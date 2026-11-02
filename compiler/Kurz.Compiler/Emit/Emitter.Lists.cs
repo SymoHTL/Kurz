@@ -866,28 +866,49 @@ public sealed partial class Emitter
 
     // ---- the sorts of a list (X8) ----------------------------------------------------------------
 
-    /// <summary>
-    /// The most items for which a sort takes insertion alone, as Rust's sorts sort a list of 20 items or fewer by insertion, and the length of
-    /// the runs the stable sort sorts so before it merges them, fixed runs of this compiler's own, where Rust's merge sort finds the runs the
-    /// list holds and makes a short one longer.
-    /// </summary>
-    private const int ShortRun = 20;
+    /// <summary>The most items for which a sort takes insertion alone, as Rust's <c>sort</c> and <c>sort_unstable</c> take it (<c>MAX_LEN_ALWAYS_INSERTION_SORT</c>).</summary>
+    private const int InsertionOnly = 20;
 
-    /// <summary>What the sort helpers sort: the name of the items in the helpers' keys, their IR type, and the helper that gives whether one sorts before another.</summary>
-    private readonly record struct SortOf(string Key, string Item, string Less);
+    /// <summary>
+    /// The most items of a small sort, Rust's <c>SMALL_SORT_GENERAL_THRESHOLD</c> and <c>SMALL_SORT_NETWORK_THRESHOLD</c>, and the items of
+    /// the general small sort's scratch, <c>SMALL_SORT_GENERAL_SCRATCH_LEN</c>, as Rust 1.82's <c>smallsort.rs</c> takes them for an item that
+    /// fits 4096 bytes 48 times. An item a sort orders here takes at most 48 bytes, a nullable number of 16 bytes with its tag in a pair of
+    /// <c>SortBy</c> with an 8-byte position, so Rust's forms for wider items, insertion up to 16 items and Hoare's partition past 96 bytes,
+    /// have no item here and are not emitted.
+    /// </summary>
+    private const int SmallSortMost = 32;
+
+    private const int SmallScratch = 48;
+
+    /// <summary>The bytes of the stable sort's scratch on the stack, and the bytes up to which its scratch holds every item, as Rust's <c>driftsort_main</c> takes them.</summary>
+    private const int StackScratchBytes = 4096;
+
+    private const int FullScratchBytes = 8_000_000;
+
+    /// <summary>What the sort helpers sort: the name of the items in the helpers' keys, their IR type, the helper that gives whether one sorts before another, and the bytes and the alignment of an item.</summary>
+    private readonly record struct SortOf(string Key, string Item, string Less, int Size, int Align)
+    {
+        /// <summary>
+        /// The IR type an item is moved as: an aggregate of 8 or 16 bytes as one integer of its bits, as Rust moves an item by copying
+        /// its bytes, and every other item as its own type. An aggregate moved as itself is written in its parts and read back whole,
+        /// which the processor does not forward from the writes (sortby-int 17.6 ms against 41.6, best of 7).
+        /// </summary>
+        public string Move => Item[0] is '{' or '%' && Size is 8 or 16 ? $"i{Size * 8}" : Item;
+    }
 
     /// <summary>
     /// X8: <c>list.Sort()</c> and <c>list.SortUnstable()</c> through the place of the list's variable or of the field a path from one ends
     /// at, as <c>Reverse</c> takes it: a list of two items or more in a block other values hold is copied first (M3), and the items are
-    /// moved in the block, so no count changes. <c>Sort</c> keeps equal items in their order (<see cref="StableSort"/>), and
-    /// <c>SortUnstable</c> takes no buffer (<see cref="UnstableSort"/>), as Rust's <c>sort</c> and <c>sort_unstable</c>; both order the
-    /// items as <see cref="SortLess"/> does.
+    /// moved in the block, so no count changes. <c>Sort</c> keeps equal items in their order (<see cref="StableSort"/>, Rust's driftsort),
+    /// and <c>SortUnstable</c> takes no buffer (<see cref="UnstableSort"/>, Rust's ipnsort), as Rust's <c>sort</c> and <c>sort_unstable</c>;
+    /// both order the items as <see cref="SortLess"/> does.
     /// </summary>
     private string? EmitListSort(CallExpression c, bool stable)
     {
         var member = (MemberAccess)Unwrap(c.Callee);
         var list = (ListType)TypeOf(member.Target);
-        var sorted = new SortOf(Lower.Mangle(list.Element), Ir(list.Element), SortLess(list.Element, c.Line));
+        var (size, align) = layout.Measure(list.Element);
+        var sorted = new SortOf(Lower.Mangle(list.Element), Ir(list.Element), SortLess(list.Element, c.Line), size, align);
         var sort = Helper($"{(stable ? "sort" : "sort.unstable")}.{Lower.Mangle(list)}", "void", ["ptr"], () =>
         {
             var count = ListCount(fn.Value("load ptr, ptr %a0"));
@@ -897,9 +918,7 @@ public sealed partial class Emitter
             fn.Block(some);
             var items = OwnItems(list);
             var n = fn.Value($"sext i32 {count} to i64");
-            fn.Emit(stable
-                ? $"call void {StableSort(sorted)}(ptr {items}, i64 {n})"
-                : $"call void {UnstableSort(sorted)}(ptr {items}, i64 {n}, i64 {SortLimit(n)})");
+            fn.Emit($"call void {(stable ? StableSort(sorted) : UnstableSort(sorted))}(ptr {items}, i64 {n})");
             fn.Branch(done);
             fn.Block(done);
             fn.Return(null);
@@ -910,8 +929,9 @@ public sealed partial class Emitter
 
     /// <summary>
     /// X8: <c>list.SortBy(keySelector)</c>, as Rust's <c>sort_by_cached_key</c> sorts: the key of each item made once, in the order of the
-    /// list, and kept with the item's position as a pair (section 12, the owner, 2026-10-31, "Once per item"); the pairs sorted by their
-    /// keys, and by their positions where two keys are equal, so that items of equal keys keep their order, without a buffer
+    /// list, and kept with the item's position as a pair (section 12, the owner, 2026-10-31, "Once per item"), a position of 4 bytes where
+    /// that makes the pair smaller (<see cref="PairLayout"/>); the pairs sorted by their keys, and by their positions where two keys are equal,
+    /// so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
     /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
     /// <c>allocation-failed</c> (M9). The list is read without a count of its own while the keys are made: a key that reads it is the
@@ -924,8 +944,11 @@ public sealed partial class Emitter
         var list = (ListType)TypeOf(member.Target);
         var key = ((FunctionType)TypeOf(c.Arguments[0].Value)).Result;
         var keySelector = Arguments(c, info, _ => new FunctionType([list.Element], key), _ => false, _ => null, cConvention: false, owned: false).Single();
-        var pair = $"{{ {Ir(key)}, i64 }}";
-        var sorted = new SortOf($"pair.{Lower.Mangle(key)}", pair, PairLess(key, pair, c.Line));
+        var (place, pairSize, pairAlign) = PairLayout(key);
+        var pair = $"{{ {Ir(key)}, {place} }}";
+        var sorted = new SortOf($"pair.{Lower.Mangle(key)}", pair, PairLess(key, pair, place, c.Line), pairSize, pairAlign);
+        string Narrow(string position) => place == "i64" ? position : fn.Value($"trunc i64 {position} to {place}");
+        string Wide(string position) => place == "i64" ? position : fn.Value($"zext {place} {position} to i64");
         var sort = Helper($"sort.by.{Lower.Mangle(list)}.{Lower.Mangle(key)}", "void", ["ptr", "%kz.fn"], () =>
         {
             var block = fn.Value("load ptr, ptr %a0");
@@ -945,7 +968,7 @@ public sealed partial class Emitter
             {
                 var i = fn.Value($"load i64, ptr {at}");
                 var made = fn.Value($"call {Ir(key)} {code}(ptr {environment}, {Ir(list.Element)} {item})");
-                var keyed = fn.Value($"insertvalue {pair} {fn.Value($"insertvalue {pair} undef, {Ir(key)} {made}, 0")}, i64 {i}, 1");
+                var keyed = fn.Value($"insertvalue {pair} {fn.Value($"insertvalue {pair} undef, {Ir(key)} {made}, 0")}, {place} {Narrow(i)}, 1");
                 fn.Emit($"store {pair} {keyed}, ptr {SortAt(pair, pairs, i)}");
                 fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
             });
@@ -953,7 +976,7 @@ public sealed partial class Emitter
             var release = fn.Label("release");
             fn.CondBranch(fn.Value($"icmp sge i32 {count}, 2"), move, release);
             fn.Block(move);
-            fn.Emit($"call void {UnstableSort(sorted)}(ptr {pairs}, i64 {n}, i64 {SortLimit(n)})");
+            fn.Emit($"call void {UnstableSort(sorted)}(ptr {pairs}, i64 {n})");
             var items = OwnItems(list);
 
             // Rust's permutation of `sort_by_cached_key`: the item for position i is at the position its pair names, followed through
@@ -969,15 +992,15 @@ public sealed partial class Emitter
             var position = fn.Value($"load i64, ptr {at}");
             fn.CondBranch(fn.Value($"icmp slt i64 {position}, {n}"), start, release);
             fn.Block(start);
-            fn.Emit($"store i64 {fn.Value($"load i64, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {position}, i32 1")}")}, ptr {chased}");
+            fn.Emit($"store i64 {Wide(fn.Value($"load {place}, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {position}, i32 1")}"))}, ptr {chased}");
             fn.Block(follow);
             var index = fn.Value($"load i64, ptr {chased}");
             fn.CondBranch(fn.Value($"icmp slt i64 {index}, {position}"), moved, swap);
             fn.Block(moved);
-            fn.Emit($"store i64 {fn.Value($"load i64, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {index}, i32 1")}")}, ptr {chased}");
+            fn.Emit($"store i64 {Wide(fn.Value($"load {place}, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {index}, i32 1")}"))}, ptr {chased}");
             fn.Branch(follow);
             fn.Block(swap);
-            fn.Emit($"store i64 {index}, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {position}, i32 1")}");
+            fn.Emit($"store {place} {Narrow(index)}, ptr {fn.Value($"getelementptr {pair}, ptr {pairs}, i64 {position}, i32 1")}");
             SortSwap(Ir(list.Element), items, position, index);
             fn.Emit($"store i64 {fn.Value($"add i64 {position}, 1")}, ptr {at}");
             fn.Branch(each);
@@ -1067,9 +1090,37 @@ public sealed partial class Emitter
         fn.Return($"i1 {Compare(TokenKind.Less, "%a0", type, "%a1", type, line)}");
     });
 
-    /// <summary>X8: the helper that gives whether the pair of a key and a position in <c>%a0</c> sorts before the one in <c>%a1</c>: by the keys (<see cref="SortLess"/>), and by the positions where neither key sorts before the other, as Rust compares the tuples of <c>sort_by_cached_key</c>.</summary>
-    private string PairLess(KurzType key, string pair, int line) => Helper($"sort.less.pair.{Lower.Mangle(key)}", "i1", [pair, pair], () =>
+    /// <summary>Whether <c>&lt;</c> orders the key as an integer of 64 bits or fewer, signed or not, null where it does not: the integers, <c>char</c>, an enum by its numbers (D12, D18) and a time type of 64 bits.</summary>
+    private static bool? PackedKey(KurzType key) => key switch
     {
+        _ when Types.IsInteger(key) => Types.IsSigned(key),
+        PrimitiveType { Kind: Primitive.Char } => false,
+        EnumType e => Lower.EnumSigned(e.Symbol),
+        _ when Types.IsTime(key) && !Types.IsWideTime(key) => true,
+        _ => null,
+    };
+
+    /// <summary>X8: the helper that gives whether the pair of a key and a position in <c>%a0</c> sorts before the one in <c>%a1</c>: by the keys (<see cref="SortLess"/>), and by the positions where neither key sorts before the other, as Rust compares the tuples of <c>sort_by_cached_key</c>.</summary>
+    private string PairLess(KurzType key, string pair, string place, int line) => Helper($"sort.less.pair.{Lower.Mangle(key)}", "i1", [pair, pair], () =>
+    {
+        if (PackedKey(key) is { } signed)
+        {
+            // a key that `<` orders as an integer of 64 bits or fewer: the key above the position in one integer, compared once,
+            // which gives the order of Rust's tuple with no branch on the keys (sortby-int 17.6 ms against 28.9 for Rust's form, the
+            // keys compared and then the positions, best of 7)
+            var low = place == "i32" ? 32 : 64;
+            var bits = (Lower.Size(key) * 8) + low;
+            string Packed(string value)
+            {
+                var high = fn.Value($"{(signed ? "sext" : "zext")} {Ir(key)} {fn.Value($"extractvalue {pair} {value}, 0")} to i{Number(bits)}");
+                var position = fn.Value($"zext {place} {fn.Value($"extractvalue {pair} {value}, 1")} to i{Number(bits)}");
+                return fn.Value($"or i{Number(bits)} {fn.Value($"shl i{Number(bits)} {high}, {Number(low)}")}, {position}");
+            }
+
+            fn.Return($"i1 {fn.Value($"icmp {(signed ? "slt" : "ult")} i{Number(bits)} {Packed("%a0")}, {Packed("%a1")}")}");
+            return;
+        }
+
         var less = SortLess(key, line);
         var a = fn.Value($"extractvalue {pair} %a0, 0");
         var b = fn.Value($"extractvalue {pair} %a1, 0");
@@ -1085,8 +1136,22 @@ public sealed partial class Emitter
         fn.Block(after);
         fn.Return("i1 false");
         fn.Block(equal);
-        fn.Return($"i1 {fn.Value($"icmp slt i64 {fn.Value($"extractvalue {pair} %a0, 1")}, {fn.Value($"extractvalue {pair} %a1, 1")}")}");
+        fn.Return($"i1 {fn.Value($"icmp slt {place} {fn.Value($"extractvalue {pair} %a0, 1")}, {fn.Value($"extractvalue {pair} %a1, 1")}")}");
     });
+
+    /// <summary>
+    /// The IR type of the position in a pair of <c>SortBy</c>, and the pair's bytes and alignment: 4 bytes where that makes the pair smaller
+    /// than 8 bytes do, as Rust's <c>sort_by_cached_key</c> takes a <c>u32</c> where it does, else 8. A list's count is an <c>int</c>, so
+    /// every position fits 4 bytes.
+    /// </summary>
+    private (string Place, int Size, int Align) PairLayout(KurzType key)
+    {
+        var (size, align) = layout.Measure(key);
+        static int Up(int value, int to) => (value + to - 1) / to * to;
+        var narrow = (Size: Up(Up(size, 4) + 4, Math.Max(align, 4)), Align: Math.Max(align, 4));
+        var wide = (Size: Up(Up(size, 8) + 8, Math.Max(align, 8)), Align: Math.Max(align, 8));
+        return narrow.Size < wide.Size ? ("i32", narrow.Size, narrow.Align) : ("i64", wide.Size, wide.Align);
+    }
 
     /// <summary>The address of the item at the position, an <c>i64</c>, among the items of the IR type <paramref name="item"/> at <paramref name="items"/>.</summary>
     private string SortAt(string item, string items, string position) => fn.Value($"getelementptr {item}, ptr {items}, i64 {position}");
@@ -1110,318 +1175,1122 @@ public sealed partial class Emitter
         return fn.Value($"shl i64 {fn.Value($"sub i64 63, {zeros}")}, 1");
     }
 
-    /// <summary>
-    /// X8: the helper that sorts the <c>%a1</c> items at <c>%a0</c> by insertion, each item moved left past the items it sorts before, so
-    /// that equal items keep their order: the sort of a short run, as Rust's sorts take it.
-    /// </summary>
-    private string InsertionSort(SortOf s) => Helper($"sort.insertion.{s.Key}", "void", ["ptr", "i64"], () =>
+    /// <summary>An item of the sort read from its address.</summary>
+    private string SortLoad(SortOf s, string at) => fn.Value($"load {s.Move}, ptr {at}, align {Number(s.Align)}");
+
+    /// <summary>An item of the sort written to its address.</summary>
+    private void SortStore(SortOf s, string value, string at) => fn.Emit($"store {s.Move} {value}, ptr {at}, align {Number(s.Align)}");
+
+    /// <summary>Whether the item <paramref name="a"/> sorts before <paramref name="b"/>, an <c>i1</c>.</summary>
+    private string SortBefore(SortOf s, string a, string b) => fn.Value($"call i1 {s.Less}({s.Item} {SortItem(s, a)}, {s.Item} {SortItem(s, b)})");
+
+    /// <summary>An item moved as <see cref="SortOf.Move"/> read as its own type, through a local the optimiser removes.</summary>
+    private string SortItem(SortOf s, string value)
     {
-        var next = fn.Alloca("i64", "next");
-        var at = fn.Alloca("i64", "at");
-        fn.Emit($"store i64 1, ptr {next}");
-        var outer = fn.Label("outer");
-        var take = fn.Label("take");
-        var inner = fn.Label("inner");
-        var test = fn.Label("test");
+        if (s.Move == s.Item)
+        {
+            return value;
+        }
+
+        var local = fn.Alloca(s.Item, "item");
+        SortStore(s, value, local);
+        return fn.Value($"load {s.Item}, ptr {local}");
+    }
+
+    /// <summary>A local of the IR type, holding <paramref name="first"/>.</summary>
+    private string SortLocal(string type, string hint, string first)
+    {
+        var local = fn.Alloca(type, hint);
+        fn.Emit($"store {type} {first}, ptr {local}");
+        return local;
+    }
+
+    private string SortRead(string type, string local) => fn.Value($"load {type}, ptr {local}");
+
+    private void SortWrite(string type, string local, string value) => fn.Emit($"store {type} {value}, ptr {local}");
+
+    /// <summary>The <paramref name="count"/> items at <paramref name="source"/> copied to <paramref name="target"/>, which they do not overlap.</summary>
+    private void SortCopy(SortOf s, string target, string source, string count) => SortCopyBytes(target, source, fn.Value($"mul i64 {count}, {Number(s.Size)}"));
+
+    private void SortCopyBytes(string target, string source, string bytes)
+    {
+        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {target}, ptr {source}, i64 {bytes}, i1 false)");
+    }
+
+    /// <summary>The address <paramref name="by"/> items, an <c>i1</c>'s 0 or 1, past <paramref name="at"/>, or before it where <paramref name="back"/>.</summary>
+    private string SortStep(SortOf s, string at, string by, bool back = false)
+    {
+        var step = fn.Value($"zext i1 {by} to i64");
+        return SortAt(s.Item, at, back ? fn.Value($"sub i64 0, {step}") : step);
+    }
+
+    /// <summary>The smaller of two <c>i64</c>s, read without a sign.</summary>
+    private string SortMin(string a, string b) => fn.Value($"select i1 {fn.Value($"icmp ult i64 {a}, {b}")}, i64 {a}, i64 {b}");
+
+    /// <summary>The larger of two <c>i64</c>s, read without a sign.</summary>
+    private string SortMax(string a, string b) => fn.Value($"select i1 {fn.Value($"icmp ugt i64 {a}, {b}")}, i64 {a}, i64 {b}");
+
+    /// <summary>
+    /// X8: the helper that moves the item at <c>%a1</c> left past the items from <c>%a0</c> on that it sorts before, the items before it
+    /// sorted, as Rust's <c>insert_tail</c> does: it reads the item only where it sorts before its left neighbour, and moves each item it
+    /// passes one place right, so that equal items keep their order.
+    /// </summary>
+    private string SortTail(SortOf s) => Helper($"sort.tail.{s.Key}", "void", ["ptr", "ptr"], () =>
+    {
         var shift = fn.Label("shift");
+        var step = fn.Label("step");
+        var next = fn.Label("next");
         var put = fn.Label("put");
         var done = fn.Label("done");
-        fn.Block(outer);
-        var k = fn.Value($"load i64, ptr {next}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {k}, %a1"), take, done);
-        fn.Block(take);
-        var item = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", k)}");
-        fn.Emit($"store i64 {k}, ptr {at}");
-        fn.Block(inner);
-        var j = fn.Value($"load i64, ptr {at}");
-        fn.CondBranch(fn.Value($"icmp sgt i64 {j}, 0"), test, put);
-        fn.Block(test);
-        var before = fn.Value($"sub i64 {j}, 1");
-        var left = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", before)}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {item}, {s.Item} {left})"), shift, put);
+        var before = SortAt(s.Item, "%a1", "-1");
+        var item = SortLoad(s, "%a1");
+        fn.CondBranch(SortBefore(s, item, SortLoad(s, before)), shift, done);
         fn.Block(shift);
-        fn.Emit($"store {s.Item} {left}, ptr {SortAt(s.Item, "%a0", j)}");
-        fn.Emit($"store i64 {before}, ptr {at}");
-        fn.Branch(inner);
+        var gap = SortLocal("ptr", "gap", "%a1");
+        var sift = SortLocal("ptr", "sift", before);
+        fn.Block(step);
+        var at = SortRead("ptr", sift);
+        SortStore(s, SortLoad(s, at), SortRead("ptr", gap));
+        SortWrite("ptr", gap, at);
+        fn.CondBranch(fn.Value($"icmp eq ptr {at}, %a0"), put, next);
+        fn.Block(next);
+        var lower = SortAt(s.Item, at, "-1");
+        SortWrite("ptr", sift, lower);
+        fn.CondBranch(SortBefore(s, item, SortLoad(s, lower)), step, put);
         fn.Block(put);
-        fn.Emit($"store {s.Item} {item}, ptr {SortAt(s.Item, "%a0", fn.Value($"load i64, ptr {at}"))}");
-        fn.Emit($"store i64 {fn.Value($"add i64 {k}, 1")}, ptr {next}");
-        fn.Branch(outer);
+        SortStore(s, item, SortRead("ptr", gap));
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>X8: the helper that sorts the <c>%a1</c> items at <c>%a0</c> by insertion, the first <c>%a2</c> of them sorted, as Rust's <c>insertion_sort_shift_left</c> does (<see cref="SortTail"/>).</summary>
+    private string SortInsertion(SortOf s) => Helper($"sort.insertion.{s.Key}", "void", ["ptr", "i64", "i64"], () =>
+    {
+        var end = SortAt(s.Item, "%a0", "%a1");
+        var tail = SortLocal("ptr", "tail", SortAt(s.Item, "%a0", "%a2"));
+        var loop = fn.Label("loop");
+        var insert = fn.Label("insert");
+        var done = fn.Label("done");
+        fn.Block(loop);
+        var at = SortRead("ptr", tail);
+        fn.CondBranch(fn.Value($"icmp ne ptr {at}, {end}"), insert, done);
+        fn.Block(insert);
+        fn.Emit($"call void {SortTail(s)}(ptr %a0, ptr {at})");
+        SortWrite("ptr", tail, SortAt(s.Item, at, "1"));
+        fn.Branch(loop);
         fn.Block(done);
         fn.Return(null);
     });
 
     /// <summary>
-    /// X8: the helper of <c>Sort</c>, which sorts the <c>%a1</c> items at <c>%a0</c> and keeps equal items in their order: a merge sort, as
-    /// Rust's stable sort is one. A short list is sorted by insertion alone; a longer one in runs of <see cref="ShortRun"/> items, sorted by
-    /// insertion, then merged in pairs of runs twice as long each time (<see cref="Merge"/>), with a buffer of half the items, rounded up,
-    /// as Rust's stable sort asks for at the least (<c>driftsort_main</c>), which holds the shorter run of a pair. A buffer the system
-    /// refuses raises <c>allocation-failed</c> (M9).
+    /// X8: the helper that gives the length of the run the <c>%a1</c> items at <c>%a0</c> begin with, and whether it falls, as Rust's
+    /// <c>find_existing_run</c> does: a run that falls takes each next item that sorts before the one before it, so that it holds no two
+    /// equal items and its reversal keeps the order of equal items, and a run that rises each next item that does not.
     /// </summary>
-    private string StableSort(SortOf s) => Helper($"sort.stable.{s.Key}", "void", ["ptr", "i64"], () =>
+    private string SortRunOf(SortOf s) => Helper($"sort.run.{s.Key}", "{ i64, i1 }", ["ptr", "i64"], () =>
     {
-        var insertion = InsertionSort(s);
-        var shortList = fn.Label("short");
-        var runs = fn.Label("runs");
-        fn.CondBranch(fn.Value($"icmp sle i64 %a1, {ShortRun}"), shortList, runs);
-        fn.Block(shortList);
-        fn.Emit($"call void {insertion}(ptr %a0, i64 %a1)");
-        fn.Return(null);
-        fn.Block(runs);
-        var half = fn.Value($"sub i64 %a1, {fn.Value("lshr i64 %a1, 1")}");
-        var bytes = fn.Value($"mul i64 {half}, {fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64")}");
-        var buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {bytes})");
-
-        // each run sorted by insertion
-        var low = fn.Alloca("i64", "low");
-        fn.Emit($"store i64 0, ptr {low}");
-        var run = fn.Label("run");
-        var sortRun = fn.Label("run.sort");
-        var merged = fn.Label("merged");
-        fn.Block(run);
-        var lo = fn.Value($"load i64, ptr {low}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {lo}, %a1"), sortRun, merged);
-        fn.Block(sortRun);
-        var rest = fn.Value($"sub i64 %a1, {lo}");
-        var length = fn.Value($"select i1 {fn.Value($"icmp slt i64 {rest}, {ShortRun}")}, i64 {rest}, i64 {ShortRun}");
-        fn.Emit($"call void {insertion}(ptr {SortAt(s.Item, "%a0", lo)}, i64 {length})");
-        fn.Emit($"store i64 {fn.Value($"add i64 {lo}, {ShortRun}")}, ptr {low}");
-        fn.Branch(run);
-
-        // then each pair of runs merged, the runs twice as long each time, until one run holds every item
-        fn.Block(merged);
-        var width = fn.Alloca("i64", "width");
-        fn.Emit($"store i64 {ShortRun}, ptr {width}");
-        var pass = fn.Label("pass");
-        var start = fn.Label("pass.start");
-        var pairOf = fn.Label("pair");
-        var mergePair = fn.Label("pair.merge");
-        var widen = fn.Label("widen");
+        var few = fn.Label("few");
+        var scan = fn.Label("scan");
+        var falling = fn.Label("falling");
+        var rising = fn.Label("rising");
         var done = fn.Label("done");
-        fn.Block(pass);
-        var w = fn.Value($"load i64, ptr {width}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {w}, %a1"), start, done);
-        fn.Block(start);
-        fn.Emit($"store i64 0, ptr {low}");
-        fn.Block(pairOf);
-        var first = fn.Value($"load i64, ptr {low}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {first}, {fn.Value($"sub i64 %a1, {w}")}"), mergePair, widen);
-        fn.Block(mergePair);
-        var end = fn.Value($"add i64 {first}, {fn.Value($"shl i64 {w}, 1")}");
-        var high = fn.Value($"select i1 {fn.Value($"icmp slt i64 {end}, %a1")}, i64 {end}, i64 %a1");
-        fn.Emit($"call void {Merge(s)}(ptr {SortAt(s.Item, "%a0", first)}, i64 {w}, i64 {fn.Value($"sub i64 {high}, {first}")}, ptr {buffer})");
-        fn.Emit($"store i64 {end}, ptr {low}");
-        fn.Branch(pairOf);
-        fn.Block(widen);
-        fn.Emit($"store i64 {fn.Value($"shl i64 {w}, 1")}, ptr {width}");
-        fn.Branch(pass);
+        fn.CondBranch(fn.Value("icmp ult i64 %a1, 2"), few, scan);
+        fn.Block(few);
+        fn.Return($"{{ i64, i1 }} {fn.Value("insertvalue { i64, i1 } { i64 0, i1 false }, i64 %a1, 0")}");
+        fn.Block(scan);
+        var falls = SortBefore(s, SortLoad(s, SortAt(s.Item, "%a0", "1")), SortLoad(s, "%a0"));
+        var run = SortLocal("i64", "run", "2");
+        fn.CondBranch(falls, falling, rising);
+
+        // one loop for each direction, as Rust's `find_existing_run` has: a run that falls takes each next item that sorts before
+        // the one before it, a run that rises each next item that does not
+        foreach (var (loop, down) in new[] { (falling, true), (rising, false) })
+        {
+            var test = fn.Label("test");
+            var longer = fn.Label("longer");
+            fn.Block(loop);
+            var r = SortRead("i64", run);
+            fn.CondBranch(fn.Value($"icmp ult i64 {r}, %a1"), test, done);
+            fn.Block(test);
+            var lower = SortBefore(s, SortLoad(s, SortAt(s.Item, "%a0", r)), SortLoad(s, SortAt(s.Item, "%a0", fn.Value($"sub i64 {r}, 1"))));
+            fn.CondBranch(lower, down ? longer : done, down ? done : longer);
+            fn.Block(longer);
+            SortWrite("i64", run, fn.Value($"add i64 {r}, 1"));
+            fn.Branch(loop);
+        }
+
         fn.Block(done);
+        var length = fn.Value($"insertvalue {{ i64, i1 }} undef, i64 {SortRead("i64", run)}, 0");
+        fn.Return($"{{ i64, i1 }} {fn.Value($"insertvalue {{ i64, i1 }} {length}, i1 {falls}, 1")}");
+    });
+
+    /// <summary>X8: the helper that reverses the <c>%a1</c> items at <c>%a0</c>, a run that falls, as Rust's <c>reverse</c> does: each item of the first half swapped with its mirror.</summary>
+    private string SortReverse(SortOf s) => Helper($"sort.reverse.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var half = fn.Value("lshr i64 %a1, 1");
+        var last = fn.Value("sub i64 %a1, 1");
+        var low = SortLocal("i64", "low", "0");
+        var loop = fn.Label("loop");
+        var swap = fn.Label("swap");
+        var done = fn.Label("done");
+        fn.Block(loop);
+        var i = SortRead("i64", low);
+        fn.CondBranch(fn.Value($"icmp ult i64 {i}, {half}"), swap, done);
+        fn.Block(swap);
+        SortSwap(s.Item, "%a0", i, fn.Value($"sub i64 {last}, {i}"));
+        SortWrite("i64", low, fn.Value($"add i64 {i}, 1"));
+        fn.Branch(loop);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: the helper that gives the address of the median of the items at <c>%a0</c>, <c>%a1</c> and <c>%a2</c>, as Rust's <c>median3</c>
+    /// does: the first where it lies between the other two, else the second or the third, by a third comparison.
+    /// </summary>
+    private string SortMedian(SortOf s) => Helper($"sort.median.{s.Key}", "ptr", ["ptr", "ptr", "ptr"], () =>
+    {
+        var a = SortLoad(s, "%a0");
+        var b = SortLoad(s, "%a1");
+        var c = SortLoad(s, "%a2");
+        var x = SortBefore(s, a, b);
+        var y = SortBefore(s, a, c);
+        var outside = fn.Label("outside");
+        var between = fn.Label("between");
+        fn.CondBranch(fn.Value($"icmp eq i1 {x}, {y}"), outside, between);
+        fn.Block(outside);
+        var z = SortBefore(s, b, c);
+        fn.Return($"ptr {fn.Value($"select i1 {fn.Value($"xor i1 {z}, {x}")}, ptr %a2, ptr %a1")}");
+        fn.Block(between);
+        fn.Return("ptr %a0");
+    });
+
+    /// <summary>
+    /// X8: the helper that gives the address of a pseudo-median of the three sections of <c>%a3</c> items at <c>%a0</c>, <c>%a1</c> and
+    /// <c>%a2</c>, as Rust's <c>median3_rec</c> does: the median of the three, each section of 8 items or more taken first as the
+    /// pseudo-median of its own eighths at 0, 4 and 7.
+    /// </summary>
+    private string SortMedianOfMedians(SortOf s) => Helper($"sort.median.rec.{s.Key}", "ptr", ["ptr", "ptr", "ptr", "i64"], () =>
+    {
+        var self = SortMedianOfMedians(s);
+        var deeper = fn.Label("deeper");
+        var three = fn.Label("three");
+        fn.CondBranch(fn.Value($"icmp uge i64 {fn.Value("mul i64 %a3, 8")}, 64"), deeper, three);
+        fn.Block(deeper);
+        var eighth = fn.Value("udiv i64 %a3, 8");
+        var four = fn.Value($"mul i64 {eighth}, 4");
+        var seven = fn.Value($"mul i64 {eighth}, 7");
+        string Of(string at) => fn.Value($"call ptr {self}(ptr {at}, ptr {SortAt(s.Item, at, four)}, ptr {SortAt(s.Item, at, seven)}, i64 {eighth})");
+        var a = Of("%a0");
+        var b = Of("%a1");
+        var c = Of("%a2");
+        fn.Return($"ptr {fn.Value($"call ptr {SortMedian(s)}(ptr {a}, ptr {b}, ptr {c})")}");
+        fn.Block(three);
+        fn.Return($"ptr {fn.Value($"call ptr {SortMedian(s)}(ptr %a0, ptr %a1, ptr %a2)")}");
+    });
+
+    /// <summary>
+    /// X8: the helper that gives the position of the pivot of the <c>%a1</c> items at <c>%a0</c>, 8 or more, as Rust's <c>choose_pivot</c>
+    /// does: the median of the first item and the items at four and seven eighths of the list, and from 64 items on the pseudo-median of the
+    /// three eighths that begin there (<see cref="SortMedianOfMedians"/>).
+    /// </summary>
+    private string SortPivot(SortOf s) => Helper($"sort.pivot.{s.Key}", "i64", ["ptr", "i64"], () =>
+    {
+        var eighth = fn.Value("udiv i64 %a1, 8");
+        var b = SortAt(s.Item, "%a0", fn.Value($"mul i64 {eighth}, 4"));
+        var c = SortAt(s.Item, "%a0", fn.Value($"mul i64 {eighth}, 7"));
+        var chosen = fn.Alloca("ptr", "chosen");
+        var few = fn.Label("few");
+        var many = fn.Label("many");
+        var done = fn.Label("done");
+        fn.CondBranch(fn.Value("icmp ult i64 %a1, 64"), few, many);
+        fn.Block(few);
+        SortWrite("ptr", chosen, fn.Value($"call ptr {SortMedian(s)}(ptr %a0, ptr {b}, ptr {c})"));
+        fn.Branch(done);
+        fn.Block(many);
+        SortWrite("ptr", chosen, fn.Value($"call ptr {SortMedianOfMedians(s)}(ptr %a0, ptr {b}, ptr {c}, i64 {eighth})"));
+        fn.Branch(done);
+        fn.Block(done);
+        var bytes = fn.Value($"sub i64 {fn.Value($"ptrtoint ptr {SortRead("ptr", chosen)} to i64")}, {fn.Value("ptrtoint ptr %a0 to i64")}");
+        fn.Return($"i64 {fn.Value($"udiv exact i64 {bytes}, {Number(s.Size)}")}");
+    });
+
+    /// <summary>
+    /// X8: the helper that splits the <c>%a1</c> items at <c>%a0</c> around the pivot at the position <c>%a2</c> and gives the count of the
+    /// items before it, as Rust's <c>partition</c> does with <c>partition_lomuto_branchless_cyclic</c>: the pivot swapped to the front, each
+    /// item after it read once and counted where it goes before the pivot (where <paramref name="equal"/>, where the pivot does not sort
+    /// before it), with no branch on that, the items moved in one cycle through a gap that the first of them leaves, two items to a step
+    /// for items of up to 16 bytes, and the pivot swapped to the end of the items before it.
+    /// </summary>
+    private string SortPartition(SortOf s, bool equal) => Helper($"sort.partition.{(equal ? "equal" : "less")}.{s.Key}", "i64", ["ptr", "i64", "i64"], () =>
+    {
+        SortSwap(s.Item, "%a0", "0", "%a2");
+        var pivot = SortLoad(s, "%a0");
+        var items = SortAt(s.Item, "%a0", "1");
+        var count = fn.Value("sub i64 %a1, 1");
+        string Goes(string item) => equal ? fn.Value($"xor i1 {SortBefore(s, pivot, item)}, true") : SortBefore(s, item, pivot);
+        var gapValue = fn.Alloca(s.Item, "gap.value");
+        SortStore(s, SortLoad(s, items), gapValue);
+        var below = SortLocal("i64", "below", "0");
+        var right = SortLocal("ptr", "right", SortAt(s.Item, items, "1"));
+        var gap = SortLocal("ptr", "gap", items);
+        void Step(string at)
+        {
+            var item = SortLoad(s, at);
+            var goes = Goes(item);
+            var taken = SortRead("i64", below);
+            var left = SortAt(s.Item, items, taken);
+            SortStore(s, SortLoad(s, left), SortRead("ptr", gap));
+            SortStore(s, item, left);
+            SortWrite("ptr", gap, at);
+            SortWrite("i64", below, fn.Value($"add i64 {taken}, {fn.Value($"zext i1 {goes} to i64")}"));
+            SortWrite("ptr", right, SortAt(s.Item, at, "1"));
+        }
+
+        var unroll = s.Size <= 16 ? 2 : 1;
+        var unrollEnd = SortAt(s.Item, items, fn.Value($"sub i64 {count}, {Number(unroll - 1)}"));
+        var unrolled = fn.Label("unrolled");
+        var steps = fn.Label("steps");
+        var rest = fn.Label("rest");
+        var done = fn.Label("done");
+        fn.Block(unrolled);
+        fn.CondBranch(fn.Value($"icmp ult ptr {SortRead("ptr", right)}, {unrollEnd}"), steps, rest);
+        fn.Block(steps);
+        for (var k = 0; k < unroll; k++)
+        {
+            Step(SortRead("ptr", right));
+        }
+
+        fn.Branch(unrolled);
+
+        // the item left after the steps, if any, and then the first item, read from where it was kept, into the gap
+        fn.Block(rest);
+        var at = SortRead("ptr", right);
+        var last = fn.Value($"icmp eq ptr {at}, {SortAt(s.Item, items, count)}");
+        Step(fn.Value($"select i1 {last}, ptr {gapValue}, ptr {at}"));
+        fn.CondBranch(last, done, rest);
+        fn.Block(done);
+        var before = SortRead("i64", below);
+        SortSwap(s.Item, "%a0", "0", before);
+        fn.Return($"i64 {before}");
+    });
+
+    /// <summary>
+    /// X8: the helper of <c>SortUnstable</c> and of <c>SortBy</c>'s pairs, which sorts the <c>%a1</c> items at <c>%a0</c> in place, as Rust's
+    /// <c>sort_unstable</c> does: 20 items or fewer by insertion (<see cref="SortInsertion"/>), more by ipnsort (<see cref="IpnSort"/>).
+    /// </summary>
+    private string UnstableSort(SortOf s) => Helper($"sort.unstable.items.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var few = fn.Label("few");
+        var many = fn.Label("many");
+        fn.CondBranch(fn.Value($"icmp ule i64 %a1, {Number(InsertionOnly)}"), few, many);
+        fn.Block(few);
+        fn.Emit($"call void {SortInsertion(s)}(ptr %a0, i64 %a1, i64 1)");
+        fn.Return(null);
+        fn.Block(many);
+        fn.Emit($"call void {IpnSort(s)}(ptr %a0, i64 %a1)");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>ipnsort</c> of the <c>%a1</c> items at <c>%a0</c>: a list that is one run is left as it is, or reversed where the run
+    /// falls (<see cref="SortRunOf"/>); any other is sorted by the quicksort (<see cref="QuickSort"/>), with twice the base-2 logarithm of
+    /// the count as the bound on its splits (<see cref="SortLimit"/>).
+    /// </summary>
+    private string IpnSort(SortOf s) => Helper($"sort.ipn.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var run = fn.Value($"call {{ i64, i1 }} {SortRunOf(s)}(ptr %a0, i64 %a1)");
+        var whole = fn.Label("whole");
+        var reverse = fn.Label("reverse");
+        var done = fn.Label("done");
+        var quick = fn.Label("quick");
+        fn.CondBranch(fn.Value($"icmp eq i64 {fn.Value("extractvalue { i64, i1 } " + run + ", 0")}, %a1"), whole, quick);
+        fn.Block(whole);
+        fn.CondBranch(fn.Value($"extractvalue {{ i64, i1 }} {run}, 1"), reverse, done);
+        fn.Block(reverse);
+        fn.Emit($"call void {SortReverse(s)}(ptr %a0, i64 %a1)");
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+        fn.Block(quick);
+        fn.Emit($"call void {QuickSort(s)}(ptr %a0, i64 %a1, ptr null, i64 {SortLimit("%a1")})");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's unstable <c>quicksort</c> of the <c>%a1</c> items at <c>%a0</c>: up to 32 items by the small sort
+    /// (<see cref="SmallSort"/>), and past <c>%a3</c> splits by the heapsort (<see cref="HeapSort"/>), so that the comparisons of no order
+    /// of the items grow faster than a constant times n log n; else split around the pivot (<see cref="SortPivot"/>,
+    /// <see cref="SortPartition"/>), the items before it sorted by a call and the items after it in the same loop. Where the pivot the split
+    /// before left at <c>%a2</c>, before these items, does not sort before the new pivot, the new one is the least of them, and the items
+    /// equal to it are split off and left where they are, as Rust's quicksort sorts many equal items.
+    /// </summary>
+    private string QuickSort(SortOf s) => Helper($"sort.quick.{s.Key}", "void", ["ptr", "i64", "ptr", "i64"], () =>
+    {
+        var self = QuickSort(s);
+        var items = SortLocal("ptr", "items", "%a0");
+        var count = SortLocal("i64", "count", "%a1");
+        var ancestor = SortLocal("ptr", "ancestor", "%a2");
+        var limit = SortLocal("i64", "limit", "%a3");
+        var top = fn.Label("top");
+        var small = fn.Label("small");
+        var large = fn.Label("large");
+        var heap = fn.Label("heap");
+        var split = fn.Label("split");
+        var check = fn.Label("check");
+        var equal = fn.Label("equal");
+        var less = fn.Label("less");
+        fn.Block(top);
+        var v = SortRead("ptr", items);
+        var n = SortRead("i64", count);
+        fn.CondBranch(fn.Value($"icmp ule i64 {n}, {Number(SmallSortMost)}"), small, large);
+        fn.Block(small);
+        fn.Emit($"call void {SmallSort(s)}(ptr {v}, i64 {n})");
+        fn.Return(null);
+        fn.Block(large);
+        var bound = SortRead("i64", limit);
+        fn.CondBranch(fn.Value($"icmp eq i64 {bound}, 0"), heap, split);
+        fn.Block(heap);
+        fn.Emit($"call void {HeapSort(s)}(ptr {v}, i64 {n})");
+        fn.Return(null);
+        fn.Block(split);
+        var lower = fn.Value($"sub i64 {bound}, 1");
+        SortWrite("i64", limit, lower);
+        var p = fn.Value($"call i64 {SortPivot(s)}(ptr {v}, i64 {n})");
+        var before = SortRead("ptr", ancestor);
+        fn.CondBranch(fn.Value($"icmp ne ptr {before}, null"), check, less);
+        fn.Block(check);
+        fn.CondBranch(SortBefore(s, SortLoad(s, before), SortLoad(s, SortAt(s.Item, v, p))), less, equal);
+        fn.Block(equal);
+        var equals = fn.Value($"call i64 {SortPartition(s, true)}(ptr {v}, i64 {n}, i64 {p})");
+        var past = fn.Value($"add i64 {equals}, 1");
+        SortWrite("ptr", items, SortAt(s.Item, v, past));
+        SortWrite("i64", count, fn.Value($"sub i64 {n}, {past}"));
+        SortWrite("ptr", ancestor, "null");
+        fn.Branch(top);
+        fn.Block(less);
+        var below = fn.Value($"call i64 {SortPartition(s, false)}(ptr {v}, i64 {n}, i64 {p})");
+        fn.Emit($"call void {self}(ptr {v}, i64 {below}, ptr {before}, i64 {lower})");
+        var next = fn.Value($"add i64 {below}, 1");
+        SortWrite("ptr", ancestor, SortAt(s.Item, v, below));
+        SortWrite("ptr", items, SortAt(s.Item, v, next));
+        SortWrite("i64", count, fn.Value($"sub i64 {n}, {next}"));
+        fn.Branch(top);
+    });
+
+    /// <summary>
+    /// X8: the unstable small sort of the <c>%a1</c> items at <c>%a0</c>, 32 or fewer, as Rust's <c>UnstableSmallSortTypeImpl</c> picks it:
+    /// a sorting network for items of up to 8 bytes (<see cref="NetworkSort"/>), and for wider items the general small sort
+    /// (<see cref="GeneralSmallSort"/>) through a scratch of 48 items on the stack.
+    /// </summary>
+    private string SmallSort(SortOf s) => s.Size <= 8 ? NetworkSort(s) : Helper($"sort.small.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var scratch = fn.Alloca($"[{Number(SmallScratch)} x {s.Item}]", "scratch");
+        fn.Emit($"call void {GeneralSmallSort(s)}(ptr %a0, i64 %a1, ptr {scratch})");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>small_sort_network</c> of the <c>%a1</c> items at <c>%a0</c>, 32 or fewer: fewer than 18 items as one region, more as
+    /// two halves, each region sorted by a network of 13 or 9 items where it holds as many and by insertion after them
+    /// (<see cref="NetworkRegion"/>), and the halves merged from both ends into a scratch of 32 items on the stack
+    /// (<see cref="BidirectionalMerge"/>) and copied back.
+    /// </summary>
+    private string NetworkSort(SortOf s) => Helper($"sort.network.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var some = fn.Label("some");
+        var merge = fn.Label("merge");
+        var done = fn.Label("done");
+        fn.CondBranch(fn.Value("icmp ult i64 %a1, 2"), done, some);
+        fn.Block(some);
+        var half = fn.Value("lshr i64 %a1, 1");
+        var alone = fn.Value("icmp ult i64 %a1, 18");
+        fn.Emit($"call void {NetworkRegion(s)}(ptr %a0, i64 {fn.Value($"select i1 {alone}, i64 %a1, i64 {half}")})");
+        fn.CondBranch(alone, done, merge);
+        fn.Block(merge);
+        fn.Emit($"call void {NetworkRegion(s)}(ptr {SortAt(s.Item, "%a0", half)}, i64 {fn.Value($"sub i64 %a1, {half}")})");
+        var scratch = fn.Alloca($"[{Number(SmallSortMost)} x {s.Item}]", "scratch");
+        fn.Emit($"call void {BidirectionalMerge(s)}(ptr %a0, i64 %a1, ptr {scratch})");
+        SortCopy(s, "%a0", scratch, "%a1");
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>X8: one region of <see cref="NetworkSort"/>, the <c>%a1</c> items at <c>%a0</c>: its first 13 items sorted by the network of 13 where it holds as many, else its first 9 by the network of 9, and the rest by insertion.</summary>
+    private string NetworkRegion(SortOf s) => Helper($"sort.network.region.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var sorted = SortLocal("i64", "sorted", "1");
+        var thirteen = fn.Label("thirteen");
+        var notThirteen = fn.Label("not.thirteen");
+        var nine = fn.Label("nine");
+        var insert = fn.Label("insert");
+        fn.CondBranch(fn.Value("icmp uge i64 %a1, 13"), thirteen, notThirteen);
+        fn.Block(thirteen);
+        fn.Emit($"call void {Network(s, 13)}(ptr %a0)");
+        SortWrite("i64", sorted, "13");
+        fn.Branch(insert);
+        fn.Block(notThirteen);
+        fn.CondBranch(fn.Value("icmp uge i64 %a1, 9"), nine, insert);
+        fn.Block(nine);
+        fn.Emit($"call void {Network(s, 9)}(ptr %a0)");
+        SortWrite("i64", sorted, "9");
+        fn.Branch(insert);
+        fn.Block(insert);
+        fn.Emit($"call void {SortInsertion(s)}(ptr %a0, i64 %a1, i64 {SortRead("i64", sorted)})");
+        fn.Return(null);
+    });
+
+    /// <summary>The comparators of Rust's <c>sort9_optimal</c> and <c>sort13_optimal</c>, optimal sorting networks of 9 and 13 items, in their order.</summary>
+    private static readonly Dictionary<int, (int A, int B)[]> Networks = new()
+    {
+        [9] =
+        [
+            (0, 3), (1, 7), (2, 5), (4, 8), (0, 7), (2, 4), (3, 8), (5, 6), (0, 2), (1, 3), (4, 5), (7, 8), (1, 4), (3, 6), (5, 7), (0, 1),
+            (2, 4), (3, 5), (6, 8), (2, 3), (4, 5), (6, 7), (1, 2), (3, 4), (5, 6),
+        ],
+        [13] =
+        [
+            (0, 12), (1, 10), (2, 9), (3, 7), (5, 11), (6, 8), (1, 6), (2, 3), (4, 11), (7, 9), (8, 10), (0, 4), (1, 2), (3, 6), (7, 8),
+            (9, 10), (11, 12), (4, 6), (5, 9), (8, 11), (10, 12), (0, 5), (3, 8), (4, 7), (6, 11), (9, 10), (0, 1), (2, 5), (6, 9), (7, 8),
+            (10, 11), (1, 3), (2, 4), (5, 6), (9, 10), (1, 2), (3, 4), (5, 7), (6, 8), (2, 3), (4, 5), (6, 7), (8, 9), (3, 4), (5, 6),
+        ],
+    };
+
+    /// <summary>X8: the helper that sorts the first <paramref name="items"/> items at <c>%a0</c> by the network of that many (<see cref="Networks"/>), each comparator Rust's <c>swap_if_less</c>: the two items swapped where the second sorts before the first, with no branch.</summary>
+    private string Network(SortOf s, int items) => Helper($"sort.network.{Number(items)}.{s.Key}", "void", ["ptr"], () =>
+    {
+        foreach (var (a, b) in Networks[items])
+        {
+            var first = SortAt(s.Item, "%a0", Number(a));
+            var second = SortAt(s.Item, "%a0", Number(b));
+            var x = SortLoad(s, first);
+            var y = SortLoad(s, second);
+            var swap = SortBefore(s, y, x);
+            SortStore(s, fn.Value($"select i1 {swap}, {s.Move} {y}, {s.Move} {x}"), first);
+            SortStore(s, fn.Value($"select i1 {swap}, {s.Move} {x}, {s.Move} {y}"), second);
+        }
+
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>bidirectional_merge</c>: the two sorted halves of the <c>%a1</c> items at <c>%a0</c>, the first <c>%a1 / 2</c> and the
+    /// rest, merged into <c>%a2</c> from both ends at once, each step taking at the front the first of the two front items, the first
+    /// half's where neither sorts before the other, and at the back the last of the two back items, the second half's where neither sorts
+    /// after the other, with no branch; of an odd count the one item left goes between.
+    /// </summary>
+    private string BidirectionalMerge(SortOf s) => Helper($"sort.bimerge.{s.Key}", "void", ["ptr", "i64", "ptr"], () =>
+    {
+        var half = fn.Value("lshr i64 %a1, 1");
+        var left = SortLocal("ptr", "left", "%a0");
+        var right = SortLocal("ptr", "right", SortAt(s.Item, "%a0", half));
+        var output = SortLocal("ptr", "out", "%a2");
+        var leftBack = SortLocal("ptr", "left.back", SortAt(s.Item, "%a0", fn.Value($"sub i64 {half}, 1")));
+        var rightBack = SortLocal("ptr", "right.back", SortAt(s.Item, "%a0", fn.Value("sub i64 %a1, 1")));
+        var outputBack = SortLocal("ptr", "out.back", SortAt(s.Item, "%a2", fn.Value("sub i64 %a1, 1")));
+        var step = SortLocal("i64", "step", "0");
+        var loop = fn.Label("loop");
+        var body = fn.Label("body");
+        var odd = fn.Label("odd");
+        var last = fn.Label("last");
+        var done = fn.Label("done");
+        fn.Block(loop);
+        var i = SortRead("i64", step);
+        fn.CondBranch(fn.Value($"icmp ult i64 {i}, {half}"), body, odd);
+        fn.Block(body);
+        var l = SortRead("ptr", left);
+        var r = SortRead("ptr", right);
+        var lv = SortLoad(s, l);
+        var rv = SortLoad(s, r);
+        var takeLeft = fn.Value($"xor i1 {SortBefore(s, rv, lv)}, true");
+        var o = SortRead("ptr", output);
+        SortStore(s, fn.Value($"select i1 {takeLeft}, {s.Move} {lv}, {s.Move} {rv}"), o);
+        SortWrite("ptr", right, SortStep(s, r, fn.Value($"xor i1 {takeLeft}, true")));
+        SortWrite("ptr", left, SortStep(s, l, takeLeft));
+        SortWrite("ptr", output, SortAt(s.Item, o, "1"));
+        var lb = SortRead("ptr", leftBack);
+        var rb = SortRead("ptr", rightBack);
+        var lbv = SortLoad(s, lb);
+        var rbv = SortLoad(s, rb);
+        var takeRight = fn.Value($"xor i1 {SortBefore(s, rbv, lbv)}, true");
+        var ob = SortRead("ptr", outputBack);
+        SortStore(s, fn.Value($"select i1 {takeRight}, {s.Move} {rbv}, {s.Move} {lbv}"), ob);
+        SortWrite("ptr", rightBack, SortStep(s, rb, takeRight, back: true));
+        SortWrite("ptr", leftBack, SortStep(s, lb, fn.Value($"xor i1 {takeRight}, true"), back: true));
+        SortWrite("ptr", outputBack, SortAt(s.Item, ob, "-1"));
+        SortWrite("i64", step, fn.Value($"add i64 {i}, 1"));
+        fn.Branch(loop);
+        fn.Block(odd);
+        fn.CondBranch(fn.Value($"icmp ne i64 {fn.Value("and i64 %a1, 1")}, 0"), last, done);
+        fn.Block(last);
+        var front = SortRead("ptr", left);
+        var firstLeft = fn.Value($"icmp ult ptr {front}, {SortAt(s.Item, SortRead("ptr", leftBack), "1")}");
+        var from = fn.Value($"select i1 {firstLeft}, ptr {front}, ptr {SortRead("ptr", right)}");
+        SortStore(s, SortLoad(s, from), SortRead("ptr", output));
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>sort4_stable</c>: the 4 items at <c>%a0</c> written sorted to <c>%a1</c> after 5 comparisons, each item copied once,
+    /// equal items in their order: two pairs ordered, their least and greatest picked, and the two left between them ordered.
+    /// </summary>
+    private string SortFour(SortOf s) => Helper($"sort.four.{s.Key}", "void", ["ptr", "ptr"], () =>
+    {
+        string At(int k) => SortAt(s.Item, "%a0", Number(k));
+        string Pick(string choose, string yes, string no) => fn.Value($"select i1 {choose}, ptr {yes}, ptr {no}");
+        string Not(string bit) => fn.Value($"xor i1 {bit}, true");
+        var c1 = SortBefore(s, SortLoad(s, At(1)), SortLoad(s, At(0)));
+        var c2 = SortBefore(s, SortLoad(s, At(3)), SortLoad(s, At(2)));
+        var a = SortStep(s, "%a0", c1);
+        var b = SortStep(s, "%a0", Not(c1));
+        var c = SortStep(s, At(2), c2);
+        var d = SortStep(s, At(2), Not(c2));
+        var c3 = SortBefore(s, SortLoad(s, c), SortLoad(s, a));
+        var c4 = SortBefore(s, SortLoad(s, d), SortLoad(s, b));
+        var least = Pick(c3, c, a);
+        var greatest = Pick(c4, b, d);
+        var unknownLeft = Pick(c3, a, Pick(c4, c, b));
+        var unknownRight = Pick(c4, d, Pick(c3, b, c));
+        var c5 = SortBefore(s, SortLoad(s, unknownRight), SortLoad(s, unknownLeft));
+        var low = Pick(c5, unknownRight, unknownLeft);
+        var high = Pick(c5, unknownLeft, unknownRight);
+        string[] order = [least, low, high, greatest];
+        for (var k = 0; k < 4; k++)
+        {
+            SortStore(s, SortLoad(s, order[k]), SortAt(s.Item, "%a1", Number(k)));
+        }
+
+        fn.Return(null);
+    });
+
+    /// <summary>X8: Rust's <c>sort8_stable</c>: the 8 items at <c>%a0</c> sorted as two fours into the scratch at <c>%a2</c> (<see cref="SortFour"/>) and merged into <c>%a1</c> (<see cref="BidirectionalMerge"/>).</summary>
+    private string SortEight(SortOf s) => Helper($"sort.eight.{s.Key}", "void", ["ptr", "ptr", "ptr"], () =>
+    {
+        fn.Emit($"call void {SortFour(s)}(ptr %a0, ptr %a2)");
+        fn.Emit($"call void {SortFour(s)}(ptr {SortAt(s.Item, "%a0", "4")}, ptr {SortAt(s.Item, "%a2", "4")})");
+        fn.Emit($"call void {BidirectionalMerge(s)}(ptr %a2, i64 8, ptr %a1)");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>small_sort_general_with_scratch</c>, the stable small sort of the <c>%a1</c> items at <c>%a0</c>, 32 or fewer, through
+    /// the scratch at <c>%a2</c> of 16 items more: each half sorted in the scratch, its first 8 items by <see cref="SortEight"/> where the
+    /// list holds 16 or more items of up to 16 bytes, else its first 4 by <see cref="SortFour"/> where it holds 8 or more, else its first
+    /// item copied, and the rest of the half inserted (<see cref="SortTail"/>); then the halves merged back (<see cref="BidirectionalMerge"/>).
+    /// </summary>
+    private string GeneralSmallSort(SortOf s) => Helper($"sort.general.{s.Key}", "void", ["ptr", "i64", "ptr"], () =>
+    {
+        var some = fn.Label("some");
+        var done = fn.Label("done");
+        fn.CondBranch(fn.Value("icmp ult i64 %a1, 2"), done, some);
+        fn.Block(some);
+        var half = fn.Value("lshr i64 %a1, 1");
+        var presorted = SortLocal("i64", "presorted", "1");
+        var four = fn.Label("four");
+        var fours = fn.Label("fours");
+        var one = fn.Label("one");
+        var fill = fn.Label("fill");
+        if (s.Size <= 16)
+        {
+            var eights = fn.Label("eights");
+            fn.CondBranch(fn.Value("icmp uge i64 %a1, 16"), eights, four);
+            fn.Block(eights);
+            fn.Emit($"call void {SortEight(s)}(ptr %a0, ptr %a2, ptr {SortAt(s.Item, "%a2", "%a1")})");
+            fn.Emit($"call void {SortEight(s)}(ptr {SortAt(s.Item, "%a0", half)}, ptr {SortAt(s.Item, "%a2", half)}, ptr {SortAt(s.Item, "%a2", fn.Value("add i64 %a1, 8"))})");
+            SortWrite("i64", presorted, "8");
+            fn.Branch(fill);
+        }
+
+        fn.Block(four);
+        fn.CondBranch(fn.Value("icmp uge i64 %a1, 8"), fours, one);
+        fn.Block(fours);
+        fn.Emit($"call void {SortFour(s)}(ptr %a0, ptr %a2)");
+        fn.Emit($"call void {SortFour(s)}(ptr {SortAt(s.Item, "%a0", half)}, ptr {SortAt(s.Item, "%a2", half)})");
+        SortWrite("i64", presorted, "4");
+        fn.Branch(fill);
+        fn.Block(one);
+        SortStore(s, SortLoad(s, "%a0"), "%a2");
+        SortStore(s, SortLoad(s, SortAt(s.Item, "%a0", half)), SortAt(s.Item, "%a2", half));
+        fn.Branch(fill);
+        fn.Block(fill);
+        var start = SortRead("i64", presorted);
+        foreach (var (offset, desired) in new[] { ("0", half), (half, fn.Value($"sub i64 %a1, {half}")) })
+        {
+            var source = SortAt(s.Item, "%a0", offset);
+            var target = SortAt(s.Item, "%a2", offset);
+            var at = SortLocal("i64", "at", start);
+            var loop = fn.Label("loop");
+            var insert = fn.Label("insert");
+            var next = fn.Label("next");
+            fn.Block(loop);
+            var i = SortRead("i64", at);
+            fn.CondBranch(fn.Value($"icmp ult i64 {i}, {desired}"), insert, next);
+            fn.Block(insert);
+            var tail = SortAt(s.Item, target, i);
+            SortStore(s, SortLoad(s, SortAt(s.Item, source, i)), tail);
+            fn.Emit($"call void {SortTail(s)}(ptr {target}, ptr {tail})");
+            SortWrite("i64", at, fn.Value($"add i64 {i}, 1"));
+            fn.Branch(loop);
+            fn.Block(next);
+        }
+
+        fn.Emit($"call void {BidirectionalMerge(s)}(ptr %a2, i64 %a1, ptr %a0)");
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: the helper of <c>Sort</c>, which sorts the <c>%a1</c> items at <c>%a0</c> and keeps equal items in their order, as Rust's stable
+    /// <c>sort</c> does: 20 items or fewer by insertion (<see cref="SortInsertion"/>), more by driftsort (<see cref="DriftsortMain"/>).
+    /// </summary>
+    private string StableSort(SortOf s) => Helper($"sort.stable.items.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var few = fn.Label("few");
+        var many = fn.Label("many");
+        fn.CondBranch(fn.Value($"icmp ule i64 %a1, {Number(InsertionOnly)}"), few, many);
+        fn.Block(few);
+        fn.Emit($"call void {SortInsertion(s)}(ptr %a0, i64 %a1, i64 1)");
+        fn.Return(null);
+        fn.Block(many);
+        fn.Emit($"call void {DriftsortMain(s)}(ptr %a0, i64 %a1)");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's <c>driftsort_main</c> for the <c>%a1</c> items at <c>%a0</c>: a scratch of every item up to 8,000,000 bytes of them and of
+    /// half the items past that, and of 48 items at the least, taken from 4096 bytes on the stack where it fits them and from the allocator
+    /// else, whose refusal raises <c>allocation-failed</c> (M9); and the merges found eagerly, by the small sort alone, up to 64 items
+    /// (<see cref="Drift"/>).
+    /// </summary>
+    private string DriftsortMain(SortOf s) => Helper($"sort.drift.main.{s.Key}", "void", ["ptr", "i64"], () =>
+    {
+        var whole = SortMin("%a1", Number(FullScratchBytes / s.Size));
+        var asked = SortMax(SortMax(fn.Value("lshr i64 %a1, 1"), whole), Number(SmallScratch));
+        var onStack = Number(StackScratchBytes / s.Size);
+        var eager = fn.Value($"icmp ule i64 %a1, {Number(2 * SmallSortMost)}");
+        var area = fn.Alloca($"[{Number(StackScratchBytes)} x i8], align {Number(s.Align)}", "stack.scratch");
+        var stack = fn.Label("stack");
+        var heap = fn.Label("heap");
+        fn.CondBranch(fn.Value($"icmp ule i64 {asked}, {onStack}"), stack, heap);
+        fn.Block(stack);
+        fn.Emit($"call void {Drift(s)}(ptr %a0, i64 %a1, ptr {area}, i64 {onStack}, i1 {eager})");
+        fn.Return(null);
+        fn.Block(heap);
+        var bytes = fn.Value($"mul i64 {asked}, {Number(s.Size)}");
+        var buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {bytes})");
+        fn.Emit($"call void {Drift(s)}(ptr %a0, i64 %a1, ptr {buffer}, i64 {asked}, i1 {eager})");
         fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {bytes})");
         fn.Return(null);
     });
 
     /// <summary>
-    /// X8: the helper that merges the two sorted runs of the <c>%a2</c> items at <c>%a0</c>, the first <c>%a1</c> and the rest, as Rust's
-    /// merge sort merges them: nothing where the first item of the second run does not sort before the last of the first; else the shorter
-    /// run is copied into the buffer at <c>%a3</c> and merged with the other, from the front where it is the first run and from the back
-    /// where it is the second, an item of the second run going before one of the first only where it sorts before it, so that equal
-    /// items keep their order.
+    /// X8: Rust's <c>drift::sort</c> of the <c>%a1</c> items at <c>%a0</c> through the scratch at <c>%a2</c> of <c>%a3</c> items, eagerly
+    /// where <c>%a4</c>: the list read as runs (<see cref="CreateRun"/>), and each run pushed on a stack of 66 runs after the runs on it are
+    /// merged that powersort puts deeper in the merge tree than the boundary of the new run (<see cref="LogicalMerge"/>); a run is a length
+    /// shifted left by one, with its lowest bit set where it is sorted. A list that is still unsorted at the end is sorted by the stable
+    /// quicksort (<see cref="StableQuicksort"/>).
     /// </summary>
-    private string Merge(SortOf s) => Helper($"sort.merge.{s.Key}", "void", ["ptr", "i64", "i64", "ptr"], () =>
+    private string Drift(SortOf s) => Helper($"sort.drift.{s.Key}", "void", ["ptr", "i64", "ptr", "i64", "i1"], () =>
     {
-        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        var size = fn.Value($"ptrtoint ptr {SortAt(s.Item, "null", "1")} to i64");
-        var last = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", fn.Value("sub i64 %a1, 1"))}");
-        var next = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", "%a1")}");
-        var merge = fn.Label("merge");
-        var done = fn.Label("done");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {next}, {s.Item} {last})"), merge, done);
-        fn.Block(merge);
-        var second = fn.Value("sub i64 %a2, %a1");
-        var forward = fn.Label("forward");
-        var backward = fn.Label("backward");
-        fn.CondBranch(fn.Value($"icmp sle i64 %a1, {second}"), forward, backward);
-
-        // the first run in the buffer, merged from the front; what is left of it after the second run ran out goes after the merged items
-        fn.Block(forward);
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr %a3, ptr %a0, i64 {fn.Value($"mul i64 %a1, {size}")}, i1 false)");
-        var i = fn.Alloca("i64", "taken");
-        var j = fn.Alloca("i64", "other");
-        var o = fn.Alloca("i64", "out");
-        fn.Emit($"store i64 0, ptr {i}");
-        fn.Emit($"store i64 %a1, ptr {j}");
-        fn.Emit($"store i64 0, ptr {o}");
-        var front = fn.Label("front");
-        var step = fn.Label("front.step");
-        var right = fn.Label("front.second");
-        var left = fn.Label("front.first");
-        var rest = fn.Label("front.rest");
-        fn.Block(front);
-        var iv = fn.Value($"load i64, ptr {i}");
-        var jv = fn.Value($"load i64, ptr {j}");
-        fn.CondBranch(fn.Value($"and i1 {fn.Value($"icmp slt i64 {iv}, %a1")}, {fn.Value($"icmp slt i64 {jv}, %a2")}"), step, rest);
-        fn.Block(step);
-        var a = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a3", iv)}");
-        var b = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", jv)}");
-        var ov = fn.Value($"load i64, ptr {o}");
-        fn.Emit($"store i64 {fn.Value($"add i64 {ov}, 1")}, ptr {o}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {b}, {s.Item} {a})"), right, left);
-        fn.Block(right);
-        fn.Emit($"store {s.Item} {b}, ptr {SortAt(s.Item, "%a0", ov)}");
-        fn.Emit($"store i64 {fn.Value($"add i64 {jv}, 1")}, ptr {j}");
-        fn.Branch(front);
-        fn.Block(left);
-        fn.Emit($"store {s.Item} {a}, ptr {SortAt(s.Item, "%a0", ov)}");
-        fn.Emit($"store i64 {fn.Value($"add i64 {iv}, 1")}, ptr {i}");
-        fn.Branch(front);
-        fn.Block(rest);
-        var taken = fn.Value($"load i64, ptr {i}");
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {SortAt(s.Item, "%a0", fn.Value($"load i64, ptr {o}"))}, ptr {SortAt(s.Item, "%a3", taken)}, i64 {fn.Value($"mul i64 {fn.Value($"sub i64 %a1, {taken}")}, {size}")}, i1 false)");
+        module.Declare("declare i64 @llvm.ctlz.i64(i64, i1)");
+        var few = fn.Label("few");
+        var go = fn.Label("go");
+        fn.CondBranch(fn.Value("icmp ult i64 %a1, 2"), few, go);
+        fn.Block(few);
         fn.Return(null);
+        fn.Block(go);
 
-        // the second run in the buffer, merged from the back; what is left of it after the first run ran out goes to the front
-        fn.Block(backward);
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr %a3, ptr {SortAt(s.Item, "%a0", "%a1")}, i64 {fn.Value($"mul i64 {second}, {size}")}, i1 false)");
-        var bi = fn.Alloca("i64", "first");
-        var bj = fn.Alloca("i64", "kept");
-        var bo = fn.Alloca("i64", "end");
-        fn.Emit($"store i64 %a1, ptr {bi}");
-        fn.Emit($"store i64 {second}, ptr {bj}");
-        fn.Emit($"store i64 %a2, ptr {bo}");
-        var back = fn.Label("back");
-        var backStep = fn.Label("back.step");
-        var backFirst = fn.Label("back.first");
-        var backSecond = fn.Label("back.second");
-        var backRest = fn.Label("back.rest");
-        fn.Block(back);
-        var x = fn.Value($"load i64, ptr {bi}");
-        var y = fn.Value($"load i64, ptr {bj}");
-        fn.CondBranch(fn.Value($"and i1 {fn.Value($"icmp sgt i64 {x}, 0")}, {fn.Value($"icmp sgt i64 {y}, 0")}"), backStep, backRest);
-        fn.Block(backStep);
-        var xp = fn.Value($"sub i64 {x}, 1");
-        var yp = fn.Value($"sub i64 {y}, 1");
-        var p = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a0", xp)}");
-        var q = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, "%a3", yp)}");
-        var put = fn.Value($"sub i64 {fn.Value($"load i64, ptr {bo}")}, 1");
-        fn.Emit($"store i64 {put}, ptr {bo}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {q}, {s.Item} {p})"), backFirst, backSecond);
-        fn.Block(backFirst);
-        fn.Emit($"store {s.Item} {p}, ptr {SortAt(s.Item, "%a0", put)}");
-        fn.Emit($"store i64 {xp}, ptr {bi}");
-        fn.Branch(back);
-        fn.Block(backSecond);
-        fn.Emit($"store {s.Item} {q}, ptr {SortAt(s.Item, "%a0", put)}");
-        fn.Emit($"store i64 {yp}, ptr {bj}");
-        fn.Branch(back);
-        fn.Block(backRest);
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr %a0, ptr %a3, i64 {fn.Value($"mul i64 {fn.Value($"load i64, ptr {bj}")}, {size}")}, i1 false)");
+        // `merge_tree_scale_factor`, and the least length of a run found: `sqrt_approx` of the count past 4096 items, else up to 64
+        var scale = fn.Value($"udiv i64 {fn.Value("add i64 4611686018427387903, %a1")}, %a1");
+        var log = fn.Value($"sub i64 63, {fn.Value("call i64 @llvm.ctlz.i64(i64 " + fn.Value("or i64 %a1, 1") + ", i1 true)")}");
+        var shift = fn.Value($"lshr i64 {fn.Value($"add i64 {log}, 1")}, 1");
+        var root = fn.Value($"lshr i64 {fn.Value($"add i64 {fn.Value($"shl i64 1, {shift}")}, {fn.Value($"lshr i64 %a1, {shift}")}")}, 1");
+        var least = SortMin(fn.Value($"sub i64 %a1, {fn.Value("lshr i64 %a1, 1")}"), "64");
+        var good = fn.Value($"select i1 {fn.Value("icmp ule i64 %a1, 4096")}, i64 {least}, i64 {root}");
+        var runs = fn.Alloca("[66 x i64]", "runs");
+        var depths = fn.Alloca("[66 x i8]", "depths");
+        var stacked = SortLocal("i64", "stacked", "0");
+        var scan = SortLocal("i64", "scan", "0");
+        var previous = SortLocal("i64", "previous", "1");
+        var nextRun = fn.Alloca("i64", "next.run");
+        var depth = fn.Alloca("i8", "depth");
+        var loop = fn.Label("loop");
+        var make = fn.Label("make");
+        var final = fn.Label("final");
+        var collapse = fn.Label("collapse");
+        var check = fn.Label("check");
+        var merge = fn.Label("merge");
+        var push = fn.Label("push");
+        var advance = fn.Label("advance");
+        var end = fn.Label("end");
+        var quick = fn.Label("quick");
+        var done = fn.Label("done");
+        fn.Block(loop);
+        var at = SortRead("i64", scan);
+        var prior = SortRead("i64", previous);
+        fn.CondBranch(fn.Value($"icmp ult i64 {at}, %a1"), make, final);
+        fn.Block(make);
+        var made = fn.Value($"call i64 {CreateRun(s)}(ptr {SortAt(s.Item, "%a0", at)}, i64 {fn.Value($"sub i64 %a1, {at}")}, ptr %a2, i64 {good}, i1 %a4)");
+        SortWrite("i64", nextRun, made);
+
+        // `merge_tree_depth`: the leading zeros of the scaled midpoints of the two runs, told apart
+        var x = fn.Value($"mul i64 {scale}, {fn.Value($"add i64 {fn.Value($"sub i64 {at}, {fn.Value($"lshr i64 {prior}, 1")}")}, {at}")}");
+        var y = fn.Value($"mul i64 {scale}, {fn.Value($"add i64 {at}, {fn.Value($"add i64 {at}, {fn.Value($"lshr i64 {made}, 1")}")}")}");
+        var zeros = fn.Value($"call i64 @llvm.ctlz.i64(i64 {fn.Value($"xor i64 {x}, {y}")}, i1 false)");
+        SortWrite("i8", depth, fn.Value($"trunc i64 {zeros} to i8"));
+        fn.Branch(collapse);
+        fn.Block(final);
+        SortWrite("i64", nextRun, "1");
+        SortWrite("i8", depth, "0");
+        fn.Branch(collapse);
+        fn.Block(collapse);
+        var count = SortRead("i64", stacked);
+        fn.CondBranch(fn.Value($"icmp ugt i64 {count}, 1"), check, push);
+        fn.Block(check);
+        var top = fn.Value($"sub i64 {count}, 1");
+        var deeper = fn.Value($"icmp uge i8 {fn.Value($"load i8, ptr {SortAt("i8", depths, top)}")}, {SortRead("i8", depth)}");
+        fn.CondBranch(deeper, merge, push);
+        fn.Block(merge);
+        var left = fn.Value($"load i64, ptr {SortAt("i64", runs, top)}");
+        var right = SortRead("i64", previous);
+        var length = fn.Value($"add i64 {fn.Value($"lshr i64 {left}, 1")}, {fn.Value($"lshr i64 {right}, 1")}");
+        var start = SortAt(s.Item, "%a0", fn.Value($"sub i64 {at}, {length}"));
+        SortWrite("i64", previous, fn.Value($"call i64 {LogicalMerge(s)}(ptr {start}, i64 {length}, ptr %a2, i64 %a3, i64 {left}, i64 {right})"));
+        SortWrite("i64", stacked, top);
+        fn.Branch(collapse);
+        fn.Block(push);
+        var place = SortRead("i64", stacked);
+        fn.Emit($"store i64 {SortRead("i64", previous)}, ptr {SortAt("i64", runs, place)}");
+        fn.Emit($"store i8 {SortRead("i8", depth)}, ptr {SortAt("i8", depths, place)}");
+        SortWrite("i64", stacked, fn.Value($"add i64 {place}, 1"));
+        fn.CondBranch(fn.Value($"icmp uge i64 {at}, %a1"), end, advance);
+        fn.Block(advance);
+        var following = SortRead("i64", nextRun);
+        SortWrite("i64", scan, fn.Value($"add i64 {at}, {fn.Value($"lshr i64 {following}, 1")}"));
+        SortWrite("i64", previous, following);
+        fn.Branch(loop);
+        fn.Block(end);
+        fn.CondBranch(fn.Value($"trunc i64 {SortRead("i64", previous)} to i1"), done, quick);
+        fn.Block(quick);
+        fn.Emit($"call void {StableQuicksort(s)}(ptr %a0, i64 %a1, ptr %a2, i64 %a3)");
         fn.Return(null);
         fn.Block(done);
         fn.Return(null);
     });
 
     /// <summary>
-    /// X8: the helper of <c>SortUnstable</c> and of <c>SortBy</c>'s pairs, which sorts the <c>%a1</c> items at <c>%a0</c> in place: a quicksort,
-    /// as Rust's <c>sort_unstable</c> is one. The pivot is the median of the first, the middle and the last item; the items are split
-    /// around it from both ends, so that items equal to it fall on both sides; the shorter side is sorted by a call and the longer in the
-    /// same loop, so that the calls nest no deeper than the base-2 logarithm of the count. A side of <see cref="ShortRun"/> items or fewer
-    /// is sorted by insertion, and a side reached after <c>%a2</c> splits, the bound <see cref="SortLimit"/> gives, by a heapsort
-    /// (<see cref="HeapSort"/>), so that the comparisons of no order of the items grow faster than a constant times n log n.
+    /// X8: Rust's <c>create_run</c>: the run the <c>%a1</c> items at <c>%a0</c> begin with, sorted, where it holds <c>%a3</c> items or more
+    /// (<see cref="SortRunOf"/>), reversed where it falls; else, eagerly where <c>%a4</c>, the first 32 items or fewer sorted by the stable
+    /// small sort through the scratch at <c>%a2</c> (<see cref="GeneralSmallSort"/>), which Rust reaches through its quicksort, and lazily
+    /// the first <c>%a3</c> items or fewer as a run not sorted yet.
     /// </summary>
-    private string UnstableSort(SortOf s) => Helper($"sort.unstable.{s.Key}", "void", ["ptr", "i64", "i64"], () =>
+    private string CreateRun(SortOf s) => Helper($"sort.drift.run.{s.Key}", "i64", ["ptr", "i64", "ptr", "i64", "i1"], () =>
     {
-        var self = UnstableSort(s);
-        var items = fn.Alloca("ptr", "items");
-        var count = fn.Alloca("i64", "count");
-        var limit = fn.Alloca("i64", "limit");
-        fn.Emit("store ptr %a0, ptr " + items);
-        fn.Emit("store i64 %a1, ptr " + count);
-        fn.Emit("store i64 %a2, ptr " + limit);
-        var top = fn.Label("top");
-        var shortSide = fn.Label("short");
-        var longSide = fn.Label("long");
-        var heap = fn.Label("heap");
-        var pivot = fn.Label("pivot");
-        fn.Block(top);
-        var v = fn.Value($"load ptr, ptr {items}");
-        var m = fn.Value($"load i64, ptr {count}");
-        var l = fn.Value($"load i64, ptr {limit}");
-        fn.CondBranch(fn.Value($"icmp sle i64 {m}, {ShortRun}"), shortSide, longSide);
-        fn.Block(shortSide);
-        fn.Emit($"call void {InsertionSort(s)}(ptr {v}, i64 {m})");
-        fn.Return(null);
-        fn.Block(longSide);
-        fn.CondBranch(fn.Value($"icmp eq i64 {l}, 0"), heap, pivot);
-        fn.Block(heap);
-        fn.Emit($"call void {HeapSort(s)}(ptr {v}, i64 {m})");
-        fn.Return(null);
-        fn.Block(pivot);
-        var lower = fn.Value($"sub i64 {l}, 1");
-        fn.Emit($"store i64 {lower}, ptr {limit}");
-        var last = fn.Value($"sub i64 {m}, 1");
-        var middle = fn.Value($"lshr i64 {last}, 1");
-        OrderTwo(s, v, "0", middle);
-        OrderTwo(s, v, middle, last);
-        OrderTwo(s, v, "0", middle);
-        // the pivot is read from its slot without a count of its own and kept while the split swaps that slot: the swaps move items
-        // inside the block and let go of none, and nothing frees the block while the split runs, so the item it names stays alive
-        var p = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, v, middle)}");
+        var find = fn.Label("find");
+        var found = fn.Label("found");
+        var reverse = fn.Label("reverse");
+        var sorted = fn.Label("sorted");
+        var none = fn.Label("none");
+        var eager = fn.Label("eager");
+        var lazy = fn.Label("lazy");
+        fn.CondBranch(fn.Value("icmp uge i64 %a1, %a3"), find, none);
+        fn.Block(find);
+        var run = fn.Value($"call {{ i64, i1 }} {SortRunOf(s)}(ptr %a0, i64 %a1)");
+        var length = fn.Value($"extractvalue {{ i64, i1 }} {run}, 0");
+        fn.CondBranch(fn.Value($"icmp uge i64 {length}, %a3"), found, none);
+        fn.Block(found);
+        fn.CondBranch(fn.Value($"extractvalue {{ i64, i1 }} {run}, 1"), reverse, sorted);
+        fn.Block(reverse);
+        fn.Emit($"call void {SortReverse(s)}(ptr %a0, i64 {length})");
+        fn.Branch(sorted);
+        fn.Block(sorted);
+        fn.Return($"i64 {fn.Value($"or i64 {fn.Value($"shl i64 {length}, 1")}, 1")}");
+        fn.Block(none);
+        fn.CondBranch("%a4", eager, lazy);
+        fn.Block(eager);
+        var first = SortMin("%a1", Number(SmallSortMost));
+        fn.Emit($"call void {GeneralSmallSort(s)}(ptr %a0, i64 {first}, ptr %a2)");
+        fn.Return($"i64 {fn.Value($"or i64 {fn.Value($"shl i64 {first}, 1")}, 1")}");
+        fn.Block(lazy);
+        fn.Return($"i64 {fn.Value($"shl i64 {SortMin("%a3", "%a1")}, 1")}");
+    });
 
-        // Hoare's split: the first item from the front that the pivot does not follow, and the first from the back it does not precede,
-        // swapped until the two meet; every item up to the meeting point then sorts no later than the pivot and every item after it no earlier
-        var i = fn.Alloca("i64", "front");
-        var j = fn.Alloca("i64", "back");
-        fn.Emit($"store i64 -1, ptr {i}");
-        fn.Emit($"store i64 {m}, ptr {j}");
-        var scanFront = fn.Label("scan.front");
-        var scanBack = fn.Label("scan.back");
-        var meet = fn.Label("meet");
-        var swap = fn.Label("swap");
+    /// <summary>
+    /// X8: Rust's <c>logical_merge</c> of the runs <c>%a4</c> and <c>%a5</c>, the <c>%a1</c> items at <c>%a0</c>: where either is sorted, or
+    /// the two do not fit the scratch at <c>%a2</c> of <c>%a3</c> items, each unsorted one sorted by the stable quicksort
+    /// (<see cref="StableQuicksort"/>) and the two merged (<see cref="StableMerge"/>) into one sorted run; else one run not sorted yet.
+    /// </summary>
+    private string LogicalMerge(SortOf s) => Helper($"sort.drift.merge.{s.Key}", "i64", ["ptr", "i64", "ptr", "i64", "i64", "i64"], () =>
+    {
+        var leftSorted = fn.Value("trunc i64 %a4 to i1");
+        var rightSorted = fn.Value("trunc i64 %a5 to i1");
+        var tooLong = fn.Value("icmp ugt i64 %a1, %a3");
+        var physical = fn.Label("physical");
+        var sortLeft = fn.Label("sort.left");
+        var checkRight = fn.Label("check.right");
+        var sortRight = fn.Label("sort.right");
+        var merge = fn.Label("merge");
+        var lazy = fn.Label("lazy");
+        fn.CondBranch(fn.Value($"or i1 {tooLong}, {fn.Value($"or i1 {leftSorted}, {rightSorted}")}"), physical, lazy);
+        fn.Block(physical);
+        var leftLength = fn.Value("lshr i64 %a4, 1");
+        fn.CondBranch(leftSorted, checkRight, sortLeft);
+        fn.Block(sortLeft);
+        fn.Emit($"call void {StableQuicksort(s)}(ptr %a0, i64 {leftLength}, ptr %a2, i64 %a3)");
+        fn.Branch(checkRight);
+        fn.Block(checkRight);
+        fn.CondBranch(rightSorted, merge, sortRight);
+        fn.Block(sortRight);
+        fn.Emit($"call void {StableQuicksort(s)}(ptr {SortAt(s.Item, "%a0", leftLength)}, i64 {fn.Value($"sub i64 %a1, {leftLength}")}, ptr %a2, i64 %a3)");
+        fn.Branch(merge);
+        fn.Block(merge);
+        fn.Emit($"call void {StableMerge(s)}(ptr %a0, i64 %a1, ptr %a2, i64 %a3, i64 {leftLength})");
+        fn.Return($"i64 {fn.Value("or i64 " + fn.Value("shl i64 %a1, 1") + ", 1")}");
+        fn.Block(lazy);
+        fn.Return($"i64 {fn.Value("shl i64 %a1, 1")}");
+    });
+
+    /// <summary>X8: Rust's <c>stable_quicksort</c>: the stable quicksort of the <c>%a1</c> items at <c>%a0</c> through the scratch at <c>%a2</c> of <c>%a3</c> items, with twice the base-2 logarithm of the count as the bound on its splits (<see cref="StableQuick"/>).</summary>
+    private string StableQuicksort(SortOf s) => Helper($"sort.stable.quicksort.{s.Key}", "void", ["ptr", "i64", "ptr", "i64"], () =>
+    {
+        fn.Emit($"call void {StableQuick(s)}(ptr %a0, i64 %a1, ptr %a2, i64 %a3, i64 {SortLimit("%a1")}, ptr null)");
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// X8: Rust's stable <c>quicksort</c> of the <c>%a1</c> items at <c>%a0</c> through the scratch at <c>%a2</c> of <c>%a3</c> items: up to
+    /// 32 items by the stable small sort (<see cref="GeneralSmallSort"/>), and past <c>%a4</c> splits by driftsort's eager form
+    /// (<see cref="Drift"/>), so that no order of the items takes more than a constant times n log n comparisons; else split around a copy
+    /// of the pivot (<see cref="SortPivot"/>, <see cref="StablePartition"/>), keeping the order of the items on each side, the items after
+    /// it sorted by a call that takes the copy as the pivot before them and the items before it in the same loop. Where the pivot before
+    /// these items, at <c>%a5</c>, does not sort before the new pivot, or no item sorts before the new pivot, the items equal to it are split
+    /// off to the front and left where they are, as Rust's quicksort sorts many equal items.
+    /// </summary>
+    private string StableQuick(SortOf s) => Helper($"sort.stable.quick.{s.Key}", "void", ["ptr", "i64", "ptr", "i64", "i64", "ptr"], () =>
+    {
+        var self = StableQuick(s);
+        var items = SortLocal("ptr", "items", "%a0");
+        var count = SortLocal("i64", "count", "%a1");
+        var limit = SortLocal("i64", "limit", "%a4");
+        var ancestor = SortLocal("ptr", "ancestor", "%a5");
+        var pivotCopy = fn.Alloca(s.Item, "pivot");
+        var top = fn.Label("top");
+        var small = fn.Label("small");
+        var large = fn.Label("large");
+        var drift = fn.Label("drift");
         var split = fn.Label("split");
-        fn.Block(scanFront);
-        var iv = fn.Value($"add i64 {fn.Value($"load i64, ptr {i}")}, 1");
-        fn.Emit($"store i64 {iv}, ptr {i}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {fn.Value($"load {s.Item}, ptr {SortAt(s.Item, v, iv)}")}, {s.Item} {p})"), scanFront, scanBack);
-        fn.Block(scanBack);
-        var jv = fn.Value($"sub i64 {fn.Value($"load i64, ptr {j}")}, 1");
-        fn.Emit($"store i64 {jv}, ptr {j}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {p}, {s.Item} {fn.Value($"load {s.Item}, ptr {SortAt(s.Item, v, jv)}")})"), scanBack, meet);
-        fn.Block(meet);
-        var front = fn.Value($"load i64, ptr {i}");
-        fn.CondBranch(fn.Value($"icmp sge i64 {front}, {jv}"), split, swap);
-        fn.Block(swap);
-        SortSwap(s.Item, v, front, jv);
-        fn.Branch(scanFront);
+        var check = fn.Label("check");
+        var less = fn.Label("less");
+        var equal = fn.Label("equal");
+        var recurse = fn.Label("recurse");
+        fn.Block(top);
+        var v = SortRead("ptr", items);
+        var n = SortRead("i64", count);
+        fn.CondBranch(fn.Value($"icmp ule i64 {n}, {Number(SmallSortMost)}"), small, large);
+        fn.Block(small);
+        fn.Emit($"call void {GeneralSmallSort(s)}(ptr {v}, i64 {n}, ptr %a2)");
+        fn.Return(null);
+        fn.Block(large);
+        var bound = SortRead("i64", limit);
+        fn.CondBranch(fn.Value($"icmp eq i64 {bound}, 0"), drift, split);
+        fn.Block(drift);
+        fn.Emit($"call void {Drift(s)}(ptr {v}, i64 {n}, ptr %a2, i64 %a3, i1 true)");
+        fn.Return(null);
         fn.Block(split);
-        var leftCount = fn.Value($"add i64 {jv}, 1");
-        var rightCount = fn.Value($"sub i64 {m}, {leftCount}");
-        var rightItems = SortAt(s.Item, v, leftCount);
-        var leftShorter = fn.Label("left.shorter");
-        var rightShorter = fn.Label("right.shorter");
-        fn.CondBranch(fn.Value($"icmp slt i64 {leftCount}, {rightCount}"), leftShorter, rightShorter);
-        fn.Block(leftShorter);
-        fn.Emit($"call void {self}(ptr {v}, i64 {leftCount}, i64 {lower})");
-        fn.Emit($"store ptr {rightItems}, ptr {items}");
-        fn.Emit($"store i64 {rightCount}, ptr {count}");
+        var lower = fn.Value($"sub i64 {bound}, 1");
+        SortWrite("i64", limit, lower);
+        var p = fn.Value($"call i64 {SortPivot(s)}(ptr {v}, i64 {n})");
+        var pivot = SortLoad(s, SortAt(s.Item, v, p));
+        SortStore(s, pivot, pivotCopy);
+        var before = SortRead("ptr", ancestor);
+        fn.CondBranch(fn.Value($"icmp ne ptr {before}, null"), check, less);
+        fn.Block(check);
+        fn.CondBranch(SortBefore(s, SortLoad(s, before), pivot), less, equal);
+        fn.Block(less);
+        var below = fn.Value($"call i64 {StablePartition(s, false)}(ptr {v}, i64 {n}, ptr %a2, i64 {p}, i1 false)");
+        fn.CondBranch(fn.Value($"icmp eq i64 {below}, 0"), equal, recurse);
+        fn.Block(equal);
+        var equals = fn.Value($"call i64 {StablePartition(s, true)}(ptr {v}, i64 {n}, ptr %a2, i64 {p}, i1 true)");
+        SortWrite("ptr", items, SortAt(s.Item, v, equals));
+        SortWrite("i64", count, fn.Value($"sub i64 {n}, {equals}"));
+        SortWrite("ptr", ancestor, "null");
         fn.Branch(top);
-        fn.Block(rightShorter);
-        fn.Emit($"call void {self}(ptr {rightItems}, i64 {rightCount}, i64 {lower})");
-        fn.Emit($"store i64 {leftCount}, ptr {count}");
+        fn.Block(recurse);
+        fn.Emit($"call void {self}(ptr {SortAt(s.Item, v, below)}, i64 {fn.Value($"sub i64 {n}, {below}")}, ptr %a2, i64 %a3, i64 {lower}, ptr {pivotCopy})");
+        SortWrite("i64", count, below);
         fn.Branch(top);
     });
 
-    /// <summary>The items at the positions <paramref name="a"/> and <paramref name="b"/> swapped where the second sorts before the first.</summary>
-    private void OrderTwo(SortOf s, string items, string a, string b)
+    /// <summary>
+    /// X8: Rust's <c>stable_partition</c> of the <c>%a1</c> items at <c>%a0</c> around the pivot at the position <c>%a3</c>, through the
+    /// scratch at <c>%a2</c>: each item read in order and written to the front of the scratch where it goes before the pivot (where it sorts
+    /// before it, or, where <paramref name="equal"/>, where the pivot does not sort before it), else to the back of the scratch from the end
+    /// down, four items to a step for items of up to 16 bytes, with no branch on where an item goes; the pivot itself goes to the front where
+    /// <c>%a4</c>. Then the front copied back, and after it the back in reverse, so that each side keeps its order. Gives the count of the
+    /// front.
+    /// </summary>
+    private string StablePartition(SortOf s, bool equal) => Helper($"sort.stable.partition.{(equal ? "equal" : "less")}.{s.Key}", "i64", ["ptr", "i64", "ptr", "i64", "i1"], () =>
     {
-        var swap = fn.Label("order.swap");
-        var done = fn.Label("ordered");
-        var x = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, items, a)}");
-        var y = fn.Value($"load {s.Item}, ptr {SortAt(s.Item, items, b)}");
-        fn.CondBranch(fn.Value($"call i1 {s.Less}({s.Item} {y}, {s.Item} {x})"), swap, done);
-        fn.Block(swap);
-        SortSwap(s.Item, items, a, b);
+        var pivot = SortLoad(s, SortAt(s.Item, "%a0", "%a3"));
+        var scan = SortLocal("ptr", "scan", "%a0");
+        var front = SortLocal("i64", "front", "0");
+        var back = SortLocal("ptr", "back", SortAt(s.Item, "%a2", "%a1"));
+        var endAt = SortLocal("i64", "end.at", "%a3");
+        void One(Func<string, string> goesFront)
+        {
+            var from = SortRead("ptr", scan);
+            var item = SortLoad(s, from);
+            var toFront = goesFront(item);
+            var lowered = SortAt(s.Item, SortRead("ptr", back), "-1");
+            SortWrite("ptr", back, lowered);
+            var taken = SortRead("i64", front);
+            var target = SortAt(s.Item, fn.Value($"select i1 {toFront}, ptr %a2, ptr {lowered}"), taken);
+            SortStore(s, item, target);
+            SortWrite("i64", front, fn.Value($"add i64 {taken}, {fn.Value($"zext i1 {toFront} to i64")}"));
+            SortWrite("ptr", scan, SortAt(s.Item, from, "1"));
+        }
+
+        string Goes(string item) => equal ? fn.Value($"xor i1 {SortBefore(s, pivot, item)}, true") : SortBefore(s, item, pivot);
+        var loop = fn.Label("loop");
+        var plain = fn.Label("plain");
+        var plainBody = fn.Label("plain.body");
+        var after = fn.Label("after");
+        var pivotStep = fn.Label("pivot");
+        var output = fn.Label("out");
+        fn.Block(loop);
+        var endPosition = SortRead("i64", endAt);
+        if (s.Size <= 16)
+        {
+            var unrolledEnd = SortAt(s.Item, "%a0", fn.Value($"select i1 {fn.Value($"icmp ugt i64 {endPosition}, 3")}, i64 {fn.Value($"sub i64 {endPosition}, 3")}, i64 0"));
+            var unrolled = fn.Label("unrolled");
+            var unrolledBody = fn.Label("unrolled.body");
+            fn.Block(unrolled);
+            fn.CondBranch(fn.Value($"icmp ult ptr {SortRead("ptr", scan)}, {unrolledEnd}"), unrolledBody, plain);
+            fn.Block(unrolledBody);
+            for (var k = 0; k < 4; k++)
+            {
+                One(Goes);
+            }
+
+            fn.Branch(unrolled);
+        }
+
+        fn.Block(plain);
+        fn.CondBranch(fn.Value($"icmp ult ptr {SortRead("ptr", scan)}, {SortAt(s.Item, "%a0", endPosition)}"), plainBody, after);
+        fn.Block(plainBody);
+        One(Goes);
+        fn.Branch(plain);
+        fn.Block(after);
+        fn.CondBranch(fn.Value($"icmp eq i64 {endPosition}, %a1"), output, pivotStep);
+        fn.Block(pivotStep);
+        One(_ => "%a4");
+        SortWrite("i64", endAt, "%a1");
+        fn.Branch(loop);
+        fn.Block(output);
+        var count = SortRead("i64", front);
+        SortCopy(s, "%a0", "%a2", count);
+        var at = SortLocal("i64", "at", "0");
+        var rest = fn.Value($"sub i64 %a1, {count}");
+        var copy = fn.Label("copy");
+        var each = fn.Label("each");
+        var done = fn.Label("done");
+        fn.Block(copy);
+        var i = SortRead("i64", at);
+        fn.CondBranch(fn.Value($"icmp ult i64 {i}, {rest}"), each, done);
+        fn.Block(each);
+        var source = SortAt(s.Item, "%a2", fn.Value($"sub i64 {fn.Value("sub i64 %a1, 1")}, {i}"));
+        SortStore(s, SortLoad(s, source), SortAt(s.Item, "%a0", fn.Value($"add i64 {count}, {i}")));
+        SortWrite("i64", at, fn.Value($"add i64 {i}, 1"));
+        fn.Branch(copy);
         fn.Block(done);
-    }
+        fn.Return($"i64 {count}");
+    });
+
+    /// <summary>
+    /// X8: Rust's stable <c>merge</c> of the two sorted runs of the <c>%a1</c> items at <c>%a0</c>, the first <c>%a4</c> and the rest, through
+    /// the scratch at <c>%a2</c> of <c>%a3</c> items: the shorter run copied into the scratch and merged with the other, from the front where
+    /// it is the first run and from the back where it is the second, an item of the second run going before one of the first only where it
+    /// sorts before it, with no branch on which goes; what is left in the scratch goes where the merge stopped. Nothing where a run is empty
+    /// or the shorter one does not fit the scratch.
+    /// </summary>
+    private string StableMerge(SortOf s) => Helper($"sort.merge.{s.Key}", "void", ["ptr", "i64", "ptr", "i64", "i64"], () =>
+    {
+        var rightLength = fn.Value("sub i64 %a1, %a4");
+        var skip = fn.Value($"or i1 {fn.Value("icmp eq i64 %a4, 0")}, {fn.Value($"or i1 {fn.Value("icmp uge i64 %a4, %a1")}, {fn.Value($"icmp ult i64 %a3, {SortMin("%a4", rightLength)}")}")}");
+        var go = fn.Label("go");
+        var up = fn.Label("up");
+        var upLoop = fn.Label("up.loop");
+        var upBody = fn.Label("up.body");
+        var down = fn.Label("down");
+        var downLoop = fn.Label("down.loop");
+        var finish = fn.Label("finish");
+        var done = fn.Label("done");
+        fn.CondBranch(skip, done, go);
+        fn.Block(go);
+        var leftShorter = fn.Value($"icmp ule i64 %a4, {rightLength}");
+        var middle = SortAt(s.Item, "%a0", "%a4");
+        var save = fn.Value($"select i1 {leftShorter}, ptr %a0, ptr {middle}");
+        var saved = fn.Value($"select i1 {leftShorter}, i64 %a4, i64 {rightLength}");
+        SortCopy(s, "%a2", save, saved);
+        var start = SortLocal("ptr", "start", "%a2");
+        var end = SortLocal("ptr", "end", SortAt(s.Item, "%a2", saved));
+        var target = SortLocal("ptr", "target", save);
+        fn.CondBranch(leftShorter, up, down);
+
+        // the first run from the scratch and the second in place, merged from the front
+        fn.Block(up);
+        var right = SortLocal("ptr", "right", middle);
+        var rightEnd = SortAt(s.Item, "%a0", "%a1");
+        fn.Block(upLoop);
+        var st = SortRead("ptr", start);
+        var r = SortRead("ptr", right);
+        var more = fn.Value($"and i1 {fn.Value($"icmp ne ptr {st}, {SortRead("ptr", end)}")}, {fn.Value($"icmp ne ptr {r}, {rightEnd}")}");
+        fn.CondBranch(more, upBody, finish);
+        fn.Block(upBody);
+        var rv = SortLoad(s, r);
+        var sv = SortLoad(s, st);
+        var takeLeft = fn.Value($"xor i1 {SortBefore(s, rv, sv)}, true");
+        var t = SortRead("ptr", target);
+        SortStore(s, fn.Value($"select i1 {takeLeft}, {s.Move} {sv}, {s.Move} {rv}"), t);
+        SortWrite("ptr", start, SortStep(s, st, takeLeft));
+        SortWrite("ptr", right, SortStep(s, r, fn.Value($"xor i1 {takeLeft}, true")));
+        SortWrite("ptr", target, SortAt(s.Item, t, "1"));
+        fn.Branch(upLoop);
+
+        // the second run from the scratch and the first in place, merged from the back
+        fn.Block(down);
+        var output = SortLocal("ptr", "out", SortAt(s.Item, "%a0", "%a1"));
+        fn.Block(downLoop);
+        var leftAt = SortAt(s.Item, SortRead("ptr", target), "-1");
+        var rightAt = SortAt(s.Item, SortRead("ptr", end), "-1");
+        var o = SortAt(s.Item, SortRead("ptr", output), "-1");
+        SortWrite("ptr", output, o);
+        var lv = SortLoad(s, leftAt);
+        var bv = SortLoad(s, rightAt);
+        var takeFirst = SortBefore(s, bv, lv);
+        SortStore(s, fn.Value($"select i1 {takeFirst}, {s.Move} {lv}, {s.Move} {bv}"), o);
+        var newTarget = SortStep(s, leftAt, fn.Value($"xor i1 {takeFirst}, true"));
+        var newEnd = SortStep(s, rightAt, takeFirst);
+        SortWrite("ptr", target, newTarget);
+        SortWrite("ptr", end, newEnd);
+        var stop = fn.Value($"or i1 {fn.Value($"icmp eq ptr {newTarget}, %a0")}, {fn.Value($"icmp eq ptr {newEnd}, %a2")}");
+        fn.CondBranch(stop, finish, downLoop);
+
+        // what is left in the scratch, where the merge stopped
+        fn.Block(finish);
+        var from = SortRead("ptr", start);
+        var bytes = fn.Value($"sub i64 {fn.Value($"ptrtoint ptr {SortRead("ptr", end)} to i64")}, {fn.Value($"ptrtoint ptr {from} to i64")}");
+        SortCopyBytes(SortRead("ptr", target), from, bytes);
+        fn.Return(null);
+        fn.Block(done);
+        fn.Return(null);
+    });
 
     /// <summary>
     /// X8: the helper that sorts the <c>%a1</c> items at <c>%a0</c> as a heap, as Rust's <c>heapsort</c> does: the items made a heap whose
