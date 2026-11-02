@@ -526,7 +526,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        chainMembers[i] = list.Element;
-        return new Typed(Types.Nullable(list.Element));
+        var item = Types.Read(list.Element); // R3: a `weak` item reads as a strong `T?`, as `xs[i]` reads it
+        chainMembers[i] = item;
+        return new Typed(Types.Nullable(item));
     }
 }
