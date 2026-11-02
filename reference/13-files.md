@@ -186,6 +186,29 @@ Show() else {
 }
 ```
 
+Case: [system/setter-after-close.kz](../corpus/system/setter-after-close.kz)
+```kurz
+// a stream's setter and a listener's on a handle closed before get the system's error of a descriptor that is not open, as every
+// call after `Close` does
+void | IoError Closed() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    client.Close()
+    client.SetReadTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    listener.Close()
+    listener.SetAcceptTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
 ### S6 (decided, §12) A whole file
 
 `File.ReadAll(path)` reads the whole file at `path` into a `Bytes`, `Bytes | IoError`, and
@@ -437,7 +460,9 @@ match TcpStream.Connect("127.0.0.1:65536") {
 Case: [system/read-timeout.kz](../corpus/system/read-timeout.kz)
 ```kurz
 // a read whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, which the system counts in
-// its own ticks, and long before the 5 seconds of the default; the stream stays open, and the next read takes what the peer wrote
+// its own ticks; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
+// floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
+// nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -451,7 +476,7 @@ void | IoError Wait() {
     }
 
     elapsed = timestamp.Now - start
-    print(elapsed >= 40ms && elapsed < 2s)
+    print(elapsed >= 40ms && elapsed < 4s)
     server.Write("x".Bytes)
     print(client.Read(mut buffer, 1))
 }
@@ -463,15 +488,18 @@ Wait() else {
 
 Case: [system/write-timeout.kz](../corpus/system/write-timeout.kz)
 ```kurz
-// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`
+// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`.
+// All of it takes less than 4 s, a margin no rule fixes, for the buffers the kernel sizes and the one wait of 50 ms, set below the 5 s
+// of the default, so that a setter that set nothing, whose last write would wait the default, prints `false`
 void | IoError Stall() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.SetWriteTimeout(50ms)
-    mut chunk = "0123456789abcdef".Bytes
+    piece = "0123456789abcdef".Bytes
+    mut chunk = Bytes()
     while chunk.Count < 65536 {
-        chunk.AddRange(chunk)
+        chunk.AddRange(piece)
     }
 
     start = timestamp.Now
@@ -485,7 +513,7 @@ void | IoError Stall() {
         }
     }
 
-    print(timestamp.Now - start < 3s)
+    print(timestamp.Now - start < 4s)
     server.Close()
 }
 
@@ -497,7 +525,11 @@ Stall() else {
 Case: [system/connect-timeout.kz](../corpus/system/connect-timeout.kz)
 ```kurz
 // a listener that accepts nothing: once its queue of connections that wait is full, a connection waits, and the second form of
-// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it
+// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it. The queue fills on
+// Linux's defaults: the 128 a listener asks for, within `somaxconn`, and `tcp_abort_on_overflow` at 0, which drops a connection
+// that finds the queue full where 1 would refuse it; a kernel that took every connection ends the loop at 1000 with no `TimedOut`
+// line. All of it takes less than 4 s, a margin no rule fixes, set below the 5 s of the default, so that a bound that was not
+// passed on prints `false`
 void | IoError Full() {
     listener = TcpListener.Bind("127.0.0.1:0")
     mut held = List<TcpStream>()
@@ -517,7 +549,7 @@ void | IoError Full() {
     }
 
     print(held.Count > 1)
-    print(timestamp.Now - start < 2s)
+    print(timestamp.Now - start < 4s)
 }
 
 Full() else {
@@ -527,8 +559,11 @@ Full() else {
 
 Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
 ```kurz
-// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, where it waits without a
-// bound by default; the listener stays open, and the next `Accept` takes the connection that came, whose stream gets the default
+// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time; the listener stays open,
+// and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
+// and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
+// default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the
+// default, `FileTests` reads back by `getsockopt`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
     listener.SetAcceptTimeout(50ms)
@@ -539,7 +574,7 @@ void | IoError Wait() {
     }
 
     elapsed = timestamp.Now - start
-    print(elapsed >= 40ms && elapsed < 2s)
+    print(elapsed >= 40ms && elapsed < 4s)
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.Write("x".Bytes)
@@ -554,8 +589,8 @@ Wait() else {
 
 Case: [system/timeout-refused.kz](../corpus/system/timeout-refused.kz)
 ```kurz
-// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; `null` is no bound; and a setter on a closed
-// stream gets the system's error of a descriptor that is not open, as every call after `Close` does
+// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; and `null` is taken,
+// which `FileTests` reads back as no bound by `getsockopt`
 void | IoError Refused() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -578,11 +613,6 @@ void | IoError Refused() {
     }
 
     client.SetReadTimeout(null)
-    client.Close()
-    client.SetReadTimeout(1s) else {
-        IoError e => print("{e.Kind} {e.Code}")
-    }
-
     server.Close()
 }
 
@@ -590,6 +620,8 @@ Refused() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/setter-after-close.kz](../corpus/system/setter-after-close.kz)
 
 ### S10 (decided, §12) A call blocks its thread
 

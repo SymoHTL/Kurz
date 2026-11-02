@@ -1960,15 +1960,20 @@ public sealed class CheckerTests
     public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
     {
         // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
-        // no setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
+        // no read or write setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
         const string Program = "void | IoError Bound() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)\n    c.SetReadTimeout(50ms)\n    c.SetWriteTimeout(null)\n    c.SetReadTimeout(timeout: 1s)\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nBound() else {\n    IoError e => print(e)\n}";
         Clean(Program); // the positive control
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "l.SetReadTimeout(50ms)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(Program.Replace("c.SetWriteTimeout(null)", "l.SetWriteTimeout(null)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetReadTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+
+        // M7: a setter's time that changes the stream it is set on is `changed-while-held`, as a read's count is
+        const string Held = "duration Swap(mut TcpStream s, TcpStream other) {\n    s = other\n    return 1s\n}\n\nvoid | IoError Use() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    mut s = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    t = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    s.SetReadTimeout(Swap(mut s, t))\n}\n\nUse() else {\n    IoError e => print(e)\n}";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors(Held));
+        Clean(Held.Replace("    s.SetReadTimeout(Swap(mut s, t))", "    d = Swap(mut s, t)\n    s.SetReadTimeout(d)", StringComparison.Ordinal)); // the positive control
 
         // F13: the misfit names both forms of `Connect`, each with why it does not fit
         var (diagnostics, _) = Check(Program.Replace("TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)", "TcpStream.Connect(l.Port)", StringComparison.Ordinal));
