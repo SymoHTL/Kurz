@@ -4288,6 +4288,41 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_strings_with_no_bytes_are_equal_whatever_the_blocks_they_share_hold()
+    {
+        // T18: the runtime's `Same` reads no byte of two strings with no bytes: two such strings, each sharing the block of a list of
+        // bytes whose one byte was removed, `a` in one and `b` in the other, are equal to each other and to the literal "", although a
+        // read of the first byte of each would find the two bytes that differ
+        const string text = """
+            mut a = Bytes()
+            a.Add(byte(97))
+            first = a.RemoveAt(0)
+            mut b = Bytes()
+            b.Add(byte(98))
+            second = b.RemoveAt(0)
+            x = string.FromUtf8(a) else {
+                InvalidUtf8 => "?"
+            }
+
+            y = string.FromUtf8(b) else {
+                InvalidUtf8 => "?"
+            }
+
+            print(long(first) + long(second))
+            print(x.Bytes.Count + y.Bytes.Count)
+            if x == y {
+                print("x == y")
+            }
+
+            if x == "" && "" == y {
+                print("both equal the literal")
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-no-bytes"), 0, ["195", "0", "x == y", "both equal the literal"], "");
+    }
+
+    [Fact]
     public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
     {
         // T32: the runtime's `Order` compares the first byte, whose difference is the order where it differs, then the shared bytes as
