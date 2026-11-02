@@ -62,7 +62,7 @@ corpus takes no grant from it *(assumed: as §3 marks it)*.
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
 except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13), whose front end the suite checks for no diagnostic, and which the checker, reading no `flags` type, holds to `not supported` and no error;
-it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header. What the other cases print, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
+it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header, a case that expects output ending with 0 and writing nothing to standard error. What the other cases print, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -88,7 +88,9 @@ fail, which `print-failed` needs.
 to standard output, with `print`'s rules (A1): the one line feed, and the run-time error `print-failed`
 where its write fails (§12, the owner, 2026-11-01, "eprint(x)"). A file's own declaration of `eprint`, a
 function, a variable or a parameter at any level, is `redeclared` (V9), as of `Environment` (S14).
-*(assumed, §12: the file's own `eprint`)*
+Where a failed `eprint` raises `print-failed`, the report of that error, whose write fails too, is dropped,
+and the program ends with the code of an error that ends it.
+*(assumed, §12: the file's own `eprint`, and the report dropped)*
 
 No case for what it writes: the lines of a case's header are what the program writes to standard
 output, and a case that expects output writes nothing to standard error.
