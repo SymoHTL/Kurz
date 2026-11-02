@@ -154,7 +154,7 @@ public sealed partial class Checker
             }
 
             var names = f.TypeParameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            var reads = f.TypeParameters.Any(p => p.Constant is EnumType); // T34: its body reads the constant a copy binds
+            var reads = f.TypeParameters.Any(p => p.Constant is { } c && !Types.IsError(c)); // T34: its body reads the constant a copy binds
             SyntaxCopy.Walk(d, e => reads |= e is MemberAccess { Target: NameExpression n, Member: var m } && names.Contains(n.Name) && IsTypeMember(m), s => reads |= s is ConstAssertStatement);
             if (reads)
             {

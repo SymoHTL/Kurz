@@ -855,6 +855,33 @@ public sealed class ParserTests
         Assert.Equal(tree, Tree(program));
     }
 
+    [Theory]
+    [InlineData("b = Buffer<64>()", "(assign-or-declare b (call Buffer<(int 64)>))")]
+    [InlineData("x = Pick<T, true>(y)", "(assign-or-declare x (call Pick<T, true> y))")]
+    [InlineData("m = Mark<'x'>()", "(assign-or-declare m (call Mark<(char 120)>))")]
+    [InlineData("n = Shift<-1>()", "(assign-or-declare n (call Shift<(- (int 1))>))")]
+    [InlineData("f(a < 64, c > (d))", "(call f (call a<(int 64), c> d))")]
+    [InlineData("f((a < 64), c > (d))", "(call f (paren (< a (int 64))), (> c (paren d)))")]
+    [InlineData("print(a < 64, c > d)", "(call print (< a (int 64)), (> c d))")]
+    [InlineData("f(a < 64.5, c > (d))", "(call f (< a (real 64.5)), (> c (paren d)))")]
+    [InlineData("f(a < \"s\", c > (d))", "(call f (< a (string \"s\")), (> c (paren d)))")]
+    public void A_literal_stands_among_a_calls_type_arguments_where_its_parenthesis_follows(string program, string tree)
+    {
+        // T34: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
+        // reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call `a<64, c>(d)` and the comparisons take
+        // parentheses; a list not followed by `(` stays two comparisons, and a real or a string literal is no constant a type parameter
+        // holds, so it keeps the comparisons
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void A_literal_among_type_arguments_before_a_member_is_no_list()
+    {
+        // T34 with R15: a literal stands in the list only where `(` follows it; `List<64>.FromRaw(p, 0)` is a comparison whose right
+        // operand is missing, `syntax` (E4), where `List<long>.FromRaw(p, 0)` names the member of a generic type
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("ys = List<64>.FromRaw(p, 0)").Distinct());
+    }
+
     [Fact]
     public void A_type_parameter_that_holds_a_constant_has_a_name()
     {

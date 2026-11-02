@@ -584,10 +584,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type, `Order.Source`, where a pass made the copy;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
-- a type parameter that holds a constant of an `enum`, `const Mode M`, with its default, `const Mode M = Mode.Plain`: a call
-  writes the constant by name among its type arguments, `Say<Mode.Loud>`, or leaves out one with a default, and the
-  function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`, in
-  which the parameter's name is a constant of its enum and a call passes it on by that name (T34);
+- a type parameter that holds a constant of an integer type, `bool`, `char` or an `enum`, `const int N` or `const Mode M`,
+  with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
+  `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
+  the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
+  in which the parameter's name is a constant of its type and a call passes it on by that name (T34);
 - `const assert(condition, text)`, checked while the program compiles and emitting nothing: its condition and the holes of its
   text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
   holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
@@ -1222,7 +1223,9 @@ that sit under a rule by its id. Every one is pinned by a test.
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
-  `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
+  `syntax`, a comparison without its right operand. A literal among the type arguments, which T34 keeps where `(` follows
+  the list (the owner, 2026-11-02), so that `f(a < 64, c > (d))` is the call `a<64, c>(d)`, ends the list before a member
+  and its `(`: `List<64>.FromRaw(p, 0)` is `syntax`. T17 says generic types are written as in C# and
   states no such rule.
 - R10 to R17: the raw forms, each edge with the rule it rests on.
   - `*` and `&` before a value are prefix operators that bind as `-` does, since R10 writes a pointer
@@ -1405,9 +1408,9 @@ call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrol
 such a loop and an `enum`'s value, which is `type-mismatch` there (T34), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, and `void` as a type argument of such a function, `void` having no value of
-`TypeKind` (T33); a type parameter that holds a constant of a type but an `enum`, the record's integer types, `bool` and
-`char`, whose literal among a call's type arguments no rule reads, which leaves the function unread, one of a `data` type,
-and overloads that hold a type and a constant, or constants of two enums, at the place of a type argument a call writes,
+`TypeKind` (T33); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
+leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
+types, at the place of a type argument a call writes,
 which is read before the overload is picked (T34, F12); a call in a `const assert`, which the build does not evaluate while the
 program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
 text among them (T35); and `use` (F10) of any folder but the runtime's `sys`;

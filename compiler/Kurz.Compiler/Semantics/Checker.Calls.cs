@@ -1758,35 +1758,53 @@ public sealed partial class Checker
 
     /// <summary>
     /// T34: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
-    /// that hold a type there and a constant, or constants of two enums, are not supported, since the argument is read before the
+    /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
     /// overload is picked.
     /// </summary>
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
-        var kinds = there.Select(p => p.Constant is EnumType e ? $"a constant of `{e.Text}`" : "a type").Distinct().ToList();
+        var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
         if (kinds.Count > 1)
         {
             NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T34, F12)");
             return Types.Error;
         }
 
-        return there.FirstOrDefault(p => p.Constant is EnumType) is { } holds ? ResolveConstantArgument(argument, holds) : Resolve(argument);
+        return there.FirstOrDefault(p => p.Constant is { } c && !Types.IsError(c)) is { } holds ? ResolveConstantArgument(argument, holds) : Resolve(argument);
     }
 
     /// <summary>
-    /// T34: the constant a call gives a type parameter that holds one: a value of its enum by name, <c>JsonKeys.SnakeCase</c>, or, in a
-    /// copy, the name of a type parameter of its own that holds one, passed on. A type there, or a value of another enum, is
-    /// <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// T34: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
+    /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
+    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
+    /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
     /// </summary>
     private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
     {
-        var of = (EnumType)holds.Constant!;
+        var of = holds.Constant!;
+        if (argument is ConstantTypeArgument literal)
+        {
+            var t = CheckExpression(literal.Value, of);
+            if (t.IsError || Types.IsError(of))
+            {
+                return Types.Error;
+            }
+
+            if (!Types.Assignable(t.Type, of) || t.Constant is null)
+            {
+                ReportMismatch(t.Type, of, literal.Line, $"`{holds.Name}` takes a constant of `{of.Text}`, not {Types.A(t.Type)}", "T34");
+                return Types.Error;
+            }
+
+            return new ConstantArgument(of, t.Constant);
+        }
+
         if (argument is NamedType { TypeArguments.Count: 0 } n)
         {
             if (BoundConstant(n.Name) is { } bound)
             {
-                if (ReferenceEquals(bound.Of.Symbol, of.Symbol))
+                if (bound.Of.Equals(of))
                 {
                     return bound;
                 }
@@ -1806,9 +1824,9 @@ public sealed partial class Checker
                     return Types.Error;
                 }
 
-                if (ReferenceEquals(named, of.Symbol))
+                if (of is EnumType ofEnum && ReferenceEquals(named, ofEnum.Symbol))
                 {
-                    return new ConstantArgument(of, index);
+                    return new ConstantArgument(of, new EnumConstant(index));
                 }
 
                 Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T34, T1)");

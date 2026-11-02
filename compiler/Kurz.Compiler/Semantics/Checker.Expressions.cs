@@ -432,7 +432,7 @@ public sealed partial class Checker
 
         if (variable is null && BoundConstant(n.Name) is { } constant)
         {
-            return new Typed(constant.Of, new EnumConstant(constant.Index)); // T34: in a copy, the constant its call gave, known while it compiles
+            return new Typed(constant.Of, constant.Value); // T34: in a copy, the constant its call gave, known while it compiles
         }
 
         if (variable is not null)

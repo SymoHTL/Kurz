@@ -1,0 +1,10 @@
+// expect: output
+// | true
+// rules: T34
+
+bool Both(bool x, bool y) => x && y
+
+a = 1
+c = 5
+d = 3
+print(Both((a < 64), c > (d)))
