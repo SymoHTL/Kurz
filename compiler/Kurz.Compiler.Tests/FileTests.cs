@@ -817,6 +817,15 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 fd = fd + 1
             }
 
+            listener.SetAcceptTimeout(2500000001ns)
+            print("{Bound(3, 20)} {Bound(3, 21)}")
+            second = TcpStream.Connect("127.0.0.1:{listener.Port}")
+            accepted = listener.Accept()
+            print("{Bound(7, 20)} {Bound(7, 21)}")
+            listener.SetAcceptTimeout(null)
+            print(Bound(3, 20))
+            second.Close()
+            accepted.Close()
             client.SetReadTimeout(1500000001ns)
             client.SetWriteTimeout(1ns)
             print(Bound(4, 20))
@@ -837,10 +846,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_stream_waits_5_seconds_by_default_a_listener_without_a_bound_and_a_setter_sets_the_time_as_rust_does()
     {
         // S9: the stream `Connect` made and the one `Accept` gave read and write with a bound of 5 seconds, and the listener has none, so
-        // that `Accept` waits; a time cut down to whole microseconds, as Rust's `set_timeout` cuts it, which Linux keeps in its own ticks,
+        // that `Accept` waits; a listener's own time bounds its `accept`, `SO_RCVTIMEO`, and a stream it then gives still gets the
+        // default, which Linux would otherwise copy from the listener; a time cut down to whole microseconds, as Rust's `set_timeout` cuts it, which Linux keeps in its own ticks,
         // rounding a part of one up, so that 1.5 s and 1 ns read back as 1.5 s and a 1 ns that rounded up would not; a positive time that
         // comes to no microsecond raised to 1, a bound and not none; and `null` no bound
-        string[] lines(string seconds) => ["0 0 0 0", $"{seconds} 0 {seconds} 0", $"{seconds} 0 {seconds} 0", "1 500000", "true", "0 0"];
+        string[] lines(string seconds) => ["0 0 0 0", $"{seconds} 0 {seconds} 0", $"{seconds} 0 {seconds} 0", "2 500000 0 0", $"{seconds} 0 {seconds} 0", "0 0", "1 500000", "true", "0 0"];
         Ran(Bounds, "socket-bounds", lines("5"), grants: ["raw", "native"]);
 
         // the positive control: the default the runtime sets, 7 seconds, read back as 7
@@ -972,9 +982,10 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         string[] texts = [
             "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetReadTimeout(1s)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetWriteTimeout(null)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
+            "void | IoError Bound(TcpListener? l) {\n    if l != null {\n        l.SetAcceptTimeout(1s)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "print(1)\nmatch TcpStream.Connect(\"127.0.0.1:1\", 1s) {\n    TcpStream => print(\"connected\")\n    IoError e => print(e)\n}\n",
         ];
-        foreach (var (text, line) in texts.Zip([3, 3, 2]))
+        foreach (var (text, line) in texts.Zip([3, 3, 3, 2]))
         {
             var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
             RefusedOnWindows(refused);
@@ -992,6 +1003,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             void | IoError Texts() {
                 listener = TcpListener.Bind("127.0.0.1:0")
                 address = "127.0.0.1:{listener.Port}"
+                listener.SetAcceptTimeout(50ms)
+                match listener.Accept() {
+                    TcpStream => print("accepted")
+                    IoError e => print(e)
+                }
+
+                listener.SetAcceptTimeout(null)
                 client = TcpStream.Connect(address)
                 server = listener.Accept()
                 server.SetReadTimeout(50ms)
@@ -1035,6 +1053,6 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        Ran(text, "socket-time-texts", ["timed out: 127.0.0.1:0", "invalid input: 127.0.0.1:0", "timed out: ADDRESS", "invalid input: ADDRESS", "other (os error 9): 127.0.0.1:0"]);
+        Ran(text, "socket-time-texts", ["timed out: 127.0.0.1:0", "timed out: 127.0.0.1:0", "invalid input: 127.0.0.1:0", "timed out: ADDRESS", "invalid input: ADDRESS", "other (os error 9): 127.0.0.1:0"]);
     }
 }

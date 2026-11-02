@@ -1980,6 +1980,18 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_listener_sets_the_time_of_its_accept_and_a_stream_and_a_file_have_no_such_setter()
+    {
+        // S9: a listener's `SetAcceptTimeout` takes a `duration?`, `null` for no bound, as the stream's setters do; a stream and a file have
+        // none, and a time of another type fits no form
+        const string Program = "void | IoError Wait() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    l.SetAcceptTimeout(50ms)\n    l.SetAcceptTimeout(null)\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Close()\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nWait() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("c.Close()", "c.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace("l.SetAcceptTimeout(50ms)", "l.SetAcceptTimeout(50)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void A_read_takes_its_list_as_mut_and_clear_changes_a_mut_list()
     {
         // S3 with M7: the list a read adds to is a `mut` argument, written so at the call

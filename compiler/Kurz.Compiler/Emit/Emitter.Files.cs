@@ -51,10 +51,10 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout)
+        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
-            var kinds = TypeOf(target) is HandleType { Kind: Handle.TcpStream } ? "StreamErrorKind" : "ErrorKind";
+            var kinds = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener } ? "SocketErrorKind" : "ErrorKind";
             var handle = EmitExpression(target);
             switch (info.Kind)
             {
@@ -65,9 +65,9 @@ public sealed partial class Emitter
                     EmitFileWrite(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.TcpAccept:
-                    EmitAccept(outcome, handle);
+                    EmitAccept(outcome, handle, kinds);
                     break;
-                case CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout:
+                case CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout:
                     EmitSetTimeout(c, info, outcome, handle);
                     break;
                 default:
@@ -259,8 +259,9 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// S9: a stream's <c>SetReadTimeout(timeout)</c> or <c>SetWriteTimeout(timeout)</c>: the runtime's <c>SetTimeout</c> with
-    /// <c>SO_RCVTIMEO</c> (20) or <c>SO_SNDTIMEO</c> (21), the nanoseconds of the time, and whether there is one, <c>null</c> being no bound.
+    /// S9: a stream's <c>SetReadTimeout(timeout)</c> or <c>SetWriteTimeout(timeout)</c>, or a listener's <c>SetAcceptTimeout(timeout)</c>:
+    /// the runtime's <c>SetTimeout</c> with <c>SO_RCVTIMEO</c> (20), which bounds a read and an <c>accept</c> (socket(7)), or
+    /// <c>SO_SNDTIMEO</c> (21), the nanoseconds of the time, and whether there is one, <c>null</c> being no bound.
     /// </summary>
     private void EmitSetTimeout(CallExpression c, CallInfo info, FileOutcome o, string handle)
     {
@@ -268,7 +269,7 @@ public sealed partial class Emitter
         var time = Arguments(c, info, _ => nullable, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(nullable).Length + 1)..];
         var bounded = fn.Value($"xor i1 {IsCase(Tag(time, nullable), nullable, Types.Null)}, true");
         var nanoseconds = fn.Value($"select i1 {bounded}, i64 {Payload(time, nullable, Types.Duration)}, i64 0");
-        var option = info.Kind == CallKind.TcpSetReadTimeout ? "20" : "21";
+        var option = info.Kind == CallKind.TcpSetWriteTimeout ? "21" : "20";
         var r = SysCall("SetTimeout", $"i32 {HandleDescriptor(handle)}, i32 {option}, i64 {nanoseconds}, i1 {bounded}");
         FailBelowZero(o, r, HandlePath(handle));
         Succeed(o, null);
@@ -286,13 +287,14 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S9: a listener's <c>Accept()</c>, a stream that holds the listener's address on a count of its own, which
-    /// <see cref="NewHandle"/> takes, so that the address outlives the listener's block.
+    /// <see cref="NewHandle"/> takes, so that the address outlives the listener's block; the kind of a failure is the one the
+    /// runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
     /// </summary>
-    private void EmitAccept(FileOutcome o, string handle)
+    private void EmitAccept(FileOutcome o, string handle, string kinds)
     {
         var r = SysCall("Accept", $"i32 {HandleDescriptor(handle)}");
         var address = HandlePath(handle);
-        FailBelowZero(o, r, address);
+        FailBelowZero(o, r, address, kinds: kinds);
         Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), address));
     }
 
@@ -351,7 +353,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A failure, a result below 0, ends the call with its <c>IoError</c> after <paramref name="before"/>, its kind the one the runtime's
-    /// function <paramref name="kinds"/> gives, <c>ErrorKind</c>, or <c>StreamErrorKind</c> for a stream's read and write (S9); the code
+    /// function <paramref name="kinds"/> gives, <c>ErrorKind</c>, or <c>SocketErrorKind</c> for a stream's read and write and a listener's <c>Accept</c> (S9); the code
     /// goes on with a result of 0 or more.
     /// </summary>
     private void FailBelowZero(FileOutcome o, string result, string path, Action? before = null, string kinds = "ErrorKind")

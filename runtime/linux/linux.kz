@@ -2235,8 +2235,8 @@ long Deadline(byte* held, long nanoseconds) {
     return now + nanoseconds
 }
 
-// The time of the reads of the socket `fd`, with `option` `SO_RCVTIMEO` (20), or of its writes, with
-// `SO_SNDTIMEO` (21), of `SOL_SOCKET` (1), set to `nanoseconds`, or to no bound where `bounded` is false,
+// The time of the reads of the socket `fd`, and of its `accept` where it listens, with `option`
+// `SO_RCVTIMEO` (20), or of its writes, with `SO_SNDTIMEO` (21), of `SOL_SOCKET` (1), set to `nanoseconds`, or to no bound where `bounded` is false,
 // as Rust's `set_timeout` sets it (S9): a `struct timeval` of the whole seconds and of the microseconds
 // cut from the rest, a positive time that comes to no microsecond raised to 1, so that it never reads as
 // no bound, which the `timeval` of zeros is. A time of zero or below is -4097, `InvalidInput` with the
@@ -2670,10 +2670,11 @@ pub long Accept(int fd) {
     return accepted
 }
 
-// The kind of a failure of a stream's read or write (S9): `TimedOut` for `EAGAIN` (11), with which a call
-// on a blocking socket returns when the time `SetTimeout` set runs out (socket(7)), where Rust gives
-// `WouldBlock`; the kind `ErrorKind` gives for every other failure. The number stays the system's, 11.
-pub IoKind StreamErrorKind(long failure) {
+// The kind of a failure of a stream's read or write, or of a listener's `Accept` (S9): `TimedOut` for
+// `EAGAIN` (11), with which a call on a blocking socket returns when the time `SetTimeout` set runs out
+// (socket(7)), where Rust gives `WouldBlock`; the kind `ErrorKind` gives for every other failure. The
+// number stays the system's, 11.
+pub IoKind SocketErrorKind(long failure) {
     if failure == -11 {
         return IoKind.TimedOut
     }

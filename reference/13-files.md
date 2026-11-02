@@ -525,9 +525,36 @@ Full() else {
 }
 ```
 
+Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
+```kurz
+// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, where it waits without a
+// bound by default; the listener stays open, and the next `Accept` takes the connection that came, whose stream gets the default
+void | IoError Wait() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    listener.SetAcceptTimeout(50ms)
+    start = timestamp.Now
+    match listener.Accept() {
+        TcpStream => print("accepted")
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    elapsed = timestamp.Now - start
+    print(elapsed >= 40ms && elapsed < 2s)
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("x".Bytes)
+    mut buffer = Bytes()
+    print(server.Read(mut buffer, 1))
+}
+
+Wait() else {
+    IoError e => print(e)
+}
+```
+
 Case: [system/timeout-refused.kz](../corpus/system/timeout-refused.kz)
 ```kurz
-// a time of zero or below is refused, in a setter and in the second form of `Connect`; `null` is no bound; and a setter on a closed
+// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; `null` is no bound; and a setter on a closed
 // stream gets the system's error of a descriptor that is not open, as every call after `Close` does
 void | IoError Refused() {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -538,6 +565,10 @@ void | IoError Refused() {
     }
 
     client.SetWriteTimeout(-1ms) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    listener.SetAcceptTimeout(0s) else {
         IoError e => print("{e.Kind} {e.Code}")
     }
 

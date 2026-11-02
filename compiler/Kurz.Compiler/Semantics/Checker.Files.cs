@@ -65,9 +65,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S9: a listener's
-    /// <c>Accept()</c> and <c>Close()</c>, and a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
+    /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
     /// a <c>duration?</c>, <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (section 12, the owner,
-    /// 2026-11-01, Q8 (a)); each with the case <c>IoError</c>.
+    /// 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do (section
+    /// 12, assumed); each with the case <c>IoError</c>.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
@@ -82,6 +83,7 @@ public sealed partial class Checker
             "Accept" when listener => (CallKind.TcpAccept, [], Types.TcpStream),
             "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
             "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
+            "SetAcceptTimeout" when listener => (CallKind.TcpSetAcceptTimeout, [timeout], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };

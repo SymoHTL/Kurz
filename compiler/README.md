@@ -407,13 +407,13 @@ once the addresses are known, after the lookup of a name, which it does not boun
 and holds over every address tried *(assumed: one bound over the addresses of a name; its cost is that a first
 address that never answers spends the whole bound, and the later addresses are not tried)*. A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
-stream; a listener gets neither, so that `Accept` waits without a bound, and the stream it gives is set
-explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option
-as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
+stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
+which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
+for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
 the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
 `timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
-bits in nanoseconds holds at most about 292 years, far below it. A stream's read and write take their kind from
-`StreamErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
+bits in nanoseconds holds at most about 292 years, far below it. A stream's read and write and a listener's `Accept` take their kind
+from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
 runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
 system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
 each piece the system takes, as Rust's `write_all` does, and can take longer in all. `std/` gives the room a read makes in a list of bytes before it,
@@ -804,10 +804,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
-  stream's `SetReadTimeout` and `SetWriteTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
+  stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
-  case `IoError`, its kind and number from `ErrorKind` (`StreamErrorKind` for a stream's read and write) and `ErrorCode` and its path the call's first,
+  case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 32 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, and the path or the address, which a stream from `Accept` takes from its listener (S9), counted as a list's block is and
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
