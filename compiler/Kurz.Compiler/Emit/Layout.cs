@@ -146,11 +146,11 @@ internal sealed class Layout(IrModule module)
                 DataType d when d.Symbol.IsGeneric && related.Contains(d.Symbol) => $"a generic data type in a relation of inheritance, `{d}` (D6, T19)",
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
                 DataType d when IsBlock(d) && Fields(d).Any(f => HoldsInstance(f, [])) => $"an instance of a class held by `{d}`, a data value laid out as a block, which is never freed (section 3, R3)",
-                ClassType c => c.Symbol.Fields.Select(f => Refusal(f.Type)).FirstOrDefault(r => r is not null),
-                DataType d => Fields(d).Select(Refusal).FirstOrDefault(r => r is not null),
-                UnionType u => u.Cases.Where(c => c is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
-                ListType l => Refusal(l.Element),
-                MapType m => Refusal(m.Key) ?? Refusal(m.Value),
+                ClassType c => c.Symbol.Fields.Select(f => Inner(type, f.Type)).FirstOrDefault(r => r is not null),
+                DataType d => Fields(d).Select(f => Inner(type, f)).FirstOrDefault(r => r is not null),
+                UnionType u => u.Cases.Where(c => c is not VoidType).Select(c => Inner(type, c)).FirstOrDefault(r => r is not null),
+                ListType l => Inner(type, l.Element),
+                MapType m => Inner(type, m.Key) ?? Inner(type, m.Value),
                 FunctionType f => f.Parameters.Append(f.Result).Where(t => t is not VoidType).Select(Refusal).FirstOrDefault(r => r is not null),
                 _ => Lower.Supported(type) ? null : Lower.Refusal(type),
             };
@@ -171,6 +171,12 @@ internal sealed class Layout(IrModule module)
         MapType m => HoldsInstance(m.Key, seen) || HoldsInstance(m.Value, seen),
         _ => false,
     };
+
+    /// <summary>
+    /// The refusal of a part of <paramref name="whole"/>: a vector is a variable's, a parameter's or a result's alone, and the type that
+    /// holds one in a field, a case, an item or an entry is <c>not supported</c>, since its block is not aligned to the vector's size (R18).
+    /// </summary>
+    private string? Inner(KurzType whole, KurzType part) => part is VectorType ? Lower.Refusal(whole) : Refusal(part);
 
     /// <summary>
     /// The <c>null</c> of a <c>T?</c> whose <c>T</c> is held through an address, an address no value of <c>T</c> has, as Rust lays out
