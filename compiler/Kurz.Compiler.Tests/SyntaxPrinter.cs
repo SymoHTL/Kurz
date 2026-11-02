@@ -139,6 +139,7 @@ internal static class SyntaxPrinter
         WeakType { Inner: UnionType } w => "weak (" + Type(w.Inner).TrimEnd() + ") ",
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",
+        ConstantTypeArgument c => Print(c.Value) + " ",
         // a pointer to a union, a function type or a weak type is parenthesized as a nullable one is: `(A | B)*` against `A | B*`
         PointerType { Pointee: FunctionType or UnionType or WeakType or ExternFunctionType } p => "(" + Type(p.Pointee).TrimEnd() + ")* ",
         PointerType p => Type(p.Pointee).TrimEnd() + "* ",

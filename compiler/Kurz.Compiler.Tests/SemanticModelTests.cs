@@ -782,8 +782,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             {
                 case NameExpression n:
                     // a variable, a function, a data value without fields, an implicit field (K7), or the name of a type parameter that
-                    // holds a constant, a value of its enum a code generator reads whole (T34)
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    // holds a constant, a value of its enum, an integer, a `bool` or a `char` a code generator reads whole (T34)
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant or IntegerConstant or BoolConstant or CharConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7

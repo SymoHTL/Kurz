@@ -43,6 +43,7 @@ public static class SyntaxCopy
         private TypeSyntax Type(TypeSyntax t) => t switch
         {
             NamedType n => n with { TypeArguments = n.TypeArguments.Select(Type).ToList() },
+            ConstantTypeArgument c => c with { Value = Expression(c.Value) },
             NullableType n => n with { Inner = Type(n.Inner) },
             UnionType u => u with { Cases = u.Cases.Select(Type).ToList() },
             FunctionType f => f with { Parameters = f.Parameters.Select(Type).ToList(), Result = Type(f.Result) },

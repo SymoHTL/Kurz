@@ -1412,10 +1412,19 @@ call that leaves it out takes; the types it holds are the integer types, `bool`,
 `enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type, and where a type stands it is
-`unknown-name` (V10); a value of another `enum` or a type where the constant stands, and a constant
+`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
 where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))*
+
+A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
+where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
+the call `a<64, c>(d)`, and two comparisons take parentheses, `f((a < 64), c > (d))` (§4, the
+owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer takes its `-`,
+`Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
+an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
+another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
+`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
 
 Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
 ```kurz
@@ -1492,6 +1501,45 @@ void Say<const Mode M>(string text) {
 }
 
 Say("a")
+```
+
+Case: [types/const-parameter-literal.kz](../corpus/types/const-parameter-literal.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+bool Flag<const bool B>() => B
+char Mark<const char C>() => C
+
+void Show<const int N = 4>() {
+    print("{N}")
+}
+
+void Pass<const long L>() {
+    Show<5>()
+    print(L)
+}
+
+print(Scaled<64>(2))
+print(Flag<true>())
+print(Mark<'x'>())
+Show()
+Show<-3>()
+Pass<7>()
+```
+
+Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+print(Scaled<true>(2))
+```
+
+Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)
+```kurz
+bool Both(bool x, bool y) => x && y
+
+a = 1
+c = 5
+d = 3
+print(Both((a < 64), c > (d)))
 ```
 
 ### T18 (assumed, §4) Operators

@@ -29,6 +29,12 @@ public sealed record WeakType(int Line, TypeSyntax Inner) : TypeSyntax(Line);
 /// <summary><c>void</c> (F4), as a result type.</summary>
 public sealed record VoidType(int Line) : TypeSyntax(Line);
 
+/// <summary>
+/// T34: a literal among a call's type arguments, the constant a type parameter that holds one takes: <c>Buffer&lt;64&gt;()</c>,
+/// <c>Pick&lt;T, true&gt;(x)</c>, an integer with its <c>-</c>, a <c>bool</c> or a <c>char</c>.
+/// </summary>
+public sealed record ConstantTypeArgument(int Line, Expression Value) : TypeSyntax(Line);
+
 /// <summary><c>int*</c>, a raw pointer to what <paramref name="Pointee"/> names, <c>void*</c> among them (R10, R14).</summary>
 public sealed record PointerType(int Line, TypeSyntax Pointee) : TypeSyntax(Line);
 
