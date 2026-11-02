@@ -597,7 +597,8 @@ print(Counter.Next())
 
 The initial value of a `static` field reads constants and the `static` field of any class, its own
 or another, in any order, by their names inside the class or as `Units.Count`, as a `static` of
-Rust reads another, and the compiler computes the initial values; a member of an instance is K19's.
+Rust reads another, and the compiler computes the initial values that are constants; a member of an
+instance is K19's.
 Initial values that read each other in a cycle, a field that reads itself among them (`Start =
 Start + 1`), are the compile error `static-cycle`, at the field of the cycle that comes first in the
 file, with a message that names the fields of the cycle in order, as Rust's E0391 names a cycle of
@@ -618,7 +619,9 @@ reads a field computed at its first read (§4) is no constant either, and its ow
 at its own first read, which computes the field it reads first where that one is not computed yet:
 each field alone, and no initializer runs for the whole class, as one `LazyLock` of Rust reads
 another (§4, the owner, 2026-11-02, against the whole class at its first touch, as C#'s type
-initializer, and against constants only, with such a read an error of its own id). Outside an initial value, a read of a
+initializer, and against constants only, with such a read an error of its own id). Such a field meets
+an exception in its initial value as one a function computes does (§4): the read raises it, and every
+read after it the same exception *(assumed: as §4 marks it)*. Outside an initial value, a read of a
 `static` field is a value of its type and no constant, as C# reads a `static readonly` field: an
 `int` field does not go into a `byte` as an integer literal would (T7) *(assumed: as §4 marks it)*.
 The cycle this rule names is one between the names initial values read; what a field that a
@@ -709,11 +712,20 @@ print(Level.Small)
 
 Case: [classes/static-reads-first-read.kz](../corpus/classes/static-reads-first-read.kz)
 ```kurz
-int Compute() => 3
+int Compute() {
+    print("computing A")
+    return 3
+}
+
+int Never() {
+    print("computing C")
+    return 0
+}
 
 class Table {
     pub static int A = Compute()
     pub static int B = A + 1
+    pub static int C = Never()
 }
 
 print(Table.B)
