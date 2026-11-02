@@ -179,8 +179,10 @@ public sealed class ClangTests : IDisposable
     {
         // section 2 (the owner, 2026-11-02, issue 156, comment 6580739215): the arguments `Build` gives clang, with `-S`, compile
         // three functions of IR to assembly; in a release build the directive that aligns each function is `.p2align 6`, 64
-        // bytes, and in a test build none is. The functions are read as ELF names them (`.type f,@function`) and as COFF does
-        // (`.def f;` with `.type 32;`), with a floor of three, so that a reading that finds no function fails
+        // bytes, and in a test build each is the one clang writes with no option of alignment, LLVM's own for the target (16
+        // bytes on x86-64, `.prefalign 4` on ELF and `.p2align 4` on COFF). The functions are read as ELF names them
+        // (`.type f,@function`) and as COFF does (`.def f;` with `.type 32;`), with a floor of three and every label found, so
+        // that a reading that finds no function, or no label, fails
         var clang = Clang.Find().Found;
         Assert.True(clang is not null, "no clang");
         var ir = Path.Combine(root, "align.ll");
@@ -216,7 +218,12 @@ public sealed class ClangTests : IDisposable
             }
             else
             {
-                Assert.All(aligned, f => Assert.DoesNotMatch(@"^\t\.p2align\t6(,|$)", f.Directive));
+                var plain = Path.Combine(root, "plain.s");
+                var (plainCode, _, plainError) = Processes.Capture(clang.Path, ["-O0", ir, "-o", plain, "-S"], null, TimeSpan.FromMinutes(1));
+                Assert.True(plainCode == 0, plainError);
+                var own = Alignments(File.ReadAllLines(plain));
+                Assert.All(own, f => Assert.StartsWith("\t.", f.Directive, StringComparison.Ordinal));
+                Assert.Equal(own, aligned);
             }
         }
     }
@@ -242,7 +249,7 @@ public sealed class ClangTests : IDisposable
         return [.. names.Select(name =>
         {
             var at = Array.FindIndex(lines, l => l.StartsWith(name + ":", StringComparison.Ordinal));
-            var directive = "none";
+            var directive = at < 0 ? "no label" : "none";
             for (var i = at - 1; at > 0 && i >= 0 && lines[i].StartsWith("\t.", StringComparison.Ordinal); i--)
             {
                 if (lines[i].StartsWith("\t.p2align", StringComparison.Ordinal) || lines[i].StartsWith("\t.prefalign", StringComparison.Ordinal))
