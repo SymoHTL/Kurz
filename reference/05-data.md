@@ -158,8 +158,8 @@ print(n == n)
 
 Case: [data/union-equality-case-value.kz](../corpus/data/union-equality-case-value.kz)
 ```kurz
-// a union beside a value of one of its cases takes no `==`, a nullable one after its lift too (N10), as Rust
-// refuses `Ok(5) == 5` on a `Result<i32, String>` (D3)
+// a union beside a value of one of its cases takes no `==`, as Rust refuses `Ok(5) == 5` on a
+// `Result<i32, String>` (D3)
 int | string a = 1
 print(a == 1)
 ```
@@ -986,6 +986,17 @@ c.Increment()
 c.Increment()
 print(c.Count)
 print(before.Count)
+```
+
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
 ```
 
 ### D17 (decided, §4) How sets of flags are combined

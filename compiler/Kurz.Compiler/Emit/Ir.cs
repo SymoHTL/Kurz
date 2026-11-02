@@ -199,7 +199,6 @@ internal sealed class DebugInfo
 /// </summary>
 internal sealed class IrFunction
 {
-    private readonly string signature;
     private readonly StringBuilder allocas = new();
     private readonly StringBuilder body = new();
     private readonly List<string> attributes;
@@ -210,12 +209,18 @@ internal sealed class IrFunction
     /// <param name="attributes">Function attributes written after the signature.</param>
     public IrFunction(string signature, params string[] attributes)
     {
-        this.signature = signature;
+        Signature = signature;
         this.attributes = attributes.ToList();
     }
 
+    /// <summary>The text between <c>define</c> and the body, which a guarded block's function writes once its body named the variables it reads (R18).</summary>
+    public string Signature { get; set; }
+
     /// <summary>Whether the current block ended in a terminator, so that the next instruction needs a block.</summary>
     public bool Terminated { get; private set; }
+
+    /// <summary>Whether the code being emitted runs after the function cleaned the upper halves of the YMM registers for a run of statements a test of <c>X86.Sha</c> guards (R18).</summary>
+    public bool UpperClean { get; set; }
 
     /// <summary>The function's subprogram in the line tables, null where the build carries none or the function has no source.</summary>
     public string? Subprogram { get; set; }
@@ -306,7 +311,7 @@ internal sealed class IrFunction
     public string Render(IEnumerable<string> every)
     {
         var sb = new StringBuilder();
-        sb.Append("define ").Append(signature);
+        sb.Append("define ").Append(Signature);
         foreach (var a in attributes.Concat(every))
         {
             sb.Append(' ').Append(a);

@@ -1,0 +1,19 @@
+// expect: output
+// | data
+// | string
+// | other
+// rules: T33
+
+data Order(string Id, int Count)
+
+void ShowKind<T>() {
+    match T.Kind {
+        TypeKind.Data => print("data")
+        TypeKind.String => print("string")
+        else => print("other")
+    }
+}
+
+ShowKind<Order>()
+ShowKind<string>()
+ShowKind<bool>()

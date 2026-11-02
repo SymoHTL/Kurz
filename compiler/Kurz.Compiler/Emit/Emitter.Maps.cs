@@ -11,7 +11,8 @@ namespace Kurz.Compiler.Emit;
 /// it says whether a slot holds an entry, 255 where it holds none and a probe ends at its group, never filled or emptied in a group
 /// that holds a 255 still, and 128 where its entry was removed in a group with no 255, which a probe passes, and a slot holds an
 /// entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A
-/// key's hash is SipHash-1-3 under the keys of the map's block: of a string's UTF-8 bytes, of a time of 128 bits its 16 bytes, of a
+/// key's hash is the fast hash, or SipHash-1-3 under the keys of the map's block once an insert's probe passed the bound and the map
+/// switched (section 4, the owner, 2026-11-01, "Switch, as .NET"; <see cref="SwitchBody"/>): of a string's UTF-8 bytes, of a time of 128 bits its 16 bytes, of a
 /// <c>double</c> or a <c>float</c> the bits of its <c>double</c>, every NaN as one NaN and -0.0 as 0.0, of any other key of one value
 /// widened to 64 bits (<see cref="Word"/>), and of the hashes of a <c>data</c> value's fields, of a list's items or of a union's tag and value, as words.
 /// </summary>
@@ -40,7 +41,7 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// The hash of a key under the keys of the map's block: of a string's bytes, of a time of 128 bits' 16 bytes, of any other value of
+    /// The hash of a key under the hash of the map's block, the fast hash or SipHash-1-3 under its keys: of a string's bytes, of a time of 128 bits' 16 bytes, of any other value of
     /// one word's 8 bytes, and of a <c>data</c> value, a list or a union made of words by <see cref="HashBody"/>, so that two keys equal
     /// by <see cref="Equal"/> have one hash (D3).
     /// </summary>
@@ -55,7 +56,15 @@ public sealed partial class Emitter
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {bytes}, i64 {count})");
                 }
 
-            case DataType or ListType or UnionType:
+            case ClassType c when c.Symbol.ComparesByIdentity:
+                {
+                    // K4: an instance that compares by identity hashes its address, which its count keeps while it is a key
+                    var slot = fn.Alloca("i64", "key");
+                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {key} to i64")}, ptr {slot}");
+                    return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
+                }
+
+            case DataType or ListType or UnionType or ClassType:
                 {
                     var name = Helper($"hash.{Lower.Mangle(type)}", "i64", ["ptr", Ir(type)], () => HashBody(type));
                     return fn.Value($"call i64 {name}(ptr {block}, {Ir(type)} {key})");
@@ -99,9 +108,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// The helper of the hash of a <c>data</c> value, a list or a union, the map's block in <c>%a0</c> and the value in <c>%a1</c>: the
-    /// SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag and its value's hash, and first the number of
-    /// the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15).
+    /// The helper of the hash of a <c>data</c> value, a list, a union or an instance that compares by its fields, the map's block in
+    /// <c>%a0</c> and the value in <c>%a1</c>: the SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag
+    /// and its value's hash, and first the number of the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15, K5).
     /// </summary>
     private void HashBody(KurzType type)
     {
@@ -158,6 +167,16 @@ public sealed partial class Emitter
 
                     break;
                 }
+
+            case ClassType c:
+                foreach (var field in c.Symbol.FieldsThatCount)
+                {
+                    // K5: the hash of the fields that count, so that two instances equal by them have one hash
+                    var pointer = InstanceFieldPointer(c.Symbol, "%a1", c.Symbol.Fields.IndexOf(field));
+                    Add(KeyHash("%a0", fn.Value($"load {Ir(field.Type)}, ptr {pointer}"), field.Type));
+                }
+
+                break;
         }
 
         fn.Return($"i64 {End()}");
@@ -409,6 +428,48 @@ public sealed partial class Emitter
         fn.Emit($"store {Ir(type.Key)} %a1, ptr {fn.Value($"getelementptr {entry}, ptr {empty}, i32 0, i32 1")}");
         fn.Emit($"store {Ir(type.Value)} %a2, ptr {fn.Value($"getelementptr {entry}, ptr {empty}, i32 0, i32 2")}");
         fn.Emit($"call void {StdFunction("MapAdded")}(ptr {target})");
+        var tripped = fn.Label("tripped");
+        var done = fn.Label("done");
+        fn.CondBranch(fn.Value($"call i1 {StdFunction("MapTripped")}(ptr {target})"), tripped, done); // the probe passed the bound (section 4)
+        fn.Block(tripped);
+        var switched = Helper($"switch.{Lower.Mangle(type)}", "void", ["ptr"], () => SwitchBody(type));
+        fn.Emit($"call void {switched}(ptr %a0)");
+        fn.Branch(done);
+        fn.Block(done);
+        fn.Return(null);
+        fn.Block(failed);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");
+        fn.Unreachable();
+    }
+
+    /// <summary>
+    /// The helper that moves the map in the place <c>%a0</c>, whose insert's probe passed the bound on the fast hash, onto SipHash-1-3
+    /// under its block's keys, one time (section 4, the owner, 2026-11-01, "Switch, as .NET"): a block of its slots under SipHash-1-3
+    /// (<c>MapSwitched</c>), every entry moved into it under its key's new hash, as .NET's <c>Resize</c> with new hash codes puts every
+    /// entry again, and the old block freed without letting go of what the entries hold, which the new block holds now.
+    /// </summary>
+    private void SwitchBody(MapType type)
+    {
+        var entry = EntryType(type);
+        var size = EntrySize(type);
+        var asked = fn.Alloca("i64", "asked");
+        fn.Emit($"store i64 0, ptr {asked}");
+        var block = fn.Value("load ptr, ptr %a0");
+        var made = fn.Value($"call ptr {StdFunction("MapSwitched")}(ptr {block}, i64 {size}, ptr {asked})");
+        var move = fn.Label("move");
+        var failed = fn.Label("failed");
+        fn.CondBranch(fn.Value($"icmp eq ptr {made}, null"), failed, move);
+        fn.Block(move);
+        EachEntry(block, type, (key, value) =>
+        {
+            var hash = KeyHash(made, key, type.Key);
+            var slot = fn.Value($"call ptr {StdFunction("MapEmpty")}(ptr {made}, i64 {hash}, i64 {size})"); // never null: the block has the slots the entries had
+            fn.Emit($"store i64 {hash}, ptr {slot}");
+            fn.Emit($"store {Ir(type.Key)} {key}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+            fn.Emit($"store {Ir(type.Value)} {value}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
+        });
+        fn.Emit($"call void {StdFunction("MapFree")}(ptr {block}, i64 {size})");
+        fn.Emit($"store ptr {made}, ptr %a0");
         fn.Return(null);
         fn.Block(failed);
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");

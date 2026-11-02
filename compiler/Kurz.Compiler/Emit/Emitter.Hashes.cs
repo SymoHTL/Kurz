@@ -133,7 +133,7 @@ public sealed partial class Emitter
         var made = fn.Alloca("ptr", "made");
         var asked = fn.Alloca("i64", "asked");
         fn.Emit($"store i64 0, ptr {asked}");
-        var at = fn.Value($"call i64 {StdFunction("HexDecode")}(ptr {bytes}, i64 {count}, ptr {made}, ptr {asked})");
+        var at = fn.Value($"call i64 {StdFunction("HexDecode")}(ptr {bytes}, i64 {count}, ptr {HexDigits()}, ptr {made}, ptr {asked})");
         Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
         var result = fn.Alloca(Ir(union), "decoded");
         var done = fn.Label("hex.done");
@@ -153,6 +153,32 @@ public sealed partial class Emitter
         fn.Branch(done);
         fn.Block(done);
         return fn.Value($"load {Ir(union)}, ptr {result}");
+    }
+
+    /// <summary>
+    /// The global that holds the value of each byte as a hexadecimal digit (H7), written once into a program that decodes hexadecimal:
+    /// 256 bytes, 0 to 15 for <c>0</c> to <c>9</c>, <c>A</c> to <c>F</c> and <c>a</c> to <c>f</c>, and 255 for every other byte, as
+    /// .NET's <c>HexConverter.CharToHexLookup</c> holds them; the standard library's <c>HexDecode</c> reads two of them for each byte it
+    /// makes, as .NET's scalar <c>FromHexString</c> does. The <c>hex</c> crate, whose <c>decode</c> H7 cites for what is read, compares each
+    /// byte with the three ranges (<c>val</c>): a text of 32 MiB decoded 5 times took 468 ms so in Kurz and 610 ms in the crate's own Rust,
+    /// against 47 ms through this table (release builds, the best of seven).
+    /// </summary>
+    private string HexDigits()
+    {
+        const string name = "@\"hex.digits\"";
+        if (helpers.Add(name))
+        {
+            var values = Enumerable.Range(0, 256).Select(b => (char)b switch
+            {
+                >= '0' and <= '9' => b - '0',
+                >= 'A' and <= 'F' => b - 'A' + 10,
+                >= 'a' and <= 'f' => b - 'a' + 10,
+                _ => 255,
+            });
+            module.Global($"{name} = private unnamed_addr constant [256 x i8] [{string.Join(", ", values.Select(v => $"i8 {(sbyte)v}"))}]");
+        }
+
+        return name;
     }
 
     /// <summary>Whether the data type is <c>HexError</c>, which no file can declare beside the one every file sees (H7, V9).</summary>
