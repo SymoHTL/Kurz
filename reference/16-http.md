@@ -7,12 +7,11 @@ owner, 2026-11-01, Q7 (b)).
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
 `HttpLimits`, `HttpClient`, `HttpClientOptions` and `Uri`, with `UriError` and `UriKind`, as `std/`
-declares them, as it sees `File` and `TcpStream` (S2, S8). A value of one is of the same type in the
-file and in `std/`. A file's own declaration of one of these names is `redeclared` (V9). The names are
-a list the compiler holds, each a `pub` type of `std/`, as Rust's `std::prelude::rust_2021` lists the
-names every module sees (§12: the owner, 2026-11-01, Q7 (b), that every file sees them; the list of
-names, the two of `Uri`, and the list held in the compiler, against every `pub` type of `std/` and
-against a list written in `std/`, are the record's assumptions).
+declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
+names is `redeclared` (V9). The names are a list the compiler holds, each a `pub` type of `std/`, as
+Rust's `std::prelude::rust_2021` lists the names every module sees (§12: the owner, 2026-11-01, Q7 (b),
+that every file sees them; the list of names, the two of `Uri`, and the list held in the compiler,
+against every `pub` type of `std/` and against a list written in `std/`, are the record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
