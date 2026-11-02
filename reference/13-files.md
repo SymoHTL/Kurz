@@ -105,8 +105,8 @@ as it did before the buffer. A `Write` after buffered reads of one handle would 
 program's reads ended, the position moved back over the bytes read ahead, as C#'s `FileStream`
 moves it, which no handle reaches, since `File.Open` opens a file to read and `File.Create` to write
 (S2) and a stream has no position; a second `File.Open` of a file has its own descriptor, position
-and buffer. *(assumed, §12: the buffer made at the first fill, the read that fails storing nothing,
-the `max` of 0, the write after buffered reads and the second handle)*
+and buffer. *(assumed, §12: the buffer made at the first fill, every holder sharing it, the read
+that fails storing nothing, the `max` of 0, the write after buffered reads and the second handle)*
 
 Case: [system/read-appends.kz](../corpus/system/read-appends.kz)
 ```kurz
@@ -205,6 +205,12 @@ void | IoError Show() {
     client.Write(small)
     print(server.Read(mut got, 1))
 
+    // the 2999 bytes the buffer holds and no read took go with the close, and the system's queue holds none: the peer reads the end
+    // of the stream, where bytes left in the queue would have reset the connection
+    server.Close()
+    mut last = Bytes()
+    print(client.Read(mut last, 16))
+
     // the same from a file
     File.WriteAll("read-buffer.txt", sent)
     f = File.Open("read-buffer.txt")
@@ -216,6 +222,13 @@ void | IoError Show() {
 
     end = Reads()
     print("{read.Count} {read == small} {end - start < 100}")
+
+    // the bytes the file's buffer holds go with its close: a read after it is S5's error and takes none of them
+    f.Close()
+    match f.Read(mut read, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
 
     // a read of 8 KiB or more into an empty buffer goes straight to the list, and the bytes the buffer holds go first
     g = File.Open("read-buffer.txt")
@@ -297,6 +310,8 @@ Show() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/read-buffer.kz](../corpus/system/read-buffer.kz)
 
 ### S6 (decided, §12) A whole file
 
@@ -704,6 +719,8 @@ Refused() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/read-buffer.kz](../corpus/system/read-buffer.kz)
 
 ### S10 (decided, §12) A call blocks its thread
 
