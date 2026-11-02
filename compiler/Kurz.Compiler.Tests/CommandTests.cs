@@ -138,6 +138,36 @@ public sealed class CommandTests : IDisposable
     }
 
     [Fact]
+    public void Build_ends_for_a_default_that_builds_its_own_class_and_its_run_ends_in_stack_overflow()
+    {
+        // K7 with the owner's answer of 2026-11-02: the defaults of a class's body are one function per class that each construction
+        // calls, so a default that builds its own class, and two classes whose defaults build each other, end the build, where the
+        // emitter built them into each construction without end and the compiler's own stack ran out; the run recurses into
+        // `stack-overflow`, as C#'s initializer does. Where the stack runs out, in the allocator of `std/` or in a default, decides the
+        // error line, so the trace's frames at the defaults are held, each named by its class
+        (string Name, string Text, (string Class, int Line)[] Frames)[] programs =
+        [
+            ("self", "class A(int N) {\n    int d = A(N - 1).d\n\n    pub int D() => d\n}\n\nprint(A(1).D())\n", [("A", 2)]),
+            ("each-other", "class A(int N) {\n    int d = B(N).e\n\n    pub int D() => d\n}\n\nclass B(int M) {\n    pub int e = A(M).D()\n}\n\nprint(A(1).D())\n", [("A", 2), ("B", 8)]),
+        ];
+        foreach (var (name, text, frames) in programs)
+        {
+            var source = Path.Combine(root, $"{name}.kz");
+            File.WriteAllText(source, text);
+            var output = Path.Combine(root, OperatingSystem.IsWindows() ? $"{name}.exe" : name);
+            Assert.Equal((0, "", ""), Kurz("build", source, "-o", output));
+            var (code, printed, error) = Processes.Capture(output, [], null, TimeSpan.FromSeconds(60), new Dictionary<string, string?> { ["KURZ_TRACE"] = "1" });
+            Assert.Equal("", printed);
+            Assert.NotEqual(0, code);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.StartsWith("error: stack-overflow at ", error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+                Assert.All(frames, f => Assert.Contains($"\n  at {f.Class} in {source}:{f.Line}\n", error, StringComparison.Ordinal));
+            }
+        }
+    }
+
+    [Fact]
     public void Build_writes_the_line_tables_into_a_test_build_and_into_a_release_build_where_lines_says_so()
     {
         // the owner, 2026-10-29, "build, run and exec": `--lines` keeps them in a release build and changes nothing in a test build
