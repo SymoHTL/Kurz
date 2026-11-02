@@ -440,6 +440,8 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     {
         var a = Vector128.Create(Enumerable.Range(0, 16).Select(i => (byte)((i * 37 + 11) % 256)).ToArray());
         var b = Vector128.Create(Enumerable.Range(0, 16).Select(i => (byte)((i * 53 + 200) % 256)).ToArray());
+        // a with five bytes of b, so that some lanes of each width are equal to a's and some are not
+        var c = Vector128.Create(Enumerable.Range(0, 16).Select(i => i is 0 or 3 or 9 or 10 or 15 ? b.GetElement(i) : a.GetElement(i)).ToArray());
         static string Bytes(Vector128<byte> v) => string.Concat(Enumerable.Range(0, 16).Select(i => " " + v.GetElement(i).ToString(CultureInfo.InvariantCulture)));
         static string Create(Vector128<byte> v) => "Vector128.Create(" + string.Join(", ", Enumerable.Range(0, 16).Select(i => $"byte({v.GetElement(i).ToString(CultureInfo.InvariantCulture)})")) + ")";
         var text = $$"""
@@ -454,6 +456,7 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
 
             a = {{Create(a)}}
             b = {{Create(b)}}
+            c = {{Create(c)}}
             print(Lanes(a))
             print(Lanes(Vector128.Create(byte(9))))
             if X86.Sse2.IsSupported {
@@ -463,6 +466,17 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
                 print(Lanes(X86.Sse2.Shuffle(a.AsInt32(), 0xB1).AsByte()))
                 print(X86.Sse2.Add(Vector128.Create(2147483647, 0, 0, 0), Vector128.Create(1, 0, 0, 0)).GetElement(0))
                 print(X86.Sse2.Add(Vector128.Create(1.5, 2.25), Vector128.Create(0.25, 0.5)).GetElement(1) == 2.75)
+                print(Lanes(X86.Sse2.CompareEqual(a, c)))
+                print(Lanes(X86.Sse2.CompareEqual(a.AsSByte(), c.AsSByte()).AsByte()))
+                print(Lanes(X86.Sse2.CompareEqual(a.AsInt16(), c.AsInt16()).AsByte()))
+                print(Lanes(X86.Sse2.CompareEqual(a.AsUInt16(), c.AsUInt16()).AsByte()))
+                print(Lanes(X86.Sse2.CompareEqual(a.AsInt32(), c.AsInt32()).AsByte()))
+                print(Lanes(X86.Sse2.CompareEqual(a.AsUInt32(), c.AsUInt32()).AsByte()))
+                print(Lanes(X86.Sse2.And(a, b)))
+                print(Lanes(X86.Sse2.And(a.AsInt64(), b.AsInt64()).AsByte()))
+                print(X86.Sse2.MoveMask(a))
+                print(X86.Sse2.MoveMask(b.AsSByte()))
+                print(X86.Sse2.MoveMask(X86.Sse2.CompareEqual(a, c)))
             }
 
             print(Vector256.Create(1, 2, 3, 4, 5, 6, 7, 8).GetElement(7))
@@ -510,6 +524,17 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
             Bytes(Sse2.Shuffle(a.AsInt32(), 0xB1).AsByte()),
             Sse2.Add(Vector128.Create(int.MaxValue, 0, 0, 0), Vector128.Create(1, 0, 0, 0)).GetElement(0).ToString(CultureInfo.InvariantCulture), // the lanes wrap, as C#'s
             "true",
+            Bytes(Sse2.CompareEqual(a, c)),
+            Bytes(Sse2.CompareEqual(a.AsSByte(), c.AsSByte()).AsByte()),
+            Bytes(Sse2.CompareEqual(a.AsInt16(), c.AsInt16()).AsByte()),
+            Bytes(Sse2.CompareEqual(a.AsUInt16(), c.AsUInt16()).AsByte()),
+            Bytes(Sse2.CompareEqual(a.AsInt32(), c.AsInt32()).AsByte()),
+            Bytes(Sse2.CompareEqual(a.AsUInt32(), c.AsUInt32()).AsByte()),
+            Bytes(Sse2.And(a, b)),
+            Bytes(Sse2.And(a.AsInt64(), b.AsInt64()).AsByte()),
+            Sse2.MoveMask(a).ToString(CultureInfo.InvariantCulture),
+            Sse2.MoveMask(b.AsSByte()).ToString(CultureInfo.InvariantCulture),
+            Sse2.MoveMask(Sse2.CompareEqual(a, c)).ToString(CultureInfo.InvariantCulture), // 0x79F6: the eleven bytes c kept
             "8",
             "72340172838076673",
             "8",

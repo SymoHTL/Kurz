@@ -554,7 +554,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the standard library's `Find`, for one byte two words of 8 bytes at a time, the first two read at any
   address and the rest from an address that is a multiple of 8, with the place taken from the mask of Rust's
   `contains_zero_byte` test, and Crochemore and Perrin's two-way search for more, as
-  Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
+  Rust's `str::find`, but for a needle of 2 to 32 bytes where the CPU has SSE2, which takes
+  Rust's `simd_contains` (R18), and its `BytesAt` for the start and the end (X1);
   `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms, `s.Trim(c)`, `s.TrimStart(c)` and `s.TrimEnd(c)`,
   which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
@@ -721,8 +722,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
   `IndexOf(item)` and `IndexOf(value)` of a run, an `int?`, which compare items as `==` compares two
-  items of a list, a list of one-byte items through the standard library's two-way search, as a string,
-  and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
+  items of a list, a list of one-byte items through the standard library's `Find`, as a string, a list
+  of 64 bytes or more of an integer type of 2, 4 or 8 bytes or of `char`s through its `FindShort`,
+  `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
+  each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
   where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
@@ -732,18 +735,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   holding its item before the list moves, as `Add` does, and move the items after the index by a memmove,
   as Rust's `Vec::insert` and `Vec::remove`, `RemoveAt` giving the item it takes out and keeping the room; and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
-  `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
-  equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
-  half the items, rounded up, as Rust's stable sort asks for at the least; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
-  median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
-  in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
-  pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
-  `sort_by_cached_key`; a buffer or a block of pairs the system refuses ends the program with
-  `allocation-failed` (M9); `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300
-  generated lists of each of five item types, `int`, `byte`, `double`, `string` and `int?`, the unstable
-  sort of `double` items with `-0` read as `0`, and `SortBy` of the `int` lists by an `int`, a `string` and
-  a `double` key, the first 50 under the allocator that makes every freed block inaccessible as well, and the quicksort to a list McIlroy's adversary built against its pivots, which reaches the
-  heapsort;
+  `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first, each sort as Rust 1.82's: up to
+  20 items by insertion; `Sort` past them by driftsort, which keeps equal items in their order: runs found
+  and reversed where they fall, merged in the order of powersort, and what lies between them sorted by a
+  stable quicksort, or eagerly by the small sort up to 64 items, through a scratch of every item up to
+  8,000,000 bytes of them and of half the items past that, from 4096 bytes on the stack where it fits
+  them; `SortUnstable` past them by ipnsort without a buffer: a list that is one run left or reversed,
+  any other split by a branchless partition around a recursive pseudo-median, the items equal to a
+  pivot split off, a heapsort past twice the base-2 logarithm of the count in splits, and up to 32 items
+  a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
+  `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
+  of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
+  they say, as Rust's `sort_by_cached_key`. Two forms are not Rust's and measured faster on the same
+  results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
+  orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
+  scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
+  `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five
+  item types, `int`, `byte`, `double`, `string` and `int?`, the unstable sort of `double` items with `-0`
+  read as `0`, and `SortBy` of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an
+  enum and a `duration` key, the first 50 under the allocator that makes every freed block inaccessible
+  as well; over 65 lists of `double` items of eight shapes, runs that rise and that fall among them, of up
+  to 64,000 items and one of 1,100,000, and over lists of `decimal` items whose equal values print apart;
+  and the quicksorts of both sorts to lists McIlroy's adversary built against their pivots, which reach
+  the heapsort and the driftsort they fall back on;
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
@@ -1139,7 +1153,10 @@ of one value or of every lane, `GetElement`, whose index outside the lanes raise
 where C# throws, and the `As` conversions, which keep the bits; and the functions of `X86.Sse2`,
 `X86.Ssse3`, `X86.Sse41`, `X86.Aes` and `X86.Sha` that R18's cases and the standard library call, each
 as LLVM's instruction or intrinsic for C#'s (`Shuffle` of `X86.Sse2` a `shufflevector`, of `X86.Ssse3`
-`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`), an immediate as the
+`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`; `CompareEqual` of `X86.Sse2`, of
+lanes of 1, 2 and 4 bytes, an `icmp eq` whose lanes are widened to all ones, `And` an `and`, and
+`MoveMask` of bytes the top bits of the lanes as an `i16`, which LLVM turns into `pmovmskb`, each held
+to .NET's result by `IntrinsicTests`), an immediate as the
 instruction reads it (`Extract` its low bits, `AlignRight` zeros past 31 bytes). A test of a class's
 `IsSupported` is a constant where the CPU of the build answers it: `true` for a class the CPU has,
 `X86.Sse2` on every x86-64 CPU and more with `--cpu`, `false` for a class under `Arm`. Otherwise it
