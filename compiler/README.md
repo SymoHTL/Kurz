@@ -884,9 +884,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), counted as a list's block is and
-  closed at zero, the error of that close ignored, the buffer freed with the block, and `Close` writes -1 as the descriptor and gives up the buffer's bytes before it
-  closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
+  flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
+  freed with the block; each `Read`, `Write`, setter, `Accept` and pull of a line is a call in flight, which a compare-and-swap adds 2
+  to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction takes off at its end, and
+  `Close` sets the word's mark, 1, by an atomic or, so that every later call through any holder, a second `Close` among them, finds it
+  and gets the system's error of a descriptor that is not open, 9, with no system call, and the descriptor is released by the
+  `Close` where no call is in flight, the error of that close given, and else by the last call out, which ignores it, a socket's
+  `Close` with calls in flight shutting the socket down first by the runtime's `ShutdownSocket`, so that a stream's read and write and
+  a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
   the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
@@ -901,7 +907,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   none being the end of the file, and one added after room for it, which past the limit raises
   `allocation-failed` (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
-  descriptors, and the same files all held, which reach the limit; a close through a copy; a read
+  descriptors, and the same files all held, which reach the limit; a close through a copy; a read,
+  a pull, a write, an `Accept` and each setter that a close through another holder meets in flight, which the IR of the program
+  built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
+  the socket down, and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under

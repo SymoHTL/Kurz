@@ -1860,6 +1860,18 @@ pub long CloseFile(int fd) {
     return result
 }
 
+// The socket `fd` shut down for reading and writing, `SHUT_RDWR` (2), at a `Close` while calls are in
+// flight on it (S5), which ends a call that blocks on it in another thread at once, as Go's close wakes
+// the calls that wait, while its descriptor stays open for them; 0, a failure ignored, since the `Close`
+// that calls it succeeds.
+pub long ShutdownSocket(int fd) {
+    raw {
+        shutdown(fd, 2)
+    }
+
+    return 0
+}
+
 // The file at `path` deleted, by `unlink`: 0, or the failure.
 pub long DeleteFile(byte* path) {
     mut long result = 0
