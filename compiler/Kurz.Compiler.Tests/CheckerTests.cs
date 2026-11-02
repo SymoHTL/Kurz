@@ -1358,6 +1358,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    IoError e => print(e)\n}"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for x in nope {\n    print(x)\n} else {\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("n = 5\nfor x in n {\n    print(x)\n} else {\n    IoError e => print(e)\n}"));
+        // an `else` with no arms, or an `else` arm, after a call or a collection that did not type adds no error, while an arm's pattern type
+        // and its body are still checked, each giving the error of its own construct (E1, proposed)
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("y = Nope() else {\n}\nprint(y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("y = Nope() else {\n    else => 0\n}\nprint(y)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    else => print(0)\n}"));
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 4), (ErrorIds.BreakOutsideLoop, 5)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    Nope e => print(e)\n    IoError => break\n}"));
     }
 
     [Fact]
