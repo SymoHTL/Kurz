@@ -1,0 +1,6 @@
+// expect: throws index-out-of-range at 6
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+// `GetElement` past the four lanes raises index-out-of-range, where C# throws ArgumentOutOfRangeException (R18)
+print(v.GetElement(4))

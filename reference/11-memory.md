@@ -953,31 +953,53 @@ An intrinsic is a function of the class of an instruction set, which the compile
 set's instructions, `X86.Sse41.Extract(v, 2)`; the classes stand under `X86` and `Arm`, the value
 types `Vector128<T>` and `Vector256<T>` hold the lanes, and each class has `IsSupported`, which tests
 the CPU for its set (§13, the owner, 2026-11-01, "C#'s shape"). The classes and their functions take
-C#'s names, the class of x86's SHA set is `X86.Sha`, and the operations of `Vector128<T>` and
+the names, and each class the class it derives from, of .NET 10's `System.Runtime.Intrinsics`, the
+class of x86's SHA set is `X86.Sha`, derived from `X86.Sse2`, and the operations of `Vector128<T>` and
 `Vector256<T>` on their lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
 intrinsics and need no test *(assumed: as §13 marks them)*. The functions of `X86.Sha` are the seven
 of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (§13, the owner,
 2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
 types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
-and has to fit the parameter's type: `X86.Sse41.Extract(v, 300)` is `constant-overflow`
-*(assumed: as §13 marks it)*.
+and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`, and one
+that fits and lies past the lanes names the lane its low bits name, as .NET 10 gives it, so
+`X86.Sse41.Extract(v, 255)` of four lanes gives lane 3 *(assumed: as §13 marks it)*. `Vector128.Create` takes one value for every lane or one for each lane, another count being
+`argument-mismatch`, its lane type picked as a call's function is (F13, F14), and `GetElement` of an
+index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*. A file's
+own declaration of `X86`, `Arm`, `Vector128` or `Vector256`, at any level, is `redeclared`, as a file's
+own `EnvError` is (S14), while a field takes the name (§13, the owner, 2026-11-01, "redeclared, as
+File").
 
 An intrinsic stands where a test of its class's `IsSupported` guards it, as a test narrows a
 nullable variable (N3), and in a `raw` block (R7) (§13, the owner, 2026-11-01, "Checker narrows"):
-in the block of `if X86.Sse41.IsSupported { }`, on the right of `X86.Sse41.IsSupported && ...`, and
+wherever N3's flow proves the test, in the block of `if X86.Sse41.IsSupported { }`, on the right
+of `X86.Sse41.IsSupported && ...` and of `!X86.Sse41.IsSupported || ...`, in the body of
+`while X86.Sse41.IsSupported { }`, and
 after an `if !X86.Sse41.IsSupported { }` whose block always leaves, for the rest of the block that
 holds the `if`; `!` turns a test around, so that the `else` block of `if !X86.Sse41.IsSupported { }`
 is guarded; a test of a class guards the intrinsics of the classes C# derives it from,
-`X86.Avx2.IsSupported` those of `X86.Sse41`, while the `else` block of `if X86.Sse41.IsSupported { }`
-and a test of another class guard nothing *(assumed: as §13 marks them)*. Anywhere else an intrinsic is the compile error
+`X86.Sse41.IsSupported` those of `X86.Sse2`, while the `else` block of `if X86.Sse41.IsSupported { }`,
+a test of a class that is neither the intrinsic's class nor a class derived from the intrinsic's
+class, `X86.Aes` for `X86.Sse41`, and a test kept in a variable guard nothing *(assumed: as §13 marks them)*. Anywhere else an intrinsic is the compile error
 `intrinsic-unguarded` *(proposed: the id)*. The compiler compiles a guarded block as a function of
 its own for the sets its tests name, and every function the block reaches by direct calls, the
 runtime's included, again for them, in which the
 tests of those sets are `true`; where the build names a CPU that has a set, its test is `true`
 everywhere (§2, §13, the owner, 2026-11-01, "Guarded block", "Copied per feature" and "Transitive,
-all").
-`IsSupported` of a set the build's target does not have is `false`, and its block is still
-checked; a case is read for x86-64 (R11), where the test of every class under `Arm` is `false`
+all"). That function and each copy are compiled for the sets the tests of every guarded block they
+stand in name, and the sets those derive from, all of whose tests are `true` in them; the copy stops
+at a C declaration (R16), at a call through a function value, which runs the function as it was
+compiled where the value was made, and at the compiler's own helpers; a lambda written in a guarded
+block is guarded and compiled for the block's sets *(assumed: as §13 marks them)*. A guarded block
+reads and writes the function's variables, and its `return`, `break`, `continue` and `throw` act as in
+any block; the CPU is read once per process, at its start, in a program that has a test the build
+does not answer as a constant; the two branches of a
+guarded block can give different results *(assumed: as §13 marks them)*.
+`IsSupported` of a set the target's architecture does not have is `false`, and its block is still
+checked and not compiled; a case is read for x86-64 (R11), where the test of every class under `Arm`
+is `false` *(assumed: as §13 marks it)*. A set every CPU of the architecture has, `X86.Sse2` on x86-64, is tested as any other: its
+test is `true`, and an intrinsic of it outside a test and outside `raw` is `intrinsic-unguarded`
+*(assumed: as §13 marks them)*. A `raw` block that runs an intrinsic of a set the CPU lacks ends the
+process with an illegal instruction: that the set is there is an invariant `raw` code keeps
 *(assumed: as §13 marks it)*.
 
 The checker does not read the names `X86`, `Arm`, `Vector128` and `Vector256`, and says
@@ -1005,8 +1027,69 @@ Case: [memory/intrinsic-immediate.kz](../corpus/memory/intrinsic-immediate.kz)
 ```kurz
 v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
-    // the index of Extract is a `byte` in C#: the constant 300 does not fit it (R18)
-    print(X86.Sse41.Extract(v, 300))
+    // the index of Extract is a `byte` in C#: the constant 256 does not fit it (R18)
+    print(X86.Sse41.Extract(v, 256))
+}
+```
+
+Case: [memory/intrinsic-low-bits.kz](../corpus/memory/intrinsic-low-bits.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    // 255 fits a `byte`; past the four lanes, its low bits name lane 3, as .NET 10 gives it (R18)
+    print(X86.Sse41.Extract(v, 255))
+} else {
+    print(v.GetElement(3))
+}
+```
+
+Case: [memory/intrinsic-create-count.kz](../corpus/memory/intrinsic-create-count.kz)
+```kurz
+// `Create` takes one value, or one for each of the four lanes of an `int` vector (R18)
+v = Vector128.Create(1, 2, 3)
+```
+
+Case: [memory/intrinsic-element-range.kz](../corpus/memory/intrinsic-element-range.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+// `GetElement` past the four lanes raises index-out-of-range, where C# throws ArgumentOutOfRangeException (R18)
+print(v.GetElement(4))
+```
+
+Case: [memory/intrinsic-baseline.kz](../corpus/memory/intrinsic-baseline.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+// every x86-64 CPU has SSE2, and its intrinsic still stands only under a test or in `raw` (R18)
+print(X86.Sse2.Add(v, v).GetElement(2))
+```
+
+Case: [memory/intrinsic-and.kz](../corpus/memory/intrinsic-and.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+// the right side of `&&` after a test is guarded (R18)
+found = X86.Sse41.IsSupported && X86.Sse41.Extract(v, 2) == 3
+print(found || v.GetElement(2) == 3)
+```
+
+Case: [memory/intrinsic-not-else.kz](../corpus/memory/intrinsic-not-else.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if !X86.Sse41.IsSupported {
+    print(v.GetElement(2))
+} else {
+    // `!` turns the test around, so this `else` block is guarded (R18)
+    print(X86.Sse41.Extract(v, 2))
+}
+```
+
+Case: [memory/intrinsic-derived.kz](../corpus/memory/intrinsic-derived.kz)
+```kurz
+v = Vector128.Create(1, 2, 3, 4)
+if X86.Sse41.IsSupported {
+    // a test of `X86.Sse41` guards the intrinsics of the classes it derives from, `X86.Sse2` among them (R18)
+    print(X86.Sse2.Add(v, v).GetElement(2))
+} else {
+    print(v.GetElement(2) * 2)
 }
 ```
 
@@ -1016,7 +1099,7 @@ v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
     print(v.GetElement(2))
 } else {
-    // the `else` block of a test guards nothing (R18)
+    // the `else` block of `if X86.Sse41.IsSupported` guards nothing (R18)
     print(X86.Sse41.Extract(v, 2))
 }
 ```
@@ -1036,16 +1119,19 @@ int Third(Vector128<int> lanes) {
     if !X86.Sse41.IsSupported {
         return lanes.GetElement(2)
     }
+    // the rest of the block after a test turned around whose block always leaves is guarded (R18)
     return X86.Sse41.Extract(lanes, 2)
 }
 
+print(Third(Vector128.Create(1, 2, 3, 4)))
+```
+
+Case: [memory/intrinsic-other-target-checked.kz](../corpus/memory/intrinsic-other-target-checked.kz)
+```kurz
 v = Vector128.Create(1, 2, 3, 4)
-print(Third(v))
-if X86.Sse41.IsSupported {
-    // the copy of `Third` compiled for SSE4.1, in which its test is `true` (R18)
-    print(Third(v))
-} else {
-    print(Third(v))
+if Arm.AdvSimd.IsSupported {
+    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: an x86 intrinsic in it is unguarded (R18)
+    print(X86.Sse41.Extract(v, 2))
 }
 ```
 

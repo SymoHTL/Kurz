@@ -1,0 +1,8 @@
+// expect: error intrinsic-unguarded at 7
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+if Arm.AdvSimd.IsSupported {
+    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: an x86 intrinsic in it is unguarded (R18)
+    print(X86.Sse41.Extract(v, 2))
+}
