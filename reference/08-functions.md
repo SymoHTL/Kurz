@@ -174,7 +174,9 @@ copy: the lambda holds a reference to the same instance, which changes through e
 (K2), so it may change what the instance holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
 value `d` stay `capture-assign` (§4, the owner, 2026-11-01, "Both allowed", against a method call
-alone and against neither). An instance that a captured `data` value holds is one the lambda may
+alone and against neither). It may also write into the list or the map that a `mut` field of the
+instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
+write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786). An instance that a captured `data` value holds is one the lambda may
 change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
