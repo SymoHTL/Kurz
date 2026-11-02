@@ -110,8 +110,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
 
         // an expression of a kind the walk does not list is named as such, and never passes for a literal
         var unknown = new Walk(model);
-        unknown.Program(new ProgramSyntax([.. tree.Statements, new ExpressionStatement(4, new ThisExpression(4))]));
-        Assert.Contains("4: an expression the walk does not know, ThisExpression", unknown.Missing);
+        unknown.Program(new ProgramSyntax([.. tree.Statements, new ExpressionStatement(4, new TypeMemberAccess(4, new NamedType(4, "List", [new NamedType(4, "int", [])]), "FromRaw"))]));
+        Assert.Contains("4: an expression the walk does not know, TypeMemberAccess", unknown.Missing);
     }
 
     // ---- facts --------------------------------------------------------------------------------
@@ -486,7 +486,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Expression(v.Value);
                     break;
                 case AssignOrDeclare a:
-                    Need(model.Declares(a) || Try(() => model.AssignedVariableOf(a)), a.Line, $"`{a.Name} =`");
+                    Need(model.Declares(a) || Try(() => model.AssignedVariableOf(a)) || model.IsImplicitField(a, out _, out _), a.Line, $"`{a.Name} =`");
                     Expression(a.Value);
                     break;
                 case Assignment a:
@@ -578,6 +578,16 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case TypeDeclaration { Kind: TypeDeclarationKind.Enum }:
                     break; // D12: its values are constants, which the expressions that name them carry
+                case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
+                    Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
+                    Defaults(t.PrimaryConstructor ?? []);
+                    foreach (var method in (t.Members ?? []).OfType<FunctionDeclaration>())
+                    {
+                        Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7
+                        Statement(method);
+                    }
+
+                    break;
                 case TypeDeclaration t:
                     Need(Try(() => model.DataTypeOf(t)), t.Line, $"type `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
@@ -641,7 +651,10 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Place(m.Target);
                     break;
                 case NameExpression n:
-                    Need(model.IsVariable(n), n.Line, $"the variable `{n.Name}`");
+                    Need(model.IsVariable(n) || model.IsImplicitField(n, out _, out _), n.Line, $"the variable `{n.Name}`");
+                    break;
+                case ThisExpression t:
+                    Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`");
                     break;
                 case UnaryExpression u:
                     Expression(u.Operand);
@@ -667,7 +680,10 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant), n.Line, $"what `{n.Name}` means");
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    break;
+                case ThisExpression t:
+                    Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7
                     break;
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
                     break; // D12: a value of an enum, a constant a code generator reads whole
@@ -761,6 +777,12 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case CallKind.ListAdd or CallKind.ListWhere:
                     Expression(((MemberAccess)c.Callee).Target);
+                    break;
+                case CallKind.Method when c.Callee is MemberAccess m:
+                    Expression(m.Target); // K7: the instance
+                    break;
+                case CallKind.Method:
+                    Need(model.IsImplicitField(c.Callee, out _, out _), c.Line, "the `this` of a method called by its name"); // K7
                     break;
                 default:
                     break;

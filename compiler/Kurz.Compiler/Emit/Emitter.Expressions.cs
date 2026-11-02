@@ -38,6 +38,10 @@ public sealed partial class Emitter
         {
             case StringLiteral s:
                 return EmitInterpolation(s);
+            case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
+                return ImplicitField(n, field, type); // K7
+            case ThisExpression t:
+                return This(t, t.Line); // K7: borrowed, as a parameter is
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);
@@ -352,6 +356,12 @@ public sealed partial class Emitter
                 {
                     var index = Layout.FieldIndex(d, m.Member);
                     return Narrowed(Field(target(), d, index), Layout.Fields(d)[index], type);
+                }
+
+            case ClassType c:
+                {
+                    var index = c.Symbol.FieldIndex(m.Member);
+                    return Narrowed(InstanceField(target(), c.Symbol, index), c.Symbol.Fields[index].Type, type); // K1, K2
                 }
 
             case PrimitiveType { Kind: Primitive.String } when m.Member == "Pointer":
@@ -919,6 +929,8 @@ public sealed partial class Emitter
 
             case DataType or UnionType:
                 return DerivedText(value, type, line);
+            case ClassType c:
+                return InstanceText(value, c); // A5
             case EnumType e:
                 return EnumText(value, e); // A4
             case NullType:

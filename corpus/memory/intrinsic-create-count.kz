@@ -1,0 +1,5 @@
+// expect: error argument-mismatch at 5
+// rules: R18
+
+// `Create` takes one value, or one for each of the four lanes of an `int` vector (R18)
+v = Vector128.Create(1, 2, 3)

@@ -1,0 +1,11 @@
+// expect: output
+// | 3
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+if !X86.Sse41.IsSupported {
+    print(v.GetElement(2))
+} else {
+    // `!` turns the test around, so this `else` block is guarded (R18)
+    print(X86.Sse41.Extract(v, 2))
+}

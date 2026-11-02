@@ -280,10 +280,12 @@ flowchart TD
         HAZARD issue 11"]
         R7["review rounds, the owner's cap of one (2026-10-22; three from 2026-10-21): a round is a run that labelled the pull request;
         a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
-        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run ends
+        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run with a file
+        the replay cache does not answer ends
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
-        reviewed too. The end is inside the job: a job its if skips reports success.
-        Red: self-tests (the count, the label before the first pass, the end and its status).
+        reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
+        in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
+        Red: self-tests (the count, the label before the first pass, the end and its status, the run that only replays).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
@@ -292,7 +294,9 @@ flowchart TD
         gates and review green on the head, branch up to date,
         no force push, no deletion, nobody bypasses"]
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
-        a branch behind its base, armed auto-merge, an unanswered finding (at the review cap a finding
+        a branch behind its base (at the review cap the refusal says, from the review status of the head,
+        whether the round converged on every file, and where it did not or the status does not show it,
+        that taking main costs a paid round and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
@@ -311,7 +315,8 @@ flowchart TD
         approval of 2026-10-21, which holds for the cap of one since 2026-10-22, is given for the head the round at the cap reviewed, when that round completed,
         for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
         step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
-        the branch is brought up to date as a new head, which only the owner's approval of that head merges"]
+        the branch is brought up to date as a new head, which only the owner's approval of that head merges
+        over red; a new head the replay cache answers whole is green and needs none (R7)"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end
