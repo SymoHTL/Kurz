@@ -1,0 +1,12 @@
+// expect: error static-cycle at 5
+// rules: K20
+
+class Low {
+    pub static int Min = High.Max / 2
+}
+
+class High {
+    pub static int Max = Low.Min * 2
+}
+
+print(Low.Min)
