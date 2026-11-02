@@ -77,6 +77,12 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     /// <summary>The class whose method this is (K7), with its instance as <c>this</c>; null for a function of the file.</summary>
     public ClassSymbol? Owner { get; init; }
+
+    /// <summary>
+    /// K7: a method written <c>static</c>, which has no instance and no <c>this</c>, and is called by its class's name, <c>T.M(args)</c>,
+    /// as C#'s static method and Rust's associated function, which takes no <c>self</c>.
+    /// </summary>
+    public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
 }
 
 /// <summary>A field of a <c>data</c> type (D1), its own or inherited (D7).</summary>
@@ -123,15 +129,47 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>K7, K18: the <c>static</c> fields of the class, in the order written.</summary>
+    public List<StaticFieldSymbol> StaticFields { get; } = [];
+
     public int Line => Declaration.Line;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
 
+    public StaticFieldSymbol? StaticField(string name) => StaticFields.FirstOrDefault(f => f.Name == name);
+
     public int FieldIndex(string name) => Fields.FindIndex(f => f.Name == name);
 
-    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of no parameters with a <c>string</c> result; null where the class has none.</summary>
+    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
     public FunctionSymbol? TextMethod =>
-        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+}
+
+/// <summary>
+/// K7, K18: a <c>static</c> field of a class, which exists once for the program and holds an immutable value: the constant its
+/// initial value is, which the checker sets once it read that value, and which every read of the field gives.
+/// </summary>
+public sealed class StaticFieldSymbol(FieldDeclaration declaration, ClassSymbol owner)
+{
+    public string Name => Declaration.Name;
+
+    public FieldDeclaration Declaration { get; } = declaration;
+
+    public ClassSymbol Owner { get; } = owner;
+
+    /// <summary>The written type, or the type of the initial value where none is written (V2).</summary>
+    public KurzType Type { get; set; } = Types.Error;
+
+    /// <summary>The constant the field holds; null until the checker read its initial value, and where it reads none.</summary>
+    public Constant? Value { get; set; }
+
+    /// <summary>Set where the field was refused, with its one diagnostic, so that its reads and assignments carry nothing more (E1).</summary>
+    public bool Refused { get; set; }
+
+    public int Line => Declaration.Line;
+
+    /// <summary>F9: a field without <c>pub</c> is private to its class.</summary>
+    public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
 }
 
 /// <summary>
