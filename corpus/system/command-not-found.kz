@@ -1,0 +1,13 @@
+// expect: output
+// | not found: kurz-case-no-such-program
+// | NotFound
+// rules: S17, S21
+
+match Command.New("kurz-case-no-such-program").Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => {
+        print(e)
+        print(e.Kind)
+    }
+    ExitError e => print(e)
+}

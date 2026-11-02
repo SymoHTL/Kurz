@@ -3119,6 +3119,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Fact]
+    public void A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place()
+    {
+        // M7 with K7: a `mut` field named alone in a method and passed as `mut` is the field's own place, so the callee's write is the
+        // field's, and the block the list field held before is let go of once, which the fence holds
+        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\n";
+        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]"], "");
+    }
+
+    [Fact]
+    public void The_first_class_a_program_releases_may_hold_a_field_of_another_class()
+    {
+        // the release of `Outer`, the first one built, builds `Inner`'s for its field before `Outer` is in the emitter's list of
+        // released classes: the flag of a release at work is declared once all the same, with the function that works the lists off
+        const string outer = "class Inner(int N)\n\nclass Outer(Inner? I, int N)\n\nvoid Show() {\n    o = Outer(null, 1)\n    print(o.N)\n}\n\nShow()\n";
+        Ran(BuildAndRun(outer, toolchain.Runtime, "class-first-released-holds-a-class"), 0, ["1"], "");
+    }
+
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
     // all held
     private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
@@ -3978,10 +3996,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         // M9 (the owner, 2026-10-30, "Rust's full path"): each `getrandom` of the runtime is a system call of a number the kernel does
         // not have, 100000, which it refuses with ENOSYS (seen on x86_64), as a kernel before 3.17 refuses `getrandom`; the keys come
-        // from `/dev/urandom`
+        // from `/dev/urandom`; the runtime declares `syscall` for the lock of a file's reader (S16)
         (string Path, string Old, string New)[] enosys =
         [
-            (TargetFile, "    long getrandom(byte* bytes, long count, uint options)\n", "    long getrandom(byte* bytes, long count, uint options)\n    long syscall(long number, ...)\n"),
             (TargetFile, "getrandom(bytes, count, 4)", "syscall(100000, bytes, count, 4)"),
             (TargetFile, "getrandom(bytes, count, 1)", "syscall(100000, bytes, count, 1)"),
         ];
