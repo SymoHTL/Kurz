@@ -155,9 +155,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// socket where it was given 2, before it reads the descriptor: a close that races the call, held in one thread where it falls between
     /// the two. No program can make that race, since no handle reaches a second thread, a pointer to it being <c>counted-pointee</c> (R10).
     /// A <c>Close</c> there that gives anything but 0, the result of a close whose release a call in flight leaves to the last call out,
-    /// ends the process with a trap.
+    /// ends the process with a trap. <paramref name="edit"/>, where it is given, changes that IR further before it is built.
     /// </summary>
-    private void RanWithCloseInFlight(string text, string name, string[] lines, IReadOnlyCollection<string> grants)
+    private void RanWithCloseInFlight(string text, string name, string[] lines, IReadOnlyCollection<string> grants, Func<string, string>? edit = null)
     {
         if (Builder.HostTarget == Target.Windows)
         {
@@ -201,6 +201,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
                 """;
             ir = ir.Replace(Enter, "call i1 @\"test.enter.close\"(", StringComparison.Ordinal) + racing;
+            if (edit is not null)
+            {
+                ir = edit(ir);
+            }
+
             var run = Toolchain.Run(toolchain.Build(compilation.Program with { Ir = ir }, name + suffix));
             Assert.Equal(lines, run.Output);
             Assert.Equal((0, ""), (run.Code, run.Error));
@@ -378,6 +383,118 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the positive control: built as it is, the second accept takes the second connection, the listener holds its port, the second
         // read takes the fourth byte, and the idle read runs out of its time
         Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "accepted", "98", "3", "1", "-11"], grants: ["raw"]);
+    }
+
+    private const string InFlightShutdown = Armed + """
+        static mut int seen = 0
+
+        // a read in flight on a socket meets a `Close` through another holder; what that `Close`'s shutdown reached, which the IR of the
+        // fact writes into `seen`, printed after it
+        void | IoError Window() {
+            pair = TcpListener.Bind("127.0.0.1:0")
+            client = TcpStream.Connect("127.0.0.1:{pair.Port}")
+            server = pair.Accept()
+            client.Write("abcd".Bytes)
+            mut bytes = Bytes()
+            ArmClose(2)
+            print(server.Read(mut bytes, 3) else {
+                IoError e => -e.Code
+            })
+
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            print(shown)
+            client.Close()
+            pair.Close()
+        }
+
+        Window() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// The IR of <paramref name="ir"/>, a program of <see cref="InFlightShutdown"/>, in which the shutdown that a socket's <c>Close</c>
+    /// with calls in flight makes first meets, in the window after the <c>Close</c> marked the handle, what another thread may do there:
+    /// the call in flight leaves (<c>leave.handle</c>), and that thread opens a socket that listens, which the system gives the lowest free
+    /// number. After the shutdown, <c>seen</c> holds 10 where that socket took the number the shutdown was given, plus 1 where it still
+    /// listens (<c>SO_ACCEPTCONN</c>, which a shutdown of a listener clears).
+    /// </summary>
+    private static string WithAThreadInTheWindow(string ir)
+    {
+        var multiline = System.Text.RegularExpressions.RegexOptions.Multiline;
+        var seen = System.Text.RegularExpressions.Regex.Match(ir, "^(@\"s\\.[^\"]*\\.seen\") = internal global i32 0$", multiline);
+        Assert.True(seen.Success, "the program's `seen`");
+        var start = ir.IndexOf("define internal i64 @\"close.handle\"(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "a program with a `Close`");
+        var end = ir.IndexOf("\n}\n", start, StringComparison.Ordinal);
+        var body = ir[start..end];
+        var shutdown = System.Text.RegularExpressions.Regex.Matches(body, "^\\s*(%\\S+ = )?call i64 @\"[^\"]*ShutdownSocket[^\"]*\"\\(i32 (%\\S+)\\)$", multiline);
+        Assert.Single(shutdown);
+        var call = shutdown[0];
+        body = body.Replace(call.Value, $"  call void @\"test.before.shutdown\"(ptr %a0)\n{call.Value}\n  call void @\"test.after.shutdown\"(i32 {call.Groups[2].Value})", StringComparison.Ordinal);
+        var declarations = new System.Text.StringBuilder();
+        foreach (var (name, line) in new[]
+        {
+            ("@socket(", "declare i32 @socket(i32, i32, i32)"), ("@bind(", "declare i32 @bind(i32, ptr, i32)"),
+            ("@listen(", "declare i32 @listen(i32, i32)"), ("@getsockopt(", "declare i32 @getsockopt(i32, i32, i32, ptr, ptr)"),
+        })
+        {
+            if (!ir.Contains("declare i32 " + name, StringComparison.Ordinal))
+            {
+                declarations.AppendLine(line);
+            }
+        }
+
+        return ir[..start] + body + ir[end..] + $$"""
+
+            @"test.window.fd" = internal global i32 -1
+
+            define internal void @"test.before.shutdown"(ptr %handle) {
+              call void @"leave.handle"(ptr %handle)
+              %s = call i32 @socket(i32 2, i32 1, i32 0)
+              %address = alloca [16 x i8]
+              store i64 0, ptr %address
+              %high = getelementptr i8, ptr %address, i64 8
+              store i64 0, ptr %high
+              store i16 2, ptr %address
+              %ip = getelementptr i8, ptr %address, i64 4
+              store i32 16777343, ptr %ip
+              %bound = call i32 @bind(i32 %s, ptr %address, i32 16)
+              %listening = call i32 @listen(i32 %s, i32 1)
+              store i32 %s, ptr @"test.window.fd"
+              ret void
+            }
+
+            define internal void @"test.after.shutdown"(i32 %shut) {
+              %s = load i32, ptr @"test.window.fd"
+              %value = alloca i32
+              %length = alloca i32
+              store i32 0, ptr %value
+              store i32 4, ptr %length
+              %read = call i32 @getsockopt(i32 %s, i32 1, i32 30, ptr %value, ptr %length)
+              %listens = load i32, ptr %value
+              %same = icmp eq i32 %s, %shut
+              %number = select i1 %same, i32 10, i32 0
+              %code = add i32 %number, %listens
+              store i32 %code, ptr {{seen.Groups[1].Value}}
+              ret void
+            }
+
+            """ + declarations;
+    }
+
+    [Fact]
+    public void A_close_holds_a_count_of_its_own_across_its_shutdown_so_no_call_out_releases_the_number_before_the_shutdown_reaches_it()
+    {
+        // S5, S9: the call in flight leaves while the `Close` shuts the socket down, and another socket is opened in that window: it takes
+        // another number and still listens, since the `Close`'s own count keeps the descriptor until the shutdown is made; the read in flight
+        // then finds the descriptor released, the closed handle's error
+        RanWithCloseInFlight(InFlightShutdown, "in-flight-shutdown", ["-9", "1"], ["raw"], WithAThreadInTheWindow);
     }
 
     private const string Reused = """

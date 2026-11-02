@@ -912,24 +912,39 @@ public sealed partial class Emitter
     });
 
     /// <summary>
-    /// S5: the helper of <c>Close</c> on the handle at <c>%a0</c>: the mark set in its word for every holder; <see cref="ClosedResult"/>
-    /// where a <c>Close</c> marked it before, so that of two that race one wins; the close's result where no call is in flight, the
-    /// descriptor released at once; and 0 where calls are in flight, the last of which releases it (<see cref="LeaveHandle"/>), a socket,
-    /// where <c>%a1</c> is true, shut down first, so that a call that blocks on it ends at once and gets the closed handle's error
-    /// (<see cref="Woken"/>), as Go's close wakes the calls that wait (the owner, 2026-11-02, against a call that waits for its bound),
-    /// while the error of the close the last call makes is dropped (the owner, 2026-11-02, as Rust's last <c>Arc&lt;File&gt;</c> drops it).
+    /// S5: the helper of <c>Close</c> on the handle at <c>%a0</c>: the mark set in its word for every holder by a compare-and-swap, which
+    /// is tried again where a call changed the word; <see cref="ClosedResult"/> where a <c>Close</c> marked it before, so that of two that
+    /// race one wins; the close's result where no call is in flight, the descriptor released at once; and 0 where calls are in flight, the
+    /// last of which releases it (<see cref="LeaveHandle"/>), a socket, where <c>%a1</c> is true, shut down first, so that a call that
+    /// blocks on it ends at once and gets the closed handle's error (<see cref="Woken"/>), as Go's close wakes the calls that wait (the
+    /// owner, 2026-11-02, against a call that waits for its bound), while the <c>Close</c> holds a count of its own, taken with the mark
+    /// and given back through <see cref="LeaveHandle"/> once the shutdown is made, so that no call out releases the descriptor, and the
+    /// system gives its number to another file, before the shutdown reaches it (the owner, 2026-11-02, on the review's finding, #39); the
+    /// error of the close the last call makes is dropped (the owner, 2026-11-02, as Rust's last <c>Arc&lt;File&gt;</c> drops it).
     /// </summary>
     private string CloseHandle() => Helper("close.handle", "i64", ["ptr", "i1"], () =>
     {
-        var before = fn.Value($"atomicrmw or ptr {HandleField("%a0", InFlightAt)}, i32 1 acq_rel");
+        var word = HandleField("%a0", InFlightAt);
+        var seen = fn.Alloca("i32", "seen");
+        fn.Emit($"store i32 {fn.Value($"load atomic i32, ptr {word} monotonic, align 4")}, ptr {seen}");
+        var look = fn.Label("look");
         var marked = fn.Label("marked");
-        var unmarked = fn.Label("unmarked");
+        var swap = fn.Label("swap");
+        var swapped = fn.Label("swapped");
         var idle = fn.Label("idle");
         var busy = fn.Label("busy");
-        fn.CondBranch(fn.Value($"icmp ne i32 {fn.Value($"and i32 {before}, 1")}, 0"), marked, unmarked);
-        fn.Block(marked);
-        fn.Return($"i64 {ClosedResult}");
-        fn.Block(unmarked);
+        fn.Branch(look);
+        fn.Block(look);
+        var before = fn.Value($"load i32, ptr {seen}");
+        fn.CondBranch(fn.Value($"icmp ne i32 {fn.Value($"and i32 {before}, 1")}, 0"), marked, swap);
+        fn.Block(swap);
+        // the mark, and on a socket with calls in flight a count of the `Close`'s own, held across its shutdown
+        var shuts = fn.Value($"and i1 %a1, {fn.Value($"icmp ne i32 {before}, 0")}");
+        var own = fn.Value($"select i1 {shuts}, i32 3, i32 1");
+        var result = fn.Value($"cmpxchg ptr {word}, i32 {before}, i32 {fn.Value($"add i32 {before}, {own}")} acq_rel monotonic");
+        fn.Emit($"store i32 {fn.Value($"extractvalue {{ i32, i1 }} {result}, 0")}, ptr {seen}");
+        fn.CondBranch(fn.Value($"extractvalue {{ i32, i1 }} {result}, 1"), swapped, look);
+        fn.Block(swapped);
         fn.CondBranch(fn.Value($"icmp eq i32 {before}, 0"), idle, busy);
         fn.Block(idle);
         fn.Return($"i64 {SysCall("CloseFile", $"i32 {HandleDescriptor("%a0")}")}");
@@ -939,9 +954,12 @@ public sealed partial class Emitter
         fn.CondBranch("%a1", shut, deferred);
         fn.Block(shut);
         SysCall("ShutdownSocket", $"i32 {HandleDescriptor("%a0")}");
+        fn.Emit($"call void {LeaveHandle()}(ptr %a0)");
         fn.Branch(deferred);
         fn.Block(deferred);
         fn.Return("i64 0");
+        fn.Block(marked);
+        fn.Return($"i64 {ClosedResult}");
     });
 
     /// <summary>

@@ -153,7 +153,9 @@ call already in flight when the `Close` runs keeps the descriptor and completes,
 succeeds at once, an error of the close the last call makes dropped, as the close at the last count
 drops it (§12, the owner, 2026-11-02, against a lock around each call, against keeping the hazard and
 against a new error for a deferred close; the cost is a count kept around each call on a handle, two
-atomic operations). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+atomic operations, and a `Close` that shuts a socket down holds a count of its own across the
+shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
+`File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
 last count that ignores its error, and no text)*
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two.
