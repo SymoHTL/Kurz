@@ -267,7 +267,7 @@ constructor runs, as C# evaluates an initializer, which refuses an instance memb
 declared below it, a method of its instance or `this` is `unknown-name` (V10), while a `static`
 method of the class is a name there, as C# refuses no `static` member in an initializer (§4, the
 owner, 2026-11-02); the cost is that such a
-default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
+default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A default that builds its own class, itself or through the default of a class it builds, runs again at each construction it makes, so that the run recurses until it ends in `stack-overflow` (O11), as C# recurses on an initializer that constructs its own class (§8, the owner, 2026-11-02, against a compile error with an id of its own for such a default, which would refuse a guarded one too); the error line names the frame in which the stack ran out, in the allocator of `std/` or in a default, as O11 reads it, so no case pins it. A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
 further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
 method that a derived class overrides is marked `virtual` in the base and `override` in the derived
 class, as in C#: `override` on a method that the nearest base class declaring it marks neither
@@ -382,6 +382,36 @@ class Grid(int Side) {
 
 print(Grid(2).Cells())
 print(Grid(3).Cells())
+```
+
+Case: [classes/field-default-method-hides-function.kz](../corpus/classes/field-default-method-hides-function.kz)
+```kurz
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    pub int Get() => V
+
+    pub int A() => a
+}
+
+print(C(1).A())
+```
+
+Case: [classes/field-default-static-hides-function.kz](../corpus/classes/field-default-static-hides-function.kz)
+```kurz
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    static int Get() => 2
+
+    pub int A() => a
+}
+
+print(C(1).A())
 ```
 
 Case: [classes/field-weak.kz](../corpus/classes/field-weak.kz)
@@ -597,7 +627,8 @@ print(Counter.Next())
 
 The initial value of a `static` field reads constants and the `static` field of any class, its own
 or another, in any order, by their names inside the class or as `Units.Count`, as a `static` of
-Rust reads another, and the compiler computes the initial values; a member of an instance is K19's.
+Rust reads another, and the compiler computes the initial values that are constants; a member of an
+instance is K19's.
 Initial values that read each other in a cycle, a field that reads itself among them (`Start =
 Start + 1`), are the compile error `static-cycle`, at the field of the cycle that comes first in the
 file, with a message that names the fields of the cycle in order, as Rust's E0391 names a cycle of
@@ -618,7 +649,9 @@ reads a field computed at its first read (§4) is no constant either, and its ow
 at its own first read, which computes the field it reads first where that one is not computed yet:
 each field alone, and no initializer runs for the whole class, as one `LazyLock` of Rust reads
 another (§4, the owner, 2026-11-02, against the whole class at its first touch, as C#'s type
-initializer, and against constants only, with such a read an error of its own id). Outside an initial value, a read of a
+initializer, and against constants only, with such a read an error of its own id). Such a field meets
+an exception in its initial value as one a function computes does (§4): the read raises it, and every
+read after it the same exception *(assumed: as §4 marks it)*. Outside an initial value, a read of a
 `static` field is a value of its type and no constant, as C# reads a `static readonly` field: an
 `int` field does not go into a `byte` as an integer literal would (T7) *(assumed: as §4 marks it)*.
 The cycle this rule names is one between the names initial values read; what a field that a
@@ -709,11 +742,20 @@ print(Level.Small)
 
 Case: [classes/static-reads-first-read.kz](../corpus/classes/static-reads-first-read.kz)
 ```kurz
-int Compute() => 3
+int Compute() {
+    print("computing A")
+    return 3
+}
+
+int Never() {
+    print("computing C")
+    return 0
+}
 
 class Table {
     pub static int A = Compute()
     pub static int B = A + 1
+    pub static int C = Never()
 }
 
 print(Table.B)
