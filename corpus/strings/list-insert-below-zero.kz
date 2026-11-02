@@ -1,0 +1,7 @@
+// expect: throws index-out-of-range at 6
+// rules: X11
+
+mut xs = [1, 2]
+xs.Insert(0, 0)
+xs.Insert(-1, 9)
+print(xs)

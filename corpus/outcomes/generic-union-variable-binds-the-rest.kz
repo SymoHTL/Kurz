@@ -1,0 +1,23 @@
+// expect: output
+// | []
+// rules: O4
+
+data NotFound
+data Rejected
+
+int | NotFound | Rejected Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Rejected
+    }
+    return NotFound
+}
+
+List<T> Wrap<T>(T | NotFound found) => List<T>()
+
+int | NotFound | Rejected got = Find(2)
+// a variable is no call: `T` is its type less the case the union names, `int | Rejected`
+List<int | Rejected> kept = Wrap(got)
+print(kept)

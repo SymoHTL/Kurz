@@ -45,7 +45,8 @@ public sealed class CorpusTests
     /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
-    /// A10, A13, A15), the grants of files and sockets (S12) and the intrinsics (R18). A
+    /// A10, A13, A15), the grants of files and sockets (S12), processes, standard input and the exit code
+    /// (S17 to S23), standard error (A17), a top-level <c>return</c> with a value (F17), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
@@ -53,7 +54,10 @@ public sealed class CorpusTests
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
         || rule is "D13" or "D16" or "D17" or "D19" or "F9" or "F10" or "T19" or "M6" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A13" or "A15"
-        || rule is "S12" or "R18";
+        || rule is "S12"
+        || rule is "S17" or "S18" or "S19" or "S20" or "S21" or "S22" or "S23" or "A17" or "F17"
+        || rule is "T33"
+        || rule is "G1" or "G2" or "G3" or "G4" or "G5";
 
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)

@@ -318,7 +318,7 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitDrain()
     {
-        // declared here, once: a release helper made while another one's fields are laid out comes before that one is listed
+        // declared here, once: the first class's release builds the releases of its fields' classes before it is in `released`
         module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
         fn = new IrFunction("internal void @\"kz.drain\"()");
         (regions, scopes) = ([], []);

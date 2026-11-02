@@ -354,6 +354,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.Syntax, hole.Expression.Line, "a call with a `void` success used as a value (O10)");
                 }
+                else if (HoldsVector(t.Type))
+                {
+                    NotSupported(hole.Expression.Line, VectorText);
+                }
                 else if (!HasText(t.Type))
                 {
                     Report(ErrorIds.NoText, hole.Expression.Line, $"{Types.A(t.Type)} has no text to put into a string (A4, A7, A10)");
@@ -451,6 +455,16 @@ public sealed partial class Checker
             return ReadImplicitField(n, implicitField); // K7: the field of `this`
         }
 
+        if (ImplicitStaticField(n.Name) is { } staticField)
+        {
+            return ReadStaticField(n, staticField); // K18: a `static` field of the class
+        }
+
+        if (InstanceFieldInStatic(n.Name, n.Line))
+        {
+            return Typed.Error; // K19
+        }
+
         if (ImplicitMethods(n.Name) is not null)
         {
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
@@ -528,7 +542,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -544,9 +558,19 @@ public sealed partial class Checker
             return CheckChainMember(m); // N5
         }
 
+        if (CheckIntrinsicMember(m) is { } test)
+        {
+            return test; // R18
+        }
+
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name))
+            if (KindOfCopy(n.Name, m.Member) is { } kind)
+            {
+                return kind; // T33: `T.Kind` in a copy, a constant
+            }
+
+            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;
             }
@@ -556,10 +580,9 @@ public sealed partial class Checker
                 return EnumValue(enumSymbol, m.Member, m.Line);
             }
 
-            if (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a class and has no member `{m.Member}` of its own: a field is read from an instance (K1, V10)");
-                return Typed.Error;
+                return ClassStaticMember(classSymbol, m); // K7, K18, K19
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
@@ -1047,6 +1070,13 @@ public sealed partial class Checker
         if ((left.Type is PointerType || right.Type is PointerType) && PointerOperation(b, left, right) is { } pointer)
         {
             return pointer; // R10, R14
+        }
+
+        if ((left.Type is VectorType || right.Type is VectorType) && cls != OperatorClass.Logical)
+        {
+            // R18: C# gives a vector operators on its lanes, which wrap where Kurz's `+` checks (T5); no rule says which Kurz takes
+            NotSupported(b.Line, $"`{Operator(b.Operator)}` on {Types.A(left.Type is VectorType ? left.Type : right.Type)}, as C# has it, which the compiler does not build (R18)");
+            return cls == OperatorClass.Comparison ? new Typed(Types.Bool) : Typed.Error;
         }
 
         var op = Operator(b.Operator);
