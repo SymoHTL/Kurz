@@ -149,9 +149,9 @@ public sealed partial class Clang
     /// it: the owner's choice of 2026-11-02 (issue 156, comment 6580739215), an exception to "no row slower beyond noise" taken
     /// for the rows it makes faster, against the 8 it makes slower. Of the sweep's 56 rows on Linux x86-64, 18 ran faster beyond
     /// their band and 8 slower: parsing doubles of 17 digits took 111.90 ms against 136.91, and of 5 digits 43.39 against 55.76,
-    /// while setting and getting strings in a map took 77.35 against 69.96. The option goes to LLVM's code generator, which the IR
-    /// is handed to: clang's <c>-falign-functions</c> is read by its front end, which IR does not pass through, and aligns nothing
-    /// here. A test build keeps LLVM's alignment.
+    /// while setting and getting strings in a map took 77.35 against 71.07 and 69.96. The option goes to LLVM's code generator,
+    /// which the IR is handed to: clang's <c>-falign-functions</c> is read by its front end, which IR does not pass through, and
+    /// aligns nothing here. A test build keeps LLVM's alignment.
     /// </summary>
     internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {

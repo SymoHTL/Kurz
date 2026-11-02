@@ -3152,6 +3152,44 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
+    private const string HandleTarget = """
+        class Log(mut File Out) {
+            pub int Swap(File next) {
+                Out = next
+                return 2
+            }
+
+            pub Bytes Again(File next) {
+                Out = next
+                return "xy".Bytes
+            }
+
+            pub int | IoError ReadOwn(mut Bytes into, File next) => Out.Read(mut into, this.Swap(next))
+        }
+
+        void | IoError Run() {
+            File.WriteAll("held-read.txt", "abc".Bytes)
+            log = Log(File.Open("held-read.txt"))
+            mut buffer = Bytes()
+            print(log.Out.Read(mut buffer, log.Swap(File.Open("held-read.txt"))))
+            print(log.Out.Read(mut buffer, 5))
+            print(log.ReadOwn(mut buffer, File.Open("held-read.txt")))
+            print(log.Out.Read(mut buffer, 5))
+            out = Log(File.Create("held-write.txt"))
+            out.Out.Write(out.Again(File.Create("held-other.txt")))
+            print(File.ReadAll("held-write.txt").Count)
+            print(File.ReadAll("held-other.txt").Count)
+            File.Delete("held-read.txt")
+            File.Delete("held-write.txt")
+            File.Delete("held-other.txt")
+        }
+
+        Run() else {
+            IoError e => print(e)
+        }
+
+        """;
+
     [Fact]
     public void No_block_is_read_or_written_after_it_is_freed()
     {
@@ -3182,6 +3220,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
         Ran(BuildAndRun(where, fenced, "list-where-fenced"), 0, ["166670"], "");
+        // a call on a handle reads its target before its arguments (D11), and the read of a field of a class instance, by its path or
+        // by its name in a method (K7), takes a count held to the statement's end, so that an argument that gives the field another
+        // file lets go of none the call uses: each read reads the file the field held when the call began, and the write writes it (S5);
+        // a call on a file is `not supported` in a build for Windows (S11)
+        if (Builder.HostTarget != Target.Windows)
+        {
+            Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
+        }
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
@@ -4566,8 +4612,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
-        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // T18: the runtime's `Same` compares the first bytes first, then 1 to 3 bytes as their first, middle and last byte, 4 to 16 as
+        // four words of 4, and more as 16 bytes at a time in words of 8 and the 16 bytes that end them: a string of every count from 0 to
         // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
         // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
@@ -4578,12 +4624,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_strings_with_no_bytes_are_equal_whatever_the_blocks_they_share_hold()
+    {
+        // T18: the runtime's `Same` reads no byte of two strings with no bytes: two such strings, each sharing the block of a list of
+        // bytes whose one byte was removed, `a` in one and `b` in the other, are equal to each other and to the literal "", although a
+        // read of the first byte of each would find the two bytes that differ
+        const string text = """
+            mut a = Bytes()
+            a.Add(byte(97))
+            first = a.RemoveAt(0)
+            mut b = Bytes()
+            b.Add(byte(98))
+            second = b.RemoveAt(0)
+            x = string.FromUtf8(a) else {
+                InvalidUtf8 => "?"
+            }
+
+            y = string.FromUtf8(b) else {
+                InvalidUtf8 => "?"
+            }
+
+            print(long(first) + long(second))
+            print(x.Bytes.Count + y.Bytes.Count)
+            if x == y {
+                print("x == y")
+            }
+
+            if x == "" && "" == y {
+                print("both equal the literal")
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-no-bytes"), 0, ["195", "0", "x == y", "both equal the literal"], "");
+    }
+
+    [Fact]
     public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
     {
-        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
-        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
-        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
-        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // T32: the runtime's `Order` compares the first byte, whose difference is the order where it differs, then the shared bytes as
+        // words read with their first byte highest, each an unsigned number: 1 to 3 as their first, middle and last byte, 4 to 16 as four
+        // words of 4, more as 16 bytes at a time and then four words of 8, the first word that differs giving the order, and where the
+        // shared bytes agree the lengths: a string of every count from 0
+        // to 72, so that the loop of 16 bytes runs up to three steps, against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
         // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
         // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
         // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
@@ -4606,8 +4688,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return t
             }
 
-            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
-            for count in 0..<41 {
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk"
+            for count in 0..<73 {
                 a = s.Substring(0, count)
                 mut line = ""
                 for k in 0..<count {
@@ -4631,9 +4713,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk";
         var lines = new List<string>();
-        for (var count = 0; count <= 40; count++)
+        for (var count = 0; count <= 72; count++)
         {
             var a = s[..count];
             var line = new StringBuilder();
@@ -4655,6 +4737,98 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
         Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
         Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    [Fact]
+    public void Two_strings_of_one_count_are_compared_by_their_first_bytes_before_a_word_of_either_is_read()
+    {
+        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it reads a word of either or calls
+        // `SameBytes`, which reads the words of more than 16 bytes, since two different strings of one count most often differ there.
+        // No result tells that order from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as
+        // the emitter writes it, in the order of its source, reads a byte (`load i8`) before its first call that reads a word of 4 and
+        // before its call of `SameBytes`, and the body of `SameBytes` reads words of 8
+        var ir = Compile("a = \"ab\"\nb = \"ac\"\nprint(a == b)\n", toolchain.Runtime).Program!.Ir;
+        string Body(string definition)
+        {
+            var start = ir.IndexOf(definition, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"the program holds {definition}");
+            var body = ir[start..];
+            return body[..body.IndexOf("\n}", StringComparison.Ordinal)];
+        }
+
+        var same = Body("define internal i1 @\"rt.common.Same.");
+        var bytes = same.IndexOf("= load i8, ptr", StringComparison.Ordinal);
+        int[] later = [same.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal), same.IndexOf("call i1 @\"rt.common.SameBytes.", StringComparison.Ordinal)];
+        Assert.True(bytes >= 0, $"`Same` reads a byte:\n{same}");
+        Assert.All(later, at => Assert.True(at >= 0, $"`Same` reads words of 4 and calls `SameBytes`:\n{same}"));
+        Assert.True(bytes < later.Min(), $"`Same` reads the first bytes before a word and before it calls `SameBytes`:\n{same}");
+        var rest = Body("define internal i1 @\"rt.common.SameBytes.");
+        Assert.True(rest.Contains("call i64 @\"std.WordAt.", StringComparison.Ordinal), $"`SameBytes` reads words of 8:\n{rest}");
+    }
+
+    [Fact]
+    public void Two_strings_of_up_to_16_bytes_are_compared_in_each_caller_and_longer_ones_by_a_call()
+    {
+        // T18: the runtime's `Same` holds the test of the counts, of the first bytes and of up to 16 bytes, small enough that clang
+        // inlines it into each caller, and `SameBytes` the bytes of longer strings, a call, as Rust's `==` of `str` calls `bcmp` for
+        // the bytes (the owner, 2026-11-02, pull request 232, comment 6578274207, and the answer after it); the emitter marks
+        // `SameBytes` `noinline` (`Emitter.OutOfLine`), so that LLVM does not inline it into `Same`, its one caller, and keep `Same`
+        // a call. No result tells that from one function of both, so the IR clang optimises as a release build is optimised holds
+        // it: a program that compares strings in three places, whose IR calls `Same` in each, calls `Same` nowhere once optimised,
+        // and `SameBytes` in more than one place (LLVM writes a name without its quotes where it needs none)
+        const string text = """
+            bool Equal(string x, string y) {
+                return x == y
+            }
+
+            bool Differ(string x, string y) {
+                return x != y
+            }
+
+            mut words = List<string>()
+            for i in 0..<6 {
+                words.Add("w{i % 3}")
+            }
+
+            mut count = 0
+            for i in 0..<6 {
+                if Equal(words[i], words[(i + 1) % 6]) {
+                    count = count + 1
+                }
+
+                if Differ(words[i], words[(i + 2) % 6]) {
+                    count = count + 10
+                }
+
+                if words[i] == words[(i + 3) % 6] {
+                    count = count + 100
+                }
+            }
+
+            print(count)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        static int Calls(IEnumerable<string> lines, string name) =>
+            lines.Count(l => l.Contains("call ", StringComparison.Ordinal)
+                && (l.Contains($"@\"rt.common.{name}.", StringComparison.Ordinal) || l.Contains($"@rt.common.{name}.", StringComparison.Ordinal)));
+        Assert.True(Calls(program.Ir.Split('\n'), "Same") >= 3, "the IR as the emitter writes it calls `Same` in each place");
+        var directory = Path.Combine(toolchain.Directory, "string-same-inlined");
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        Assert.Equal(0, Calls(optimised, "Same"));
+        Assert.True(Calls(optimised, "SameBytes") >= 2, string.Join('\n', optimised.Where(l => l.Contains("rt.common.Same", StringComparison.Ordinal))));
     }
 
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>

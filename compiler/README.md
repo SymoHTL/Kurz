@@ -893,13 +893,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Write`, setter, `Accept` and pull of a line is a call in flight, which a compare-and-swap adds 2
-  to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction takes off at its end, and
-  `Close` sets the word's mark, 1, by an atomic or, so that every later call through any holder, a second `Close` among them, finds it
-  and gets the system's error of a descriptor that is not open, 9, with no system call, and the descriptor is released by the
-  `Close` where no call is in flight, the error of that close given, and else by the last call out, which ignores it, a socket's
-  `Close` with calls in flight shutting the socket down first by the runtime's `ShutdownSocket`, so that a stream's read and write and
-  a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle give that error too (S5, S9);
+  freed with the block; each `Read`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
+  takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
+  second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
+  descriptor is released by the `Close` where no call is in flight, the error of that close given, and else by the last call out,
+  which ignores it, a socket's `Close` with calls in flight adding a count of its own with its mark, shutting the socket down by the
+  runtime's `ShutdownSocket` and then giving that count back, so that the last call out releases the descriptor only after the
+  shutdown, and a stream's read and write and a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle
+  give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
   the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
@@ -917,7 +919,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   descriptors, and the same files all held, which reach the limit; a close through a copy; a read,
   a pull, a write, an `Accept` and each setter that a close through another holder meets in flight, which the IR of the program
   built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
-  the socket down, and a closed handle whose number the system gave another file; a read
+  the socket down and releases a listener's descriptor once its `Accept` is out, as `F_GETFD` shows; a socket's close with a call in
+  flight, into whose window before the shutdown the IR puts that call's end and a new socket that listens, which does not take the
+  closed socket's number and still listens after the shutdown; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
+  leaves that stream's writes alone; and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
@@ -971,8 +976,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
-  runtime's `Same` and `Order` comparing the first byte, then words of 8 bytes, the last ending where the bytes
-  end, as the C library's `memcmp` compares them;
+  runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
+  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
+  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
+  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
+  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1120,7 +1128,9 @@ same lines, and so do the strings' program and twenty rounds of strings through 
 and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
 lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
-and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+and maps in fields written through paths by each `mut` member, beside copies, a block's among them, a `Where` over 100000 items in five rounds, and in a
+build for Linux a read and a write on the file a field of a class instance holds, whose argument gives the field another file, by
+the field's path and by its name in a method, each through the file the field held when the call began, and which keeps no freed block of more than 262144 bytes,
 since a kept block stays readable, so that a write into one freed under it ends the process, and in which every block ends at a page
 the system makes inaccessible, where its size rounded up to 16 ends, so that a write one byte past the end of a block of 16 bytes,
 of 300000 and of one `Reallocate` gave as a new block ends the process, and the last byte of each written does not, and whose `Free`
