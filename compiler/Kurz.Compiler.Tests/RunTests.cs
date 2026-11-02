@@ -118,7 +118,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/directories.kz", "system/open-missing.kz", "system/path-with-nul.kz", "system/read-appends.kz", "system/read-negative-max.kz",
         "system/tcp-echo.kz", "system/whole-file.kz", "system/write-read.kz", "system/file-modified.kz", "system/read-timeout.kz",
         "system/write-timeout.kz", "system/connect-timeout.kz", "system/timeout-refused.kz", "system/accept-timeout.kz",
-        "system/setter-after-close.kz",
+        "system/lines-break-read.kz", "system/lines-empty.kz", "system/lines-invalid-utf8.kz", "system/lines-not-open-to-read.kz",
+        "system/lines-propagate.kz", "system/lines-read.kz", "system/setter-after-close.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
