@@ -3344,6 +3344,8 @@ public sealed class CheckerTests
         Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
         // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
         Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        // the same read through `?[` (N5), whose item a member, a `T?` variable and a `T?` parameter take
+        Clean("class Owner(string Name)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nList<weak Owner?>? Club(Owner owner) {\n    mut ys = List<weak Owner?>()\n    ys.Add(owner)\n    return ys\n}\n\nx = Owner(\"Ann\")\nxs = Club(x)\nprint(xs?[0]?.Name ?? \"gone\")\nOwner? k = xs?[0]\nprint(NameOf(k))\nprint(NameOf(xs?[0]))");
         Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
 
         // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field
