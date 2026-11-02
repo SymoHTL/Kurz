@@ -397,7 +397,26 @@ error of the system, where Rust gives `Uncategorized`, and -4099, `Other`, for o
 `EAI_FAIL` (section 12, "Split NotFound / Other"). `Listen` sets `SO_REUSEADDR`, listens
 with a backlog of 128 and reads the port by `getsockname`; `Connect` calls again where a signal interrupted
 it and takes `EISCONN`; `Accept` calls `accept4` close-on-exec, again where a signal interrupted it; each
-socket is opened close-on-exec (S9). `std/` gives the room a read makes in a list of bytes before it,
+socket is opened close-on-exec (S9). A read, a write and `Connect` on a socket wait at most 5 seconds where
+the program sets no other time, `DefaultBound` being the one definition of the 5 seconds (S9). `Connect`, and
+`ConnectWithin`, its second form, connect as Rust's `connect_timeout` does: the socket opened with
+`SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
+`poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
+call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
+once the addresses are known, after the lookup of a name, which it does not bound (section 14 holds that open),
+and holds over every address tried *(assumed: one bound over the addresses of a name; its cost is that a first
+address that never answers spends the whole bound, and the later addresses are not tried)*. A stream `Connect`
+made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
+stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
+which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
+for a stream's two setters and a listener's alike, as Rust's `set_timeout` does: a time of zero or below is -4097, `InvalidInput`; a bound is the whole seconds and
+the microseconds cut from the rest, a positive time that comes to no microsecond raised to 1, and no bound the
+`timeval` of zeros. Rust also bounds the seconds by `time_t::MAX`, which is not written here: a `duration` of 64
+bits in nanoseconds holds at most about 292 years, far below it. A stream's read and write and a listener's `Accept` take their kind
+from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
+runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
+system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
+each piece the system takes, as Rust's `write_all` does, and can take longer in all. `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
 
@@ -669,7 +688,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
   where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
-  a block another value holds first (X9, M3); and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
+  a block another value holds first (X9, M3); `Insert(index, item)` and `RemoveAt(index)` (X11), which
+  read the index before the list is copied or grows and raise `index-out-of-range` outside it, `Insert`
+  holding its item before the list moves, as `Add` does, and move the items after the index by a memmove,
+  as Rust's `Vec::insert` and `Vec::remove`, `RemoveAt` giving the item it takes out and keeping the room; and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
   `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
   equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
@@ -784,9 +806,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, each of a file's and a stream's `Read`, `Write` and `Close` and each of a listener's
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
+  stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
+  not `null`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
-  case `IoError`, its kind and number from `ErrorKind` and `ErrorCode` and its path the call's first,
+  case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 32 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, and the path or the address, which a stream from `Accept` takes from its listener (S9), counted as a list's block is and
   closed at zero, the error of that close ignored, and `Close` writes -1 as the descriptor before it
@@ -1311,7 +1335,7 @@ class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, 
 M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
 its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1402,7 +1426,9 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
-which the intrinsics and their vector types stand (R18); and `use` (F10) of any folder but the runtime's `sys`;
+which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type, `T.Kind`,
+`T.Fields`, `T.Make` and the parts beyond the fields, and the name `TypeKind`, which every file sees, so that a file's own
+declaration of it is `redeclared` (T33); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
@@ -1419,7 +1445,10 @@ generic data type (T19), each of which leaves the data type, and every data type
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
-type or a time type (T10, T29);
+type or a time type (T10, T29); `void` as a type argument written in a type or a call, of a generic
+function, a generic `data` type, `List` and `Map`, which C# refuses and Rust's `()`, a type of no
+size, takes, and of which the record says neither (T17, T19), where `List<void>.FromRaw(p, n)` and
+`List<void>.Allocate(n)` keep R14's `type-mismatch` (below);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -1453,7 +1482,7 @@ round can ask about it by the rule's id.
   `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
   value of its own and holds nothing of the map, so a map's methods need none of `Add`'s exception, which
   every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
-  among them (M7). A map that
+  and `Insert` among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
   separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13), each form's

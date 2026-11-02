@@ -589,6 +589,34 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("xs = List<int>()\nprint(xs.Where<int>(x => x > 1).Count)"));
     }
 
+    [Theory]
+    [InlineData("void Other<T>() {\n}\n\nOther<void>()", "4: `void` as a type argument of `Other` (T17, T19)")]
+    [InlineData("List<void> a = List<void>()\nprint(a.Count)", "1: `void` as a type argument of `List` (T17, T19)|1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("m = Map<string, void>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("m = Map<void, int>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<void, int> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<string, void> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nvoid Show(Box<void> b) {\n}", "3: `void` as a type argument of `Box` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nb = Box<void>(1)", "3: `void` as a type argument of `Box` (T17, T19)")]
+    [InlineData("xs = List<List<void>>()\nprint(xs.Count)", "1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("List<void> Make() {\n    return List<int>()\n}", "1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("data Bag(Map<string, void> Items)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Other<T>(int x) {\n}\n\nOther<void>()", "7: `void` as a type argument of `Other` (T17, T19)")]
+    public void Void_as_a_type_argument_is_not_supported_where_it_is_written(string program, string expected)
+    {
+        // T17, T19: C# refuses `void` as a type argument and Rust's `()` takes one; the record says neither, so the checker refuses it
+        // where it is written, of a generic function, a generic data type, `List` and `Map`, before the emitter writes a copy of it
+        Assert.Equal(expected.Split('|'), NotSupported(program));
+    }
+
+    [Fact]
+    public void Void_inside_a_type_argument_stands()
+    {
+        // T17, F11: the result of a function type is no type argument, so a list of `void` functions and a call's `void` lambda stand
+        Clean("fs = List<(int) => void>()\nprint(fs.Count)");
+        Clean("void Run<T>(T x, (T) => void f) {\n    f(x)\n}\n\nRun<int>(1, x => print(x))");
+    }
+
     [Fact]
     public void A_lambda_argument_fixes_no_type_parameter()
     {
@@ -1997,7 +2025,42 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("l.Accept()", "l.Read()", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("s.Close()", "s.Accept()", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(Program.Replace("c.Close()", "print(c.Port)", StringComparison.Ordinal)));
-        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(Program.Replace("TcpStream.Connect(\"localhost:{port}\")", "TcpStream.Connect(port)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors(Program.Replace("TcpStream.Connect(\"localhost:{port}\")", "TcpStream.Connect(port)", StringComparison.Ordinal))); // F13: it fits neither form of `Connect`, the address alone nor the address and a time (S9)
+    }
+
+    [Fact]
+    public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
+    {
+        // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
+        // no setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
+        const string Program = "void | IoError Bound() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)\n    c.SetReadTimeout(50ms)\n    c.SetWriteTimeout(null)\n    c.SetReadTimeout(timeout: 1s)\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nBound() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "l.SetReadTimeout(50ms)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(Program.Replace("c.SetWriteTimeout(null)", "l.SetWriteTimeout(null)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetReadTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
+        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
+        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+
+        // F13: the misfit names both forms of `Connect`, each with why it does not fit
+        var (diagnostics, _) = Check(Program.Replace("TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)", "TcpStream.Connect(l.Port)", StringComparison.Ordinal));
+        var misfit = Assert.Single(diagnostics.Items, d => d.Id == ErrorIds.ArgumentMismatch);
+        Assert.Equal(3, misfit.Line);
+        Assert.StartsWith("the call fits none of the forms of `Connect` (F13):", misfit.Message, StringComparison.Ordinal);
+        Assert.Contains(" Connect(string address)`: ", misfit.Message, StringComparison.Ordinal);
+        Assert.Contains(" Connect(string address, duration timeout)`: ", misfit.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_listener_sets_the_time_of_its_accept_and_a_stream_and_a_file_have_no_such_setter()
+    {
+        // S9: a listener's `SetAcceptTimeout` takes a `duration?`, `null` for no bound, as the stream's setters do; a stream and a file have
+        // none, and a time of another type fits no form
+        const string Program = "void | IoError Wait() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    l.SetAcceptTimeout(50ms)\n    l.SetAcceptTimeout(null)\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Close()\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nWait() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("c.Close()", "c.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace("l.SetAcceptTimeout(50ms)", "l.SetAcceptTimeout(50)", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -3373,5 +3436,34 @@ public sealed class CheckerTests
         // E1: a type parameter that only an argument without a type fixed is the error type, and so is a list of it, so the call's result
         // carries nothing more where a list is required
         Assert.Equal([(ErrorIds.UnknownName, 7)], Errors("List<T> Wrap<T>(T item) {\n    mut xs = List<T>()\n    xs.Add(item)\n    return xs\n}\n\nList<int> ys = Wrap(nope)\nprint(ys.Count)"));
+    }
+
+    [Theory]
+    [InlineData("void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nShow(1)", "2: reading a type in generic code, `T.Fields` (T33)")]
+    [InlineData("void Show<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nShow<int>()", "2: reading a type in generic code, `T.Kind` (T33)")]
+    [InlineData("data P(int X)\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<P>())", "3: reading a type in generic code, `T.Make` (T33)")]
+    [InlineData("print(TypeKind.Data)", "1: reading a type in generic code, `TypeKind` (T33)")]
+    [InlineData("void Show(TypeKind k) {\n}\n\nprint(1)", "1: reading a type in generic code, `TypeKind` (T33)")]
+    public void Reading_a_type_in_generic_code_is_not_supported_where_it_stands(string program, string expected) =>
+        // T33: a member of a type parameter that reads its type, at a member and at a member's call, and `TypeKind` as a value and as a type (E1)
+        Assert.Equal([expected], NotSupported(program));
+
+    [Fact]
+    public void A_member_named_as_a_type_reading_keeps_its_meaning_on_a_name_that_is_no_type_parameter()
+    {
+        // T33 reads the members of a type parameter alone: an enum's own value `Kind` stays a value of the enum
+        Clean("enum Shape { Kind, Fields }\n\nprint(Shape.Kind)");
+    }
+
+    [Fact]
+    public void A_file_s_own_TypeKind_is_redeclared()
+    {
+        // T33 with V9: a type, a function, a variable and a parameter of the name are each refused where they are declared, while a
+        // field takes the name
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("enum TypeKind { Data }\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int TypeKind() => 1\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("string TypeKind = \"a\"\nprint(TypeKind)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("void Show(int TypeKind) {\n    print(TypeKind)\n}\n\nShow(1)"));
+        Assert.Empty(Errors("data Found(int TypeKind)\n\nprint(Found(1).TypeKind)"));
     }
 }
