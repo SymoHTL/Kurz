@@ -3,18 +3,19 @@
 HTTP's types are Kurz code in the standard library, `std/`, as Rust's `std` is Rust code (§12, the
 owner, 2026-11-01, Q7 (b)).
 
-### W1 (assumed, §12) The types every file sees
+### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
 `HttpLimits`, `HttpClient`, `HttpClientOptions` and `Uri`, with `UriError` and `UriKind`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
-names that `std/` declares, in any of its forms, a type, a function, a variable or a parameter, is
-`redeclared` (V9); a name of the list that `std/` does not declare is no type a file sees, and a
-file's own declaration of it is its own. The names are a list the compiler holds, each a `pub` type
-of `std/`, where Rust writes its list in `std`, as the module `std::prelude::rust_2021` that its
-compiler names by edition (§12: the owner, 2026-11-01, Q7 (b), that every file sees them, and
-2026-11-02, that the compiler holds the list, against every `pub` type of `std/` and against a list
-written in `std/`; the list of names and the two of `Uri` are the record's assumptions).
+names, in any of its forms, a type, a function, a variable or a parameter, is `redeclared` (V9),
+whether `std/` declares that type or not, so that no program stops building when `std/` adds it.
+The names are a list the compiler holds, each a `pub` type of `std/`, where Rust writes its list in
+`std`, as the module `std::prelude::rust_2021` that its compiler names by edition (§12: the owner,
+2026-11-01, Q7 (b), that every file sees them, and 2026-11-02, that a file's own declaration of one
+is `redeclared` whether `std/` declares it or not, and that the compiler holds the list, against
+every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
+assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -66,8 +67,8 @@ print(err == HttpError(HttpKind.TooLarge, "request header too large"))
 
 A failure of HTTP is a case of its own, `data HttpError(HttpKind Kind, string Detail)`, beside a
 failure of the network, which stays an `IoError` (S1), neither wrapped in the other (§12, the owner,
-2026-10-31, "HttpError + record's rule" and "IoError + HttpError") *(assumed: that it stays a `data`
-type in `std/`, as §12 marks it)*. Its kinds are
+2026-10-31, "HttpError + record's rule" and "IoError + HttpError"), and stays a `data` type in
+`std/` (§12, the owner, 2026-11-02, Q15 (a), against `HttpError` as a class). Its kinds are
 `enum HttpKind { Protocol, TooLarge, Status, Unsupported }`. An `HttpError` prints its detail alone,
 `malformed response: no status line`, with no words of its kind (§12, the owner, 2026-11-01, Q4 (a)).
 It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
