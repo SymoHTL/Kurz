@@ -1833,10 +1833,6 @@ round can ask about it by the rule's id.
   field's initializer before the constructor's body. A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
-- K14 with K7: a field of a class body without `=`, `mut` or not, is `field-unassigned` at the field
-  in a class with no constructor at all, as in one with a primary constructor, since K14's empty
-  constructor of a class without one assigns it no more than the primary one does, and Kurz has no
-  zero value it could hold; the error is at the field, which the class's line would not name.
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the

@@ -477,10 +477,24 @@ field, a `mut` field written between the braces without `=` is `field-unassigned
 `mut` is (the owner,
 2026-10-10, confirming the reading proposed after the review of round 13). Reading such a field
 before its first assignment is that error too, as the read of a field without `mut` is (the owner,
-2026-10-10). The call of the primary one is direct; a further constructor
+2026-10-10). In a class with no constructor at all, a field of the body without `=`, `mut` or not,
+is `field-unassigned` too, at the field's line: the empty constructor of such a class assigns it no
+more than a primary constructor does (the owner, 2026-11-02, against `not supported`, and the
+field's line against the class's). The call of the primary one is direct; a further constructor
 without it is `constructor-must-chain`. A constructor written in the body is private without `pub`,
 as every member is (F9); the primary constructor, and the empty constructor of a class without one,
 are visible wherever the class is.
+
+Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)
+```kurz
+class Tally {
+    mut int count
+
+    pub int Count() => count
+}
+
+print(Tally().Count())
+```
 
 Case: [classes/field-read-before-assignment.kz](../corpus/classes/field-read-before-assignment.kz)
 ```kurz
