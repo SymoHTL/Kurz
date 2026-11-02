@@ -3048,6 +3048,7 @@ public sealed class CheckerTests
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 300))\n}", ErrorIds.ConstantOverflow, 4)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, -1))\n}", ErrorIds.ConstantOverflow, 4)]
     [InlineData("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, \"2\"))\n}", ErrorIds.ArgumentMismatch, 4)]
+    [InlineData("l = Vector128.Create(1L)\nif X86.Sse2.IsSupported {\n    print(X86.Sse2.CompareEqual(l, l).GetElement(0))\n}", ErrorIds.ArgumentMismatch, 5)] // SSE2 compares no 8-byte lanes; SSE4.1 does
     public void A_name_type_or_immediate_an_intrinsic_does_not_take_is_its_error(string program, string id, int line) =>
         Assert.Equal([(id, line)], Errors(Lanes(program)));
 
