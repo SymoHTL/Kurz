@@ -3873,8 +3873,34 @@ public sealed class CheckerTests
     [Fact]
     public void The_name_of_a_loop_over_T_Fields_is_redeclared_where_one_is_visible()
     {
-        // V9 with T33: the loop declares its name in each pass as any loop does, once reported (E1)
-        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors(Fields + "void Show<T>(T value) {\n    f = 1\n    for f in T.Fields {\n        print(f.Name)\n    }\n\n    print(f)\n}\n\nShow(Order(\"a\", 1))"));
+        // V9 with T33: the loop's name is checked once, before the passes, as any loop's is, so a type with no fields, which makes no
+        // pass, gets it too, and one with fields gets it once (E1)
+        var program = Fields + "void Show<T>(T value) {\n    f = 1\n    for f in T.Fields {\n        print(f.Name)\n    }\n\n    print(f)\n}\n\nShow(Order(\"a\", 1))";
+        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors(program));
+        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors(program.Replace(Fields, "data Empty\n\n").Replace("Order(\"a\", 1)", "Empty")));
+    }
+
+    [Fact]
+    public void An_else_after_a_loop_over_T_Fields_is_read_as_after_a_list()
+    {
+        // S16 with T33: the fields fail with no case, as a list's items, so an `else` after the loop is `unreachable-arm` at its line, and
+        // an arm in it is refused as after a loop over a list, with a type that has fields and with one that has none
+        var loop = "void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    } else {\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.UnreachableArm, 6)], Errors(Fields + loop + "Show(Order(\"a\", 1))"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 6)], Errors("data Empty\n\n" + loop + "Show(Empty)"));
+        var list = Errors("void Show(List<int> xs) {\n    for x in xs {\n        print(x)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow([1])");
+        Assert.NotEmpty(list);
+        Assert.Equal(list.Select(e => (e.Id, e.Line + 2)).ToList(), Errors(Fields + loop.Replace("} else {\n", "} else {\n        IoError e => print(e)\n") + "Show(Order(\"a\", 1))"));
+    }
+
+    [Fact]
+    public void F_Get_in_a_loop_over_T_Fields_inside_a_pass_keeps_its_check()
+    {
+        // T33: the outer pass's `f.Get(value)`, copied again for each pass of the inner loop, is still held to a value of `T`, one with a
+        // field of that name included
+        var program = "data Order(string Id, int Count)\ndata Other(string Id, int Count)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        for g in T.Fields {\n            print(f.Get(value))\n        }\n    }\n}\n\nShow(Order(\"a\", 1))";
+        Clean(program);
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(program.Replace("f.Get(value)", "f.Get(Other(\"b\", 2))")));
     }
 
     [Fact]
