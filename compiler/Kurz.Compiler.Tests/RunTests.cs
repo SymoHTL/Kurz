@@ -195,7 +195,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         var diagnostics = new DiagnosticBag();
         var tree = Syntax.Parser.Parse(source, diagnostics);
-        Semantics.Checker.Check(tree, diagnostics, header.Grants);
+        Semantics.Checker.Check(tree, diagnostics, header.Grants, CorpusTests.StdChecker.Value); // W1: as a build reads it
         return diagnostics.HasNotSupported;
     }
 
