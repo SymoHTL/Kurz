@@ -11,7 +11,7 @@ namespace Kurz.Compiler.Emit;
 /// the count of the values that hold it, 8 bytes, its descriptor, 4 bytes, -1 once it is closed, a listener's port, 4 bytes, from its
 /// 16th byte the path or the address it was opened with, a string of which the block holds a count, from its 32nd byte the address of the
 /// buffer a file's lines are read through, null until the first pull, the position of its first byte not taken yet and the count of the
-/// bytes read into it, 4 bytes each, and the word of the lock a pull takes, 4 bytes (S16); 56 bytes. A stream a listener's
+/// bytes read into it, 4 bytes each, and the word of the lock a pull takes, 4 bytes (S16), then 4 bytes of padding; 56 bytes. A stream a listener's
 /// <c>Accept</c> gives holds the listener's address (S9). The last value that lets go of it closes the descriptor, ignoring an error of the close, as Rust's
 /// <c>Drop</c> of a <c>File</c> ignores it, lets go of the path, frees the buffer and the block (S5; the owner, 2026-10-29, "At the last count, as Rust
 /// Drop"). A call on a file calls the runtime of Linux, whose result is a number of 0 or more or a failure below 0, which the runtime's
@@ -698,7 +698,8 @@ public sealed partial class Emitter
         fn.Emit($"store i1 true, ptr {ended}");
         fn.Branch(line);
 
-        // the line: its bytes without a `\r` in front of the `\n` that ended it, as a string, which an empty line needs no block for
+        // the line: its bytes without a `\r` in front of the `\n` that ended it, as a string, which an empty line needs no block for: a
+        // gathered list is null until a piece adds a byte, since `BytesReserve` gives null for a list without a block and 0 more bytes
         fn.Block(line);
         var block = fn.Value($"load ptr, ptr {gathered}");
         var some = fn.Label("some");

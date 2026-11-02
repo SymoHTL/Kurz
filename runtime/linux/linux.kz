@@ -1794,9 +1794,11 @@ pub long ReadFile(int fd, byte* bytes, long count) {
     return Checked(result)
 }
 
-// The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202)
-// with `FUTEX_WAIT_PRIVATE` (128) and no time limit, as Rust's `futex_wait` puts it to sleep: 0, or the
-// failure, which the caller does not read, since it tries the lock again after every wake (S16).
+// The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202,
+// its number on x86-64, the one target of this runtime) with `FUTEX_WAIT_PRIVATE` (128) and no time
+// limit, where Rust's `futex_wait` uses `FUTEX_WAIT_BITSET_PRIVATE` for its time limit and sleeps the
+// same way without one: 0, or the failure, which the caller does not read, since it tries the lock
+// again after every wake (S16).
 pub long LockWait(int* word, int expected) {
     mut long result = 0
     raw {
@@ -1806,7 +1808,7 @@ pub long LockWait(int* word, int expected) {
     return result
 }
 
-// One thread that sleeps on the lock word of a file at `word` woken, by `futex` (202) with
+// One thread that sleeps on the lock word of a file at `word` woken, by `futex` (202 on x86-64) with
 // `FUTEX_WAKE_PRIVATE` (129), as Rust's `futex_wake` wakes one: the count woken, or the failure, which
 // the caller does not read (S16).
 pub long LockWake(int* word) {
