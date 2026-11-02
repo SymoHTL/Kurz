@@ -1,0 +1,15 @@
+// expect: output
+// | end
+// rules: S22
+
+void | IoError | InvalidUtf8 Echo() {
+    for line in Stdin.Lines() {
+        print(line)
+    }
+    print("end")
+}
+
+Echo() else {
+    IoError e => print(e)
+    InvalidUtf8 e => print(e)
+}

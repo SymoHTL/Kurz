@@ -1,0 +1,22 @@
+// expect: output
+// | hi
+// | 1048576
+// rules: S19
+
+void | IoError | ExitError | InvalidUtf8 Run() {
+    small = Command.New("cat").Input("hi".Bytes).Output()
+    print(string.FromUtf8(small.Stdout))
+    mut big = Bytes()
+    while big.Count < 1048576 {
+        big.Add(120)
+    }
+
+    echoed = Command.New("cat").Input(big).Output()
+    print(echoed.Stdout.Count)
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

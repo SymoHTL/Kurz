@@ -1034,7 +1034,23 @@ public sealed class Parser
         }
 
         var collection = ParseExpression();
-        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, ParseBlockAfter(tokens[index - 1].Line, "`for`"), second);
+        var body = ParseBlockAfter(tokens[index - 1].Line, "`for`");
+        List<MatchArm>? arms = null;
+        if (AtKeyword("else"))
+        {
+            var elseKeyword = Advance(); // S16: `for line in f.Lines() { } else { Case => ... }` handles the loop's failures as O5 handles a call's
+            arms = ParseArms(elseKeyword.Line, "`else`");
+        }
+        else if (At(TokenKind.Newline) && PeekPastNewlines().IsKeyword("else") && !ElseStartsAnArm())
+        {
+            // C2, E4: as after an `if`, `else` on a line of its own is `syntax` at its line; its arms still parse, so that the one error stands (E1)
+            SkipNewlines();
+            var stray = Advance();
+            ReportSyntax(stray.Line, "`else` follows the closing brace of the loop's block on the same line");
+            arms = ParseArms(stray.Line, "`else`");
+        }
+
+        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, body, second, arms);
     }
 
     private MatchStatement ParseMatchStatement()

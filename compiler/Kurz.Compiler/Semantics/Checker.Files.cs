@@ -48,23 +48,47 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var candidate = new Candidate { Slots = f.Slots, Result = Types.Union([f.Success, IoError]) };
-        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+        var result = Types.Union([f.Success, IoError]);
+        List<Candidate> candidates = [new Candidate { Slots = f.Slots, Result = result }];
+        if (f.Kind == CallKind.TcpConnect)
+        {
+            // S9: the second form, `TcpStream.Connect(address, timeout)`, as Rust's `TcpStream::connect_timeout` (section 12, the owner,
+            // 2026-10-30, "Second form, as Rust"), its time a `duration` (assumed); the emitter tells the forms apart by their slots
+            candidates = [
+                new Candidate { Slots = f.Slots, Result = result, Form = $"{result} Connect(string address)" },
+                new Candidate { Slots = [Path("address"), new Slot("timeout", Types.Duration, false, false, false)], Result = result, Form = $"{result} Connect(string address, duration timeout)" },
+            ];
+        }
+
+        return Record(c, f.Kind, Call(candidates, c, null, out var picked), picked);
     }
 
     /// <summary>
-    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>, and S9: a listener's
-    /// <c>Accept()</c> and <c>Close()</c>, each with the case <c>IoError</c>.
+    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S9: a listener's
+    /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
+    /// a <c>duration?</c>, <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (section 12, the owner,
+    /// 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do (section
+    /// 12, assumed); each with the case <c>IoError</c>.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Lines" && handle.Kind == Handle.File)
+        {
+            return CheckLines(c);
+        }
+
         var bytes = new ListType(Types.Byte);
         var listener = handle.Kind == Handle.TcpListener;
+        var stream = handle.Kind == Handle.TcpStream;
+        var timeout = new Slot("timeout", Types.Nullable(Types.Duration), false, false, false);
         (CallKind Kind, List<Slot> Slots, KurzType Success)? method = m.Member switch
         {
             "Read" when !listener => (CallKind.FileRead, [new Slot("into", bytes, true, false, false), new Slot("max", Types.Int, false, false, false)], Types.Int),
             "Write" when !listener => (CallKind.FileWrite, [new Slot("bytes", bytes, false, false, false)], Types.Void),
             "Accept" when listener => (CallKind.TcpAccept, [], Types.TcpStream),
+            "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
+            "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
+            "SetAcceptTimeout" when listener => (CallKind.TcpSetAcceptTimeout, [timeout], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };
@@ -84,6 +108,29 @@ public sealed partial class Checker
         return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
     }
 
+    /// <summary>
+    /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
+    /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is text no rule gives a meaning, E4's <c>syntax</c>.
+    /// </summary>
+    private Typed CheckLines(CallExpression c)
+    {
+        if (!ReferenceEquals(c, loopSource))
+        {
+            Report(ErrorIds.Syntax, c.Line, "`f.Lines()` stands as the collection of a `for` loop alone (S16)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Lines`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = [], Result = Types.Union([Types.Void, IoError, new DataType(dataTypes["InvalidUtf8"], [])]) };
+        return Record(c, CallKind.FileLines, Call([candidate], c, null, out var picked), picked);
+    }
+
     // ---- the command line and the environment (chapter 13) -----------------------------------------------
 
     /// <summary>
@@ -93,6 +140,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Exit")
+        {
+            NotSupported(m.Line, "`Environment.Exit`, the exit code (S23)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
         {
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
