@@ -252,7 +252,9 @@ chose, "The loop walks the map as it was when the loop started" (the owner, 2026
 Value, as C#", the option that also named the entry's `Key` and `Value`); for a list and a range §4 states nothing, and it is
 *(proposed: a reading of M3)*. The record's stream sample uses this form. The lines of a file are walked
 by `for line in f.Lines() { }`, which pulls them one at a time, with an `else` after the block for the
-cases a pull fails with: S16 states it.
+cases a pull fails with: S16 states it. They are the exception to the collection as it was when the
+loop started: the loop pulls each line when it needs it, so that a `Read` or a second `Lines()` on the
+same `File` in the block takes what the loop would have pulled next (S16).
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz
