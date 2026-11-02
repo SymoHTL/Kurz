@@ -229,6 +229,14 @@ public sealed partial class Emitter
                     throw Unsupported(c.Line, "a `mut` parameter given anything but a variable (M7)");
                 }
 
+                if (Model.IsImplicitField(n, out _, out var field) && field is not null)
+                {
+                    // M7, K7: a `mut` field of the instance named alone in its method, given as the field's own place
+                    var symbol = ClassOfThis(n, n.Line).Symbol;
+                    arguments.Add($"ptr {InstanceFieldPointer(symbol, This(n, n.Line), symbol.FieldIndex(field.Name))}");
+                    continue;
+                }
+
                 arguments.Add($"ptr {Place(Model.VariableOf(n), n.Line)}");
                 continue;
             }
