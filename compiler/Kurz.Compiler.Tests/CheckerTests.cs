@@ -889,15 +889,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut short s = 1\nBump(mut s)\nprint(s)")); // M7: the callee writes an `int` back
 
         // M7 with K7: a `mut` field of the instance named alone in its method is passed as `mut`; one without `mut` is mut-required,
-        // one field twice is mut-at-call, and one inside a lambda is capture-assign
+        // and one field twice is mut-at-call. Inside a lambda the same holds, since the lambda holds a reference to the instance
+        // (F11 with K2: the owner, 2026-11-02)
         var box = "void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nvoid Two(mut List<int> a, mut List<int> b) {\n    a.Add(b.Count)\n}\n\n";
         Clean(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
         var (fixedField, _) = Check(box + "class Box(List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
         Assert.Equal(["11: `Items` is a field without `mut` and cannot be passed as `mut` (M7, K1)"], fixedField.Sorted.Select(d => $"{d.Line}: {d.Message}"));
         var (twice, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Two(mut Items, mut Items)\n    }\n}\n\nBox([]).Grow()");
         Assert.Equal([(ErrorIds.MutAtCall, "11: `Items` is passed as `mut` twice (M7)")], twice.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
-        var (inLambda, _) = Check(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()"); // F11: a lambda's `this`
-        Assert.Equal([(ErrorIds.CaptureAssign, "11: a lambda reads `this` and cannot pass its field `Items` as `mut` (F11)")], inLambda.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
+        Clean(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()"); // F11: a lambda's `this`
+        var (fixedInLambda, _) = Check(box + "class Box(List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()");
+        Assert.Equal([(ErrorIds.MutRequired, "11: `Items` is a field without `mut` and cannot be passed as `mut` (M7, K1)")], fixedInLambda.Sorted.Select(d => (d.Id, $"{d.Line}: {d.Message}")));
     }
 
     [Fact]

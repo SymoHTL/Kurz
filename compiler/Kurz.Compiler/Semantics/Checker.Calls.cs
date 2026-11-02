@@ -2765,12 +2765,9 @@ public sealed partial class Checker
         var (variable, captured) = Lookup(name.Name);
         if (variable is null && members.Count == 0 && ImplicitField(name.Name) is { } field)
         {
-            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is
-            if (Lookup("this").Captured)
-            {
-                Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `this` and cannot pass its field `{name.Name}` as `mut` (F11)");
-            }
-            else if (!field.Mut)
+            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is.
+            // Inside a lambda it is passed too, through the reference to the instance the lambda holds (F11 with K2)
+            if (!field.Mut)
             {
                 Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` is a field without `mut` and cannot be passed as `mut` (M7, K1)");
             }

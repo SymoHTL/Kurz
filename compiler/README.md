@@ -1780,7 +1780,8 @@ round can ask about it by the rule's id.
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`. Inside a method, a field of the instance named alone (K7) stands
   there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
-  `mut-at-call`, and one inside a lambda is `capture-assign` (F11); the emitter gives the call the
+  `mut-at-call`, and one inside a lambda is passed as well, through the reference to the instance the
+  lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment 6579495475); the emitter gives the call the
   field's own place, so the callee's write is the field's.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or

@@ -3282,9 +3282,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place()
     {
         // M7 with K7: a `mut` field named alone in a method and passed as `mut` is the field's own place, so the callee's write is the
-        // field's, and the block the list field held before is let go of once, which the fence holds
-        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\n";
-        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]"], "");
+        // field's, and the block the list field held before is let go of once, which the fence holds; a lambda that passes the field
+        // writes it through the reference to the instance it holds, inside the method and after it returned (F11 with K2)
+        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub void Later() {\n        f = () => Bump(mut N)\n        g = () => Grow(mut Items, N)\n        f()\n        g()\n    }\n\n    pub () => void Bumper() => () => Bump(mut N)\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\nb.Later()\nprint(b)\nk = b.Bumper()\nk()\nk()\nprint(b)\n";
+        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]", "3 [3, 0, 1, 2]", "5 [3, 0, 1, 2]"], "");
     }
 
     [Fact]
