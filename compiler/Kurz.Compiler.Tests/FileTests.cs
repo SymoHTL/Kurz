@@ -20,9 +20,10 @@ namespace Kurz.Compiler.Tests;
 /// colon, a literal of IPv6 binds where the machine has its loopback, and a connection <c>Accept</c> gave names its listener's address
 /// (S9), and a lookup that fails with <c>EAI_AGAIN</c> or <c>EAI_FAIL</c>, or with <c>EAI_SYSTEM</c> while <c>errno</c> holds 0, is the kind
 /// <c>Other</c>, and one that fails with <c>EAI_SYSTEM</c> while <c>errno</c> holds 13 the error of that number, each through a runtime
-/// whose lookup gives that result; a stream reads and writes within 5 seconds by default and a listener waits without a bound, a setter
-/// sets the time as Rust's <c>set_timeout</c> sets it, read back by <c>getsockopt</c>, the first form of <c>Connect</c> waits the default
-/// bound, one bound holds over every address of a name, and <c>EAGAIN</c> is <c>TimedOut</c> on a stream's read and write alone (S9);
+/// whose lookup gives that result; each system call of a stream's read and write waits at most 5 seconds by default and a listener's
+/// <c>accept</c> waits without a bound, a setter sets the time as Rust's <c>set_timeout</c> sets it, read back by <c>getsockopt</c>, the
+/// first form of <c>Connect</c> waits the default bound, a connection to a name ends within one bound over its addresses, and <c>EAGAIN</c>
+/// is <c>TimedOut</c> on a stream's read and write and a listener's <c>Accept</c> alone (S9);
 /// a line is whole across the reads of the buffer, a <c>\r</c> in front of a <c>\n</c> in the next read is not part of it, a close gives
 /// up the bytes the buffer holds, and a loop over the lines holds its file (S16); and a build for Windows says
 /// <c>not supported</c> at a call on a file or a socket, and at a loop over a file's lines (S11). Each program runs under
@@ -859,7 +860,12 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(Bounds, "socket-bounds-seven", lines("7"), runtimes: [seven], grants: ["raw", "native"]);
     }
 
-    /// <summary>A listener whose queue of 128 connections that wait is full, and connections to it until one is not made: what it was, and whether all of it took less than 2 seconds.</summary>
+    /// <summary>
+    /// A listener whose queue of 128 connections that wait is full, and connections to it until one is not made: what it was, and
+    /// whether all of it took less than 2 seconds. The queue fills on Linux's defaults: the 128 a listener asks for, within
+    /// <c>somaxconn</c>, and <c>tcp_abort_on_overflow</c> at 0; a kernel that took every connection ends the loop at 1000 with no line
+    /// of an error.
+    /// </summary>
     private const string Full = """
         void | IoError Full() {
             listener = TcpListener.Bind("127.0.0.1:0")
@@ -889,19 +895,23 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_first_form_of_connect_is_bounded_by_the_default_and_runs_out_with_timed_out_and_the_number_0()
     {
-        // S9: Linux drops the connection that finds its listener's queue full, so that it waits; the first form of `Connect` waits the
+        // S9: Linux drops the connection that finds its listener's queue full, with `tcp_abort_on_overflow` at 0, its default (at 1 it
+        // refuses the connection), so that it waits; the first form of `Connect` waits the
         // default bound, here 100 ms, and gives `TimedOut` with the number 0, as Rust's `connect_timeout` gives no error of the system
         var short_ = ListTests.Edited(("runtime/linux/linux.kz", "long DefaultBound() => 5000000000", "long DefaultBound() => 100000000"));
         Ran(Full, "socket-connect-default", ["TimedOut 0", "true", "true"], runtimes: [short_]);
     }
 
     [Fact]
-    public void One_bound_holds_over_every_address_of_a_name_and_once_it_ran_out_no_other_is_tried()
+    public void A_connect_to_a_name_ends_within_one_bound_over_its_addresses()
     {
-        // S9 (assumed: one bound shared by every address a name gives; its cost is that a first address that never answers spends the
-        // whole bound, and the later addresses are not tried): a lookup that asks for every type of socket gives `127.1` three times
-        // (a stream, a datagram and a raw socket), each a connection to the full queue; the call ends with the one bound, 500 ms, not
-        // three times it
+        // S9 (section 12, the owner, 2026-11-02: one bound shared by every address a name gives; its cost is that a first address that
+        // never answers spends the whole bound, and the later addresses are not tried): a lookup that asks for every type of socket
+        // gives `127.1` three times (a stream, a datagram and a raw socket), each a connection to the full queue; the call ends with
+        // the one bound, 500 ms, not three times it. What this shows is the call's end, not how the bound is shared: where the first
+        // address runs out of time, the stop after it alone, or the shared bound alone, ends the call as the two together do, so a
+        // bound for each address with the stop is not told apart here; it differs only where an earlier address fails in another way
+        // after it spent part of the time, and no case makes one fail so
         const string text = """
             void | IoError Shared() {
                 listener = TcpListener.Bind("127.0.0.1:0")
@@ -933,30 +943,42 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Eagain_is_timed_out_on_a_stream_s_read_and_write_alone()
+    public void Eagain_is_timed_out_on_a_stream_s_read_and_write_and_a_listener_s_accept_alone()
     {
-        // S9 (assumed): a call on a blocking socket whose time ran out returns `EAGAIN` (11), which a stream's read and write give as
-        // `TimedOut` with the system's number; every other `EAGAIN` keeps Rust's `WouldBlock`: through a runtime whose every read gives it
+        // S9: a call on a blocking socket whose time ran out returns `EAGAIN` (11), which a stream's read and write give as `TimedOut`
+        // with the system's number (section 12, the owner, 2026-11-02), and a listener's `Accept` too (assumed); every other `EAGAIN`,
+        // a file's read and write here, keeps Rust's `WouldBlock` (assumed): through a runtime whose every read, write and `accept`
+        // gives it
         const string text = """
             void | IoError Again() {
-                File.WriteAll("again.txt", "x".Bytes)
+                created = File.Create("again.txt")
+                created.Write("x".Bytes) else {
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
                 f = File.Open("again.txt")
                 File.Delete("again.txt")
-                listener = TcpListener.Bind("127.0.0.1:0")
-                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
-                server = listener.Accept()
                 mut buffer = Bytes()
                 match f.Read(mut buffer, 1) {
                     int => print("read")
                     IoError e => print("{e.Kind} {e.Code}")
                 }
 
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
                 match client.Read(mut buffer, 1) {
                     int => print("read")
                     IoError e => print("{e.Kind} {e.Code}")
                 }
 
-                server.Close()
+                client.Write("x".Bytes) else {
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
+
+                match listener.Accept() {
+                    TcpStream => print("accepted")
+                    IoError e => print("{e.Kind} {e.Code}")
+                }
             }
 
             Again() else {
@@ -964,8 +986,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        var again = ListTests.Edited(("runtime/linux/linux.kz", "pub long ReadFile(int fd, byte* bytes, long count) {\n", "pub long ReadFile(int fd, byte* bytes, long count) {\n    if count >= 0 {\n        return -11\n    }\n\n"));
-        Ran(text, "socket-eagain", ["WouldBlock 11", "TimedOut 11"], runtimes: [again]);
+        var again = ListTests.Edited(
+            ("runtime/linux/linux.kz", "pub long ReadFile(int fd, byte* bytes, long count) {\n", "pub long ReadFile(int fd, byte* bytes, long count) {\n    if count >= 0 {\n        return -11\n    }\n\n"),
+            ("runtime/linux/linux.kz", "pub long WriteFile(int fd, byte* bytes, long count) {\n", "pub long WriteFile(int fd, byte* bytes, long count) {\n    if count >= 0 {\n        return -11\n    }\n\n"),
+            ("runtime/linux/linux.kz", "pub long Accept(int fd) {\n", "pub long Accept(int fd) {\n    if fd >= 0 {\n        return -11\n    }\n\n"));
+        Ran(text, "socket-eagain", ["WouldBlock 11", "WouldBlock 11", "TimedOut 11", "TimedOut 11", "TimedOut 11"], runtimes: [again]);
     }
 
     private const string Buffered = """
@@ -1110,8 +1135,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetWriteTimeout(null)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "void | IoError Bound(TcpListener? l) {\n    if l != null {\n        l.SetAcceptTimeout(1s)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "print(1)\nmatch TcpStream.Connect(\"127.0.0.1:1\", 1s) {\n    TcpStream => print(\"connected\")\n    IoError e => print(e)\n}\n",
+            "void | IoError Half(TcpStream? s) {\n    if s != null {\n        s.ShutdownWrite()\n    }\n}\n\nHalf(null) else {\n    IoError e => print(e)\n}\n",
         ];
-        foreach (var (text, line) in texts.Zip([3, 3, 3, 2]))
+        foreach (var (text, line) in texts.Zip([3, 3, 3, 2, 3]))
         {
             var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
             RefusedOnWindows(refused);

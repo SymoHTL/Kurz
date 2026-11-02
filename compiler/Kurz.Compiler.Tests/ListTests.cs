@@ -2432,7 +2432,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
     // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
-    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
+    // read of a `weak` item through `?[`
     private const string Weak = """
         class Owner(string Name) {
             pub string Text() => Name
@@ -2479,6 +2480,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         print("{p.Keeper} {c.Members[1]}")
+        List<weak Owner?>? maybe = c.Members
+        print(maybe?[0]?.Name ?? "gone")
+        print(maybe?[1] != null)
+        print("{maybe?[0]} {maybe?[2]}")
         t = Tag("x", o)
         print(NameOf(t.By))
         mut Owner? strong = Owner("Fay")
@@ -2506,6 +2511,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Bob",
         "gone",
         "gone",
+        "Bob null",
+        "Bob",
+        "false", // R3 with N5: `?[` reads a `weak` item, so the freed `Eve` is null there as in `c.Members[1]`
         "Bob null",
         "Bob",
         "Fay",
@@ -3721,6 +3729,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void Copy_writes_every_byte_of_0_to_17_and_24_wherever_it_reads_them_and_writes_them()
+    {
+        // The standard library's `Copy`, whose form for small counts the speed escape of issue 156 (comment 6575718942) kept: up to
+        // 16 bytes as the C library's `memcpy` copies a small count, two words of 8, two words of 4 or three bytes, overlapping where
+        // the count is no power of two, and more byte by byte. `Substring` copies through it from the offset it starts at, and `Join`
+        // to the offset of each part: for each count 0 to 17 and 24, bytes of 128 and above in every place of a word (letters of two
+        // bytes, after one byte of ASCII where the count is odd), cut 0, 1, 3 and 7 bytes into a string that holds a block, with 0 or 5
+        // bytes after them, so that a cut ends where its string ends; and the cut joined after the bytes before it, so that `Join`
+        // writes it at that offset. Under the fence too, where a block ends where its page ends
+        const string text = """
+            Bytes Content(int count) {
+                mut b = Bytes()
+                if count % 2 == 1 {
+                    b.Add(90)
+                }
+
+                for j in 0..<count / 2 {
+                    c = 128 + (41 * j + 7 * count) % 1920
+                    b.Add(byte(192 + c / 64))
+                    b.Add(byte(128 + c % 64))
+                }
+
+                return b
+            }
+
+            void Cut(string s, int at, int count) {
+                cut = s.Substring(at, count)
+                print(cut.Bytes)
+                print(string.Join("", [s.Substring(0, at), cut]).Bytes)
+            }
+
+            for n in 0..<19 {
+                mut count = n
+                if n == 18 {
+                    count = 24
+                }
+
+                content = Content(count)
+                for at in [0, 1, 3, 7] {
+                    for end in [0, 5] {
+                        mut b = Bytes()
+                        for i in 0..<at {
+                            b.Add(byte(97 + i))
+                        }
+
+                        b.AddRange(content)
+                        for i in 0..<end {
+                            b.Add(byte(65 + i))
+                        }
+
+                        match string.FromUtf8(b) {
+                            string s => Cut(s, at, count)
+                            InvalidUtf8 e => print(e.At)
+                        }
+                    }
+                }
+            }
+
+            """;
+        var lines = new List<string>();
+        foreach (var count in Enumerable.Range(0, 18).Append(24))
+        {
+            var content = new List<int>();
+            if (count % 2 == 1)
+            {
+                content.Add(90);
+            }
+
+            for (var j = 0; j < count / 2; j++)
+            {
+                var c = 128 + (((41 * j) + (7 * count)) % 1920);
+                content.Add(192 + (c / 64));
+                content.Add(128 + (c % 64));
+            }
+
+            foreach (var at in new[] { 0, 1, 3, 7 })
+            {
+                foreach (var _ in new[] { 0, 5 })
+                {
+                    lines.Add("[" + string.Join(", ", content) + "]");
+                    lines.Add("[" + string.Join(", ", Enumerable.Range(97, at).Concat(content)) + "]");
+                }
+            }
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "copy-counts"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "copy-counts-fenced"), 0, [.. lines], "");
     }
 
     [Fact]

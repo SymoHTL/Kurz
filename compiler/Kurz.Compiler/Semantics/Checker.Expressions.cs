@@ -366,6 +366,10 @@ public sealed partial class Checker
                 {
                     // A9, A15: reported
                 }
+                else if (HoldsHttpError(t.Type))
+                {
+                    NotSupported(hole.Expression.Line, HttpErrorText);
+                }
                 else if (HoldsInstance(t.Type, []))
                 {
                     CallRan(); // N9: the text of an instance is its `Text()`, a call (A5)
@@ -383,6 +387,12 @@ public sealed partial class Checker
 
         return new Typed(Types.String, text is null ? null : new StringConstant(text.ToString()));
     }
+
+    /// <summary>
+    /// W2: the text of an <c>HttpError</c>, where the checker takes it: section 12 gives it through a <c>Text()</c> in the body of the
+    /// <c>data</c> type, a body the checker does not read (D16), so <c>std/</c> declares none.
+    /// </summary>
+    private const string HttpErrorText = "the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)";
 
     /// <summary>A2 to A15: whether a value of the type has a text for <c>print</c> and an interpolation. The error type has one, so that nothing more is reported.</summary>
     private static bool HasText(KurzType type) => HasText(type, []);
@@ -465,8 +475,14 @@ public sealed partial class Checker
             return Typed.Error; // K19
         }
 
-        if (ImplicitMethods(n.Name) is not null)
+        if (ImplicitMethods(n.Name) is { } methods)
         {
+            if (InStaticMember() && !methods.Any(f => f.IsStatic))
+            {
+                InstanceMethodInStatic(n.Name, n.Line); // K19, with a call or without one
+                return Typed.Error;
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }

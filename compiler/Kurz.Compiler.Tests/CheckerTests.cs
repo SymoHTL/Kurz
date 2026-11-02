@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
@@ -2054,6 +2055,76 @@ public sealed class CheckerTests
         Assert.EndsWith("(V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message, StringComparison.Ordinal);
     }
 
+    // ---- the types of std/ every file sees (chapter 16) ------------------------------------------------
+
+    /// <summary>The runtime and <c>std/</c> checked once, for the tests that read the types of the prelude from <c>std/</c>'s checker (W1).</summary>
+    private static readonly Lazy<CheckedRuntime> StdRuntime = new(() => Builder.CheckRuntime(Target.Linux));
+
+    /// <summary>The checker's reading of a program that sees the types of <c>std/</c> the prelude names, as a build reads it.</summary>
+    private static (DiagnosticBag Diagnostics, Checker Checker) CheckSeeingStd(string program, CheckedRuntime? runtime = null)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        Assert.Empty(diagnostics.Items);
+        return (diagnostics, Checker.Check(tree, diagnostics, [], (runtime ?? StdRuntime.Value).StdChecker));
+    }
+
+    [Fact]
+    public void A_type_of_std_that_the_prelude_names_is_std_s_own_in_the_file()
+    {
+        // W1: the file reads the symbols std/'s checker made, so that a value of one is of the same type in the file and in std/
+        var runtime = StdRuntime.Value;
+        var stdError = runtime.StdChecker.Model.DataTypeOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpError"));
+        var (diagnostics, checker) = CheckSeeingStd("e = HttpError(HttpKind.Protocol, \"no request line\")\nk = e.Kind\nprint(e.Detail)\nprint(k)\nprint(\"{e.Kind}: {e.Detail}\")\n");
+        Assert.Empty(diagnostics.Items);
+        Assert.Same(stdError, Assert.IsType<DataType>(checker.TopLevelVariables["e"]).Symbol);
+        Assert.Same(Assert.IsType<EnumType>(stdError.Fields[0].Type).Symbol, Assert.IsType<EnumType>(checker.TopLevelVariables["k"]).Symbol);
+
+        // the positive control: a checker given no std/ sees neither name
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 1)], Errors("e = HttpError(HttpKind.Protocol, \"x\")"));
+    }
+
+    [Theory]
+    [InlineData("pub data HttpError(", "e = HttpError(HttpKind.Protocol, \"x\")\nprint(e.Detail)\n", "print(HttpKind.Protocol)\n")]
+    [InlineData("pub enum HttpKind {", "print(HttpKind.Protocol)\n", "string Detail(HttpError e) => e.Detail\n\nprint(1)\n")]
+    public void A_name_of_the_prelude_that_std_does_not_declare_pub_is_seen_by_no_file(string declaration, string uses, string other)
+    {
+        // W1 with F9: a type of std/ without `pub` is private to its folder, so the list does not bring it in; the other stays seen
+        var runtime = ListTests.Edited(("std/std.kz", declaration, declaration["pub ".Length..]));
+        Assert.Contains((ErrorIds.UnknownName, 1), CheckSeeingStd(uses, runtime).Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd(uses).Diagnostics.Items); // the positive control: `pub` in std/ as it stands
+        Assert.Empty(CheckSeeingStd(other, runtime).Diagnostics.Items);
+    }
+
+    [Theory]
+    [InlineData("data HttpError(int Code)", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("enum HttpKind { Lost }", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
+    {
+        var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
+        Assert.Equal((ErrorIds.Redeclared, 1, message), (error.Id, error.Line, error.Message));
+        Assert.Empty(Check(text).Diagnostics.Items); // the positive control: without std/ the file's own type is the only one
+    }
+
+    [Theory]
+    [InlineData("print(e)")]
+    [InlineData("print(\"error: {e}\")")]
+    [InlineData("print(string.Join(\", \", [e]))")]
+    [InlineData("print([e])")]
+    [InlineData("int | HttpError u = e\nprint(u)")]
+    [InlineData("mut m = Map<string, HttpError>()\nm[\"a\"] = e\nprint(m)")]
+    [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
+    [InlineData("print(Held(e))")]
+    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    {
+        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
+        // not read (D16), so it takes no text of one, nor of a value that holds one
+        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
+        var refused = Assert.Single(diagnostics.Items);
+        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
+        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
+    }
+
     // ---- files (chapter 13) --------------------------------------------------------------------------------
 
     [Fact]
@@ -2089,15 +2160,20 @@ public sealed class CheckerTests
     public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
     {
         // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
-        // no setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
+        // no read or write setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
         const string Program = "void | IoError Bound() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)\n    c.SetReadTimeout(50ms)\n    c.SetWriteTimeout(null)\n    c.SetReadTimeout(timeout: 1s)\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nBound() else {\n    IoError e => print(e)\n}";
         Clean(Program); // the positive control
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "l.SetReadTimeout(50ms)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(Program.Replace("c.SetWriteTimeout(null)", "l.SetWriteTimeout(null)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetReadTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+
+        // M7: a setter's time that changes the stream it is set on is `changed-while-held`, as a read's count is
+        const string Held = "duration Swap(mut TcpStream s, TcpStream other) {\n    s = other\n    return 1s\n}\n\nvoid | IoError Use() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    mut s = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    t = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    s.SetReadTimeout(Swap(mut s, t))\n}\n\nUse() else {\n    IoError e => print(e)\n}";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors(Held));
+        Clean(Held.Replace("    s.SetReadTimeout(Swap(mut s, t))", "    d = Swap(mut s, t)\n    s.SetReadTimeout(d)", StringComparison.Ordinal)); // the positive control
 
         // F13: the misfit names both forms of `Connect`, each with why it does not fit
         var (diagnostics, _) = Check(Program.Replace("TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)", "TcpStream.Connect(l.Port)", StringComparison.Ordinal));
@@ -2118,6 +2194,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("c.Close()", "c.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace("l.SetAcceptTimeout(50ms)", "l.SetAcceptTimeout(50)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_stream_ends_its_writes_and_a_listener_and_a_file_have_no_such_call()
+    {
+        // S9: a stream's `ShutdownWrite()` takes no argument and gives `void | IoError`, which its function passes on; a listener and a
+        // file have none
+        const string Program = "void | IoError Half() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.ShutdownWrite()\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nHalf() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.ShutdownWrite()", "l.ShutdownWrite()\n    c.Close()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("f.Close()", "f.ShutdownWrite()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(Program.Replace("c.ShutdownWrite()", "c.ShutdownWrite(1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(Program.Replace("c.ShutdownWrite()", "n = c.ShutdownWrite()\n    print(n)", StringComparison.Ordinal))); // O10: its success is `void`
     }
 
     [Fact]
@@ -3122,9 +3211,6 @@ public sealed class CheckerTests
         // K18, K20: a constant of each type the checker reads, and one that reads a `static` field of its class declared above it, by its
         // name and as `T.F`; read by its name inside the class, in a method and a lambda, and as `T.F` outside it
         Clean("enum Kind { A, B }\n\nclass C(int V) {\n    pub static int Step = 2\n    static int Four = Step * 2\n    pub static int Eight = C.Four * 2\n    pub static string Name = \"c\"\n    pub static double Half = 0.5\n    pub static decimal Price = 1\n    pub static Kind K = Kind.B\n    pub static char Ch = 'A'\n    pub static bool Yes = true\n    pub static duration D = 5s\n\n    pub int Get() {\n        f = () => Step + V\n        return f() + Four\n    }\n}\n\nprint(C(1).Get() + C.Eight)\nprint(\"{C.Name} {C.Half} {C.Price} {C.K} {C.Ch} {C.Yes} {C.D}\")");
-        // K20: a `static` field declared below, and the field itself, are no names its initial value reads
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = B\n    pub static int B = 2\n}\n\nprint(C.A)"));
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = A + 1\n}\n\nprint(C.A)"));
         // a read outside an initial value is a value of its type and no constant, as C#'s `static readonly`: no literal's reach (T7),
         // and no constant zero (T25)
         Assert.Equal([(ErrorIds.NarrowingConversion, 5)], Errors("class C(int V) {\n    pub static int A = 2\n}\n\nbyte b = C.A\nprint(b)"));
@@ -3154,8 +3240,66 @@ public sealed class CheckerTests
         Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
     }
 
+    [Fact]
+    public void The_initial_value_of_a_static_field_reads_any_static_field_and_a_cycle_among_them_is_static_cycle()
+    {
+        // K20 (the owner, 2026-11-02, "any class's static field, in any order, as Rust"): a field declared below, and one of a class
+        // declared below that reads a field of the first, are the constants they hold, each read first; the field that reads them goes on
+        // reading its own class's names after the other class's value
+        Clean("class C(int V) {\n    pub static int A = D.E * B\n    pub static int B = 2\n}\n\nclass D(int V) {\n    pub static int E = C.B + 1\n}\n\nprint(C.A)");
+        Clean("class C(int V) {\n    pub static int A = D.E * B\n    pub static int B = 2\n}\n\nclass D(int V) {\n    pub static int E = 3\n}\n\nprint(C.A)");
+        // a read inside an initial value is the constant the field holds, of the field's type: a constant division by zero (T25), a
+        // constant overflow (T6), and an `int` that does not go into a `byte` as an integer literal would (T7)
+        Assert.Equal([(ErrorIds.ConstantDivideByZero, 2)], Errors("class C(int V) {\n    pub static int Q = 1 / Zero\n    pub static int Zero = 0\n}\n\nprint(C.Q)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("class C(int V) {\n    pub static int Q = Big * 2\n    pub static int Big = 2000000000\n}\n\nprint(C.Q)"));
+        Assert.Equal([(ErrorIds.NarrowingConversion, 2)], Errors("class C(int V) {\n    pub static byte B = D.Small\n}\n\nclass D(int V) {\n    pub static int Small = 100\n}\n\nprint(C.B)"));
+
+        // a cycle is reported once, at its field that stands first in the file, naming the fields from there in the order they read each
+        // other: a field that reads itself, two fields of two classes, three fields that a field above them reads, which carries nothing
+        // more (E1), and a cycle whose first field in the file is read after the other
+        static List<string> Cycles(string program)
+        {
+            var (diagnostics, _) = Check(program);
+            Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.StaticCycle, d.Id));
+            return diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList();
+        }
+
+        const string Said = ": the initial values of `static` fields read each other in a cycle (K20)";
+        Assert.Equal(["2: `C.A` reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int A = A + 1\n}\n\nprint(C.A)"));
+        Assert.Equal(["2: `C.A` reads `D.B`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int A = D.B + 1\n}\n\nclass D(int V) {\n    pub static int B = C.A * 2\n}\n\nprint(C.A)"));
+        Assert.Equal(["3: `C.A` reads `C.B`, which reads `C.D`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int Z = A + 1\n    pub static int A = B + 1\n    pub static int B = D + 1\n    pub static int D = A + 1\n}\n\nprint(C.Z)"));
+        Assert.Equal(["3: `C.A` reads `C.B`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int Z = B + 1\n    pub static int A = B * 2\n    pub static int B = A + 1\n}\n\nprint(C.Z)"));
+        // two cycles through one field are one error, the second reaching a field the first refused (E1); two apart are one each
+        Assert.Equal([(ErrorIds.StaticCycle, 2)], Errors("class C(int V) {\n    pub static int A = B + E\n    pub static int B = A + 1\n    pub static int E = A + 2\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticCycle, 2), (ErrorIds.StaticCycle, 7)], Errors("class C(int V) {\n    pub static int B = A + 1\n    pub static int A = B + 1\n}\n\nclass D(int V) {\n    pub static int X = Y\n    pub static int Y = X\n}\n\nprint(1)"));
+        // a cycle that closes on a field a reported cycle refused, the one under way or one read before it, adds no error, in any order (E1)
+        string[] shared = ["    pub static int P = Q", "    pub static int Q = R + P", "    pub static int R = Q"];
+        int[][] orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        foreach (var order in orders)
+        {
+            var program = "class C(int V) {\n" + string.Join("\n", order.Select(i => shared[i])) + "\n}\n\nprint(1)";
+            Assert.Equal([ErrorIds.StaticCycle], Errors(program).Select(e => e.Id));
+        }
+
+        Assert.Equal([(ErrorIds.StaticCycle, 3)], Errors("class C(int V) {\n    pub static int X = Y\n    pub static int Y = Z\n    pub static int Z = Y + W\n    pub static int W = X\n}\n\nprint(1)"));
+        // a field that reads one whose initial value is no constant carries nothing beyond that field's `not supported` (E1)
+        Assert.StartsWith("4: ", Assert.Single(NotSupported("int Seven() => 7\n\nclass C(int V) {\n    pub static int X = Seven()\n    pub static int Y = X + 1\n}\n\nprint(C.Y)")));
+    }
+
+    [Fact]
+    public void A_static_method_named_without_a_call_is_a_method_as_a_value()
+    {
+        // F11: a method as a value stays unread, through its class and by its name inside it; K19's `static-mismatch` is for a method of
+        // an instance where no instance is (the theory below)
+        Assert.Equal(["5: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub static int Make() => 1\n}\n\nprint(C.Make)"));
+        Assert.Equal(["3: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub static int Make() => 1\n    pub static int Bad() => Make\n}\n\nprint(C.Bad())"));
+        Assert.Equal(["3: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub int Get() => V\n    pub int Bad() => Get\n}\n\nprint(C(1).Bad())"));
+    }
+
     [Theory]
     [InlineData("class C(int V) {\n    pub int Get() => V\n}\n\nprint(C.Get())", "5: `Get` is a method of an instance of `C`, not of the class: call it on an instance (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n}\n\nprint(C.Get)", "5: `Get` is a method of an instance of `C`, not of the class: call it on an instance (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n    pub static int Bad() => Get\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `Get` is a method of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V)\n\nprint(C.V)", "3: `V` is a field of an instance of `C`, not of the class: read it from an instance (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static C Make() => C(1)\n}\n\nc = C(2)\nprint(c.Make().V)", "6: `Make` is a `static` method of `C`: call it as `C.Make(...)` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static int Step = 2\n}\n\nc = C(1)\nprint(c.Step)", "6: `Step` is a `static` field of `C`: read it as `C.Step` (K7, K19)")]
@@ -3260,6 +3404,8 @@ public sealed class CheckerTests
         Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
         // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
         Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        // the same read through `?[` (N5), whose item a member, a `T?` variable and a `T?` parameter take
+        Clean("class Owner(string Name)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nList<weak Owner?>? Club(Owner owner) {\n    mut ys = List<weak Owner?>()\n    ys.Add(owner)\n    return ys\n}\n\nx = Owner(\"Ann\")\nxs = Club(x)\nprint(xs?[0]?.Name ?? \"gone\")\nOwner? k = xs?[0]\nprint(NameOf(k))\nprint(NameOf(xs?[0]))");
         Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
 
         // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field
