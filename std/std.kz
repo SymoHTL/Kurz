@@ -943,9 +943,13 @@ long FirstFlag(ulong mask) => long((((mask & (0UL -% mask)) >> 7) *% 0x000102030
 
 // The searches of a string and of a list of bytes (X1, X9), over the bytes of each, as Rust's
 // `str::find` searches a string's: the position of the first `m` bytes at `needle` among the `n` bytes
-// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. More bytes take the two-way
-// search of `TwoWay`, which reads no byte of `hay` more than a bounded number of times, so that no input
-// makes a search slower than linear. One byte is looked for among fewer than 16 bytes byte by byte, as
+// at `hay`, or -1 where they stand nowhere there; an `m` of 0 is found at 0. From 2 to 32 bytes, where
+// the CPU has SSE2 (R18), the search is `PairFind`'s, Rust's `simd_contains`, which reads each byte of
+// `hay` at most 4m + 2 times, 130 for a needle of 32 bytes: Rust takes it in `str::contains` alone and
+// keeps the two-way search in `str::find`, and here every search takes it, since it gives the same first
+// position and measures faster. A needle `PairFind` leaves, and one of more than 32 bytes, takes the
+// two-way search of `TwoWay`, which reads no byte of `hay` more than a bounded number of times. So no
+// input makes a search slower than linear in `n`. One byte is looked for among fewer than 16 bytes byte by byte, as
 // Rust's `memchr` of a slice looks among fewer than two words, so that no read passes the `n` bytes; among
 // 16 and more, the first 16 bytes are read as two words at any address (`WordAt`), then two words of 8
 // bytes at a time from the address at or below the 16th byte that is a multiple of 8, and the bytes left
@@ -967,6 +971,13 @@ pub long Find(byte* hay, long n, byte* needle, long m) {
     }
 
     if m > 1 {
+        if m <= 32 && X86.Sse2.IsSupported {
+            long paired = PairFind(hay, n, needle, m)
+            if paired != -2 {
+                return paired
+            }
+        }
+
         return TwoWay(hay, n, needle, m)
     }
 
@@ -1231,6 +1242,362 @@ long TwoWay(byte* hay, long n, byte* needle, long m) {
     }
 
     return found
+}
+
+// The search of `Find` for a needle of 2 to 32 bytes with SSE2 (R18), as Rust's `simd_contains` makes it
+// for `str::contains` (`library/core/src/str/pattern.rs`, Rust 1.82.0): the position of the first match, -1
+// where there is none, and -2 where no byte of the needle's last four differs from its first, a needle Rust
+// leaves to the two-way search too. The needle's first byte and a second, the last of its last four that
+// differs from the first (the second byte itself for a needle of two), are compared with 16 bytes of `hay`
+// at a time, each at its offset in the needle, and the bytes of a position where both are equal are
+// compared with the rest of the needle, the masks of four such steps read first and tested at once, then
+// from the left where one is not 0. A `hay`
+// shorter than 16 bytes past the needle's last byte is compared position by position, as Rust compares
+// its `windows`; the end of a longer one is read as the 16 positions that end at its last, which may
+// repeat positions already read. A byte of `hay` is read at most 4m + 2 times: three times as a position's
+// first byte and three times as its second, in its step, again where its step of four finds a mask and
+// reads its masks once more for `PairFour`, and in the end's 16 positions; and at most twice in each of at
+// most two checks of each of the m - 1 positions before it, since `PairSame`'s last four bytes may overlap
+// the four before them and the end's positions may repeat one a step checked. The short walk reads it at
+// most 2m - 1 times.
+long PairFind(byte* hay, long n, byte* needle, long m) {
+    mut long found = -1
+    raw {
+        byte first = needle[0]
+        mut long second = 1
+        if m > 2 {
+            mut long low = m - 4
+            if low < 0 {
+                low = 0
+            }
+
+            second = m - 1
+            while second >= low && needle[second] == first {
+                second = second - 1
+            }
+
+            if second < low {
+                return -2
+            }
+        }
+
+        long last = m - 1
+        if n < 16 + last {
+            mut long at = 0
+            while at + last < n {
+                if hay[at] == first && PairSame(hay + at + 1, needle + 1, last) {
+                    return at
+                }
+
+                at = at + 1
+            }
+
+            return -1
+        }
+
+        Vector128<byte> firsts = Vector128.Create(first)
+        Vector128<byte> seconds = Vector128.Create(needle[second])
+        mut long i = 0
+        while i + last + 64 < n {
+            while i + last + 64 < n && (PairMask(hay + i, second, firsts, seconds) | PairMask(hay + i + 16, second, firsts, seconds) | PairMask(hay + i + 32, second, firsts, seconds) | PairMask(hay + i + 48, second, firsts, seconds)) == 0 {
+                i = i + 64
+            }
+
+            if i + last + 64 < n {
+                byte* p = hay + i
+                found = PairFour(hay, needle, last, i, PairMask(p, second, firsts, seconds), PairMask(p + 16, second, firsts, seconds), PairMask(p + 32, second, firsts, seconds), PairMask(p + 48, second, firsts, seconds))
+                if found >= 0 {
+                    return found
+                }
+
+                i = i + 64
+            }
+        }
+
+        while i + last + 16 < n {
+            int mask = PairMask(hay + i, second, firsts, seconds)
+            if mask != 0 {
+                found = PairFour(hay, needle, last, i, mask, 0, 0, 0)
+                if found >= 0 {
+                    return found
+                }
+            }
+
+            i = i + 16
+        }
+
+        long end = n - last - 16
+        int mask = PairMask(hay + end, second, firsts, seconds)
+        if mask != 0 {
+            found = PairFour(hay, needle, last, end, mask, 0, 0, 0)
+        }
+    }
+
+    return found
+}
+
+// The first match among the positions of four steps of `PairMask` from `at`, their masks taken in order, or -1.
+// Every step that finds a mask calls it, so that LLVM keeps it a call of its own, as Rust keeps its `check_mask`
+// out of the loop by `#[cold]`, and the loop holds nothing for it in its registers.
+long PairFour(byte* hay, byte* needle, long last, long at, int mask0, int mask1, int mask2, int mask3) {
+    mut long found = -1
+    if mask0 != 0 {
+        found = PairCheck(hay, needle, last, at, mask0)
+    }
+
+    if found < 0 && mask1 != 0 {
+        found = PairCheck(hay, needle, last, at + 16, mask1)
+    }
+
+    if found < 0 && mask2 != 0 {
+        found = PairCheck(hay, needle, last, at + 32, mask2)
+    }
+
+    if found < 0 && mask3 != 0 {
+        found = PairCheck(hay, needle, last, at + 48, mask3)
+    }
+
+    return found
+}
+
+// The positions among the 16 from `p` at which the needle's first byte stands and its second byte stands
+// `second` bytes on, one bit each, the first position lowest (R18).
+int PairMask(byte* p, long second, Vector128<byte> firsts, Vector128<byte> seconds) {
+    mut int mask = 0
+    raw {
+        Vector128<byte> one = X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p), firsts)
+        Vector128<byte> two = X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + second), seconds)
+        mask = X86.Sse2.MoveMask(X86.Sse2.And(one, two))
+    }
+
+    return mask
+}
+
+// The first of the positions `at` plus a bit of `mask` at which the `last` bytes after the needle's first
+// stand after the position's first byte, or -1: the bits taken from the lowest, as Rust's `check_mask`
+// takes them.
+long PairCheck(byte* hay, byte* needle, long last, long at, int mask) {
+    mut int rest = mask
+    mut long found = -1
+    raw {
+        while rest != 0 {
+            int low = rest & -rest
+            long position = at + LowestBit(low)
+            if PairSame(hay + position + 1, needle + 1, last) {
+                found = position
+                break
+            }
+
+            rest = rest ^ low
+        }
+    }
+
+    return found
+}
+
+// The place of the one bit of `low`, a power of 2 below 65536: the top four of the 16 bits from the
+// 12th of `low` times the de Bruijn number 0x09AF, a different four for each place, read as the index of
+// the place in a table of 16 places of four bits each.
+long LowestBit(int low) {
+    int index = ((low * 0x09AF) >> 12) & 15
+    return long((0xCD7EA84FB6935210UL >> (index * 4)) & 15UL)
+}
+
+// Whether the `count` bytes at `x` are those at `y`: four at a time from 4 on, the last four read where
+// they end, as Rust's `small_slice_eq` compares them.
+bool PairSame(byte* x, byte* y, long count) {
+    mut bool same = true
+    raw {
+        if count < 4 {
+            mut long i = 0
+            while i < count {
+                if x[i] != y[i] {
+                    return false
+                }
+
+                i = i + 1
+            }
+        } else {
+            long end = count - 4
+            mut long i = 0
+            while i < end {
+                if LittleEndianWord(x + i) != LittleEndianWord(y + i) {
+                    return false
+                }
+
+                i = i + 4
+            }
+
+            same = LittleEndianWord(x + end) == LittleEndianWord(y + end)
+        }
+    }
+
+    return same
+}
+
+// The searches of a list's `IndexOf` for an item of 2, 4 and 8 bytes, whose `==` compares its bits: a
+// `short` or a `ushort`, an `int`, a `uint` or a `char`, a `long` or a `ulong` (X9). The position of the
+// first of the `n` items at `items` whose bits are those of `value`, or -1. With SSE2 (R18), the items are
+// compared 16 bytes at a time, four such vectors to a step, and the items left after them one vector at a
+// time, then one at a time, as .NET's `IndexOf` of such a span compares one vector at a time; SSE2
+// compares no 8-byte lanes, so an item of 8 bytes is equal where both of its halves are, as .NET compares
+// them without SSE4.1. Rust's `position` compares one item at a time, as the loop after the vectors does.
+pub long FindShort(short* items, long n, short value) {
+    mut long i = 0
+    if X86.Sse2.IsSupported {
+        raw {
+            Vector128<short> wanted = Vector128.Create(value)
+            while i + 32 <= n {
+                short* p = items + i
+                int mask0 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p), wanted).AsByte())
+                int mask1 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 8), wanted).AsByte())
+                int mask2 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 16), wanted).AsByte())
+                int mask3 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 24), wanted).AsByte())
+                if (mask0 | mask1 | mask2 | mask3) != 0 {
+                    return i + FirstOfFour(mask0, mask1, mask2, mask3) / 2
+                }
+
+                i = i + 32
+            }
+
+            while i + 8 <= n {
+                int mask = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(items + i), wanted).AsByte())
+                if mask != 0 {
+                    return i + LowestBit(mask & -mask) / 2
+                }
+
+                i = i + 8
+            }
+        }
+    }
+
+    raw {
+        while i < n {
+            if items[i] == value {
+                return i
+            }
+
+            i = i + 1
+        }
+    }
+
+    return -1
+}
+
+// `FindShort`'s search for an item of 4 bytes.
+pub long FindInt(int* items, long n, int value) {
+    mut long i = 0
+    if X86.Sse2.IsSupported {
+        raw {
+            Vector128<int> wanted = Vector128.Create(value)
+            while i + 16 <= n {
+                int* p = items + i
+                int mask0 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p), wanted).AsByte())
+                int mask1 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 4), wanted).AsByte())
+                int mask2 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 8), wanted).AsByte())
+                int mask3 = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(p + 12), wanted).AsByte())
+                if (mask0 | mask1 | mask2 | mask3) != 0 {
+                    return i + FirstOfFour(mask0, mask1, mask2, mask3) / 4
+                }
+
+                i = i + 16
+            }
+
+            while i + 4 <= n {
+                int mask = X86.Sse2.MoveMask(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(items + i), wanted).AsByte())
+                if mask != 0 {
+                    return i + LowestBit(mask & -mask) / 4
+                }
+
+                i = i + 4
+            }
+        }
+    }
+
+    raw {
+        while i < n {
+            if items[i] == value {
+                return i
+            }
+
+            i = i + 1
+        }
+    }
+
+    return -1
+}
+
+// `FindShort`'s search for an item of 8 bytes.
+pub long FindLong(long* items, long n, long value) {
+    mut long i = 0
+    if X86.Sse2.IsSupported {
+        raw {
+            Vector128<int> wanted = Vector128.Create(value).AsInt32()
+            while i + 8 <= n {
+                long* p = items + i
+                int mask0 = X86.Sse2.MoveMask(LongsEqual(X86.Sse2.LoadVector128(p).AsInt32(), wanted))
+                int mask1 = X86.Sse2.MoveMask(LongsEqual(X86.Sse2.LoadVector128(p + 2).AsInt32(), wanted))
+                int mask2 = X86.Sse2.MoveMask(LongsEqual(X86.Sse2.LoadVector128(p + 4).AsInt32(), wanted))
+                int mask3 = X86.Sse2.MoveMask(LongsEqual(X86.Sse2.LoadVector128(p + 6).AsInt32(), wanted))
+                if (mask0 | mask1 | mask2 | mask3) != 0 {
+                    return i + FirstOfFour(mask0, mask1, mask2, mask3) / 8
+                }
+
+                i = i + 8
+            }
+
+            while i + 2 <= n {
+                int mask = X86.Sse2.MoveMask(LongsEqual(X86.Sse2.LoadVector128(items + i).AsInt32(), wanted))
+                if mask != 0 {
+                    return i + LowestBit(mask & -mask) / 8
+                }
+
+                i = i + 2
+            }
+        }
+    }
+
+    raw {
+        while i < n {
+            if items[i] == value {
+                return i
+            }
+
+            i = i + 1
+        }
+    }
+
+    return -1
+}
+
+// The bytes of the 8-byte lanes of `a` and `b`, all ones where the two lanes are equal, else zero: the
+// 4-byte halves compared, and each half's result taken with its neighbour's (R18).
+Vector128<byte> LongsEqual(Vector128<int> a, Vector128<int> b) {
+    mut Vector128<byte> lanes = Vector128.Create(byte(0))
+    raw {
+        Vector128<int> halves = X86.Sse2.CompareEqual(a, b)
+        lanes = X86.Sse2.And(halves, X86.Sse2.Shuffle(halves, 0xB1)).AsByte()
+    }
+
+    return lanes
+}
+
+// The place of the first bit of four masks of 16 bits, read as one of 64 from the lowest of `mask0`; one
+// of them is not 0.
+long FirstOfFour(int mask0, int mask1, int mask2, int mask3) {
+    if mask0 != 0 {
+        return LowestBit(mask0 & -mask0)
+    }
+
+    if mask1 != 0 {
+        return 16 + LowestBit(mask1 & -mask1)
+    }
+
+    if mask2 != 0 {
+        return 32 + LowestBit(mask2 & -mask2)
+    }
+
+    return 48 + LowestBit(mask3 & -mask3)
 }
 
 // The trimming, the splitting, the replacing, the joining and the change of ASCII case of a string (X3,
