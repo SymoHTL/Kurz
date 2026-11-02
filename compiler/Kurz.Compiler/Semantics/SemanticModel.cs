@@ -29,6 +29,12 @@ public enum CallKind
     /// <summary>A data value made by the type's name (D2); <see cref="CallInfo.Data"/> is the type.</summary>
     DataNew,
 
+    /// <summary>An instance of a class made by the class's name, its primary constructor or the empty one (K1, K14); <see cref="CallInfo.Target"/> is the class type.</summary>
+    ClassNew,
+
+    /// <summary>A method of a class (K7), on the value before the dot, or on <c>this</c> where the call names the method alone; <see cref="CallInfo.Function"/> is the method picked (F13).</summary>
+    Method,
+
     /// <summary>A list's <c>Add</c> (M9).</summary>
     ListAdd,
 
@@ -73,6 +79,12 @@ public enum CallKind
 
     /// <summary>A list's <c>Reverse()</c> (X9).</summary>
     ListReverse,
+
+    /// <summary>A list's <c>Insert(index, item)</c> (X11).</summary>
+    ListInsert,
+
+    /// <summary>A list's <c>RemoveAt(index)</c>, which gives the item it takes out (X11).</summary>
+    ListRemoveAt,
 
     /// <summary>A list's <c>Sort()</c>, in place and stable (X8).</summary>
     ListSort,
@@ -161,14 +173,26 @@ public enum CallKind
     /// <summary>A file's, a listener's or a stream's <c>Close()</c> (S5, S9).</summary>
     FileClose,
 
+    /// <summary>A file's <c>Lines()</c>, the collection of a <c>for</c> loop (S16).</summary>
+    FileLines,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 
-    /// <summary><c>TcpStream.Connect(address)</c> (S9).</summary>
+    /// <summary><c>TcpStream.Connect(address)</c>, or its second form <c>TcpStream.Connect(address, timeout)</c>, of two slots (S9).</summary>
     TcpConnect,
 
     /// <summary>A listener's <c>Accept()</c> (S9).</summary>
     TcpAccept,
+
+    /// <summary>A stream's <c>SetReadTimeout(timeout)</c> (S9).</summary>
+    TcpSetReadTimeout,
+
+    /// <summary>A stream's <c>SetWriteTimeout(timeout)</c> (S9).</summary>
+    TcpSetWriteTimeout,
+
+    /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
+    TcpSetAcceptTimeout,
 
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
@@ -245,6 +269,10 @@ public sealed class SemanticModel
     private readonly Dictionary<NameExpression, FunctionSymbol> functionNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, VariableSymbol> declarations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<CallExpression, CallInfo> calls = new(ReferenceEqualityComparer.Instance);
+    private readonly List<FunctionSymbol> copies = [];
+    private readonly Dictionary<FunctionSymbol, List<FunctionSymbol>> copiesOf = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, MatchArm> kindArms = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
@@ -254,6 +282,9 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// <c>args</c>, the program's arguments without its name, which the top-level code sees (S13); null in a file that is no program's
@@ -296,6 +327,21 @@ public sealed class SemanticModel
     public VariableSymbol AssignedVariableOf(AssignOrDeclare assignment) => assignments.TryGetValue(assignment, out var v) ? v : throw Missing($"assignment to `{assignment.Name}`", assignment.Line);
 
     public CallInfo CallOf(CallExpression call) => calls.TryGetValue(call, out var c) ? c : throw Missing("call", call.Line);
+
+    /// <summary>The call's record, null where the checker kept none.</summary>
+    internal CallInfo? TryCallOf(CallExpression call) => calls.GetValueOrDefault(call);
+
+    /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
+    public IReadOnlyList<FunctionSymbol> Copies => copies;
+
+    /// <summary>T33: whether a function is checked in its copies alone, since it reads its type or passes its type parameter to a function that does: a code generator reads its copies and never its own body.</summary>
+    public bool ReadsItsType(FunctionSymbol function) => readers.Contains(function);
+
+    /// <summary>T33: the copies made of a function that reads its type, in the order they were made; none where no call made one.</summary>
+    public IReadOnlyList<FunctionSymbol> CopiesOf(FunctionSymbol original) => copiesOf.TryGetValue(original, out var made) ? made : [];
+
+    /// <summary>T33: the one arm a <c>match</c> on <c>T.Kind</c> in a copy reads, by the match's subject; null for any other <c>match</c>.</summary>
+    public MatchArm? KindArmOf(Expression subject) => kindArms.GetValueOrDefault(subject);
 
     /// <summary>Whether the checker read the call.</summary>
     public bool HasCall(CallExpression call) => calls.ContainsKey(call);
@@ -353,6 +399,21 @@ public sealed class SemanticModel
 
     internal void RecordCall(CallExpression call, CallInfo info) => calls[call] = info;
 
+    internal void RecordCopy(FunctionSymbol original, FunctionSymbol copy)
+    {
+        copies.Add(copy);
+        if (!copiesOf.TryGetValue(original, out var made))
+        {
+            copiesOf[original] = made = [];
+        }
+
+        made.Add(copy);
+    }
+
+    internal void RecordReader(FunctionSymbol function) => readers.Add(function);
+
+    internal void RecordKindArm(Expression subject, MatchArm arm) => kindArms[subject] = arm;
+
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 
     internal void RecordLambda(LambdaExpression lambda, LambdaInfo info) => lambdas[lambda] = info;
@@ -368,6 +429,33 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    /// <summary>The symbol of a class of the file (K1).</summary>
+    public ClassSymbol ClassOf(TypeDeclaration declaration) => classes.TryGetValue(declaration, out var c) ? c : throw Missing($"class `{declaration.Name}`", declaration.Line);
+
+    /// <summary>The classes of the file, in the order they are declared.</summary>
+    public IEnumerable<ClassSymbol> Classes => classes.Values;
+
+    /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
+    public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
+
+    /// <summary>
+    /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
+    /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
+    /// </summary>
+    public bool IsImplicitField(object node, out VariableSymbol thisVariable, out FieldSymbol? field)
+    {
+        var found = implicitFields.TryGetValue(node, out var entry);
+        thisVariable = entry.This;
+        field = entry.Field;
+        return found;
+    }
+
+    internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
+
+    internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 
     private static InvalidOperationException Missing(string what, int line) =>
         new($"the checker did not read the {what} at line {line}: the model is read for a program the checker read without an error and without `not supported`");
