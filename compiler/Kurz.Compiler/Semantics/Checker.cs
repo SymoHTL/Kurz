@@ -1020,15 +1020,15 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T17, T19: a type argument written in a type or a call, where `void` is not supported: C# refuses it as a type argument and Rust's
-    /// `()` takes one, and the record says neither, so it is refused here before the emitter writes a list or a copy of it.
+    /// T17: a type argument written in a type or a call, where `void` is <c>void-type-argument</c>, as C# refuses it (CS1547): no value
+    /// has the type `void`, so it is refused here before the emitter writes a list or a copy of it.
     /// </summary>
     private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
     {
         var type = Resolve(argument);
         if (Types.IsVoid(type))
         {
-            NotSupported(argument.Line, $"`void` as a type argument of {of} (T17, T19)");
+            Report(ErrorIds.VoidTypeArgument, argument.Line, $"`void` as a type argument of {of}, which no value has (T17)");
             return Types.Error;
         }
 

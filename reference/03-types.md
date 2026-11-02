@@ -1012,7 +1012,11 @@ print("b" > "b")
 
 ### T17 (decided, §4) Generics
 
-Generic types are written as in C#: `List<int>`, `Map<int, User>`.
+Generic types are written as in C#: `List<int>`, `Map<int, User>`. `void` is no type argument:
+`List<void>`, `Map<string, void>` and `Other<void>()` are the compile error `void-type-argument`
+where `void` is written, as C# refuses it (CS1547), while the result of a function type inside a
+type argument, `List<(int) => void>`, stands (§4, the owner, 2026-11-02, "refused, as CS1547").
+*(assumed, §4: the id, named for what it refuses)*
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -1021,6 +1025,13 @@ xs.Add(4)
 xs.Add(5)
 print(xs.Count)
 print(xs[1])
+```
+
+Case: [types/void-type-argument.kz](../corpus/types/void-type-argument.kz)
+```kurz
+fs = List<(int) => void>()
+names = Map<string, void>()
+print(fs.Count + names.Count)
 ```
 
 ### T19 (decided, §4) Declaring generic functions and types

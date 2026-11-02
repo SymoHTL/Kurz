@@ -570,23 +570,25 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("void Other<T>() {\n}\n\nOther<void>()", "4: `void` as a type argument of `Other` (T17, T19)")]
-    [InlineData("List<void> a = List<void>()\nprint(a.Count)", "1: `void` as a type argument of `List` (T17, T19)|1: `void` as a type argument of `List` (T17, T19)")]
-    [InlineData("m = Map<string, void>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
-    [InlineData("m = Map<void, int>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
-    [InlineData("void Count(Map<void, int> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
-    [InlineData("void Count(Map<string, void> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
-    [InlineData("data Box<T>(T Value)\n\nvoid Show(Box<void> b) {\n}", "3: `void` as a type argument of `Box` (T17, T19)")]
-    [InlineData("data Box<T>(T Value)\n\nb = Box<void>(1)", "3: `void` as a type argument of `Box` (T17, T19)")]
-    [InlineData("xs = List<List<void>>()\nprint(xs.Count)", "1: `void` as a type argument of `List` (T17, T19)")]
-    [InlineData("List<void> Make() {\n    return List<int>()\n}", "1: `void` as a type argument of `List` (T17, T19)")]
-    [InlineData("data Bag(Map<string, void> Items)", "1: `void` as a type argument of `Map` (T17, T19)")]
-    [InlineData("void Other<T>() {\n}\n\nvoid Other<T>(int x) {\n}\n\nOther<void>()", "7: `void` as a type argument of `Other` (T17, T19)")]
-    public void Void_as_a_type_argument_is_not_supported_where_it_is_written(string program, string expected)
+    [InlineData("void Other<T>() {\n}\n\nOther<void>()", "4: `void` as a type argument of `Other`, which no value has (T17)")]
+    [InlineData("List<void> a = List<void>()\nprint(a.Count)", "1: `void` as a type argument of `List`, which no value has (T17)|1: `void` as a type argument of `List`, which no value has (T17)")]
+    [InlineData("m = Map<string, void>()\nprint(m.Count)", "1: `void` as a type argument of `Map`, which no value has (T17)")]
+    [InlineData("m = Map<void, int>()\nprint(m.Count)", "1: `void` as a type argument of `Map`, which no value has (T17)")]
+    [InlineData("void Count(Map<void, int> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map`, which no value has (T17)")]
+    [InlineData("void Count(Map<string, void> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map`, which no value has (T17)")]
+    [InlineData("data Box<T>(T Value)\n\nvoid Show(Box<void> b) {\n}", "3: `void` as a type argument of `Box`, which no value has (T17)")]
+    [InlineData("data Box<T>(T Value)\n\nb = Box<void>(1)", "3: `void` as a type argument of `Box`, which no value has (T17)")]
+    [InlineData("xs = List<List<void>>()\nprint(xs.Count)", "1: `void` as a type argument of `List`, which no value has (T17)")]
+    [InlineData("List<void> Make() {\n    return List<int>()\n}", "1: `void` as a type argument of `List`, which no value has (T17)")]
+    [InlineData("data Bag(Map<string, void> Items)", "1: `void` as a type argument of `Map`, which no value has (T17)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Other<T>(int x) {\n}\n\nOther<void>()", "7: `void` as a type argument of `Other`, which no value has (T17)")]
+    public void Void_as_a_type_argument_is_refused_where_it_is_written(string program, string expected)
     {
-        // T17, T19: C# refuses `void` as a type argument and Rust's `()` takes one; the record says neither, so the checker refuses it
-        // where it is written, of a generic function, a generic data type, `List` and `Map`, before the emitter writes a copy of it
-        Assert.Equal(expected.Split('|'), NotSupported(program));
+        // T17: `void` is no type argument, as C# refuses it (CS1547), of a generic function, a generic data type, `List` and `Map`,
+        // where it is written, with an id of its own and no other error after it, before the emitter writes a copy of it
+        var (diagnostics, _) = Check(program);
+        Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.VoidTypeArgument, d.Id));
+        Assert.Equal(expected.Split('|'), diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
     }
 
     [Fact]
@@ -3584,13 +3586,13 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_type_argument_with_no_kind_is_not_supported_at_the_call_that_writes_it()
+    public void A_type_argument_with_no_kind_is_refused_at_the_call_that_writes_it()
     {
-        // T33 with T17, T19: `void` has no value of `TypeKind`, and as any type argument it is not supported at the call that writes it, so a
-        // reader called with it, or a function that passes it on to one, gets that one line and no copy
+        // T33 with T17: `void` has no value of `TypeKind`, and as any type argument it is `void-type-argument` at the call that writes it, so
+        // a reader called with it, or a function that passes it on to one, gets that one error and no copy
         var reader = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\n";
-        Assert.Equal(["7: `void` as a type argument of `Only` (T17, T19)"], NotSupported(reader + "Only<void>()"));
-        Assert.Equal(["11: `void` as a type argument of `Outer` (T17, T19)"], NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
+        Assert.Equal([(ErrorIds.VoidTypeArgument, 7)], Errors(reader + "Only<void>()"));
+        Assert.Equal([(ErrorIds.VoidTypeArgument, 11)], Errors(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
         Clean(reader + "Only<int>()");
     }
 

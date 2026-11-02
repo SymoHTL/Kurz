@@ -39,6 +39,7 @@ expects it (V12).
 | `unlisted-case` | O1, O3, O9 | a case that would leave a function whose return type does not list it after its first case, the success (O1); a return type that is no union lists none; a case that is none of the cases after the first and would go to two of them (O3) |
 | `match-not-exhaustive` | O8, C9, D12 | a `match` that lists neither every case nor an `else` arm, but one on `T.Kind`, which is checked in each copy (T33) |
 | `kind-not-read` | T33 | a `match` on `T.Kind` in a generic function with no arm for the kind of a copy's type argument, or `T.Fields` in a copy whose type is not a `data` type, at the call that made the copy |
+| `void-type-argument` | T17 | `void` written as a type argument of a generic function, a generic `data` type, `List` or `Map`, at the line that writes it, `Other<void>()` and `Map<string, void>` among them; the result of a function type inside one, `List<(int) => void>`, stands, and `List<void>.FromRaw(p, n)` and `List<void>.Allocate(n)` keep R14's `type-mismatch` |
 | `braces-required` | C1 | a block that a construct requires, replaced by a statement or opened on the next line, at the line where the block should have opened (C1); a method signature inside a type body with its `{` on the next line is `syntax` instead |
 | `reference-cycle` | R2, R4, R8, R9 | a class that can reach itself through strong fields, one of them `mut` |
 | `weak-not-nullable` | R5 | a `weak` type written without its `?` |
