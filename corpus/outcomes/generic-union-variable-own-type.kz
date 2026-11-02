@@ -1,0 +1,10 @@
+// expect: output
+// | []
+// rules: O4
+
+List<T> F<T>(T | string x) => List<T>()
+
+int | bool got = 1
+// a variable binds `T` to its own type, which names no case of the union: `int | bool`
+List<int | bool> kept = F(got)
+print(kept)

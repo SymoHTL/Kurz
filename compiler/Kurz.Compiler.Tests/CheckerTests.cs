@@ -569,6 +569,34 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("xs = List<int>()\nprint(xs.Where<int>(x => x > 1).Count)"));
     }
 
+    [Theory]
+    [InlineData("void Other<T>() {\n}\n\nOther<void>()", "4: `void` as a type argument of `Other` (T17, T19)")]
+    [InlineData("List<void> a = List<void>()\nprint(a.Count)", "1: `void` as a type argument of `List` (T17, T19)|1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("m = Map<string, void>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("m = Map<void, int>()\nprint(m.Count)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<void, int> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Count(Map<string, void> m) {\n    print(m.Count)\n}", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nvoid Show(Box<void> b) {\n}", "3: `void` as a type argument of `Box` (T17, T19)")]
+    [InlineData("data Box<T>(T Value)\n\nb = Box<void>(1)", "3: `void` as a type argument of `Box` (T17, T19)")]
+    [InlineData("xs = List<List<void>>()\nprint(xs.Count)", "1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("List<void> Make() {\n    return List<int>()\n}", "1: `void` as a type argument of `List` (T17, T19)")]
+    [InlineData("data Bag(Map<string, void> Items)", "1: `void` as a type argument of `Map` (T17, T19)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Other<T>(int x) {\n}\n\nOther<void>()", "7: `void` as a type argument of `Other` (T17, T19)")]
+    public void Void_as_a_type_argument_is_not_supported_where_it_is_written(string program, string expected)
+    {
+        // T17, T19: C# refuses `void` as a type argument and Rust's `()` takes one; the record says neither, so the checker refuses it
+        // where it is written, of a generic function, a generic data type, `List` and `Map`, before the emitter writes a copy of it
+        Assert.Equal(expected.Split('|'), NotSupported(program));
+    }
+
+    [Fact]
+    public void Void_inside_a_type_argument_stands()
+    {
+        // T17, F11: the result of a function type is no type argument, so a list of `void` functions and a call's `void` lambda stand
+        Clean("fs = List<(int) => void>()\nprint(fs.Count)");
+        Clean("void Run<T>(T x, (T) => void f) {\n    f(x)\n}\n\nRun<int>(1, x => print(x))");
+    }
+
     [Fact]
     public void A_lambda_argument_fixes_no_type_parameter()
     {
@@ -1214,6 +1242,66 @@ public sealed class CheckerTests
         Clean(find + "mut List<int | NotFound | Rejected> xs = []\nxs.Add(Find(1))\nprint(xs)");
         Clean(find + "(int | NotFound | Rejected) => void f = v => print(v)\nf(Find(1))");
         Clean(find + "void Run((int | NotFound | Rejected) => void f) {\n    f(Find(1))\n}\n\nRun(v => print(v))");
+    }
+
+    [Fact]
+    public void A_type_parameter_inside_a_written_union_takes_what_the_union_does_not_name()
+    {
+        // O4 (the owner, 2026-11-01, "T = success only"): a call whose cases the union keeps gives the type parameter its success alone, and a
+        // case the union does not name is type-mismatch at the argument, as for a variable of the union; "T = int | Rejected, as built": an
+        // argument that is no call gives its own type less the cases the union names
+        var find = "data NotFound\ndata Rejected\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    if id == 2 {\n        return Rejected\n    }\n    return NotFound\n}\n\n";
+        var wrap = "List<T> Wrap<T>(T | NotFound v) => List<T>()\n\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 16)], Errors(find + wrap + "xs = Wrap(Find(2))\nprint(xs)"));
+        Assert.Equal("List<int>", TypeOf(find + "List<T> Wrap<T>(T | NotFound | Rejected v) => List<T>()\n\nxs = Wrap(Find(2))\nprint(xs)", "xs"));
+        Assert.Equal("List<int | Rejected>", TypeOf(find + wrap + "int | NotFound | Rejected got = Find(2)\nxs = Wrap(got)\nprint(xs)", "xs"));
+
+        // "Same shape first": a case of the argument whose shape a case holding the type parameter has is read through that case, and the rest
+        // goes to the bare type parameter; the shapes are a list, a map, a data type of the same name and a function of the same count of
+        // parameters (assumed, section 5: every shape the inference reads)
+        var wide = "List<T> Wide<T>(T | List<T> x) => List<T>()\n\n";
+        Assert.Equal("List<int>", TypeOf(wide + "List<int> xs = [1, 2]\nys = Wide(xs)\nprint(ys)", "ys"));
+        Assert.Equal("List<int>", TypeOf(wide + "ys = Wide([1, 2])\nprint(ys)", "ys"));
+        Assert.Equal("List<int>", TypeOf(wide + "int | List<int> both = 1\nys = Wide(both)\nprint(ys)", "ys"));
+        Assert.Equal("List<List<int>>", TypeOf(wide + "List<int> xs = [1, 2]\nys = Wide<List<int>>(xs)\nprint(ys)", "ys"));
+        Assert.Equal("List<List<string>>", TypeOf("List<T> Wide<T>(T | List<int> x) => List<T>()\n\nList<string> xs = [\"a\"]\nys = Wide(xs)\nprint(ys)", "ys"));
+        Assert.Equal("List<bool>", TypeOf("List<V> Values<V>(V | Map<string, V> x) => List<V>()\n\nm = Map<string, bool>()\nvs = Values(m)\nprint(vs)", "vs"));
+        Assert.Equal("List<int>", TypeOf("data Box<T>(T Value)\n\nList<T> Open<T>(T | Box<T> x) => List<T>()\n\nys = Open(Box<int>(1))\nprint(ys)", "ys"));
+        Assert.Equal("List<string>", TypeOf("List<T> Call<T>(T | (T) => int f) => List<T>()\n\n(string) => int g = s => 1\nys = Call(g)\nprint(ys)", "ys"));
+
+        // "Bind T = int in both": a union with a type parameter that names no case of the call beyond its success unwraps the call, and a
+        // literal binds the type parameter to its own type, as at a bare one (T27); a literal of a case the union names gives it nothing, as a
+        // variable of that type does, and a variable of a union gives its own type (assumed, section 5)
+        var f = "List<T> F<T>(T | string x) => List<T>()\n\n";
+        Clean(find + f + "int | NotFound | Rejected Run() {\n    List<int> ys = F(Find(1))\n    print(ys)\n    return 1\n}\n\nr = Run() else {\n    else => 0\n}\nprint(r)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 17)], Errors(find + f + "int | NotFound | Rejected Run() {\n    List<string> ys = F(Find(1))\n    print(ys)\n    return 1\n}\n\nr = Run() else {\n    else => 0\n}\nprint(r)"));
+        Assert.Equal("List<int>", TypeOf(f + "ys = F(5)\nprint(ys)", "ys"));
+        Assert.Equal("List<long>", TypeOf(f + "ys = F(5L)\nprint(ys)", "ys"));
+        Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors(f + "ys = F(\"a\")\nprint(ys)"));
+        Assert.Equal([(ErrorIds.CannotInfer, 4)], Errors(f + "string s = \"a\"\nys = F(s)\nprint(ys)"));
+        Assert.Equal("List<int | bool>", TypeOf(f + "int | bool got = 1\nys = F(got)\nprint(ys)", "ys"));
+
+        // two type parameters in one union are cannot-infer, and are written at the call (assumed, section 5)
+        Assert.Equal([(ErrorIds.CannotInfer, 18)], Errors(find + "void G<T, U>(T | U | NotFound x) {\n    print(\"g\")\n}\n\nG(Find(1))"));
+    }
+
+    [Fact]
+    public void A_list_literal_of_calls_runs_the_function_whose_item_type_keeps_the_cases()
+    {
+        // O4 with F13 (the owner, 2026-11-01, "The union one"): a list literal of calls is read as such a call, so the function whose item type
+        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly item by item, so a value beside
+        // the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
+        // with a widening are ambiguous (assumed, section 5)
+        var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
+        var show = "int Show(List<int> xs) => 1\n\nstring Show(List<int | NotFound> xs) => \"union\"\n\n";
+        static string Run(string statement) => "int | NotFound Run() {\n    " + statement + "\n    print(v)\n    return 1\n}\n\nr = Run() else {\n    else => 0\n}\nprint(r)";
+        Clean(find + show + Run("string v = Show([Find(1)])"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 15)], Errors(find + show + Run("int v = Show([Find(1)])")));
+        Clean(find + show + Run("string v = Show([Find(1), Find(2)])"));
+        Clean(find + show + Run("int v = Show([Find(1), 2])"));
+        Clean(find + show + "List<int> items = [1, 2]\nint v = Show(items)\nprint(v)");
+        Clean(find + "int Show(List<int> xs) => 1\n\nstring Show(List<long | NotFound> xs) => \"union\"\n\n" + Run("int v = Show([Find(1)])"));
+        Assert.Equal([(ErrorIds.AmbiguousCall, 15)], Errors(find + "int Show(List<long | NotFound> xs) => 1\n\nstring Show(List<double | NotFound> xs) => \"union\"\n\n" + Run("v = Show([Find(1)])")));
     }
 
     [Fact]
@@ -3498,13 +3586,12 @@ public sealed class CheckerTests
     [Fact]
     public void A_type_argument_with_no_kind_is_not_supported_at_the_call_that_writes_it()
     {
-        // T33: `void` has no value of `TypeKind`, so a reader called with it, or a function that passes it on to one, is not supported
-        // at the call that writes it, where the checker takes it in any other generic call
+        // T33 with T17, T19: `void` has no value of `TypeKind`, and as any type argument it is not supported at the call that writes it, so a
+        // reader called with it, or a function that passes it on to one, gets that one line and no copy
         var reader = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\n";
-        Assert.Equal(["7: `void` as a type argument of `Only`, which reads its type, `void` having no kind of `TypeKind` (T33)"], NotSupported(reader + "Only<void>()"));
-        Assert.Equal(["11: `void` as a type argument of `Outer`, which reads its type, `void` having no kind of `TypeKind` (T33)"],
-            NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
-        Clean(reader + "void Other<T>() {\n    print(1)\n}\n\nOther<void>()\nOnly<int>()");
+        Assert.Equal(["7: `void` as a type argument of `Only` (T17, T19)"], NotSupported(reader + "Only<void>()"));
+        Assert.Equal(["11: `void` as a type argument of `Outer` (T17, T19)"], NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
+        Clean(reader + "Only<int>()");
     }
 
     [Fact]
