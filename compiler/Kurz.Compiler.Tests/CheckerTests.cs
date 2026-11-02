@@ -2873,7 +2873,16 @@ public sealed class CheckerTests
         Clean(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(Node(0, null), [1])\nif h.Head != null {\n    h.Xs[h.Head.V] = h.Head.V\n}\nprint(h.Xs)");
         Clean(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(Node(0, null), Map<int, int>())\nif h.Head != null {\n    h.M[h.Head.V] = h.Head.V\n}\nprint(h.M)");
         Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 14)], Errors(node + "class Holder(mut Node? Head) {\n    pub int Reset() {\n        Head = null\n        return 0\n    }\n}\n\nh = Holder(Node(0, null))\nmut xs = [1, 2]\nmut m = Map<int, int>()\nif h.Head != null {\n    xs[h.Head.V] = h.Reset()\n    m[h.Head.V] = h.Reset()\n}\nprint(xs)"));
+        // and each of those assignments does end the narrowing, after its value: of a field by its name, of a field through the
+        // instance, of a variable, of a data value's path, of an item and of an entry through an instance
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(mut Node? Head, mut int N) {\n    pub int Get() {\n        if Head != null {\n            N = 1\n            return Head.V\n        }\n\n        return 0\n    }\n}\n\nprint(Holder(null, 0).Get())"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut int N)\n\nh = Holder(null, 0)\nif h.Head != null {\n    h.N = 1\n    print(h.Head.V)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(node + "class Holder(mut Node? Head)\n\nh = Holder(null)\nmut x = 0\nif h.Head != null {\n    x = 1\n    print(h.Head.V)\n}\nprint(x)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(node + "data P(int X)\nclass Holder(mut Node? Head)\n\nh = Holder(null)\nmut p = P(0)\nif h.Head != null {\n    p.X = 1\n    print(h.Head.V)\n}\nprint(p)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut List<int> Xs)\n\nh = Holder(null, [1])\nif h.Head != null {\n    h.Xs[0] = 2\n    print(h.Head.V)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(node + "class Holder(mut Node? Head, mut Map<int, int> M)\n\nh = Holder(null, Map<int, int>())\nif h.Head != null {\n    h.M[0] = 2\n    print(h.Head.V)\n}"));
         // and the assignment of a field without `mut`, which is refused, narrows nothing, by the field's name or through the instance
+        // *(assumed)*
         Assert.Equal([(ErrorIds.AssignImmutable, 5), (ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(Node? Head)\n\nh = Holder(null)\nh.Head = Node(1, null)\nprint(h.Head.V)"));
         Assert.Equal([(ErrorIds.AssignImmutable, 4), (ErrorIds.NullableUnchecked, 5)], Errors(node + "class Holder(Node? Head) {\n    pub int Get() {\n        Head = Node(1, null)\n        return Head.V\n    }\n}\n\nprint(Holder(null).Get())"));
     }

@@ -1774,14 +1774,15 @@ round can ask about it by the rule's id.
   value that holds it, assigns the field and writes into what the field holds too, by the field's
   name inside a method as well, while an assignment of the captured variable itself, or into a
   `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, "Both allowed";
-  through a `data` value, assumed).
+  through a `data` value, assumed; a write into what the field holds, `b.Xs[0] = 2` and
+  `b.Xs.Add(2)`, assumed, as M5's proposed reading of K2 for paths takes it outside a lambda).
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
   narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
-  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment the
-  checker refuses narrows nothing.
+  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
+  field that the checker refuses narrows nothing *(assumed)*.
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.
