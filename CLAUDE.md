@@ -365,6 +365,19 @@ Gate: review rule "rules for sessions".
   Gate: `unicode-tables`, which ends PARTLY, and so red, where a file cannot be fetched; that the tool's
   version is still the one Rust's stable release pins is read by nobody but a reader: HAZARD (#143).
 
+- **A check that lets a name without a variable pass reads what else the name can be.** Inside a
+  method a field of the instance stands by its name alone (K7), and no variable carries it, so a
+  check that returns on a name the lookup of variables does not find, because the name's own
+  reading reports one that is nothing, lets the field through unchecked; the emitter then finds no
+  variable for it. The `mut` argument reached `main` so with pull request 181: a field passed as
+  `mut` in its method was neither refused without `mut` nor given the field's place, and the build
+  ended in the compiler's own error, "the checker did not read the name"
+  ([knowledge/a-name-without-a-variable-may-be-a-field.md](knowledge/a-name-without-a-variable-may-be-a-field.md)).
+  Gate: `compiler-tests` (`CheckerTests.A_mut_parameter_takes_a_mut_variable_marked_mut_at_the_call`
+  for the refusals, `ListTests.A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place`
+  for the field's place) for the `mut` argument; another check that lets such a name pass: review
+  rule "compiler".
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
