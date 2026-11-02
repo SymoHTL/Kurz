@@ -2565,7 +2565,9 @@ public sealed partial class Emitter
     /// before the argument and held without a count of its own while the argument is made and while the search runs: an argument that
     /// changes it is the checker's <c>changed-while-held</c> (M7). A list of one-byte items, whose equality is that of their bits, is
     /// searched by the standard library's <c>Find</c>, as a string is (<see cref="EmitStringSearch"/>), so that a run is found in linear
-    /// time; a run of other items is compared at each position in turn, as Rust compares a slice's <c>windows</c>.
+    /// time; a run of other items is compared at each position in turn, as Rust compares a slice's <c>windows</c>. An item of an integer
+    /// type of 2, 4 or 8 bytes, or a <c>char</c>, is searched for by the standard library's search of its width (<see cref="ItemSearch"/>)
+    /// in a list of at least the 64 bytes of a step of its four vectors, and in a shorter list as an item of another type is.
     /// </summary>
     private string EmitListIndexOf(CallExpression c, bool run)
     {
@@ -2596,6 +2598,28 @@ public sealed partial class Emitter
             return Position(fn.Value($"trunc i64 {found} to i32"));
         }
 
+        if (!run && ItemSearch(list.Element) is var (search, width))
+        {
+            // fewer items than a step of four vectors holds are compared one at a time, without the call of the search
+            var result = fn.Alloca("i32", "found");
+            var few = fn.Label("few");
+            var many = fn.Label("many");
+            var searched = fn.Label("searched");
+            var count = ListCount(source);
+            fn.CondBranch(fn.Value($"icmp slt i32 {count}, {Number(64 / width)}"), few, many);
+            fn.Block(few);
+            var loop = Helper($"indexof.{Lower.Mangle(list)}", "i32", ["ptr", Ir(list.Element)], () => IndexOfBody(list, c.Line));
+            fn.Emit($"store i32 {fn.Value($"call i32 {loop}(ptr {source}, {Ir(list.Element)} {value})")}, ptr {result}");
+            fn.Branch(searched);
+            fn.Block(many);
+            var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {source})");
+            var found = fn.Value($"call i64 {StdFunction(search)}(ptr {items}, i64 {fn.Value($"sext i32 {count} to i64")}, {Ir(list.Element)} {value})");
+            fn.Emit($"store i32 {fn.Value($"trunc i64 {found} to i32")}, ptr {result}");
+            fn.Branch(searched);
+            fn.Block(searched);
+            return Position(fn.Value($"load i32, ptr {result}"));
+        }
+
         var parameter = run ? "ptr" : Ir(list.Element);
         var name = Helper($"indexof.{(run ? "run." : "")}{Lower.Mangle(list)}", "i32", ["ptr", parameter], () =>
         {
@@ -2610,6 +2634,18 @@ public sealed partial class Emitter
         });
         return Position(fn.Value($"call i32 {name}(ptr {source}, {parameter} {value})"));
     }
+
+    /// <summary>
+    /// The standard library's search of a list's items of 2, 4 or 8 bytes for <c>IndexOf(item)</c>, whose <c>==</c> compares their
+    /// bits, with the width of an item, or null for an item of another type, which <see cref="IndexOfBody"/> compares.
+    /// </summary>
+    private static (string Name, int Width)? ItemSearch(KurzType element) => element switch
+    {
+        PrimitiveType { Kind: Primitive.Short or Primitive.UShort } => ("FindShort", 2),
+        PrimitiveType { Kind: Primitive.Int or Primitive.UInt or Primitive.Char } => ("FindInt", 4),
+        PrimitiveType { Kind: Primitive.Long or Primitive.ULong } => ("FindLong", 8),
+        _ => null,
+    };
 
     /// <summary>The helper of <c>IndexOf(item)</c>: the list in <c>%a0</c>, the item in <c>%a1</c>; the position of the first equal item, or -1.</summary>
     private void IndexOfBody(ListType list, int line)
