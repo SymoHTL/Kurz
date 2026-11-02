@@ -842,9 +842,10 @@ Times() else {
 ### S16 (decided, §12) The lines of a file
 
 `for line in f.Lines() { }` runs its block once for each line of a file `File.Open` opened, pulling the
-lines one at a time, as Rust's `BufRead::lines()` and C#'s `File.ReadLines` give them; `line` is a
-`string`. `\n` and `\r\n` end a line and are not part of it, the last line needs no line break, and a
-final `\n` gives no empty line after it (§12, the owner, 2026-11-01, "Lazy, `for line in ...`",
+lines one at a time, as Rust's `BufRead::lines()` and C#'s `File.ReadLines` pull them; `line` is a
+`string`. `\n` and `\r\n` end a line and are not part of it, as Rust's rule has it, where C# ends a
+line at a lone `\r` too; the last line needs no line break, and a final `\n` gives no empty line after
+it (§12, the owner, 2026-11-01, "Lazy, `for line in ...`",
 "`f.Lines()` on an open File" and "As Rust"). A lone `\r` stays in its line, and an empty file gives no
 line *(assumed, §12)*.
 
@@ -940,6 +941,39 @@ Show() else {
 }
 ```
 
+`Close` gives up the bytes the buffer holds, so that a later `Lines()` or `Read` takes none of them
+and gets the error of a closed file (S5) *(proposed)*. A line longer than the buffer is read whole,
+and one of more bytes than the largest `int` ends the process with `allocation-failed`, as a string
+past it does *(assumed, §12)*. The loop keeps the `File` its collection gave when it started: an
+assignment to the variable in the block changes the variable, not what the loop pulls *(proposed)*.
+
+Case: [system/lines-keeps-its-file.kz](../corpus/system/lines-keeps-its-file.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-keeps-a.txt", "a1\na2\n".Bytes)
+    File.WriteAll("lines-keeps-b.txt", "b1\n".Bytes)
+    mut f = File.Open("lines-keeps-a.txt")
+    g = File.Open("lines-keeps-b.txt")
+    File.Delete("lines-keeps-a.txt")
+    File.Delete("lines-keeps-b.txt")
+    // the loop keeps the `File` it started with: the assignment changes the variable, not what the loop pulls
+    for line in f.Lines() {
+        print(line)
+        f = g
+    }
+
+    // after the loop the variable holds the other file
+    for line in f.Lines() {
+        print(line)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
 A failure part-way through the read ends the loop and leaves the function through it, as a case of a
 call does (O2, O3): a line that is not UTF-8 with the case `InvalidUtf8`, as `string.FromUtf8` gives it
 (T15), and a failed read with an `IoError` (S1). A postfix `else` after the loop's block, on the line of
@@ -947,7 +981,7 @@ its closing brace, handles the cases it names, as after a call (O5), and the pro
 loop; top-level code, which has no caller, writes it (O9) (§12, the owner, 2026-11-01, "As Rust" and
 "Unwrap like a call"). The `At` of `InvalidUtf8` is the position in the line, and the line's bytes are
 taken, so that a later loop goes on after them; an `IoError` in the middle of a line gives no part of it
-*(assumed, §12)*.
+*(assumed, §12)*, and the part read is taken as well *(proposed)*.
 
 Case: [system/lines-invalid-utf8.kz](../corpus/system/lines-invalid-utf8.kz)
 ```kurz
@@ -1076,7 +1110,7 @@ Case: [system/lines-top-level.kz](../corpus/system/lines-top-level.kz)
 f = File.Open("lines-top-level.txt") else {
     IoError => throw
 }
-// top-level code has no caller: the loop's failures are handled in an `else` after it
+// top-level code has no caller: the loop's failures must be handled in an `else` after it, which this loop lacks
 for line in f.Lines() {
     print(line)
 }
@@ -1084,8 +1118,13 @@ for line in f.Lines() {
 
 `f.Lines()` stands as the collection of a `for` loop alone and has no type name: anywhere else it is
 text no rule gives a meaning, `syntax` (E4) (§12, the owner, 2026-11-01, "Loop source only";
-*(assumed, §12: the id)*). An `else` after a loop whose collection fails with no case names cases the
-collection cannot give, `type-mismatch`, as an arm of O5's that names no case of the call *(assumed, §12)*.
+*(proposed: the id)*). An arm of the `else` that names a case the collection cannot give is
+`type-mismatch` at the arm, as an arm of O5's that names no case of the call *(proposed)*, and after a
+loop over a list, a range or a map, which fails with no case, every such arm is *(proposed)*. An `else` with no
+arms there is `unreachable-arm` at the line of the `else`, as an `else` arm there is (§5, the owner,
+2026-11-02). Two names, `for i, line in f.Lines()`, are `type-mismatch` at the loop's line, as over a
+list (C6) *(proposed)*. An arm of the `else` stands after the loop: a `break` or `continue` in it
+belongs to a loop around the loop, and with none it is `break-outside-loop` (C7) *(proposed)*.
 
 Case: [system/lines-not-a-value.kz](../corpus/system/lines-not-a-value.kz)
 ```kurz
@@ -1108,8 +1147,48 @@ for x in xs {
 }
 ```
 
+Case: [system/lines-else-empty-on-list.kz](../corpus/system/lines-else-empty-on-list.kz)
+```kurz
+// an `else` with no arms after a loop whose collection fails with no case: nothing can reach it
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+}
+```
+
+Case: [system/lines-two-names.kz](../corpus/system/lines-two-names.kz)
+```kurz
+// two names walk the entries of a map, and a file's lines are no map
+void Run(File f) {
+    for i, line in f.Lines() {
+        print(line)
+    } else {
+        IoError e => print(e)
+        InvalidUtf8 u => print(u)
+    }
+}
+
+print(1)
+```
+
+Case: [system/lines-break-in-arm.kz](../corpus/system/lines-break-in-arm.kz)
+```kurz
+// an arm of the `else` stands after the loop: its `break` belongs to a loop around the loop, and there is none
+void | IoError Run(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => break
+    }
+}
+
+print(1)
+```
+
 A pull takes a lock in the `File`, so that two holders that pull lines at once each take whole lines
-(§12, the owner, 2026-11-01, "Lock per pull").
+(§12, the owner, 2026-11-01, "Lock per pull"), and a `Read` takes it while it takes the buffered bytes
+*(proposed)*.
 
 No case: a case runs one actor, and two holders that pull at once need two.
 

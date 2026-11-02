@@ -2678,6 +2678,26 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
+        if (variable is null && members.Count == 0 && ImplicitField(name.Name) is { } field)
+        {
+            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is
+            if (CapturedRoot(name) is { } captor)
+            {
+                Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{captor}` and cannot pass its field `{name.Name}` as `mut` (F11)");
+            }
+            else if (!field.Mut)
+            {
+                Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` is a field without `mut` and cannot be passed as `mut` (M7, K1)");
+            }
+            else if (paths.Contains(name.Name))
+            {
+                Report(ErrorIds.MutAtCall, a.Line, $"`{name.Name}` is passed as `mut` twice (M7)");
+            }
+
+            paths.Add(name.Name);
+            return;
+        }
+
         if (variable is null || Types.IsError(variable.Type))
         {
             return;

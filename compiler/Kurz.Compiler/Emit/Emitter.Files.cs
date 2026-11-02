@@ -731,7 +731,8 @@ public sealed partial class Emitter
         fn.Emit($"store i1 true, ptr {ended}");
         fn.Branch(line);
 
-        // the line: its bytes without a `\r` in front of the `\n` that ended it, as a string, which an empty line needs no block for
+        // the line: its bytes without a `\r` in front of the `\n` that ended it, as a string, which an empty line needs no block for: a
+        // gathered list is null until a piece adds a byte, since `BytesReserve` gives null for a list without a block and 0 more bytes
         fn.Block(line);
         var block = fn.Value($"load ptr, ptr {gathered}");
         var some = fn.Label("some");
