@@ -403,9 +403,9 @@ the program sets no other time, `DefaultBound` being the one definition of the 5
 `SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
 `poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
 call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
-once the addresses are known, after the lookup of a name, which it does not bound (section 14 holds that open),
-and holds over every address tried *(assumed: one bound over the addresses of a name; its cost is that a first
-address that never answers spends the whole bound, and the later addresses are not tried)*. A stream `Connect`
+once the addresses are known, after the lookup of a name, which it does not bound, as Rust's `connect` leaves
+`getaddrinfo`, and holds over every address tried, one bound over the addresses of a name, whose cost is that a
+first address that never answers spends the whole bound, and the later addresses are not tried (section 12). A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
 which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,

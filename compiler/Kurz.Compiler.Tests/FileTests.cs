@@ -905,13 +905,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_connect_to_a_name_ends_within_one_bound_over_its_addresses()
     {
-        // S9 (assumed: one bound shared by every address a name gives; its cost is that a first address that never answers spends the
-        // whole bound, and the later addresses are not tried): a lookup that asks for every type of socket gives `127.1` three times
-        // (a stream, a datagram and a raw socket), each a connection to the full queue; the call ends with the one bound, 500 ms, not
-        // three times it. What this shows is the call's end, not how the bound is shared: where the first address runs out of time, the
-        // stop after it alone, or the shared bound alone, ends the call as the two together do, so a bound for each address with the
-        // stop is not told apart here; it differs only where an earlier address fails in another way after it spent part of the time,
-        // and no case makes one fail so
+        // S9 (section 12, the owner, 2026-11-02: one bound shared by every address a name gives; its cost is that a first address that
+        // never answers spends the whole bound, and the later addresses are not tried): a lookup that asks for every type of socket
+        // gives `127.1` three times (a stream, a datagram and a raw socket), each a connection to the full queue; the call ends with
+        // the one bound, 500 ms, not three times it. What this shows is the call's end, not how the bound is shared: where the first
+        // address runs out of time, the stop after it alone, or the shared bound alone, ends the call as the two together do, so a
+        // bound for each address with the stop is not told apart here; it differs only where an earlier address fails in another way
+        // after it spent part of the time, and no case makes one fail so
         const string text = """
             void | IoError Shared() {
                 listener = TcpListener.Bind("127.0.0.1:0")
@@ -945,9 +945,10 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Eagain_is_timed_out_on_a_stream_s_read_and_write_and_a_listener_s_accept_alone()
     {
-        // S9 (assumed): a call on a blocking socket whose time ran out returns `EAGAIN` (11), which a stream's read and write and a
-        // listener's `Accept` give as `TimedOut` with the system's number; every other `EAGAIN`, a file's read and write here, keeps
-        // Rust's `WouldBlock`: through a runtime whose every read, write and `accept` gives it
+        // S9: a call on a blocking socket whose time ran out returns `EAGAIN` (11), which a stream's read and write give as `TimedOut`
+        // with the system's number (section 12, the owner, 2026-11-02), and a listener's `Accept` too (assumed); every other `EAGAIN`,
+        // a file's read and write here, keeps Rust's `WouldBlock` (assumed): through a runtime whose every read, write and `accept`
+        // gives it
         const string text = """
             void | IoError Again() {
                 created = File.Create("again.txt")

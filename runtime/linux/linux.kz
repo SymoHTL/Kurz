@@ -2513,8 +2513,8 @@ long Attempt(byte* address, int length, bool listening, long deadline) {
 // that binds or connects, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped. The port is
 // written into each address in the order of the network, its high byte first. A connection is bounded by
 // `nanoseconds` from the moment its addresses are known, after the lookup of a name, which the bound does
-// not cover (section 14 holds that open), over every address tried: once it runs out, -4100 ends the call
-// with no other address tried.
+// not cover, as Rust's `connect` leaves `getaddrinfo` (section 12), over every address tried: once it runs
+// out, -4100 ends the call with no other address tried.
 long EachAddress(byte* text, bool listening, long nanoseconds) {
     mut long result = -12
     raw {
