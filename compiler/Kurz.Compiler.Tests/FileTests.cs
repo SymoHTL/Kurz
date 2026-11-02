@@ -226,7 +226,8 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
-    private const string InFlightFiles = Armed + """
+    /// <summary>A program's check of whether a descriptor is open, by <c>fcntl</c>'s <c>F_GETFD</c>, under the grants <c>raw</c> and <c>native</c>.</summary>
+    private const string DescriptorOpen = """
         extern "C" {
             int fcntl(int fd, int command, ...)
         }
@@ -241,6 +242,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return open
         }
 
+        """;
+
+    private const string InFlightFiles = Armed + DescriptorOpen + """
         void | IoError | InvalidUtf8 Race() {
             File.WriteAll("in-flight.txt", "ab\ncd\n".Bytes)
             f = File.Open("in-flight.txt")
@@ -296,7 +300,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(InFlightFiles, "in-flight-files-open", ["2", "true", "1", "ab", "cd", "3"], grants: ["raw", "native"]);
     }
 
-    private const string InFlightSockets = Armed + """
+    private const string InFlightSockets = Armed + DescriptorOpen + """
         void | IoError Take(TcpListener l) {
             s = l.Accept()
             print("accepted")
@@ -318,6 +322,8 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 IoError e => print(e)
             }
 
+            // the listener's, the program's first descriptor
+            print(Open(3))
             Take(listener) else {
                 IoError e => print(e.Code)
             }
@@ -377,13 +383,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_close_of_a_socket_shuts_it_down_so_a_call_in_flight_on_it_ends_with_the_closed_handle_s_error()
     {
         // S5, S9: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is released,
-        // so that the port binds again; a read in flight takes the bytes the socket holds, and one that finds none, as a write, ends with
-        // that error; a setter in flight sets its time; each next call is `EBADF`
-        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "9", "true", "3", "-9", "9", "-9", "9", "9"], ["raw"]);
+        // which `F_GETFD` shows; the port binds again, which the shutdown frees; a read in flight takes the bytes the socket holds, and one
+        // that finds none, as a write, ends with that error; a setter in flight sets its time; each next call is `EBADF`
+        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "false", "9", "true", "3", "-9", "9", "-9", "9", "9"], ["raw", "native"]);
 
-        // the positive control: built as it is, the second accept takes the second connection, the listener holds its port, the second
-        // read takes the fourth byte, and the idle read runs out of its time
-        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "accepted", "98", "3", "1", "-11"], grants: ["raw"]);
+        // the positive control: built as it is, the second accept takes the second connection, the listener holds its descriptor and its
+        // port, the second read takes the fourth byte, and the idle read runs out of its time
+        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11"], grants: ["raw", "native"]);
     }
 
     private const string InFlightShutdown = Armed + """
