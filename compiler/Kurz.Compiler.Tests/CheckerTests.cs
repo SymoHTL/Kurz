@@ -3208,9 +3208,6 @@ public sealed class CheckerTests
         // K18, K20: a constant of each type the checker reads, and one that reads a `static` field of its class declared above it, by its
         // name and as `T.F`; read by its name inside the class, in a method and a lambda, and as `T.F` outside it
         Clean("enum Kind { A, B }\n\nclass C(int V) {\n    pub static int Step = 2\n    static int Four = Step * 2\n    pub static int Eight = C.Four * 2\n    pub static string Name = \"c\"\n    pub static double Half = 0.5\n    pub static decimal Price = 1\n    pub static Kind K = Kind.B\n    pub static char Ch = 'A'\n    pub static bool Yes = true\n    pub static duration D = 5s\n\n    pub int Get() {\n        f = () => Step + V\n        return f() + Four\n    }\n}\n\nprint(C(1).Get() + C.Eight)\nprint(\"{C.Name} {C.Half} {C.Price} {C.K} {C.Ch} {C.Yes} {C.D}\")");
-        // K20: a `static` field declared below, and the field itself, are no names its initial value reads
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = B\n    pub static int B = 2\n}\n\nprint(C.A)"));
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int V) {\n    pub static int A = A + 1\n}\n\nprint(C.A)"));
         // a read outside an initial value is a value of its type and no constant, as C#'s `static readonly`: no literal's reach (T7),
         // and no constant zero (T25)
         Assert.Equal([(ErrorIds.NarrowingConversion, 5)], Errors("class C(int V) {\n    pub static int A = 2\n}\n\nbyte b = C.A\nprint(b)"));
@@ -3240,8 +3237,66 @@ public sealed class CheckerTests
         Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
     }
 
+    [Fact]
+    public void The_initial_value_of_a_static_field_reads_any_static_field_and_a_cycle_among_them_is_static_cycle()
+    {
+        // K20 (the owner, 2026-11-02, "any class's static field, in any order, as Rust"): a field declared below, and one of a class
+        // declared below that reads a field of the first, are the constants they hold, each read first; the field that reads them goes on
+        // reading its own class's names after the other class's value
+        Clean("class C(int V) {\n    pub static int A = D.E * B\n    pub static int B = 2\n}\n\nclass D(int V) {\n    pub static int E = C.B + 1\n}\n\nprint(C.A)");
+        Clean("class C(int V) {\n    pub static int A = D.E * B\n    pub static int B = 2\n}\n\nclass D(int V) {\n    pub static int E = 3\n}\n\nprint(C.A)");
+        // a read inside an initial value is the constant the field holds, of the field's type: a constant division by zero (T25), a
+        // constant overflow (T6), and an `int` that does not go into a `byte` as an integer literal would (T7)
+        Assert.Equal([(ErrorIds.ConstantDivideByZero, 2)], Errors("class C(int V) {\n    pub static int Q = 1 / Zero\n    pub static int Zero = 0\n}\n\nprint(C.Q)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("class C(int V) {\n    pub static int Q = Big * 2\n    pub static int Big = 2000000000\n}\n\nprint(C.Q)"));
+        Assert.Equal([(ErrorIds.NarrowingConversion, 2)], Errors("class C(int V) {\n    pub static byte B = D.Small\n}\n\nclass D(int V) {\n    pub static int Small = 100\n}\n\nprint(C.B)"));
+
+        // a cycle is reported once, at its field that stands first in the file, naming the fields from there in the order they read each
+        // other: a field that reads itself, two fields of two classes, three fields that a field above them reads, which carries nothing
+        // more (E1), and a cycle whose first field in the file is read after the other
+        static List<string> Cycles(string program)
+        {
+            var (diagnostics, _) = Check(program);
+            Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.StaticCycle, d.Id));
+            return diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList();
+        }
+
+        const string Said = ": the initial values of `static` fields read each other in a cycle (K20)";
+        Assert.Equal(["2: `C.A` reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int A = A + 1\n}\n\nprint(C.A)"));
+        Assert.Equal(["2: `C.A` reads `D.B`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int A = D.B + 1\n}\n\nclass D(int V) {\n    pub static int B = C.A * 2\n}\n\nprint(C.A)"));
+        Assert.Equal(["3: `C.A` reads `C.B`, which reads `C.D`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int Z = A + 1\n    pub static int A = B + 1\n    pub static int B = D + 1\n    pub static int D = A + 1\n}\n\nprint(C.Z)"));
+        Assert.Equal(["3: `C.A` reads `C.B`, which reads `C.A`" + Said], Cycles("class C(int V) {\n    pub static int Z = B + 1\n    pub static int A = B * 2\n    pub static int B = A + 1\n}\n\nprint(C.Z)"));
+        // two cycles through one field are one error, the second reaching a field the first refused (E1); two apart are one each
+        Assert.Equal([(ErrorIds.StaticCycle, 2)], Errors("class C(int V) {\n    pub static int A = B + E\n    pub static int B = A + 1\n    pub static int E = A + 2\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticCycle, 2), (ErrorIds.StaticCycle, 7)], Errors("class C(int V) {\n    pub static int B = A + 1\n    pub static int A = B + 1\n}\n\nclass D(int V) {\n    pub static int X = Y\n    pub static int Y = X\n}\n\nprint(1)"));
+        // a cycle that closes on a field a reported cycle refused, the one under way or one read before it, adds no error, in any order (E1)
+        string[] shared = ["    pub static int P = Q", "    pub static int Q = R + P", "    pub static int R = Q"];
+        int[][] orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        foreach (var order in orders)
+        {
+            var program = "class C(int V) {\n" + string.Join("\n", order.Select(i => shared[i])) + "\n}\n\nprint(1)";
+            Assert.Equal([ErrorIds.StaticCycle], Errors(program).Select(e => e.Id));
+        }
+
+        Assert.Equal([(ErrorIds.StaticCycle, 3)], Errors("class C(int V) {\n    pub static int X = Y\n    pub static int Y = Z\n    pub static int Z = Y + W\n    pub static int W = X\n}\n\nprint(1)"));
+        // a field that reads one whose initial value is no constant carries nothing beyond that field's `not supported` (E1)
+        Assert.StartsWith("4: ", Assert.Single(NotSupported("int Seven() => 7\n\nclass C(int V) {\n    pub static int X = Seven()\n    pub static int Y = X + 1\n}\n\nprint(C.Y)")));
+    }
+
+    [Fact]
+    public void A_static_method_named_without_a_call_is_a_method_as_a_value()
+    {
+        // F11: a method as a value stays unread, through its class and by its name inside it; K19's `static-mismatch` is for a method of
+        // an instance where no instance is (the theory below)
+        Assert.Equal(["5: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub static int Make() => 1\n}\n\nprint(C.Make)"));
+        Assert.Equal(["3: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub static int Make() => 1\n    pub static int Bad() => Make\n}\n\nprint(C.Bad())"));
+        Assert.Equal(["3: a method as a value, named without a call (K7, F11)"], NotSupported("class C(int V) {\n    pub int Get() => V\n    pub int Bad() => Get\n}\n\nprint(C(1).Bad())"));
+    }
+
     [Theory]
     [InlineData("class C(int V) {\n    pub int Get() => V\n}\n\nprint(C.Get())", "5: `Get` is a method of an instance of `C`, not of the class: call it on an instance (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n}\n\nprint(C.Get)", "5: `Get` is a method of an instance of `C`, not of the class: call it on an instance (K7, K19)")]
+    [InlineData("class C(int V) {\n    pub int Get() => V\n    pub static int Bad() => Get\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `Get` is a method of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V)\n\nprint(C.V)", "3: `V` is a field of an instance of `C`, not of the class: read it from an instance (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static C Make() => C(1)\n}\n\nc = C(2)\nprint(c.Make().V)", "6: `Make` is a `static` method of `C`: call it as `C.Make(...)` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static int Step = 2\n}\n\nc = C(1)\nprint(c.Step)", "6: `Step` is a `static` field of `C`: read it as `C.Step` (K7, K19)")]

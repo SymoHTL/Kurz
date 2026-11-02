@@ -472,8 +472,14 @@ public sealed partial class Checker
             return Typed.Error; // K19
         }
 
-        if (ImplicitMethods(n.Name) is not null)
+        if (ImplicitMethods(n.Name) is { } methods)
         {
+            if (InStaticMember() && !methods.Any(f => f.IsStatic))
+            {
+                InstanceMethodInStatic(n.Name, n.Line); // K19, with a call or without one
+                return Typed.Error;
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }

@@ -263,63 +263,96 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K18, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of the same
-    /// class declared above counts as the constant it holds (K20); one declared below, or the field itself, is <c>unknown-name</c>, so
-    /// that no order and no cycle exist. An initial value that is no constant is computed at the field's first read (section 4),
-    /// whose open items of section 14 leave it <c>not supported</c>; a field without one is <c>field-unassigned</c>, since no type has a
-    /// default value (K14).
+    /// K18, K20, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of any
+    /// class, declared above or below, counts as the constant it holds, its own initial value read first, as Rust evaluates a static's
+    /// (<see cref="ReadStaticField"/>): the values are read in the order their reads need, and a cycle among them is
+    /// <c>static-cycle</c>. An initial value that is no constant is computed at the field's first read (section 4), whose open items of
+    /// section 14 leave it <c>not supported</c>; a field without one is <c>field-unassigned</c>, since no type has a default value (K14).
     /// </summary>
     private void CheckStaticFields()
     {
         foreach (var symbol in classDeclared)
         {
-            foreach (var s in symbol.StaticFields.Where(s => !s.Refused))
+            foreach (var s in symbol.StaticFields)
             {
-                if (s.Declaration.Value is not { } value)
-                {
-                    Report(ErrorIds.FieldUnassigned, s.Line, $"the `static` field `{s.Name}` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)");
-                    s.Refused = true;
-                    continue;
-                }
-
-                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = s.Line, Class = symbol, Static = true };
-                var reading = readingConstant;
-                readingConstant = true;
-                initializing = s;
-                var t = CheckExpression(value, s.Declaration.Type is null ? null : s.Type);
-                initializing = null;
-                readingConstant = reading;
-                if (t.IsError)
-                {
-                    s.Refused = true;
-                    continue;
-                }
-
-                if (s.Declaration.Type is null)
-                {
-                    s.Type = t.Type;
-                    JudgeStaticFieldType(s);
-                    if (s.Refused)
-                    {
-                        continue;
-                    }
-                }
-
-                if (t.Constant is null)
-                {
-                    NotSupported(value.Line, $"the initial value of the `static` field `{s.Name}`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)");
-                    s.Refused = true;
-                }
-                else if (!Types.Assignable(t.Type, s.Type))
-                {
-                    ReportMismatch(t.Type, s.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(s.Type)} is required");
-                    s.Refused = true;
-                }
-                else
-                {
-                    s.Value = t.Constant;
-                }
+                CheckStaticField(s);
             }
+        }
+    }
+
+    /// <summary>
+    /// K18, K20: the initial value of one <c>static</c> field, read once, at the top level of the file or from the initial value of
+    /// another field that reads it; the place the reading of that other value stands at is kept and given back.
+    /// </summary>
+    private void CheckStaticField(StaticFieldSymbol s)
+    {
+        if (s.Refused || s.Value is not null || readingStatics.Contains(s))
+        {
+            return;
+        }
+
+        if (s.Declaration.Value is not { } value)
+        {
+            Report(ErrorIds.FieldUnassigned, s.Line, $"the `static` field `{s.Name}` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)");
+            s.Refused = true;
+            return;
+        }
+
+        var outer = (frame, typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth, readingConstant, stateRead, initializing);
+        frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = s.Line, Class = s.Owner, Static = true };
+        (typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth) = (null, false, null, false, 0, 0);
+        (readingConstant, stateRead, initializing) = (true, false, s);
+        readingStatics.Add(s);
+        var t = CheckExpression(value, s.Declaration.Type is null ? null : s.Type);
+        readingStatics.RemoveAt(readingStatics.Count - 1);
+        (frame, typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth, readingConstant, stateRead, initializing) = outer;
+        if (t.IsError)
+        {
+            s.Refused = true; // E1: refused inside its value, a cycle it stands in among it (K20)
+            return;
+        }
+
+        if (s.Declaration.Type is null)
+        {
+            s.Type = t.Type;
+            JudgeStaticFieldType(s);
+            if (s.Refused)
+            {
+                return;
+            }
+        }
+
+        if (t.Constant is null)
+        {
+            NotSupported(value.Line, $"the initial value of the `static` field `{s.Name}`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)");
+            s.Refused = true;
+        }
+        else if (!Types.Assignable(t.Type, s.Type))
+        {
+            ReportMismatch(t.Type, s.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(s.Type)} is required");
+            s.Refused = true;
+        }
+        else
+        {
+            s.Value = t.Constant;
+        }
+    }
+
+    /// <summary>
+    /// K20: a cycle of initial values, each reading the next and the last reading the first, reported once, at the field of the cycle
+    /// that stands first in the file, its message naming the fields from there in the order they read each other; every field of the
+    /// cycle is refused, so that it and a field that reads it carry nothing more (E1).
+    /// </summary>
+    private void ReportStaticCycle(List<StaticFieldSymbol> cycle)
+    {
+        var first = cycle.IndexOf(cycle.MinBy(f => f.Line)!);
+        var names = cycle.Skip(first).Concat(cycle.Take(first)).Select(f => $"`{f.Owner.Name}.{f.Name}`").ToList();
+        var path = string.Concat(names.Skip(1).Select((name, i) => i == 0 ? $" reads {name}" : $", which reads {name}"));
+        var text = names.Count == 1 ? $"{names[0]} reads {names[0]}" : $"{names[0]}{path}, which reads {names[0]}";
+        Report(ErrorIds.StaticCycle, cycle[first].Line, $"{text}: the initial values of `static` fields read each other in a cycle (K20)");
+        foreach (var field in cycle)
+        {
+            field.Refused = true;
         }
     }
 
@@ -470,6 +503,14 @@ public sealed partial class Checker
         return true;
     }
 
+    /// <summary>K19: a method of an instance named through its class, <c>Counter.Next()</c> or <c>Counter.Next</c>.</summary>
+    private void InstanceMethodThroughClass(ClassSymbol symbol, string name, int line) =>
+        Report(ErrorIds.StaticMismatch, line, $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+
+    /// <summary>K19: a method of an instance named alone, with a call or without one, in a <c>static</c> member, which has no instance.</summary>
+    private void InstanceMethodInStatic(string name, int line) =>
+        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
 
@@ -549,32 +590,37 @@ public sealed partial class Checker
     // ---- static members ------------------------------------------------------------------------------
 
     /// <summary>
-    /// K18: a read of a <c>static</c> field, by its name inside the class or as <c>T.F</c>: a value of its type, which the emitter gives
-    /// as the constant the field holds, and no constant itself, as a C# <c>static readonly</c> field is none, but in the initial value of a
-    /// later <c>static</c> field of the same class (K20).
+    /// K18, K20: a read of a <c>static</c> field, by its name inside the class or as <c>T.F</c>. In the initial value of a <c>static</c>
+    /// field it is the constant the field holds, of any class and declared above or below, whose own initial value is read first; a
+    /// field whose initial value is being read closes a cycle, <c>static-cycle</c>. Elsewhere it is a value of its type, which the
+    /// emitter gives as the constant the field holds, and no constant itself, as a C# <c>static readonly</c> field is none.
     /// </summary>
     private Typed ReadStaticField(Expression node, StaticFieldSymbol field)
     {
-        if (field.Refused || Types.IsError(field.Type))
+        if (initializing is not null && !field.Refused)
         {
-            return Typed.Error; // E1: refused at its declaration
-        }
-
-        if (initializing is { } being && ReferenceEquals(being.Owner, field.Owner))
-        {
-            var fields = field.Owner.StaticFields;
-            if (fields.IndexOf(field) >= fields.IndexOf(being))
+            var at = readingStatics.IndexOf(field);
+            if (at >= 0)
             {
-                Report(ErrorIds.UnknownName, node.Line, $"`{field.Name}` is not declared above `{being.Name}`: the initial value of a `static` field reads the `static` fields declared above it (K20, V10)");
+                var cycle = readingStatics.GetRange(at, readingStatics.Count - at);
+                if (!cycle.Any(f => f.Refused))
+                {
+                    ReportStaticCycle(cycle); // a cycle through a field a reported cycle refused is that error's, in any order of the fields (E1)
+                }
+
                 return Typed.Error;
             }
 
-            model.RecordStaticField(node, field);
-            return new Typed(field.Type, field.Value);
+            CheckStaticField(field); // K20: its own initial value first
+        }
+
+        if (field.Refused || Types.IsError(field.Type))
+        {
+            return Typed.Error; // E1: refused at its declaration, or in a cycle
         }
 
         model.RecordStaticField(node, field);
-        return new Typed(field.Type);
+        return initializing is null ? new Typed(field.Type) : new Typed(field.Type, field.Value);
     }
 
     /// <summary>
@@ -600,8 +646,14 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (symbol.Methods.ContainsKey(m.Member))
+        if (symbol.Methods.TryGetValue(m.Member, out var methods))
         {
+            if (!methods.Any(f => f.IsStatic))
+            {
+                InstanceMethodThroughClass(symbol, m.Member, m.Line); // K19, with a call or without one
+                return Typed.Error;
+            }
+
             NotSupported(m.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -624,7 +676,7 @@ public sealed partial class Checker
                 return PickMethod(statics, c, expected, m.Line, out _);
             }
 
-            Report(ErrorIds.StaticMismatch, m.Line, $"`{m.Member}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+            InstanceMethodThroughClass(symbol, m.Member, m.Line);
         }
         else if (symbol.StaticField(m.Member) is not null || symbol.Field(m.Member) is not null)
         {
@@ -747,7 +799,7 @@ public sealed partial class Checker
         var candidates = InStaticMember() ? methods.Where(f => f.IsStatic).ToList() : methods;
         if (candidates.Count == 0)
         {
-            Report(ErrorIds.StaticMismatch, n.Line, $"a `static` member has no instance: `{n.Name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+            InstanceMethodInStatic(n.Name, n.Line);
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

@@ -59,6 +59,7 @@ public sealed partial class Checker
     private bool readingConstant; // F12, R13: a default value or the initial value of state is being read, in which a read of state or of raw memory is no constant
     private bool stateRead; // R13: the value being read as a constant reads state
     private StaticFieldSymbol? initializing; // K18, K20: the `static` field whose initial value is being read
+    private readonly List<StaticFieldSymbol> readingStatics = []; // K20: the `static` fields whose initial values are being read, each reading the next
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
