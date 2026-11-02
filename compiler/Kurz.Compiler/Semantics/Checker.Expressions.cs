@@ -348,6 +348,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.Syntax, hole.Expression.Line, "a call with a `void` success used as a value (O10)");
                 }
+                else if (HoldsVector(t.Type))
+                {
+                    NotSupported(hole.Expression.Line, VectorText);
+                }
                 else if (!HasText(t.Type))
                 {
                     Report(ErrorIds.NoText, hole.Expression.Line, $"{Types.A(t.Type)} has no text to put into a string (A4, A7, A10)");
@@ -528,7 +532,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -542,6 +546,11 @@ public sealed partial class Checker
         if (m.Conditional || InChain(m.Target))
         {
             return CheckChainMember(m); // N5
+        }
+
+        if (CheckIntrinsicMember(m) is { } test)
+        {
+            return test; // R18
         }
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
@@ -1052,6 +1061,13 @@ public sealed partial class Checker
         if ((left.Type is PointerType || right.Type is PointerType) && PointerOperation(b, left, right) is { } pointer)
         {
             return pointer; // R10, R14
+        }
+
+        if ((left.Type is VectorType || right.Type is VectorType) && cls != OperatorClass.Logical)
+        {
+            // R18: C# gives a vector operators on its lanes, which wrap where Kurz's `+` checks (T5); no rule says which Kurz takes
+            NotSupported(b.Line, $"`{Operator(b.Operator)}` on {Types.A(left.Type is VectorType ? left.Type : right.Type)}, as C# has it, which the compiler does not build (R18)");
+            return cls == OperatorClass.Comparison ? new Typed(Types.Bool) : Typed.Error;
         }
 
         var op = Operator(b.Operator);
