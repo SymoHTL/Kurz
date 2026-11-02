@@ -1038,15 +1038,22 @@ fails the build with a text that names it; and on a 64-bit Arm target such an op
 `DOTNET_EnableHWIntrinsic=0` does: the variable `KURZ_INTRINSICS` of the environment set to `0` turns
 off every set beyond the baseline, and `KURZ_INTRINSICS_<SET>`, the name of a class under `X86`
 upper-cased, `KURZ_INTRINSICS_SSE41` for `X86.Sse41`, the class's set and every set whose class derives
-from it; they are read once, with the CPU, in a program that reads the CPU, and a value other than `0`,
+from it, while the variable of a class of the baseline, `X86.X86Base`, `X86.Sse` or `X86.Sse2`, turns
+nothing off, not even the sets whose classes derive from it, as `KURZ_INTRINSICS=0` keeps the baseline,
+where .NET's turns its baseline off too (the owner, 2026-11-02); they are read once, with the CPU, in a program that reads the CPU, and a value other than `0`,
 and a name that names no class, turns nothing off *(assumed: the names and that only `0` acts, said
 back to the owner, as §13 marks them)*. A test of a set the setting turned off is `false`, and a set of
 the build's CPU option that it turned off fails the start check, whose line names the variable after
 the set, `avx2 turned off by KURZ_INTRINSICS_AVX2` (§13, the owner, 2026-11-02); where it names several
 sets, the line is grouped: the sets the CPU lacks first, then one group for each variable that turned
-off sets the CPU has, each such set in the group of the nearest class's variable, the groups apart by
+off sets the CPU has, the groups apart by
 `; `, `error: cpu-lacks-set (x86-64-v4: avx512f, avx512bw; avx2 turned off by KURZ_INTRINSICS_AVX2)`
-(§13, the owner, 2026-11-02). A trace and the line tables name the function a guarded block is compiled
+(§13, the owner, 2026-11-02). In the list of the sets the CPU lacks and in each group the sets stand in
+the order of the start check's table, LLVM's for `native`; the groups stand in the order of their
+variable's class's own set in that table, the group of `KURZ_INTRINSICS` last; and a set that several
+variables turned off stands in the group of the nearest of them: its class's variable, else the
+variable of the nearest class its class derives from, else `KURZ_INTRINSICS` (the owner, 2026-11-02).
+A trace and the line tables name the function a guarded block is compiled
 into after the function it stands in, `<function>.guarded`, `Pick.guarded` for a block in `Pick`, in the
 pattern of a lambda's `main.lambda` (§13, the owner, 2026-11-02).
 
