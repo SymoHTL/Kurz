@@ -1,0 +1,6 @@
+// expect: error intrinsic-unguarded at 6
+// rules: R18
+
+v = Vector128.Create(1, 2, 3, 4)
+// every x86-64 CPU has SSE2, and its intrinsic still stands only under a test or in `raw` (R18)
+print(X86.Sse2.Add(v, v).GetElement(2))
