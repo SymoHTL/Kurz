@@ -1224,7 +1224,11 @@ as at any construction. Passing a type argument grants its reading, whatever pac
 type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
 declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
-"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
+type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
+a generic function lists every outcome any of its copies can give, and a copy that gives one its
+function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
+2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
