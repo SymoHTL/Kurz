@@ -3687,6 +3687,10 @@ public sealed class CheckerTests
     [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
     [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
     [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<weak Owner?, int>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
+    [InlineData("class Owner(string Name)\ndata Tag(string Label, weak Owner? Keeper)\n\nm = Map<Tag, int>()\nprint(m.Count)", "4: a map with keys of type `Tag`: its field `Keeper`: a `weak Owner?` is no key the checker reads (M9)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<List<weak Owner?>, int>()\nprint(m.Count)", "3: a map with keys of type `List<weak Owner?>`: its items: a `weak Owner?` is no key the checker reads (M9)")]
+    [InlineData("class Owner(string Name)\ndata Tag(string Label, weak Owner? Keeper)\n\nprint(Tag(\"x\", null) == Tag(\"x\", null))", "4: `==` on a `Tag`: its field `Keeper`: `==` on a `weak Owner?` is not read (D3, M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\ndata K(Tag Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<Tag?, int>()\nprint(m.Count)", "3: a map with keys of type `Tag?`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<List<Tag>, int>()\nprint(m.Count)", "3: a map with keys of type `List<Tag>`: its items: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
@@ -3729,8 +3733,10 @@ public sealed class CheckerTests
         // method through a reference of a base's type (K7, F9), an arm of a derived class (C4), a key type whose derived class names a `mut`
         // field in its clause (K12), a method that is `extern`, or has type parameters,
         // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
-        // case of a union, whose nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
-        // names a `mut` field, both open (section 14; K8, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
+        // case of a union, whose nullable cases are open (section 14), a `weak` reference as a map's key or in a key type that compares
+        // by content, `weak-key` in the record, and `==` on a `data` value whose field is `weak`, by its target's identity in the record (R3),
+        // `equal by` that names a `weak` field, `equal-by-weak` in the record (K8, R3), a key type that holds a class whose `equal by`
+        // names a `mut` field, open (section 14; K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
         // inside a method among them, and a type declared in the body (K7)
         Assert.Equal([expected], NotSupported(program));
