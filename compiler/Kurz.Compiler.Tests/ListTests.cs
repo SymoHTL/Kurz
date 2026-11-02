@@ -2430,6 +2430,99 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[m: 2]",
     ];
 
+    // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
+    // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
+    // read of a `weak` item through `?[`
+    private const string Weak = """
+        class Owner(string Name) {
+            pub string Text() => Name
+        }
+
+        class Pet(string Name, mut weak Owner? Keeper)
+
+        class Club(mut List<weak Owner?> Members)
+
+        data Tag(string Label, weak Owner? By)
+
+        weak Owner? Remember(weak Owner? w) {
+            return w
+        }
+
+        string NameOf(weak Owner? w) => w?.Name ?? "gone"
+
+        Pet Adopt() {
+            ann = Owner("Ann")
+            return Pet("Rex", ann)
+        }
+
+        o = Owner("Bob")
+        p = Pet("Tom", o)
+        print(NameOf(p.Keeper))
+        lost = Adopt()
+        print(NameOf(lost.Keeper))
+        p.Keeper = Owner("Cy")
+        print(NameOf(p.Keeper))
+        held = Remember(o)
+        print(held?.Name ?? "none")
+        p.Keeper = o
+        if p.Keeper != null {
+            print(p.Keeper.Name)
+        }
+
+        c = Club(List<weak Owner?>())
+        c.Members.Add(o)
+        c.Members.Add(Owner("Eve"))
+        c.Members.Add(null)
+        print(c.Members)
+        for m in c.Members {
+            print(m?.Name ?? "gone")
+        }
+
+        print("{p.Keeper} {c.Members[1]}")
+        List<weak Owner?>? maybe = c.Members
+        print(maybe?[0]?.Name ?? "gone")
+        print(maybe?[1] != null)
+        print("{maybe?[0]} {maybe?[2]}")
+        t = Tag("x", o)
+        print(NameOf(t.By))
+        mut Owner? strong = Owner("Fay")
+        weak Owner? faint = strong
+        print(NameOf(faint))
+        strong = null
+        print(NameOf(faint))
+        print(strong?.Name ?? "freed")
+        mut Owner? gus = Owner("Gus")
+        pg = Pet("Max", gus)
+        Owner? kept = pg.Keeper
+        gus = null
+        print(NameOf(pg.Keeper))
+        print(kept?.Name ?? "freed")
+        """;
+
+    private static readonly string[] WeakPrint =
+    [
+        "Bob",
+        "gone", // R3: `Ann` was freed at the end of `Adopt`, and the block stayed for the weak reference to read
+        "gone", // a temporary, freed at the end of its statement
+        "Bob",
+        "Bob",
+        "[Bob, null, null]", // A4 with R3: the text of what each read gives
+        "Bob",
+        "gone",
+        "gone",
+        "Bob null",
+        "Bob",
+        "false", // R3 with N5: `?[` reads a `weak` item, so the freed `Eve` is null there as in `c.Members[1]`
+        "Bob null",
+        "Bob",
+        "Fay",
+        "gone",
+        "freed",
+        "Gus", // R3: the read `kept` stored holds its target after its other holder let go of it
+        "Gus",
+    ];
+
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
     // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
     // lambda's environment and a list's item, each holding a chain of links
@@ -2902,6 +2995,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
     }
 
     [Fact]
@@ -2986,6 +3080,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
+        // a release under way stands once in the program
+        Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
@@ -3333,25 +3431,37 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(decode, toolchain.Runtime, "decode-granted"), 0, ["[0]"], ""); // the positive control
     }
 
+    /// <summary>The runtime of this machine's target whose `Allocate` refuses <paramref name="least"/> bytes and more, in its text, while the lists' own blocks do not go through it; the first `print` asks it for 4096 bytes.</summary>
+    private static CheckedRuntime RefusingFrom(int least) => Edited(("runtime/common/runtime.kz", "    byte* p = std.Allocate(size)\n", $"    mut byte* p = null\n    if size < {least} {{\n        p = std.Allocate(size)\n    }}\n\n"));
+
     [Fact]
     public void A_sort_whose_buffer_or_keys_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
-        // M9, X8: the runtime's `Allocate` refusing 1000 to 4095 bytes (<see cref="RefusingSmallBlocks"/>): a stable sort of 300 `long`
-        // items asks for a buffer of half of them, 150 of 8 bytes, and one of 301 items for half of them rounded up, 151 of 8 bytes, as
-        // Rust's stable sort asks for at the least; `SortBy` of 100 items with `long` keys for the pairs of a key and a position, 100 of
-        // 16 bytes; an unstable sort asks for nothing
-        var refusing = RefusingSmallBlocks;
-        const string list = "mut xs = List<long>()\nfor i in 0..<300 {\n    xs.Add(long(299 - i))\n}\n\n";
-        const string sort = list + "xs.Sort()\nprint(xs[0])\n";
-        Ran(BuildAndRun(sort, refusing, "sort-refused"), 1, [], "error: allocation-failed (1200 bytes)\n");
-        Ran(BuildAndRun(sort, toolchain.Runtime, "sort-granted"), 0, ["0"], ""); // the positive control
-        const string odd = "mut xs = List<long>()\nfor i in 0..<301 {\n    xs.Add(long(300 - i))\n}\n\nxs.Sort()\nprint(xs[0])\n";
-        Ran(BuildAndRun(odd, refusing, "sort-refused-odd"), 1, [], "error: allocation-failed (1208 bytes)\n");
-        Ran(BuildAndRun(odd, toolchain.Runtime, "sort-granted-odd"), 0, ["0"], "");
-        const string keys = list + "mut ys = xs[0..<100]\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
-        Ran(BuildAndRun(keys, refusing, "keys-refused"), 1, [], "error: allocation-failed (1600 bytes)\n");
-        Ran(BuildAndRun(keys, toolchain.Runtime, "keys-granted"), 0, ["200"], "");
-        Ran(BuildAndRun(list + "xs.SortUnstable()\nprint(xs[0])\n", refusing, "unstable-granted"), 0, ["0"], "");
+        // M9, X8: the runtime's `Allocate` refusing more than 4096 bytes (<see cref="RefusingFrom"/>), and the sizes Rust's stable sort
+        // asks for: a stable sort of 512 `long` items takes its scratch of every item from 4096 bytes on the stack and asks for nothing,
+        // which a runtime that refuses 4096 bytes shows with a program that prints nothing; one of 513 asks for every item, 4104 bytes; one
+        // of 1,500,000 for the 8,000,000 bytes that hold every item up to them, and one of 2,200,000 for half of them, 1,100,000 of 8 bytes;
+        // `SortBy` of 600 items with `int` keys asks for the pairs of a key and a 4-byte position, 600 of 8 bytes, and with `long` keys for
+        // pairs of a key and an 8-byte position, which a 4-byte one does not make smaller, 600 of 16 bytes; an unstable sort asks for nothing
+        var refusing = RefusingFrom(4097);
+        static string Longs(int count, string then) => $"mut xs = List<long>()\nfor i in 0..<{count} {{\n    xs.Add(long({count - 1} - i))\n}}\n\n{then}";
+        const string sort = "xs.Sort()\nprint(xs[0])\n";
+        Ran(BuildAndRun(Longs(512, "xs.Sort()\n"), RefusingFrom(4096), "sort-on-stack"), 0, [], "");
+        Ran(BuildAndRun(Longs(512, sort), toolchain.Runtime, "sort-on-stack-granted"), 0, ["0"], "");
+        Ran(BuildAndRun(Longs(513, "xs.Sort()\n"), RefusingFrom(4096), "sort-past-stack"), 1, [], "error: allocation-failed (4104 bytes)\n"); // the runtime refuses
+        foreach (var (count, bytes) in new[] { (513, 4104), (1_500_000, 8_000_000), (2_200_000, 8_800_000) })
+        {
+            Ran(BuildAndRun(Longs(count, sort), refusing, $"sort-refused-{count}"), 1, [], $"error: allocation-failed ({bytes} bytes)\n");
+            Ran(BuildAndRun(Longs(count, sort), toolchain.Runtime, $"sort-granted-{count}"), 0, ["0"], ""); // the positive control
+        }
+
+        const string ints = "mut ys = List<int>()\nfor i in 0..<600 {\n    ys.Add(599 - i)\n}\n\nys.SortBy(y => y * 2)\nprint(ys[0])\n";
+        Ran(BuildAndRun(ints, refusing, "int-keys-refused"), 1, [], "error: allocation-failed (4800 bytes)\n");
+        Ran(BuildAndRun(ints, toolchain.Runtime, "int-keys-granted"), 0, ["0"], "");
+        var longs = Longs(600, "xs.SortBy(x => x * 2L)\nprint(xs[0])\n");
+        Ran(BuildAndRun(longs, refusing, "long-keys-refused"), 1, [], "error: allocation-failed (9600 bytes)\n");
+        Ran(BuildAndRun(longs, toolchain.Runtime, "long-keys-granted"), 0, ["0"], "");
+        Ran(BuildAndRun(Longs(2_200_000, "xs.SortUnstable()\nprint(xs[0])\n"), refusing, "unstable-granted"), 0, ["0"], "");
     }
 
     [Fact]
@@ -3619,6 +3729,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void Copy_writes_every_byte_of_0_to_17_and_24_wherever_it_reads_them_and_writes_them()
+    {
+        // The standard library's `Copy`, whose form for small counts the speed escape of issue 156 (comment 6575718942) kept: up to
+        // 16 bytes as the C library's `memcpy` copies a small count, two words of 8, two words of 4 or three bytes, overlapping where
+        // the count is no power of two, and more byte by byte. `Substring` copies through it from the offset it starts at, and `Join`
+        // to the offset of each part: for each count 0 to 17 and 24, bytes of 128 and above in every place of a word (letters of two
+        // bytes, after one byte of ASCII where the count is odd), cut 0, 1, 3 and 7 bytes into a string that holds a block, with 0 or 5
+        // bytes after them, so that a cut ends where its string ends; and the cut joined after the bytes before it, so that `Join`
+        // writes it at that offset. Under the fence too, where a block ends where its page ends
+        const string text = """
+            Bytes Content(int count) {
+                mut b = Bytes()
+                if count % 2 == 1 {
+                    b.Add(90)
+                }
+
+                for j in 0..<count / 2 {
+                    c = 128 + (41 * j + 7 * count) % 1920
+                    b.Add(byte(192 + c / 64))
+                    b.Add(byte(128 + c % 64))
+                }
+
+                return b
+            }
+
+            void Cut(string s, int at, int count) {
+                cut = s.Substring(at, count)
+                print(cut.Bytes)
+                print(string.Join("", [s.Substring(0, at), cut]).Bytes)
+            }
+
+            for n in 0..<19 {
+                mut count = n
+                if n == 18 {
+                    count = 24
+                }
+
+                content = Content(count)
+                for at in [0, 1, 3, 7] {
+                    for end in [0, 5] {
+                        mut b = Bytes()
+                        for i in 0..<at {
+                            b.Add(byte(97 + i))
+                        }
+
+                        b.AddRange(content)
+                        for i in 0..<end {
+                            b.Add(byte(65 + i))
+                        }
+
+                        match string.FromUtf8(b) {
+                            string s => Cut(s, at, count)
+                            InvalidUtf8 e => print(e.At)
+                        }
+                    }
+                }
+            }
+
+            """;
+        var lines = new List<string>();
+        foreach (var count in Enumerable.Range(0, 18).Append(24))
+        {
+            var content = new List<int>();
+            if (count % 2 == 1)
+            {
+                content.Add(90);
+            }
+
+            for (var j = 0; j < count / 2; j++)
+            {
+                var c = 128 + (((41 * j) + (7 * count)) % 1920);
+                content.Add(192 + (c / 64));
+                content.Add(128 + (c % 64));
+            }
+
+            foreach (var at in new[] { 0, 1, 3, 7 })
+            {
+                foreach (var _ in new[] { 0, 5 })
+                {
+                    lines.Add("[" + string.Join(", ", content) + "]");
+                    lines.Add("[" + string.Join(", ", Enumerable.Range(97, at).Concat(content)) + "]");
+                }
+            }
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "copy-counts"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "copy-counts-fenced"), 0, [.. lines], "");
     }
 
     [Fact]
