@@ -487,6 +487,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (OutOfReachInDefault(n.Name, n.Line))
+        {
+            return Typed.Error; // K7, V10: a member of the class hides a name outside it in a default, as in a method (C#'s CS0236)
+        }
+
         if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
         {
             Report(ErrorIds.UnknownName, n.Line, $"`{n.Name}` is a top-level variable, which a top-level function does not read (F16, V10)");
@@ -558,7 +563,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line) || OutOfReachInDefault(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }

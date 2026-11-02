@@ -3232,6 +3232,8 @@ public sealed class CheckerTests
     [InlineData("class C(int V) {\n    int a = a + 1\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "2: `a` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
     [InlineData("class C(int V) {\n    int a = Get()\n\n    pub int Get() => 1\n}\n\nprint(C(1).Get())", "2: `Get` is a method of `C`: a field's default reads no method of its instance (K7, V10)")]
     [InlineData("class C(int V) {\n    int b = Make()\n    int a = Get()\n\n    pub static int Make() => 3\n    pub int Get() => b\n}\n\nprint(C(1).Get())", "3: `Get` is a method of `C`: a field's default reads no method of its instance (K7, V10)")]
+    [InlineData("int Get() => 9\n\nclass C(int V) {\n    int a = Get()\n\n    pub int Get() => 1\n}\n\nprint(C(1).Get())", "4: `Get` is a method of `C`: a field's default reads no method of its instance (K7, V10)")]
+    [InlineData("int b() => 9\n\nclass C(int V) {\n    int a = b\n    int b = 1\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "4: `b` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
     [InlineData("class C(int V) {\n    int a = this.V\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "2: a field's default reads no `this`: its instance is being built (K7, V10)")]
     [InlineData("class C(int V) {\n    List<int> a = [1].Where(x => x > b)\n    int b = 1\n\n    pub int A() => a.Count\n}\n\nprint(C(1).A())", "2: `b` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
     public void A_name_a_field_default_does_not_read_is_unknown_name_and_says_why(string program, string expected)

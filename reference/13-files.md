@@ -144,9 +144,11 @@ Case: [system/write-read.kz](../corpus/system/write-read.kz)
 A `File` is a handle: a copy is a second holder of the one file, as a list's copy holds its block
 (section 3 of the record), and the file closes when the last value that holds it lets go of it,
 ignoring an error of that close. `f.Close()` closes it before that and returns `void | IoError`; a
-`Close` through one holder ends the handle for every holder at once, so that every later call through
-any holder, `Close` among them, returns the error the system gives a descriptor that is not open,
-`Other` with the number 9, with the path the file was opened with, and the descriptor itself is
+`Close` through one holder ends the handle for every holder at once: it marks the handle closed, its
+mark, so that every later call through any holder, `Close` among them, returns the error the system
+gives a descriptor that is not open, `Other` with the number 9, with the path the file was opened
+with (§12, the owner, 2026-11-02, issue 110, comment 6573974441, and the error the answer of comment
+6574625739 names, "the one error every call on a closed handle gets"), and the descriptor itself is
 released only when the last call in flight on the handle returns, as Rust's `Arc<File>` closes the
 file with its last clone, so that no call reaches a number the system has given another file since: a
 call already in flight when the `Close` runs keeps the descriptor and completes, and the `Close`
@@ -155,6 +157,10 @@ drops it (§12, the owner, 2026-11-02, against a lock around each call, against 
 against a new error for a deferred close; the cost is a count kept around each call on a handle, two
 atomic operations, and a `Close` that shuts a socket down holds a count of its own across the
 shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
+call in flight is a `Read`, a `Write`, a stream's `ShutdownWrite`, a listener's `Accept`, a setter of
+a bound (S9) or a pull of a loop over the lines (S16), each from after its arguments have run to its
+return (§12, the owner, 2026-11-02; `ShutdownWrite`'s, issue 39, comment 6583351876); a loop over the
+lines is in flight while it pulls a line, and not while its block runs. A
 `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
 last count that ignores its error, and no text)*
 
@@ -325,14 +331,22 @@ the descriptor at once as before (against a shutdown at every `Close`); a blocke
 shutdown wakes gets that error too, as Go's close gives a blocked write `net.ErrClosed` (against the
 system's broken pipe or reset); a `Read` in flight that the shutdown meets with bytes the socket holds
 takes them, and the next call gets that error (against failing the call and dropping the bytes); and a
-stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte, after the mark gives
-that error, a real timeout or reset that races the `Close` among them (against the system's answer,
-which would depend on the race) (§12, the owner, 2026-11-02). An actor waiting in the poller on a
+stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte, after the mark (S5)
+gives that error, a real timeout or reset that races the `Close` among them (against the system's
+answer, which would depend on the race) (§12, the owner, 2026-11-02). An `Accept` in flight whose
+system call succeeds after the mark returns the stream it got, as a `Read` keeps the bytes it took,
+and the next `Accept` gets that error, so that no connection is thrown away, as Go's `Accept` returns
+a connection whose system call finished before the close (§12, the owner, 2026-11-02, issue 39,
+comment 6578783655, against that error with the connection closed); and a `Write` that the shutdown
+ends after part of its bytes went out gives that error, the part sent not reported, as Rust's
+`write_all` and C#'s `Stream.Write` report none (§12, the owner, 2026-11-02, the same comment, against
+the count sent with the error left to the next call). An actor waiting in the poller on a
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
-that waits); the runtime of Linux has no poller, a call blocking its thread (S10), so that no actor
-waits in one there. A listener's socket reuses
+that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, and the
+runtime of Linux has neither actors nor that poller, a call blocking its thread (S10), so that no
+actor waits in one there. A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds

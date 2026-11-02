@@ -35,6 +35,9 @@ public sealed partial class Emitter
     // K6: the slots of a table before its `virtual` methods: the release, the weak release, the equality and the hash
     private const int MethodSlots = 4;
 
+    // each class whose body's defaults are queued for their function, with its name (K7)
+    private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
+
     /// <summary>
     /// K1, K7, K10: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
     /// default; where a class of the chain writes the explicit form, the fields of each class from its constructor's arguments
@@ -59,19 +62,11 @@ public sealed partial class Emitter
                 fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, symbol.Fields.IndexOf(symbol.Constructor[i].Field))}");
             }
 
-            // K7: the fields of the body follow the primary constructor's, each given its default; a class in a chain declares none
-            var body = symbol.Fields.FindIndex(f => f.Body is not null);
-            if (body >= 0)
+            // K7: the fields of the body follow the primary constructor's, each given its default by the class's function of
+            // them (ClassDefaults); a class in a chain declares none
+            if (symbol.Fields.Any(f => f.Body is not null))
             {
-                var self = fn.Alloca("ptr", "this");
-                fn.Emit($"store ptr {p}, ptr {self}");
-                slots[Model.FieldsThisOf(symbol)] = self;
-                for (var i = body; i < symbol.Fields.Count; i++)
-                {
-                    var field = symbol.Fields[i];
-                    var value = EmitDefault(classOwners[symbol], field.Body!.Value!, field.Type, owned: true);
-                    fn.Emit($"store {Ir(field.Type)} {value}, ptr {InstanceFieldPointer(symbol, p, i)}");
-                }
+                fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
             }
         }
         else
@@ -126,6 +121,56 @@ public sealed partial class Emitter
             }
 
             fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(x, p, index)}");
+        }
+    }
+
+    /// <summary>
+    /// K7: the function that gives each field of a class's body its default, in their order, through the instance it takes, queued
+    /// on first use and emitted once per class, which every construction calls, as C# runs the initializers in the constructor; a
+    /// default that builds an instance of its own class, or of a class whose default builds this one, calls it again, so the build
+    /// ends and the run recurses into <c>stack-overflow</c> (the owner, 2026-11-02, against a refusal of such a default).
+    /// </summary>
+    private string ClassDefaults(ClassSymbol symbol)
+    {
+        var key = $"{classOwners[symbol].Prefix}.{symbol.Name}.{Number(symbol.Declaration.Line)}";
+        if (!instances.TryGetValue(key, out var name))
+        {
+            name = $"@\"{key}\"";
+            instances[key] = name;
+            defaultsPending.Enqueue((symbol, name));
+        }
+
+        return name;
+    }
+
+    /// <summary>The function <see cref="ClassDefaults"/> names: a trace names its frame by the class, as the construction is written.</summary>
+    private void EmitClassDefaults(ClassSymbol symbol, string name)
+    {
+        var caller = unit;
+        unit = classOwners[symbol];
+        try
+        {
+            features = NoFeatures; // one function serves every construction, so what it calls is compiled for the CPU alone (R18)
+            Begin(new IrFunction($"internal void {name}(ptr %this)", FeatureAttributes(features)), NoMap, Types.Void);
+            Trace(symbol.Name, Symbol(name), symbol.Declaration.Line);
+            var self = fn.Alloca("ptr", "this");
+            fn.Emit($"store ptr %this, ptr {self}");
+            slots[Model.FieldsThisOf(symbol)] = self;
+            for (var i = symbol.Fields.Count(f => f.Body is null); i < symbol.Fields.Count; i++)
+            {
+                var field = symbol.Fields[i];
+                var d = field.Body!.Value!;
+                var index = i;
+                At(d.Line);
+                InRegion(() => fn.Emit($"store {Ir(field.Type)} {EmitDefault(unit, d, field.Type, owned: true)}, ptr {InstanceFieldPointer(symbol, "%this", index)}"));
+            }
+
+            fn.Return(null);
+            End();
+        }
+        finally
+        {
+            unit = caller;
         }
     }
 

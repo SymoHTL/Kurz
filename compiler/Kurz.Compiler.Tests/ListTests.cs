@@ -3358,6 +3358,44 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
+    private const string HandleTarget = """
+        class Log(mut File Out) {
+            pub int Swap(File next) {
+                Out = next
+                return 2
+            }
+
+            pub Bytes Again(File next) {
+                Out = next
+                return "xy".Bytes
+            }
+
+            pub int | IoError ReadOwn(mut Bytes into, File next) => Out.Read(mut into, this.Swap(next))
+        }
+
+        void | IoError Run() {
+            File.WriteAll("held-read.txt", "abc".Bytes)
+            log = Log(File.Open("held-read.txt"))
+            mut buffer = Bytes()
+            print(log.Out.Read(mut buffer, log.Swap(File.Open("held-read.txt"))))
+            print(log.Out.Read(mut buffer, 5))
+            print(log.ReadOwn(mut buffer, File.Open("held-read.txt")))
+            print(log.Out.Read(mut buffer, 5))
+            out = Log(File.Create("held-write.txt"))
+            out.Out.Write(out.Again(File.Create("held-other.txt")))
+            print(File.ReadAll("held-write.txt").Count)
+            print(File.ReadAll("held-other.txt").Count)
+            File.Delete("held-read.txt")
+            File.Delete("held-write.txt")
+            File.Delete("held-other.txt")
+        }
+
+        Run() else {
+            IoError e => print(e)
+        }
+
+        """;
+
     [Fact]
     public void No_block_is_read_or_written_after_it_is_freed()
     {
@@ -3390,6 +3428,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
         Ran(BuildAndRun(where, fenced, "list-where-fenced"), 0, ["166670"], "");
+        // a call on a handle reads its target before its arguments (D11), and the read of a field of a class instance, by its path or
+        // by its name in a method (K7), takes a count held to the statement's end, so that an argument that gives the field another
+        // file lets go of none the call uses: each read reads the file the field held when the call began, and the write writes it (S5);
+        // a call on a file is `not supported` in a build for Windows (S11)
+        if (Builder.HostTarget != Target.Windows)
+        {
+            Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
+        }
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence

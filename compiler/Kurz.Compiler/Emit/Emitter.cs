@@ -191,6 +191,11 @@ public sealed partial class Emitter
                 features = compiled;
                 EmitFunction(function, instanceMap, name);
             }
+            else if (defaultsPending.Count > 0)
+            {
+                var (symbol, name) = defaultsPending.Dequeue();
+                EmitClassDefaults(symbol, name);
+            }
             else if (lambdas.Count > 0)
             {
                 EmitLambdaFunction(lambdas.Dequeue());
