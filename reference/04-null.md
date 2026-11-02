@@ -699,7 +699,13 @@ constructor, an interpolation or `print` of a class instance (its `Text()`, A5),
 instances that name their fields (K5). A declaration is not an assignment; an assignment into any
 path is one, and one that assigns a value whose type has no `null` narrows a path with no `weak`
 reference in it again, as this rule says above with the owner's choice of 2026-10-09, while the case
-`null/narrowed-field-after-assignment.kz` assigns a value that may be null. Reading a field,
+`null/narrowed-field-after-assignment.kz` assigns a value that may be null. One assignment is no end for
+a path with no `weak` reference in it: a write into an item of a list or an entry of a map that a
+variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k] = 2`, keeps its
+narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
+path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
+write, since that count can be the target's last; a write into what a field of an instance holds,
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). Reading a field,
 `.Bytes` and `.Count` on a value, and `==` on values are none of them. *(this list is proposed)*
 `print` is a call like any other. C# keeps such a path narrowed across the call (the .NET SDK
 10.0.204, 2026-10-08: no warning for a use after a call that sets the field to null, CS8602 for an

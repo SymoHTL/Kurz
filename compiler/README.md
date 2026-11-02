@@ -1756,7 +1756,10 @@ round can ask about it by the rule's id.
   narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
   reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
-  field that the checker refuses narrows nothing *(assumed)*.
+  field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
+  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
+  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
+  6573114335).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.
