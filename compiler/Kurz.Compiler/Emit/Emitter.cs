@@ -181,13 +181,18 @@ public sealed partial class Emitter
         End();
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
-        while (pending.Count > 0 || lambdas.Count > 0)
+        while (pending.Count > 0 || lambdas.Count > 0 || defaultsPending.Count > 0)
         {
             if (pending.Count > 0)
             {
                 var (function, instanceMap, name, compiled) = pending.Dequeue();
                 features = compiled;
                 EmitFunction(function, instanceMap, name);
+            }
+            else if (defaultsPending.Count > 0)
+            {
+                var (symbol, name) = defaultsPending.Dequeue();
+                EmitClassDefaults(symbol, name);
             }
             else
             {

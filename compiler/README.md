@@ -679,7 +679,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
-  arguments by name, both counts at one; a field read through an instance, and by its name inside a
+  arguments by name, both counts at one, the defaults of the class's body in one function of the module
+  per class, which each construction calls with the instance and a trace names by the class, so that a
+  default which builds its own class recurses when it runs and is built once (K7); a field read through an instance, and by its name inside a
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
@@ -2025,7 +2027,10 @@ round can ask about it by the rule's id.
   through the instance being built, before the defaults of the fields after it run, as C# runs a
   field's initializer before the constructor's body. A `static` method of the class is a name in a
   default too, and a method of the instance is none, as C# refuses an instance member in an
-  initializer and no `static` one. A field of the body of the name of a field of
+  initializer and no `static` one. Both hold where a top-level function has the name, which a member
+  of the class hides in a default as in a method: the `static` method is called, and a method of the
+  instance, or a field below, is `unknown-name` with the reason (V10).
+  A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
