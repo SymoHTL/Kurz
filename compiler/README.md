@@ -511,7 +511,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `TrimStart`, `TrimEnd`, `RunStart` and `RunEnd`, as Rust's `trim`, `trim_ascii` and `trim_matches` (X4);
   `s.Split(separator)`, a new list of the pieces, and `s.Replace(oldValue, newValue)`, a new string, of a `string`
   by a `string`, a `char` by a `string` or a `char` by a `char`, each of which counts
-  what it makes before it asks for a block, as Rust's `split` and `replace` (X5); `string.Join(separator,
+  what it makes before it asks for a block, as Rust's `split` and `replace` (X5), a character of one byte by
+  another through the standard library's `ReplaceByte`, which finds the first match and maps each byte from it,
+  as Rust's `replace_ascii`, and gives the string itself where it finds none; `string.Join(separator,
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
@@ -842,7 +844,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
-  the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32);
+  the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
+  runtime's `Same` and `Order` comparing the first byte, then words of 8 bytes, the last ending where the bytes
+  end, as the C library's `memcmp` compares them;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of

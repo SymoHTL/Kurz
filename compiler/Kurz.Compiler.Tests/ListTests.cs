@@ -4062,14 +4062,149 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
-        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
+        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
-        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
-        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
-        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
+        // where a changed string of 16 or 32 bytes ends where its page ends, so that a word read past its end ends the process
+        const string text = "s = \"abcdefghijklmnopqrstuvwxyz0123456789ABCDE\"\nmut long n = 0\nfor count in 0..<41 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["41000", "21000"], "");
+        Ran(BuildAndRun(text, Fenced, "string-same-words-fenced"), 0, ["41000", "21000"], "");
+    }
+
+    [Fact]
+    public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
+    {
+        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
+        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
+        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
+        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
+        // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
+        // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
+        // that a word read past its end ends the process
+        const string text = """
+            string Sign(string x, string y) {
+                mut t = ""
+                if x < y {
+                    t = "{t}<"
+                }
+
+                if x == y {
+                    t = "{t}="
+                }
+
+                if x > y {
+                    t = "{t}>"
+                }
+
+                return t
+            }
+
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
+            for count in 0..<41 {
+                a = s.Substring(0, count)
+                mut line = ""
+                for k in 0..<count {
+                    head = s.Substring(0, k)
+                    mut up = "{head}~"
+                    mut down = "{head} "
+                    if k + 1 < count {
+                        rest = s.Substring(k + 2, count - k - 2)
+                        up = "{head}~ {rest}"
+                        down = "{head} ~{rest}"
+                    }
+
+                    wide = "{head}é{s.Substring(k + 1, count - k - 1)}"
+                    line = "{line}{Sign(a, up)}{Sign(up, a)}{Sign(a, down)}{Sign(down, a)}{Sign(a, wide)}{Sign(wide, a)}"
+                }
+
+                longer = s.Substring(0, count + 1)
+                padded = "{a}!"
+                again = padded.Substring(0, count)
+                print("{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, again)}")
+            }
+
+            """;
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        var lines = new List<string>();
+        for (var count = 0; count <= 40; count++)
+        {
+            var a = s[..count];
+            var line = new StringBuilder();
+            for (var k = 0; k < count; k++)
+            {
+                var head = s[..k];
+                var (up, down) = k + 1 < count ? (head + "~ " + s[(k + 2)..count], head + " ~" + s[(k + 2)..count]) : (head + "~", head + " ");
+                var wide = head + "é" + s[(k + 1)..count];
+                foreach (var b in new[] { up, down, wide })
+                {
+                    line.Append(Sign(a, b)).Append(Sign(b, a));
+                }
+            }
+
+            var longer = s[..(count + 1)];
+            lines.Add($"{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, a)}");
+        }
+
+        Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
+    private static string Sign(string x, string y)
+    {
+        var order = Encoding.UTF8.GetBytes(x).AsSpan().SequenceCompareTo(Encoding.UTF8.GetBytes(y));
+        return order < 0 ? "<" : order == 0 ? "=" : ">";
+    }
+
+    [Fact]
+    public void A_piece_of_up_to_40_bytes_is_copied_whole_from_each_place_in_a_word()
+    {
+        // the standard library's `Copy`, with which `StringOf` copies a piece of a string's block: 8 to 16 bytes as two words of 8, the
+        // second ending where the bytes end, 4 to 7 as two words of 4, 1 to 3 as their first, middle and last byte, more byte by byte:
+        // every count from 0 to 40, copied from each of the 8 places of a word; and the same under the fence, where a piece of 16 or
+        // 32 bytes ends where its page ends, so that a byte written past its end ends the process
+        const string text = """
+            t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            s = "{t}{t}"
+            for count in 0..<41 {
+                mut line = ""
+                for at in 0..<8 {
+                    line = "{line}{s.Substring(at, count)}|"
+                }
+
+                print(line)
+            }
+
+            """;
+        const string t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var lines = Enumerable.Range(0, 41).Select(count => string.Concat(Enumerable.Range(0, 8).Select(at => string.Concat((t + t).AsSpan(at, count), "|")))).ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-copy-counts"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "string-copy-counts-fenced"), 0, lines, "");
+    }
+
+    [Fact]
+    public void A_replace_of_one_byte_by_one_byte_takes_no_block_where_it_finds_none()
+    {
+        // X5: a `Replace` of a character of one byte by another, given as `char`s or as strings, gives the string itself where it finds
+        // none, held once more, where Rust's `replace_ascii` makes a copy: 15000 such results of a string of 1024 bytes, all of them
+        // held, fit the 16 pieces of memory of `Budget`, where 15000 copies, each a block of 1040 bytes in the size class of 2048, are
+        // 30 megabytes and outgrow them, as the same replaces that find the byte do (the positive control); where it finds one it asks
+        // for the block of its result, 16 bytes of counts and the 3 of `axc`
+        const string held = "string Make(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\ntext = Make(10)\nmut all = List<string>()\nmut round = 0\nwhile round < 7500 {\n    round = round + 1\n    all.Add(text.Replace('q', 'y'))\n    all.Add(text.Replace(\"q\", \"y\"))\n}\nprint(all.Count)\n";
+        Ran(BuildAndRun(held, Budget(), "replace-byte-absent-held"), 0, ["15000"], "");
+        var copied = BuildAndRun(held.Replace("'q'", "'x'", StringComparison.Ordinal).Replace("\"q\"", "\"x\"", StringComparison.Ordinal), Budget(), "replace-byte-present-held");
+        Assert.Equal(1, copied.Code);
+        Assert.StartsWith("error: allocation-failed (", copied.Error, StringComparison.Ordinal);
+
+        var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\n", none, "replace-byte-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\nprint(\"abc\".Replace(\"c\", \"x\"))\n", toolchain.Runtime, "replace-byte-granted"), 0, ["axc", "abx"], ""); // the positive control
     }
 
     [Theory]

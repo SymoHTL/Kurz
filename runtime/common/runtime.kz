@@ -373,8 +373,13 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18): 8 at a time, then the bytes after the last 8 one at a
-// time, where Rust's `==` of two slices of bytes compares them in one `compare_bytes`, a call to `memcmp`.
+// Whether two strings hold the same bytes (T18), as the C library's `memcmp` compares a small count,
+// which Rust's `==` of two slices of bytes calls through `compare_bytes`: 8 bytes or more as words, the
+// last word ending where the bytes end and overlapping the one before it, so that no byte is read one at a
+// time; 4 to 7 as two words of 4 that overlap; 1 to 3 as their first, middle and last byte. The first
+// byte is compared before any word, so that two strings that differ in it, as most words of one length do,
+// are told apart by one byte: `==` of 200k words of 3 to 10 letters and the copy of the next took 22.7 ms
+// with the test and 26.2 with words alone, and no compare measured took longer with it.
 pub bool Same(string first, string second) {
     long a = long(first.Bytes.Count)
     if a != long(second.Bytes.Count) {
@@ -385,21 +390,23 @@ pub bool Same(string first, string second) {
     raw {
         byte* x = first.Pointer
         byte* y = second.Pointer
-        mut long i = 0
-        while i + 8 <= a && same {
-            if std.WordAt(x + i) != std.WordAt(y + i) {
-                same = false
+        if a > 0 && x[0] != y[0] {
+            same = false
+        } else if a >= 8 {
+            mut long i = 0
+            while i + 8 < a && same {
+                if std.WordAt(x + i) != std.WordAt(y + i) {
+                    same = false
+                }
+
+                i = i + 8
             }
 
-            i = i + 8
-        }
-
-        while i < a && same {
-            if x[i] != y[i] {
-                same = false
-            }
-
-            i = i + 1
+            same = same && std.WordAt(x + a - 8) == std.WordAt(y + a - 8)
+        } else if a >= 4 {
+            same = std.LittleEndianWord(x) == std.LittleEndianWord(y) && std.LittleEndianWord(x + a - 4) == std.LittleEndianWord(y + a - 4)
+        } else if a > 0 {
+            same = x[0] == y[0] && x[a / 2] == y[a / 2] && x[a - 1] == y[a - 1]
         }
     }
 
@@ -407,7 +414,14 @@ pub bool Same(string first, string second) {
 }
 
 // The order of two strings, below 0, 0 or above 0: the first byte in which they differ, and where one starts the other, the shorter
-// first, as Rust's `Ord` for `str` compares them; in UTF-8 that is the order of their code points (T32).
+// first, as Rust's `Ord` for `str` compares them; in UTF-8 that is the order of their code points (T32). The shared bytes are compared
+// as the C library's `memcmp` compares a small count, which Rust's `Ord` calls: as words read with their first byte highest, so that
+// the order of two words is the order of their bytes, 8 bytes at a time and the last word ending where the shared bytes end, over the
+// one before it; 4 to 7 as two words of 4 that overlap; 1 to 3 as their first, middle and last byte. The first byte is compared
+// before any word, which `memcmp` does not, so that two strings that differ in it are ordered by one byte: `<` of 200k words of 3 to
+// 10 letters and the next took 14.2 ms with the test, 31.5 with words alone and 17.3 a byte at a time. Its cost is in a sort of
+// those words, which runs 12 to 15% slower than with words alone, as `memcmp` compares them for Rust (88.6 to 92.4 ms against 79.3
+// to 80.5): a sort brings neighbours together, and once they share their first byte the test mispredicts.
 pub int Order(string first, string second) {
     long a = long(first.Bytes.Count)
     long b = long(second.Bytes.Count)
@@ -416,18 +430,42 @@ pub int Order(string first, string second) {
         shared = b
     }
 
-    mut int order = 0
+    mut ulong u = 0
+    mut ulong v = 0
     raw {
         byte* x = first.Pointer
         byte* y = second.Pointer
-        mut long i = 0
-        while i < shared && order == 0 {
-            order = int(x[i]) - int(y[i])
-            i = i + 1
+        if shared > 0 && x[0] != y[0] {
+            u = ulong(x[0])
+            v = ulong(y[0])
+        } else if shared >= 8 {
+            mut long i = 0
+            while i + 8 < shared && u == v {
+                u = std.HighWordAt(x + i)
+                v = std.HighWordAt(y + i)
+                i = i + 8
+            }
+
+            if u == v {
+                u = std.HighWordAt(x + shared - 8)
+                v = std.HighWordAt(y + shared - 8)
+            }
+        } else if shared >= 4 {
+            u = ulong(std.BigEndianWord(x)) << 32 | ulong(std.BigEndianWord(x + shared - 4))
+            v = ulong(std.BigEndianWord(y)) << 32 | ulong(std.BigEndianWord(y + shared - 4))
+        } else if shared > 0 {
+            u = ulong(x[0]) << 16 | ulong(x[shared / 2]) << 8 | ulong(x[shared - 1])
+            v = ulong(y[0]) << 16 | ulong(y[shared / 2]) << 8 | ulong(y[shared - 1])
         }
     }
 
-    if order == 0 && a != b {
+    mut int order = 0
+    if u != v {
+        order = 1
+        if u < v {
+            order = -1
+        }
+    } else if a != b {
         order = 1
         if a < b {
             order = -1
