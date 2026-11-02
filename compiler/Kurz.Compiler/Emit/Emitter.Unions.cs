@@ -303,7 +303,7 @@ public sealed partial class Emitter
         ByCase(Tag(value, union), union, cases, c =>
         {
             var target = Types.CasesFor(c, rest).Single();
-            fn.Return($"{Ir(result)} {MakeUnion(result, target, Convert(Payload(value, union, c), c, target, line))}");
+            ReturnRaw(MakeUnion(result, target, Convert(Payload(value, union, c), c, target, line)));
         });
     }
 

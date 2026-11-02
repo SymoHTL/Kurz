@@ -1,0 +1,9 @@
+// expect: error unreachable-arm at 7
+// rules: O5
+
+int Plain() => 1
+
+// an `else` with no arms after a call with no case beside its success: nothing can reach it
+y = Plain() else {
+}
+print(y)
