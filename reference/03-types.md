@@ -1340,8 +1340,8 @@ ShowKind<bool>()
 
 A generic function becomes one copy of its code for each list of type arguments it is called with
 (§4). A call in a generic function's body whose type argument holds a type parameter of that
-function inside a form of a type, a list, a map, a `data` type and a function type among them,
-makes a copy for a larger type than the copy it stands in. Where such a call lies on a cycle of calls among generic
+function inside a list, as `[x]`, a `List<T>` for `T`, makes a copy for a larger type than the copy
+it stands in. Where such a call lies on a cycle of calls among generic
 functions, directly or through others, so that the type argument comes back to the type parameter
 it grew from, each copy makes a larger one without end, and the call is the compile error
 `growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a
@@ -1350,10 +1350,12 @@ a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy.
 refused where it is written, whether or not a call reaches it. A generic function that reads its
 type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
 none of its calls is read for such a cycle, and a chain of more than 64 copies stays
-`not supported`. *(assumed, §4: the id; a type parameter that is a case of a union, `T | string`,
-makes no larger copy, since a union holds each case once; every call of the cycle where a type
-argument grows is refused, each one time, a written type argument as an inferred one, a call in a
-lambda of the body as one of the body)*
+`not supported`. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+the calling function inside any other form of a type, a map, a `data` type and a function type
+among them, and not where it is a case of a union, which holds each case once, so that a
+`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
+as one of the body)*
 
 Case: [types/generic-growing-cycle.kz](../corpus/types/generic-growing-cycle.kz)
 ```kurz
