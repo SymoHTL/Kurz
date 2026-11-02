@@ -1,0 +1,10 @@
+// expect: output
+// | 100000
+// rules: K20
+
+class Money(int Cents) {
+    pub static int CentsPerUnit = 100
+    pub static int Max = CentsPerUnit * 1000
+}
+
+print(Money.Max)

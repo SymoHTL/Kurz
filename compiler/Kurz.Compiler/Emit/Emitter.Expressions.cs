@@ -34,6 +34,11 @@ public sealed partial class Emitter
             return Constant(typed.Constant, type, e.Line);
         }
 
+        if (Model.IsStaticField(e, out var staticField))
+        {
+            return Constant(staticField.Value!, type, e.Line); // K18: a `static` field holds a constant, which each read gives
+        }
+
         switch (e)
         {
             case StringLiteral s:
