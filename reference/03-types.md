@@ -1503,14 +1503,15 @@ the build stops at the call that made the copy, with the text of the code that h
 `const assert(T.Kind == TypeKind.Data, "{T} is no data type")` stops `Need(1)` with `int is no
 data type` at that call, as Rust's `const { assert!(condition, "text") }` stops a build in a copy of
 generic code. Any generic code can use it (§4, the owner, 2026-11-01, "const assert, as Rust").
-*(assumed, §4: the spelling `const assert(condition, text)`, a statement; the text interpolates
+Everything a `const assert` refuses is the compile error `const-assert-failed`, a variable or a
+parameter in its condition or in a hole among it (§4, the owner, 2026-11-02,
+"`const-assert-failed`"). *(assumed, §4: the spelling `const assert(condition, text)`, a statement; the text interpolates
 values known while the program compiles as a string literal interpolates values, a type giving its
 name and an `enum` value its name; the compiler evaluates literals, constants, operators, a copy's
 reading of its type, its constant type arguments, the standard library's functions on strings, and
 a function of the program or of a package whose body uses nothing else besides its own variables,
 loops and branches, while a call of anything else in a `const assert` is `const-assert-failed`,
-naming that call; an evaluation that has not ended after a fixed count of steps is the same error;
-the id `const-assert-failed`)* *(assumed, §4: `const` followed by the name `assert` and `(` at the
+naming that call; an evaluation that has not ended after a fixed count of steps is the same error)* *(assumed, §4: `const` followed by the name `assert` and `(` at the
 start of a statement starts it, and both are names everywhere else (L18); a line break may stand
 inside its parentheses, as inside a call's; the statement stands where any statement stands, and
 outside a generic function it is checked once where it stands, the build stopping at the statement
@@ -1518,7 +1519,7 @@ where it is false; a generic function that holds one is checked in each copy a c
 that reads its type is (T33); its condition is a `bool` (C3); the text is a string literal, and a
 text of another kind is `syntax`; a hole that names a type parameter gives the name of the type the
 copy binds, and any other hole the text of its value (A2, A4); a variable or a parameter in the
-condition or in a hole is `const-assert-failed` at its name; what a `const assert` names counts as
+condition or in a hole is that error at its name; what a `const assert` names counts as
 read, so that a variable read there alone is no `unused-variable` (V5); the error names the copy the call made and the
 function that holds the `const assert`, as `kind-not-read` does)*
 
