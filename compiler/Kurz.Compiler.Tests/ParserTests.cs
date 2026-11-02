@@ -879,6 +879,7 @@ public sealed class ParserTests
     [InlineData("const assert(true, 5)")]
     [InlineData("const assert(true, n)")]
     [InlineData("const assert(true)")]
+    [InlineData("const assert(true \"a\")")]
     [InlineData("const assert(true, \"a\", \"b\")")]
     public void A_const_assert_takes_a_condition_and_a_string_literal(string program)
     {
