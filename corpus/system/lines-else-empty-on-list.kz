@@ -1,0 +1,9 @@
+// expect: error unreachable-arm at 8
+// rules: S16
+
+// an `else` with no arms after a loop whose collection fails with no case: nothing can reach it
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+}

@@ -2229,6 +2229,7 @@ public sealed partial class Checker
             }
         }
 
+        var untyped = Types.IsError(element); // the collection did not type, or is no collection a loop walks: its error is reported
         if (f.Second is not null && value is null && !Types.IsError(element))
         {
             this.Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not {Types.A(model.TypeOf(f.Collection).Type)} (C6)");
@@ -2244,11 +2245,16 @@ public sealed partial class Checker
 
         CheckLoop(null, f.Body);
         PopScope();
-        if (failures is not null || f.Arms is not null)
+        if (untyped && f.Arms is not null)
+        {
+            CheckArmsLoosely(f.Arms); // E1: the collection's own error is the one error, and its arms are read as after a call that did not type
+        }
+        else if (failures is not null || f.Arms is not null)
         {
             // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
             // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
-            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line);
+            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : Types.A(model.TypeOf(f.Collection).Type);
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)");
         }
 
         KurzType Report(int line, KurzType type)
