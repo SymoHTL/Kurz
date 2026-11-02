@@ -137,7 +137,8 @@ text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without tha
 compiler reads no body of a `data` type (D16) and `std/` compiles with every program, so a build says
 `not supported` to the text of an `HttpError` and of a value that holds one, a list, a union, a map
 or a `data` value among them, at the expression where `print`, a hole of an interpolated string (L6)
-or `string.Join` (X6) takes it (§12, the owner, 2026-11-02, the design standing).
+or `string.Join` (X6) takes it (§12, the owner, 2026-11-02, the design standing) *(assumed: the
+values and the expressions named, as §12 marks them)*.
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
