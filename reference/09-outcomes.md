@@ -992,8 +992,9 @@ value = Find(2) else {
 print(value)
 ```
 
-An `else` with no arms handles no case: after a call with cases each of them propagates, and after a
-call with no case beside its success nothing can reach it, which is `unreachable-arm` at the line of
+An `else` with no arms handles no case: after a call with cases each of them propagates, as a case no
+arm lists does, so that in top-level code each is `unlisted-case` (O9); after a call with no case beside
+its success nothing can reach it, which is `unreachable-arm` at the line of
 the `else`, the error an `else` arm gets there (§5, the owner, 2026-11-02).
 
 Case: [outcomes/else-empty-propagates.kz](../corpus/outcomes/else-empty-propagates.kz)
@@ -1136,6 +1137,26 @@ int | NotFound Find(int id) {
 }
 
 value = Find(2)
+print(value)
+```
+
+An `else` with no arms handles none of a call's cases (O5), so in top-level code it is this error too,
+at the line of the `else`.
+
+Case: [outcomes/else-empty-top-level.kz](../corpus/outcomes/else-empty-top-level.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// an `else` with no arms handles no case, and top-level code has no caller to pass `NotFound` to
+value = Find(1) else {
+}
 print(value)
 ```
 
