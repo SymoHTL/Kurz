@@ -373,12 +373,16 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18), as Rust's `==` of `str` tests the two lengths where it is called and calls `bcmp` for
-// the bytes: here the counts, then the first bytes, where two different strings of one count most often differ, small enough that
-// LLVM inlines it into each caller, and `SameBytes` for the rest, a call. The emitter marks `SameBytes` `noinline` (`OutOfLine` in
-// `Emit/Emitter.cs`): LLVM inlines a function into its one caller, and this, grown by it, stayed a call at every `==`. 50 rounds of
-// `==` of 200k words of 3 to 10 letters, each with the copy of the next, took 21.2 ms so, against 25.4 ms with both in one function,
-// a call (Rust 27.5 ms); 10 rounds of 200k reads of a map of those words, each key in it, 31.3 ms against 32.8 ms (Rust 57.7 ms).
+// Whether two strings hold the same bytes (T18), as the C library's `memcmp` compares a small count, which Rust's `==` of two slices
+// of bytes calls through `compare_bytes`, reading no byte past the end of either: the counts, then the first bytes, where two
+// different strings of one count most often differ; 1 to 3 bytes as their middle and last byte; 4 to 16 as four words of 4, the
+// first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end, so that every
+// count from 4 to 16 takes one path, and their differences joined by `|` and tested once: `==` of 200k words of 3 to 10 letters and
+// their copies took 28.9 ms so, against 47.3 ms when 4 to 7 and 8 or more bytes took two paths, whose tests mispredicted where the
+// counts were mixed (Rust 27.0 ms). More than 16 bytes go to `SameBytes`, a call.
+// LLVM puts `Same` into each caller and keeps `SameBytes` a call, which the emitter marks `noinline`. With everything past the
+// first bytes in `SameBytes`, a hit in a map of the 200k words took 31.80 ms against 27.74 on `main`; with up to 16 bytes here,
+// 30.00 and 30.23 against 29.24 and 26.79 on `main`, in two other runs.
 pub bool Same(string first, string second) {
     long a = long(first.Bytes.Count)
     if a != long(second.Bytes.Count) {
@@ -389,40 +393,36 @@ pub bool Same(string first, string second) {
     raw {
         byte* x = first.Pointer
         byte* y = second.Pointer
-        if a > 0 {
-            same = x[0] == y[0] && SameBytes(x, y, a)
+        if a > 0 && x[0] != y[0] {
+            same = false
+        } else if a > 16 {
+            same = SameBytes(x, y, a)
+        } else if a >= 4 {
+            long q = ((a + 8) >> 4) << 2
+            uint near = (std.LittleEndianWord(x) ^ std.LittleEndianWord(y)) | (std.LittleEndianWord(x + q) ^ std.LittleEndianWord(y + q))
+            uint far = (std.LittleEndianWord(x + a - 4 - q) ^ std.LittleEndianWord(y + a - 4 - q)) | (std.LittleEndianWord(x + a - 4) ^ std.LittleEndianWord(y + a - 4))
+            same = (near | far) == 0U
+        } else if a > 0 {
+            same = ulong((x[a / 2] ^ y[a / 2]) | (x[a - 1] ^ y[a - 1])) == 0UL
         }
     }
 
     return same
 }
 
-// The rest of `Same`, for `a` bytes, at least one, whose first bytes agree, as the C library's `memcmp` compares a small count, which
-// Rust's `==` of two slices of bytes calls through `compare_bytes`, reading no byte past the end of either: 1 to 3 bytes as their
-// middle and last byte; 4 to 16 as four words of 4, the first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4
-// bytes before the end and at the end, so that every count from 4 to 16 takes one path; more than 16 as 16 bytes at a time in two
-// words of 8, and the 16 bytes that end the bytes. The differences of the words are joined by `|` and tested once. `==` of 200k words
-// of 3 to 10 letters and their copies took 28.9 ms so, against 47.3 ms when 4 to 7 and 8 or more bytes took two paths, whose tests
-// mispredicted where the counts were mixed (Rust 27.0 ms).
+// The rest of `Same`, more than 16 bytes whose first bytes agree: 16 bytes at a time in two words of 8, their differences joined by
+// `|`, and the 16 bytes that end the bytes: `==` of 20k lines of ten words with their copies, 200 rounds, took 18.95 ms so against
+// 28.41 on `main` (Rust 14.33 ms).
 bool SameBytes(byte* x, byte* y, long a) {
     mut ulong diff = 0
     raw {
-        if a > 16 {
-            mut long i = 0
-            while i + 16 < a && diff == 0UL {
-                diff = (std.WordAt(x + i) ^ std.WordAt(y + i)) | (std.WordAt(x + i + 8) ^ std.WordAt(y + i + 8))
-                i = i + 16
-            }
-
-            diff = diff | (std.WordAt(x + a - 16) ^ std.WordAt(y + a - 16)) | (std.WordAt(x + a - 8) ^ std.WordAt(y + a - 8))
-        } else if a >= 4 {
-            long q = ((a + 8) >> 4) << 2
-            uint near = (std.LittleEndianWord(x) ^ std.LittleEndianWord(y)) | (std.LittleEndianWord(x + q) ^ std.LittleEndianWord(y + q))
-            uint far = (std.LittleEndianWord(x + a - 4 - q) ^ std.LittleEndianWord(y + a - 4 - q)) | (std.LittleEndianWord(x + a - 4) ^ std.LittleEndianWord(y + a - 4))
-            diff = ulong(near | far)
-        } else {
-            diff = ulong((x[a / 2] ^ y[a / 2]) | (x[a - 1] ^ y[a - 1]))
+        mut long i = 0
+        while i + 16 < a && diff == 0UL {
+            diff = (std.WordAt(x + i) ^ std.WordAt(y + i)) | (std.WordAt(x + i + 8) ^ std.WordAt(y + i + 8))
+            i = i + 16
         }
+
+        diff = diff | (std.WordAt(x + a - 16) ^ std.WordAt(y + a - 16)) | (std.WordAt(x + a - 8) ^ std.WordAt(y + a - 8))
     }
 
     return diff == 0UL

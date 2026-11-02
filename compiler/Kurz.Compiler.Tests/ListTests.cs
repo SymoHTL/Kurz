@@ -4508,11 +4508,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_of_one_count_are_compared_by_their_first_bytes_before_a_word_of_either_is_read()
     {
-        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it calls `SameBytes`, which reads the
-        // words of both, since two different strings of one count most often differ there, and calls it only where they agree. No
-        // result tells that order from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as the
-        // emitter writes it, in the order of its source, reads a byte (`load i8`) before it calls `SameBytes`, and the body of
-        // `SameBytes` reads words of 8 and of 4
+        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it reads a word of either or calls
+        // `SameBytes`, which reads the words of more than 16 bytes, since two different strings of one count most often differ there.
+        // No result tells that order from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as
+        // the emitter writes it, in the order of its source, reads a byte (`load i8`) before its first call that reads a word of 4 and
+        // before its call of `SameBytes`, and the body of `SameBytes` reads words of 8
         var ir = Compile("a = \"ab\"\nb = \"ac\"\nprint(a == b)\n", toolchain.Runtime).Program!.Ir;
         string Body(string definition)
         {
@@ -4524,24 +4524,24 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         var same = Body("define internal i1 @\"rt.common.Same.");
         var bytes = same.IndexOf("= load i8, ptr", StringComparison.Ordinal);
-        var call = same.IndexOf("call i1 @\"rt.common.SameBytes.", StringComparison.Ordinal);
+        int[] later = [same.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal), same.IndexOf("call i1 @\"rt.common.SameBytes.", StringComparison.Ordinal)];
         Assert.True(bytes >= 0, $"`Same` reads a byte:\n{same}");
-        Assert.True(call >= 0, $"`Same` calls `SameBytes`:\n{same}");
-        Assert.True(bytes < call, $"`Same` reads the first bytes before it calls `SameBytes`:\n{same}");
+        Assert.All(later, at => Assert.True(at >= 0, $"`Same` reads words of 4 and calls `SameBytes`:\n{same}"));
+        Assert.True(bytes < later.Min(), $"`Same` reads the first bytes before a word and before it calls `SameBytes`:\n{same}");
         var rest = Body("define internal i1 @\"rt.common.SameBytes.");
-        int[] reads = [rest.IndexOf("call i64 @\"std.WordAt.", StringComparison.Ordinal), rest.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal)];
-        Assert.All(reads, read => Assert.True(read >= 0, $"`SameBytes` reads words of 8 and of 4:\n{rest}"));
+        Assert.True(rest.Contains("call i64 @\"std.WordAt.", StringComparison.Ordinal), $"`SameBytes` reads words of 8:\n{rest}");
     }
 
     [Fact]
-    public void Two_strings_are_compared_by_their_counts_and_first_bytes_in_each_caller_and_by_a_call_for_the_rest()
+    public void Two_strings_of_up_to_16_bytes_are_compared_in_each_caller_and_longer_ones_by_a_call()
     {
-        // T18: as Rust's `==` of `str` compares the two lengths and calls `bcmp` for the bytes, the runtime's `Same` holds only the
-        // test of the counts and of the first bytes, small enough that clang inlines it into each caller, and `SameBytes` the rest,
-        // which the emitter marks `noinline` (`Emitter.OutOfLine`), so that LLVM does not inline it into `Same`, its one caller, and
-        // keep `Same` a call. No result tells that from one function of both, so the IR clang optimises as a release build is
-        // optimised holds it: a program that compares strings in three places, whose IR calls `Same` in each, calls `Same` nowhere
-        // once optimised, and `SameBytes` in more than one place (LLVM writes a name without its quotes where it needs none)
+        // T18: the runtime's `Same` holds the test of the counts, of the first bytes and of up to 16 bytes, small enough that clang
+        // inlines it into each caller, and `SameBytes` the bytes of longer strings, a call, as Rust's `==` of `str` calls `bcmp` for
+        // the bytes (the owner, 2026-11-02, pull request 232, comment 6578274207, and the answer after it); the emitter marks
+        // `SameBytes` `noinline` (`Emitter.OutOfLine`), so that LLVM does not inline it into `Same`, its one caller, and keep `Same`
+        // a call. No result tells that from one function of both, so the IR clang optimises as a release build is optimised holds
+        // it: a program that compares strings in three places, whose IR calls `Same` in each, calls `Same` nowhere once optimised,
+        // and `SameBytes` in more than one place (LLVM writes a name without its quotes where it needs none)
         const string text = """
             bool Equal(string x, string y) {
                 return x == y
