@@ -192,6 +192,11 @@ public sealed partial class Emitter
             }
         }
 
+        if (released.Count > 0)
+        {
+            EmitDrain(); // K2 with section 3: the work lists of the instances released
+        }
+
         var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
         main.Emit($"call void {start}(i32 %argc, ptr %argv)");
         main.Emit("call void @kz.main()");
@@ -232,6 +237,17 @@ public sealed partial class Emitter
                 case TypeDeclaration { Kind: TypeDeclarationKind.Data } t:
                     dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
                     break;
+                case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
+                    {
+                        var symbol = u.Model.ClassOf(t);
+                        classOwners[symbol] = u;
+                        foreach (var method in symbol.Methods.Values.SelectMany(m => m))
+                        {
+                            owners[method] = u; // K7: emitted when called, as a function is
+                        }
+
+                        break;
+                    }
             }
         }
     }
@@ -302,7 +318,8 @@ public sealed partial class Emitter
 
     /// <summary>The name a trace shows for a function with these type arguments: <c>Max&lt;int&gt;</c>.</summary>
     private static string TraceName(FunctionSymbol f, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap) =>
-        f.TypeParameters.Count == 0 ? f.Name : $"{f.Name}<{string.Join(", ", f.TypeParameters.Select(p => instanceMap[p].Text))}>";
+        (f.Owner is { } c ? c.Name + "." : string.Empty)
+        + (f.TypeParameters.Count == 0 ? f.Name : $"{f.Name}<{string.Join(", ", f.TypeParameters.Select(p => instanceMap[p].Text))}>");
 
     /// <summary>The symbol of an IR name, without its <c>@</c> and its quotes.</summary>
     private static string Symbol(string name) => name.TrimStart('@').Trim('"');
@@ -331,7 +348,7 @@ public sealed partial class Emitter
     {
         var owner = owners.TryGetValue(f, out var u) ? u : throw new InvalidOperationException($"`{f.Name}` belongs to no file of the module");
         var arguments = f.TypeParameters.Count == 0 ? string.Empty : "<" + string.Join(", ", f.TypeParameters.Select(p => Lower.Mangle(instanceMap[p]))) + ">";
-        var key = $"{owner.Prefix}.{f.Name}{arguments}.{f.Line.ToString(CultureInfo.InvariantCulture)}";
+        var key = $"{owner.Prefix}.{(f.Owner is { } c ? c.Name + "." : string.Empty)}{f.Name}{arguments}.{f.Line.ToString(CultureInfo.InvariantCulture)}";
         if (!instances.TryGetValue(key, out var name))
         {
             name = $"@\"{key}\"";
@@ -381,6 +398,11 @@ public sealed partial class Emitter
         var result = Types.Substitute(f.ReturnType, instanceMap);
         RequireSupported(result, d.Line);
         var parameters = new List<string>();
+        if (f.Owner is not null)
+        {
+            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller
+        }
+
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var p = f.Parameters[i];
@@ -391,6 +413,13 @@ public sealed partial class Emitter
 
         Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})"), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
+        if (f.Owner is not null)
+        {
+            var self = fn.Alloca("ptr", "this");
+            fn.Emit($"store ptr %this, ptr {self}");
+            slots[Model.ThisOf(f)] = self;
+        }
+
         for (var i = 0; i < f.Parameters.Count; i++)
         {
             var p = f.Parameters[i];
@@ -537,6 +566,9 @@ public sealed partial class Emitter
                     break;
                 }
 
+            case AssignOrDeclare a when Model.IsImplicitField(a, out _, out var field):
+                EmitFieldAssignment(a.Value, field!.Type, () => (This(a, a.Line), ClassOfThis(a, a.Line).Symbol), field.Name); // K7
+                break;
             case AssignOrDeclare a when Model.Declares(a):
                 {
                     var variable = Model.DeclarationOf(a);
@@ -791,6 +823,9 @@ public sealed partial class Emitter
         string place;
         switch (Unwrap(a.Target))
         {
+            case MemberAccess m when TypeOf(m.Target) is ClassType c:
+                EmitFieldAssignment(a.Value, targetType, () => (EmitExpression(m.Target), c.Symbol), m.Member); // K2, K9
+                return;
             case MemberAccess:
                 EmitPathAssignment(a);
                 return;

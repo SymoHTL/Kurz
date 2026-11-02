@@ -5,6 +5,6 @@ v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
     print(v.GetElement(2))
 } else {
-    // the `else` block of a test guards nothing (R18)
+    // the `else` block of `if X86.Sse41.IsSupported` guards nothing (R18)
     print(X86.Sse41.Extract(v, 2))
 }

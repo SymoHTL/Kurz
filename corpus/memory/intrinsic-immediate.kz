@@ -3,6 +3,6 @@
 
 v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
-    // the index of Extract is a `byte` in C#: the constant 300 does not fit it (R18)
-    print(X86.Sse41.Extract(v, 300))
+    // the index of Extract is a `byte` in C#: the constant 256 does not fit it (R18)
+    print(X86.Sse41.Extract(v, 256))
 }

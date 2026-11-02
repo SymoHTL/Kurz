@@ -1,0 +1,13 @@
+// expect: error kind-not-read at 13
+// rules: T33
+
+data Order(string Id)
+
+void ShowKind<T>() {
+    match T.Kind {
+        TypeKind.Data => print("data")
+    }
+}
+
+ShowKind<Order>()
+ShowKind<bool>()
