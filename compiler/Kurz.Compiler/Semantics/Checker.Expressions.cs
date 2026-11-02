@@ -850,13 +850,21 @@ public sealed partial class Checker
         return new Typed(Types.Nullable(map.Value));
     }
 
-    /// <summary>M9: the key of an index into the map, read or written.</summary>
+    /// <summary>
+    /// M9: the key of an index into the map, read or written. Where the key's type compares by a clause, the access runs that
+    /// <c>==</c> and the key's hash, a call that ends N9's narrowing (the owner, 2026-11-02, #110, comment 6586836827).
+    /// </summary>
     private void CheckKey(Expression index, MapType map)
     {
         var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
             ReportMismatch(key.Type, map.Key, index.Line, $"{Types.A(key.Type)} where a key of `{map}`, {Types.A(map.Key)}, is required", "M9");
+        }
+
+        if (ComparesByClause(map.Key, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+        {
+            EndChangeableNarrowing(); // N9: the access runs the key's `==` and hash, a call where its class names its fields (K5)
         }
     }
 
@@ -1448,7 +1456,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => (false, $"the equality of a class instance (K4) is not read"),
+                ClassType => HeldEquality(left.Type, [], [], []),
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1458,11 +1466,17 @@ public sealed partial class Checker
             switch (refused)
             {
                 case (true, var why):
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
+                    var rules = left.Type is ClassType ? "T18, K4, D3, M9" : "T18, D3, M9"; // K4: a class compares each field as its type does
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} ({rules})");
                     return new Typed(Types.Bool);
                 case (false, var why):
                     NotSupported(b.Line, $"`{op}` on {Types.A(left.Type)}: {why} (D3, M9)");
                     return new Typed(Types.Bool);
+            }
+
+            if (ok && ComparesByClause(left.Type, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+            {
+                EndChangeableNarrowing(); // N9: `==` on instances of a class that names its fields is a call (K5)
             }
         }
 
@@ -1488,6 +1502,25 @@ public sealed partial class Checker
         };
         return new Typed(Types.Bool, result is null ? null : new BoolConstant(result.Value));
     }
+
+    /// <summary>
+    /// N9 with K5: whether <c>==</c> on two values of the type compares instances of a class that names its fields, which N9 counts
+    /// among the calls: the instances themselves, or instances the values hold where they compare by their fields or their items. A
+    /// data type met again is read through the arguments its fields hold (<see cref="HeldArguments"/>), so that the inner
+    /// <c>Pair&lt;K&gt;</c> of a <c>Pair&lt;Pair&lt;K&gt;&gt;</c> is read with its own argument, and the walk of a type that holds itself
+    /// with other arguments ends.
+    /// </summary>
+    private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
+    {
+        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ListType l => ComparesByClause(l.Element, seen),
+        UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
+        DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
+        DataType d => seen.Add(d.Symbol)
+            && (d.Symbol.Fields.Any(f => ComparesByClause(SubstituteData(d, f.Type), seen))
+                || dataTypes.Values.Where(x => x.Base == d.Symbol).Any(x => ComparesByClause(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen))),
+        _ => false,
+    };
 
     private static bool? Compare(TokenKind op, int comparison, bool known) => !known ? null : op switch
     {

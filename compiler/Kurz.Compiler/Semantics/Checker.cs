@@ -2012,7 +2012,6 @@ public sealed partial class Checker
 
         if (variable is not null)
         {
-            EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
             RequireRawForState(variable, a.Line);
             if (captured)
             {
@@ -2028,6 +2027,7 @@ public sealed partial class Checker
             }
 
             var value = CheckExpression(a.Value, variable.Type, keepCases: Types.KeepsCases(variable.Type));
+            EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
             if (Types.IsVoid(value.Type))
             {
                 Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -2115,8 +2115,6 @@ public sealed partial class Checker
             AssignThroughInstance(a, members); // K1, K2: a field of an instance
             return;
         }
-
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
 
         KurzType current;
         VariableSymbol? changed = null;
@@ -2231,6 +2229,7 @@ public sealed partial class Checker
         }
 
         var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: Types.KeepsCases(current));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;

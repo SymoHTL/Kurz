@@ -8,16 +8,16 @@ namespace Kurz.Compiler.Semantics;
 /// (K1) and of its body with their defaults (K7), its methods (K7, K9),
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
-/// judged by the types of the fields (R2, R4), and its <c>static</c> methods and fields (K7, K18). What else a class can write, a
-/// base or an interface, <c>equal by</c>, a constructor in its body, a field there without a written type, a <c>virtual</c>,
-/// <c>override</c> or <c>prot</c> member, type parameters, and a field
-/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c>, and so are <c>==</c>
-/// on two instances (K4) and an instance in a map's key (K12) (<c>compiler/README.md</c>).
+/// judged by the types of the fields (R2, R4), its <c>static</c> methods and fields (K7, K18), and its equality and hash, by identity or
+/// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15). What else a class can write, a base or an interface,
+/// a constructor in its body, a field there without a written type, a <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
+/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
     private readonly Dictionary<string, ClassSymbol> classes = new(StringComparer.Ordinal);
     private readonly List<ClassSymbol> classDeclared = [];
+    private readonly HashSet<ClassSymbol> classesCompared = new(ReferenceEqualityComparer.Instance); // K4: the classes a walk of `==` is inside of
 
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
@@ -70,11 +70,6 @@ public sealed partial class Checker
             return (d.Bases[0].Line, "a base class or an interface after `:` (K6, K10)");
         }
 
-        if (d.EqualBy.Count > 0)
-        {
-            return (d.Line, "`equal by` (K8)");
-        }
-
         foreach (var member in d.Members ?? [])
         {
             switch (member)
@@ -95,8 +90,10 @@ public sealed partial class Checker
                     return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
-                default:
+                case FunctionDeclaration:
                     break;
+                default:
+                    return (member.Line, "a type declared in the body of a class (K7)");
             }
         }
 
@@ -210,6 +207,27 @@ public sealed partial class Checker
             if (symbol.Field(name) is not null || symbol.StaticField(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+
+            if (name is "Equals" or "GetHashCode")
+            {
+                Report(ErrorIds.EqualsMethod, methods[0].Line, $"a method of a class is named `{name}`: `==` and the hash of an instance are K4's, or come from the fields an `equal by` clause names, `equal by Id` (K5, K8)");
+            }
+        }
+
+        foreach (var name in d.EqualBy)
+        {
+            if (symbol.Field(name) is not { } field)
+            {
+                Report(ErrorIds.EqualByUnknown, d.Line, $"`{name}` is no field of `{symbol.Name}`: `equal by` names fields of the class (K15)");
+            }
+            else if (field.Type is WeakRefType)
+            {
+                NotSupported(d.Line, $"`equal by` that names the `weak` field `{name}`, which section 14 of the record leaves open (K8, R3)");
+            }
+            else if (!symbol.EqualBy.Contains(field))
+            {
+                symbol.EqualBy.Add(field);
             }
         }
     }
@@ -657,23 +675,24 @@ public sealed partial class Checker
 
     /// <summary>
     /// K1, K2, K7: an assignment to a field by its name inside a method: the field of <c>this</c>, which takes a value only where it is
-    /// <c>mut</c>; inside a lambda it is the change of a captured value, <c>capture-assign</c> (F11).
+    /// <c>mut</c>; inside a lambda too, which holds a reference to the same instance (F11, K2).
     /// </summary>
     private void AssignImplicitField(AssignOrDeclare a, FieldSymbol field)
     {
-        var (receiver, captured) = Lookup("this");
-        model.RecordImplicitField(a, receiver!, field);
-        if (captured)
-        {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `this` and cannot change its field `{a.Name}` (F11)");
-        }
-        else if (!field.Mut)
+        var receiver = ThisVariable();
+        model.RecordImplicitField(a, receiver, field);
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Name}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
+        if (value.IsError)
+        {
+            return;
+        }
+
         if (Types.IsVoid(value.Type))
         {
             Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -682,9 +701,9 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else if (!captured && field.Mut)
+        else if (field.Mut)
         {
-            Assigned(new NullPath(receiver!, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
+            Assigned(new NullPath(receiver, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
     }
 
@@ -989,9 +1008,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// K1, K2: an assignment of a field of an instance, <c>c.Count = 1</c>: the field is <c>mut</c>, the variable that holds the
-    /// reference need not be, since the reference does not change; through a lambda's captured value it is <c>capture-assign</c> (F11).
-    /// A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before the path, as
-    /// M4 reads an assignment into a path (the emitter's order).
+    /// reference need not be, since the reference does not change; a lambda that captured the instance, or a value that holds it, assigns
+    /// it too (F11). A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before
+    /// the path, as M4 reads an assignment into a path (the emitter's order).
     /// </summary>
     private void AssignThroughInstance(Assignment a, List<MemberAccess> members)
     {
@@ -1025,17 +1044,13 @@ public sealed partial class Checker
         }
 
         model.RecordType(last, new Typed(field.Type));
-        if (CapturedRoot(last.Target) is { } root)
-        {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
-        }
-        else if (!field.Mut)
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{last.Member}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
         if (value.IsError)
         {
             return;
@@ -1049,34 +1064,16 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else
+        else if (field.Mut)
         {
             Assigned(PathOf(a.Target), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
-        }
-    }
-
-    /// <summary>F11: the name of the variable a path starts at where a lambda captured it, <c>this</c> among them; null where it is the function's own.</summary>
-    private string? CapturedRoot(Expression e)
-    {
-        switch (Unwrap(e))
-        {
-            case NameExpression n when Lookup(n.Name) is (not null, var captured):
-                return captured ? n.Name : null;
-            case NameExpression n when ImplicitField(n.Name) is not null:
-                return Lookup("this").Captured ? "this" : null;
-            case ThisExpression:
-                return Lookup("this").Captured ? "this" : null;
-            case MemberAccess m:
-                return CapturedRoot(m.Target);
-            default:
-                return null;
         }
     }
 
     /// <summary>
     /// M5 with K2: the receiver of a <c>mut</c> method that is a <c>mut</c> field of an instance, <c>node.Children.Add(x)</c>, which every
     /// reference reaches (M5's reading of K2 for paths); a field without <c>mut</c> is <c>mut-required</c>, a path that goes on into a
-    /// data value after the field is <c>not supported</c>, and inside a lambda the change of a captured value is <c>capture-assign</c> (F11).
+    /// data value after the field is <c>not supported</c>, and a lambda that captured the instance changes the field too (F11).
     /// Returns false where the receiver is no such field.
     /// </summary>
     private bool MutReceiverThroughInstance(Expression receiver, List<MemberAccess> members, int line, string what)
@@ -1085,7 +1082,13 @@ public sealed partial class Checker
         {
             if (Unwrap(receiver) is NameExpression n && Lookup(n.Name).Variable is null && ImplicitField(n.Name) is { } implicitField)
             {
-                return MutField(receiver, implicitField, line, what);
+                return MutField(implicitField, line, what);
+            }
+
+            if (members.Count > 0 && Unwrap(members[0].Target) is NameExpression root && Lookup(root.Name).Variable is null && ImplicitField(root.Name) is not null)
+            {
+                NotSupported(line, "a `mut` method on a value held by a field of an instance (K2, M5)"); // K7: a field named alone is a step through `this`
+                return true;
             }
 
             return false;
@@ -1104,7 +1107,7 @@ public sealed partial class Checker
             return true; // reported where the receiver was read
         }
 
-        return MutField(receiver, field, line, what);
+        return MutField(field, line, what);
     }
 
     /// <summary>
@@ -1114,7 +1117,6 @@ public sealed partial class Checker
     /// </summary>
     private bool WrittenThroughInstance(Assignment a, IndexExpression index, List<MemberAccess> fields)
     {
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         if (fields.Count > 0 && fields.FindLastIndex(m => PathType(m.Target) is ClassType) < fields.Count - 1)
         {
             NotSupported(a.Line, "an assignment into a value held by a field of an instance (K2, M4)");
@@ -1127,13 +1129,9 @@ public sealed partial class Checker
         return true;
     }
 
-    private bool MutField(Expression receiver, FieldSymbol field, int line, string what)
+    private bool MutField(FieldSymbol field, int line, string what)
     {
-        if (CapturedRoot(receiver) is { } root)
-        {
-            Report(ErrorIds.CaptureAssign, line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
-        }
-        else if (!field.Mut)
+        if (!field.Mut)
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{field.Name}` is a field without `mut` (M5, K1)");
         }

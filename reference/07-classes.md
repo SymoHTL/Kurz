@@ -47,6 +47,9 @@ bump = () => c.Add(1)
 bump()
 bump()
 print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
 ```
 
 ### K3 (decided, §4) References with identity
@@ -100,6 +103,14 @@ a = Pet("Rex", o)
 b = Pet("Rex", o)
 print(a == b)
 print(a == a)
+```
+
+Case: [classes/equality-content-map.kz](../corpus/classes/equality-content-map.kz)
+```kurz
+class Tally(string Name, Map<string, int> Counts)
+
+t = Tally("a", Map<string, int>())
+print(t == t)
 ```
 
 ### K13 (decided, §4) Equality across inheritance

@@ -688,7 +688,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   lays out `Option<Rc<T>>` (N1); and a `weak T?`, the address alone too, which holds the instance's weak
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
-  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3). The
+  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
+  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
+  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
@@ -830,7 +833,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
   and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
   SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
-  2026-11-01, "Switch, as .NET").
+  2026-11-01, "Switch, as .NET"). A key that is an instance is hashed by its address where `==`
+  compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
+  K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -1308,6 +1313,12 @@ ask about it.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
+- K4 with K1: a class with no field compares every two of its instances equal, as a `data` type with no
+  field does, since none of its fields is `mut` or `weak` *(assumed)*; and `==` and the hash of a chain of
+  instances recurse, a call per link, so that a chain long enough ends the program with the stack's
+  overflow, as Rust's derived `PartialEq` and `Hash` on an `Rc` chain do *(assumed)*. The equality
+  program of `ListTests` pins the class with no field and a chain of two links; no test builds a chain
+  long enough to end the program.
 
 ## What the compiler says about a program
 
@@ -1484,8 +1495,8 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7, K9 and K18 to K20, for a class with its primary constructor or none,
-its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K15 and K18 to K20, for a class with its primary constructor or none,
+its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
@@ -1530,7 +1541,8 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`,
+`equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1543,7 +1555,7 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a constructor in its body (K14), a field there without a written type
+(K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
 or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
 than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
 that has type parameters of its own (K7, section 4), each of which leaves the class and every
@@ -1553,9 +1565,10 @@ holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time 
 one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
 cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
 `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
-method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
-on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
-K12); of chapter 4, a nullable `void` and a
+method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
+method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a `weak` field, which
+section 14 leaves open (K8, R3), and a key type that holds, at any depth, an instance of a class whose
+`equal by` names a `mut` field, where whether `mutable-key` reaches it is open (K12, section 14); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
@@ -1661,6 +1674,14 @@ round can ask about it by the rule's id.
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
   separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+- K4 with K5, K12 and N9: a class that compares by content and holds a field of a type `==` does not take,
+  a map among them, makes `==` on its instances, and a key of it, `type-mismatch`, as a `data` value that
+  holds one does (D3, M9), since K4 compares each field by the equality Kurz gives its type and that type
+  has none; in a class that compares by identity or by its clause such a field is not compared, and is no
+  error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
+  `data` value, a union or an instance compared by content, compares that instance by its clause too, and
+  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
@@ -1790,7 +1811,8 @@ round can ask about it by the rule's id.
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`. Inside a method, a field of the instance named alone (K7) stands
   there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
-  `mut-at-call`, and one inside a lambda is `capture-assign` (F11); the emitter gives the call the
+  `mut-at-call`, and one inside a lambda is passed as well, through the reference to the instance the
+  lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment 6579495475); the emitter gives the call the
   field's own place, so the callee's write is the field's.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
@@ -2018,12 +2040,24 @@ round can ask about it by the rule's id.
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the
   instance, as an assignment into a path does (the owner, 2026-10-24, "Value first"), and Rust
-  evaluates the right side of an assignment first; through a captured variable, also through an
-  instance on the path, it is `capture-assign`, as F11 proposes.
+  evaluates the right side of an assignment first; a lambda that captured the instance, or a `data`
+  value that holds it, assigns the field and writes into what the field holds too, by the field's
+  name inside a method as well, while an assignment of the captured variable itself, or into a
+  `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, #110, comment
+  6562487754, "Both allowed";
+  through a `data` value, assumed; a write into what the field holds, `b.Xs[0] = 2` and
+  `b.Xs.Add(2)`, as M5's proposed reading of K2 for paths takes it outside a lambda: the owner,
+  2026-11-02, #110, comment 6573113786).
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
-  narrowing, as N7 reads it.
+  narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
+  after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
+  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
+  field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
+  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
+  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
+  6573114335).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

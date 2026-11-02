@@ -147,6 +147,15 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     public int FieldIndex(string name) => Fields.FindIndex(f => f.Name == name);
 
+    /// <summary>K5, K8, K15: the fields an <c>equal by</c> clause names, each once, in its order; empty where the class has no clause.</summary>
+    public List<FieldSymbol> EqualBy { get; } = [];
+
+    /// <summary>K4: whether two instances compare by identity: a class without a clause that has a <c>mut</c> or a <c>weak</c> field.</summary>
+    public bool ComparesByIdentity => EqualBy.Count == 0 && Fields.Any(f => f.Mut || f.Type is WeakRefType);
+
+    /// <summary>K4, K5: the fields <c>==</c> and the hash read: those the clause names, or every field of a class that compares by content.</summary>
+    public IReadOnlyList<FieldSymbol> FieldsThatCount => EqualBy.Count > 0 ? EqualBy : ComparesByIdentity ? [] : Fields;
+
     /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
     public FunctionSymbol? TextMethod =>
         Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
