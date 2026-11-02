@@ -32,8 +32,9 @@ over the threshold.
   `CaseAscii`, and `c < 256` and take `CaseLatin`, each small enough to be inlined at every caller,
   and call `CaseOf` only above Latin-1, as Rust's `conversions::to_lower` and `to_upper` map Latin-1
   without their table (`library/core/src/unicode/unicode_data.rs` on Rust's master branch, read
-  2026-11-01). With both tests at the call site, as the change was merged, a later run gave 75 ms
-  for the same program against 126 ms before the change.
+  2026-11-01). With both tests at the call site, as the change was merged, the program took 75 ms
+  against 126 ms before the change in the run of pull request 149's description (2026-11-01, whose
+  gates ran on its head 8b39cf8; the best of five at a load average of about 4.5 on 6 CPUs).
 - What stayed a call, in an executable of `kurz build --release`: `nm <executable> | grep <name>`
   lists a function the optimiser kept, and
   `objdump -d --no-show-raw-insn <executable> | grep -c "call.*<name>"` counts its calls. A function

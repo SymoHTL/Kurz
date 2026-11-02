@@ -2013,7 +2013,8 @@ int CaseLatin(int c, bool upper, mut int second) {
 }
 
 // The first code point Unicode's full mapping of one direction gives `c`, and the second and the third in
-// `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up:
+// `second` and `third`, 0 where there are none, as Rust's `conversions::to_lower` and `to_upper` look them up
+// (`library/core/src/unicode/unicode_data.rs` on Rust's master branch, read 2026-11-02):
 // ASCII by its letters (`CaseAscii`), the rest of Latin-1, U+0080 to U+00FF, by Rust's rules for it without the
 // table (`CaseLatin`); from U+0100 on, the run of `table` that holds `c`, found by a binary search, where `c` is a
 // code point of the run's step, else the mapping to several code points, found by a second search, else `c`
@@ -4599,12 +4600,13 @@ pub uint LittleEndianWord(byte* p) {
 
 // A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
 // with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
-// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
-// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
-// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
-// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+// give it. F joins its two terms with an or, as RFC 1321 and `op_f` do. G adds each of its two terms into
+// the sum, where RFC 1321 joins them with an or and `op_g` adds them together first, which LLVM writes as
+// an or too. The two terms of each share no bit, so every form gives the same number, and each form here
+// is the faster one of its function, measured one function at a time
+// (knowledge/kurz-ir-marks-no-parameter-noundef.md).
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
-    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    uint sum = a +% m +% t +% ((b & c) | (~b & d))
     return (sum << r | sum >> (32 - r)) +% b
 }
 
