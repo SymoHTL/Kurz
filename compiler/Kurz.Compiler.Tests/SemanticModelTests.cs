@@ -98,6 +98,19 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_walk_reads_each_copy_of_a_function_that_reads_its_type_and_the_one_arm_of_its_kind()
+    {
+        // T33: a code generator reads the copies of such a function, never its own body, and of a match on `T.Kind` the arm the copy's
+        // kind takes; a function that passes its type parameter to one is read the same way
+        var (tree, model) = Clean("void ShowKind<T>() {\n    match T.Kind {\n        TypeKind.Int => print(\"int\")\n        else => print(\"other\")\n    }\n}\n\nvoid Outer<U>() {\n    ShowKind<U>()\n}\n\nShowKind<int>()\nOuter<bool>()");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["ShowKind<int>", "ShowKind<bool>", "Outer<bool>"], walk.Copies);
+        Assert.Equal(2, walk.KindArms);
+    }
+
+    [Fact]
     public void The_walk_finds_a_node_the_checker_did_not_record()
     {
         // the positive control of the theory: a checked tree with a statement the checker never read, built by hand and put after the others
@@ -449,6 +462,12 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
 
         public int Seen { get; private set; }
 
+        /// <summary>T33: the copies the walk read in place of the body of a function that reads its type, by name.</summary>
+        public List<string> Copies { get; } = [];
+
+        /// <summary>T33: the arms the walk read of the matches on <c>T.Kind</c>, one of each in each copy.</summary>
+        public int KindArms { get; private set; }
+
         private void Need(bool present, int line, string what)
         {
             Seen++;
@@ -516,7 +535,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MatchStatement m:
                     Expression(m.Subject);
-                    Arms(m.Arms);
+                    Arms(KindArm(m.Subject) ?? m.Arms);
                     break;
                 case ReturnStatement r:
                     Expression(r.Value);
@@ -558,6 +577,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     {
                         Need(Try(() => model.CFunctionOf(f)), f.Line, $"C declaration `{f.Name}`");
                         Defaults(f.Parameters);
+                    }
+
+                    break;
+                case FunctionDeclaration f when Try(() => model.FunctionOf(f)) && model.ReadsItsType(model.FunctionOf(f)):
+                    foreach (var copy in model.CopiesOf(model.FunctionOf(f)))
+                    {
+                        Copies.Add(copy.Name); // T33: a code generator reads each copy, never the function's own body
+                        Statement(copy.Declaration!);
                     }
 
                     break;
@@ -615,6 +642,18 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             {
                 Expression(p.Default);
             }
+        }
+
+        /// <summary>T33: the one arm a code generator reads of a match on <c>T.Kind</c> in a copy; null for any other match.</summary>
+        private IReadOnlyList<MatchArm>? KindArm(Expression subject)
+        {
+            if (model.KindArmOf(subject) is not { } taken)
+            {
+                return null;
+            }
+
+            KindArms++;
+            return [taken];
         }
 
         private void Arms(IReadOnlyList<MatchArm> arms)
@@ -734,7 +773,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MatchExpression m:
                     Expression(m.Subject);
-                    Arms(m.Arms);
+                    Arms(KindArm(m.Subject) ?? m.Arms);
                     break;
                 case WithExpression w:
                     Expression(w.Target);

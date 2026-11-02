@@ -1,0 +1,27 @@
+// expect: output
+// | none
+// | [10, NotFound]
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+T Same<T>(T x) => x
+
+// a type argument written as a union keeps the cases of the call
+match Same<int | NotFound>(Find(2)) {
+    int n => print(n)
+    NotFound => print("none")
+}
+
+// and so does the item type of the list a method is called on
+mut List<int | NotFound> ys = []
+ys.Add(Find(1))
+ys.Add(Find(2))
+print(ys)
