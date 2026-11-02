@@ -4258,8 +4258,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
-        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // T18: the runtime's `Same` compares the first bytes first, then 1 to 3 bytes as their first, middle and last byte, 4 to 16 as
+        // four words of 4, and more as 16 bytes at a time in words of 8 and the 16 bytes that end them: a string of every count from 0 to
         // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
         // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
@@ -4272,9 +4272,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
     {
-        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
-        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
-        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
+        // T32: the runtime's `Order` compares the first byte, whose difference is the order where it differs, then the shared bytes as
+        // words read with their first byte highest, each an unsigned number: 1 to 3 as their first, middle and last byte, 4 to 16 as four
+        // words of 4, more as 16 bytes at a time and then four words of 8, the first word that differs giving the order, and where the
+        // shared bytes agree the lengths: a string of every count from 0
         // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
         // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
         // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
@@ -4347,6 +4348,25 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
         Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
         Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    [Fact]
+    public void Two_strings_of_one_count_are_compared_by_their_first_bytes_before_a_word_of_either_is_read()
+    {
+        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it reads a word of either, since two
+        // different strings of one count most often differ there, and reads no word where they differ. No result tells that order
+        // from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as the emitter writes it, in
+        // the order of its source, reads a byte (`load i8`) before its first call that reads a word, and holds both
+        var ir = Compile("a = \"ab\"\nb = \"ac\"\nprint(a == b)\n", toolchain.Runtime).Program!.Ir;
+        var start = ir.IndexOf("define internal i1 @\"rt.common.Same.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "the program holds the runtime's `Same`");
+        var same = ir[start..];
+        same = same[..same.IndexOf("\n}", StringComparison.Ordinal)];
+        var bytes = same.IndexOf("= load i8, ptr", StringComparison.Ordinal);
+        int[] reads = [same.IndexOf("call i64 @\"std.WordAt.", StringComparison.Ordinal), same.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal)];
+        Assert.True(bytes >= 0, $"`Same` reads a byte:\n{same}");
+        Assert.All(reads, read => Assert.True(read >= 0, $"`Same` reads words of 8 and of 4:\n{same}"));
+        Assert.True(bytes < reads.Min(), $"`Same` reads the first bytes before it reads a word:\n{same}");
     }
 
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>

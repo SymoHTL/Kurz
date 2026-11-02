@@ -888,8 +888,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
-  runtime's `Same` and `Order` comparing the first byte, then words of 8 bytes, the last ending where the bytes
-  end, as the C library's `memcmp` compares them;
+  runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
+  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
+  either string, 4 to 16 bytes as four words of 4 on one path;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
