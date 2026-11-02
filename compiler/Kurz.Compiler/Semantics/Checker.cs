@@ -59,6 +59,7 @@ public sealed partial class Checker
     private bool readingConstant; // F12, R13: a default value or the initial value of state is being read, in which a read of state or of raw memory is no constant
     private bool stateRead; // R13: the value being read as a constant reads state
     private StaticFieldSymbol? initializing; // K18, K20: the `static` field whose initial value is being read
+    private readonly List<StaticFieldSymbol> readingStatics = []; // K20: the `static` fields whose initial values are being read, each reading the next
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
@@ -80,9 +81,9 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, as Rust's <c>std::prelude::rust_2021</c>
-    /// lists the names every module sees (design record, section 12: the owner, 2026-11-01, Q7 (b), the list held in the compiler an
-    /// assumption there).
+    /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, a list held in the compiler where Rust
+    /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
+    /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
     public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError"];
 
