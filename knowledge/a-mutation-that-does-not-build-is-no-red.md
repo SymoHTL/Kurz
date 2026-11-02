@@ -1,32 +1,37 @@
 ---
 name: a-mutation-that-does-not-build-is-no-red
-description: While the tests of T33's build were proven by mutation (pull request 215, 2026-11-01), a runner read a failed `dotnet test` as the named test turned red; two mutations did not build, a constant `false` before code (CS0162) and a method that no longer read `this` (CA1822), since the compiler builds with warnings as errors, so no test ran and one red proof proved nothing. A compiler mutation is red only where the named test is among the failed tests of a run that printed its summary
+description: While the tests of the reading of a type in generic code were proven by mutation for pull request 215 (2026-11-01), a runner read a failed `dotnet test` as the named test turned red. The compiler builds with warnings as errors, so a constant `false` before code (CS0162) and a method that no longer reads `this` (CA1822) do not build, and one red proof, of a constant `if (false)`, was a build error that proved nothing (caught before the pull request was opened). A compiler mutation is red only where the named test is among the failed tests of a run that printed its summary
 metadata:
   type: feedback
 ---
 
 ## What happened
 
-Pull request 215 proved each decision of T33's build by breaking it in `compiler/`, running the
-suites that need no clang, and expecting the named test to fail (`CLAUDE.md`, "Tests: every
-decision is proven"). The runner was a script outside this repository: it ran
-`dotnet test ... --filter <the suites>` and wrote `RED` when the run exited non-zero.
+Pull request 215 built the reading of a type in generic code (T33: `T.Kind`, and a copy of a
+generic function for each type it is called with). Each decision was proven by breaking it in
+`compiler/`, running the suites that need no clang, and expecting the named test to fail
+(`CLAUDE.md`, "Tests: every decision is proven"). The runner was a script outside this
+repository: it ran `dotnet test ... --filter <the suites>` and wrote `RED` when the run exited
+non-zero.
 
 `compiler/Directory.Build.props` builds with `TreatWarningsAsErrors` and `AnalysisLevel`
-`latest-recommended`, so a mutation that only adds a warning does not build. Two did not:
+`latest-recommended`, so a mutation that only adds a warning does not build:
 
-- the bound on a chain of copies, broken with `if (false)` before the code that refuses a deeper
-  chain: `error CS0162: Unreachable code detected`. The runner wrote
-  `RED    the depth of a chain -> A_chain_of_copies_deeper_than_the_build_reads`, and no test had run;
-- a second mutation, in a later run of the same runner, which took out a method's one read of `this`:
+- The bound on a chain of copies was broken with a constant `if (false)` before the code that
+  refuses a deeper chain, and the runner wrote
+  `RED    the depth of a chain -> A_chain_of_copies_deeper_than_the_build_reads`.
+- The runner was then changed to write `NOT RUN (no test ran; a build error?)`, with the build's
+  error, where a run printed no test summary, and every mutation was run again with it. Two
+  mutations of a later run stopped so: one with a constant `false` before code,
+  `error CS0162: Unreachable code detected`, and one that took out a method's one read of `this`,
   `error CA1822: Member '...' does not access instance data and can be marked as static`.
 
-The first was in the description of pull request 215 as a red proof. The runner was changed to
-write `NOT RUN (no test ran; a build error?)` with the build's error where the run printed no test
-summary, every mutation was run again with it, and the two were written in forms that build: the
-bound one higher and one lower, a condition the analyzer cannot fold. The test of the bound was
-then seen red for what it holds, at 64 copies read and 65 refused (commit f5f654b). The review
-round of pull request 215 (2026-11-02) asked for this entry.
+A constant `if (false)` before code is the shape CS0162 refuses, so the bound's `RED` was a build
+error and proved nothing. It was caught before the pull request was opened: the bound was broken
+again in forms that build, one copy higher and one lower, and both turned the test of commit
+f5f654b red (`A_chain_of_as_many_copies_as_the_build_reads_is_read_and_one_more_is_not_supported`,
+which holds 64 copies read and 65 refused). The review round of pull request 215 (2026-11-02)
+asked for this entry.
 
 ## What to do
 
