@@ -1612,6 +1612,17 @@ n = 2
 const assert(n > 1, "n is small")
 ```
 
+Case: [types/const-assert-constant.kz](../corpus/types/const-assert-constant.kz)
+```kurz
+void Buffer<const int N>() {
+    const assert(N > 0, "a buffer of {N} items")
+    print(N)
+}
+
+Buffer<64>()
+Buffer<0>()
+```
+
 ### T18 (assumed, §4) Operators
 
 `+ - * / %` on numbers, `== != < <= > >=` for comparison, on two strings as T32 says, and `&& || !` on `bool`, with the
