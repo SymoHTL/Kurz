@@ -1135,8 +1135,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "void | IoError Bound(TcpStream? s) {\n    if s != null {\n        s.SetWriteTimeout(null)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "void | IoError Bound(TcpListener? l) {\n    if l != null {\n        l.SetAcceptTimeout(1s)\n    }\n}\n\nBound(null) else {\n    IoError e => print(e)\n}\n",
             "print(1)\nmatch TcpStream.Connect(\"127.0.0.1:1\", 1s) {\n    TcpStream => print(\"connected\")\n    IoError e => print(e)\n}\n",
+            "void | IoError Half(TcpStream? s) {\n    if s != null {\n        s.ShutdownWrite()\n    }\n}\n\nHalf(null) else {\n    IoError e => print(e)\n}\n",
         ];
-        foreach (var (text, line) in texts.Zip([3, 3, 3, 2]))
+        foreach (var (text, line) in texts.Zip([3, 3, 3, 2, 3]))
         {
             var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
             RefusedOnWindows(refused);

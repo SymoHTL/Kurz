@@ -169,8 +169,13 @@ and the result type, as in `(int) => bool`. A lambda reads the variables around 
 them: assigning one is the compile error `capture-assign`. So is every change of a captured
 variable: an assignment into a path from it (M4), a `mut` method called on it or on a path from it
 (M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
-copy would be lost or, through a class instance on the path, would not be a change of the copy at
-all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
+copy would be lost. *(proposed: the record speaks of assigning)* A class instance is no part of the
+copy: the lambda holds a reference to the same instance, which changes through every reference
+(K2), so it may change what the instance holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
+or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
+value `d` stay `capture-assign` (§4, the owner, 2026-11-01, "Both allowed", against a method call
+alone and against neither). An instance that a captured `data` value holds is one the lambda may
+change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
 objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
@@ -209,6 +214,21 @@ big = xs.Where(x => {
 })
 print(big.Count)
 print(total)
+```
+
+Case: [functions/capture-changes-instance.kz](../corpus/functions/capture-changes-instance.kz)
+```kurz
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)
 ```
 
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)
@@ -609,7 +629,9 @@ A `return` with a value among the top-level statements, `return 2`, ends the pro
 its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
 0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
 return n + Exit" and "0, silently"). The value is an `int`, and a value of another type is
-`type-mismatch`. *(assumed, §12: the type)*
+`type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
+for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
+`Environment.Exit`. *(assumed, §12: the type, the low 8 bits and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 

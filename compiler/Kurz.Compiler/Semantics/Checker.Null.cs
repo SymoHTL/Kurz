@@ -305,9 +305,10 @@ public sealed partial class Checker
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             if (condition is not null)
             {
+                var calls = callsRun;
                 CheckCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
-                (whenTrue, whenFalse) = Tests(condition);
+                (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
 
             var exits = new LoopExits();
@@ -453,7 +454,7 @@ public sealed partial class Checker
     /// <summary>
     /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as
     /// C#'s <c>?[]</c> (section 4, the owner, 2026-10-30, "Add, as C#"): the type of the item made nullable, or the item's own where it is
-    /// nullable. The index runs only where the list is not null, so only what held before it is known after. On a value that is not
+    /// nullable, and of a <c>weak</c> item its read, a strong <c>T?</c> (R3). The index runs only where the list is not null, so only what held before it is known after. On a value that is not
     /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there), with a part in it as well; a part,
     /// <c>xs?[a..b]</c>, on a nullable list is <c>not supported</c> (section 4 names the item), and so is <c>m?[key]</c> on a nullable map.
     /// </summary>
@@ -525,7 +526,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        chainMembers[i] = list.Element;
-        return new Typed(Types.Nullable(list.Element));
+        var item = Types.Read(list.Element); // R3: a `weak` item reads as a strong `T?`, as `xs[i]` reads it
+        chainMembers[i] = item;
+        return new Typed(Types.Nullable(item));
     }
 }

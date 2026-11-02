@@ -68,7 +68,8 @@ public sealed partial class Checker
     /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
     /// a <c>duration?</c> (section 12, assumed), <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (the
     /// owner, 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do
-    /// (section 12, assumed); each with the case <c>IoError</c>.
+    /// (section 12, assumed), and a stream's <c>ShutdownWrite()</c>, as Rust's <c>shutdown(Shutdown::Write)</c> (section 12, the owner,
+    /// 2026-11-02); each with the case <c>IoError</c>.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
@@ -89,6 +90,7 @@ public sealed partial class Checker
             "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
             "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
             "SetAcceptTimeout" when listener => (CallKind.TcpSetAcceptTimeout, [timeout], Types.Void),
+            "ShutdownWrite" when stream => (CallKind.TcpShutdownWrite, [], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };
@@ -111,7 +113,7 @@ public sealed partial class Checker
     /// <summary>
     /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
     /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
-    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else S16 makes it <c>syntax</c>, E4's id.
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is <c>syntax</c>, E4's id, which S16 proposes.
     /// </summary>
     private Typed CheckLines(CallExpression c)
     {
