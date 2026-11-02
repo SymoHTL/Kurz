@@ -7,8 +7,9 @@ namespace Kurz.Compiler.Semantics;
 /// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c> (K1), its methods (K7, K9),
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
-/// judged by the types of the fields (R2, R4). What else a class can write, a base or an interface, <c>equal by</c>, a field or a
-/// constructor in its body, a <c>static</c>, <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
+/// judged by the types of the fields (R2, R4), and its <c>static</c> methods and fields (K7, K18). What else a class can write, a
+/// base or an interface, <c>equal by</c>, a field of an instance or a constructor in its body, a <c>virtual</c>, <c>override</c> or
+/// <c>prot</c> member, type parameters, and a field
 /// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c>, and so are <c>==</c>
 /// on two instances (K4) and an instance in a map's key (K12) (<c>compiler/README.md</c>).
 /// </summary>
@@ -48,6 +49,11 @@ public sealed partial class Checker
 
             list.Add(method);
         }
+
+        foreach (var f in (d.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) != 0))
+        {
+            symbol.StaticFields.Add(new StaticFieldSymbol(f, symbol)); // K7, K18: the one field of a class body the checker reads
+        }
     }
 
     /// <summary>The first part of a class's declaration that the checker does not read, with its line; null where it reads all of it.</summary>
@@ -77,14 +83,16 @@ public sealed partial class Checker
         {
             switch (member)
             {
-                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & Modifiers.Static) != 0:
-                    return (f.Line, "a `static` field (K18)");
+                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & Modifiers.Static) != 0 && (modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)) != 0:
+                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a `static` field (K7, K18, R13)");
+                case FieldDeclaration { Modifiers: var modifiers } when (modifiers & Modifiers.Static) != 0:
+                    break; // K7, K18: read with the class (ResolveStaticField)
                 case FieldDeclaration f:
                     return (f.Line, "a field declared in the body of a class (K7, K14)");
                 case ConstructorDeclaration c:
                     return (c.Line, "a constructor declared in the body of a class (K14)");
-                case FunctionDeclaration f when (f.Modifiers & (Modifiers.Static | Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
-                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Static | Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, K18, R16)");
+                case FunctionDeclaration f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
+                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
                 default:
@@ -134,11 +142,134 @@ public sealed partial class Checker
             symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line));
         }
 
+        foreach (var s in symbol.StaticFields)
+        {
+            ResolveStaticField(symbol, s);
+        }
+
         foreach (var (name, methods) in symbol.Methods)
         {
-            if (symbol.Field(name) is not null)
+            if (symbol.Field(name) is not null || symbol.StaticField(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+        }
+    }
+
+    /// <summary>
+    /// K7, K18: a <c>static</c> field, which exists once for the program and so holds an immutable value: <c>static mut</c>, and a type
+    /// that is or holds a class, are <c>static-state</c>; a field of the name of another field is <c>redeclared</c> (V9). A field
+    /// without a written type takes the type of its initial value (V2), judged when that value is read (<see cref="CheckStaticFields"/>).
+    /// </summary>
+    private void ResolveStaticField(ClassSymbol symbol, StaticFieldSymbol s)
+    {
+        var d = s.Declaration;
+        if (symbol.Field(s.Name) is not null || symbol.StaticFields.TakeWhile(other => !ReferenceEquals(other, s)).Any(other => other.Name == s.Name))
+        {
+            Report(ErrorIds.Redeclared, d.Line, $"the field `{s.Name}` is declared already (V9)");
+        }
+
+        if ((d.Modifiers & Modifiers.Mut) != 0)
+        {
+            Report(ErrorIds.StaticState, d.Line, $"`{s.Name}` is a `static mut` field, state that every actor would reach: a `static` field holds an immutable value (K18)");
+            s.Refused = true;
+            return;
+        }
+
+        if (d.Type is not null)
+        {
+            s.Type = Resolve(d.Type);
+            JudgeStaticFieldType(s);
+        }
+    }
+
+    /// <summary>
+    /// K18: the type of a <c>static</c> field: one that is or holds a class is <c>static-state</c>, since an instance lives in one actor's
+    /// heap; the checker reads a field of a number, a <c>bool</c>, a <c>char</c>, a <c>string</c>, a time or a value of an enum, whose
+    /// constants F12 gives, and a type of another kind is <c>not supported</c>, as an initial value that is no constant is.
+    /// </summary>
+    private void JudgeStaticFieldType(StaticFieldSymbol s)
+    {
+        var held = new HashSet<ClassSymbol>();
+        ClassesHeld(s.Type, held, []);
+        if (Types.IsError(s.Type))
+        {
+            s.Refused = true;
+        }
+        else if (Types.IsVoid(s.Type))
+        {
+            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (K1, F4)");
+            s.Refused = true;
+        }
+        else if (held.Count > 0)
+        {
+            Report(ErrorIds.StaticState, s.Line, $"the `static` field `{s.Name}` would hold an instance of `{held.First().Name}`, which lives in one actor's heap: a `static` field holds an immutable value no actor owns (K18)");
+            s.Refused = true;
+        }
+        else if (s.Type is not (PrimitiveType or EnumType))
+        {
+            NotSupported(s.Line, $"a `static` field of type `{s.Type}`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)");
+            s.Refused = true;
+        }
+    }
+
+    /// <summary>
+    /// K18, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of the same
+    /// class declared above counts as the constant it holds (K20); one declared below, or the field itself, is <c>unknown-name</c>, so
+    /// that no order and no cycle exist. An initial value that is no constant is computed at the field's first read (section 4),
+    /// whose open items of section 14 leave it <c>not supported</c>; a field without one is <c>field-unassigned</c>, since no type has a
+    /// default value (K14).
+    /// </summary>
+    private void CheckStaticFields()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            foreach (var s in symbol.StaticFields.Where(s => !s.Refused))
+            {
+                if (s.Declaration.Value is not { } value)
+                {
+                    NotSupported(s.Line, "a `static` field without an initial value after `=` (K7, K18)");
+                    s.Refused = true;
+                    continue;
+                }
+
+                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = s.Line, Class = symbol, Static = true };
+                var reading = readingConstant;
+                readingConstant = true;
+                initializing = s;
+                var t = CheckExpression(value, s.Declaration.Type is null ? null : s.Type);
+                initializing = null;
+                readingConstant = reading;
+                if (t.IsError)
+                {
+                    s.Refused = true;
+                    continue;
+                }
+
+                if (s.Declaration.Type is null)
+                {
+                    s.Type = t.Type;
+                    JudgeStaticFieldType(s);
+                    if (s.Refused)
+                    {
+                        continue;
+                    }
+                }
+
+                if (t.Constant is null)
+                {
+                    NotSupported(value.Line, $"the initial value of the `static` field `{s.Name}`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)");
+                    s.Refused = true;
+                }
+                else if (!Types.Assignable(t.Type, s.Type))
+                {
+                    ReportMismatch(t.Type, s.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(s.Type)} is required");
+                    s.Refused = true;
+                }
+                else
+                {
+                    s.Value = t.Constant;
+                }
             }
         }
     }
@@ -205,10 +336,13 @@ public sealed partial class Checker
             foreach (var method in symbol.Methods.Values.SelectMany(list => list))
             {
                 var d = method.Declaration!;
-                frame = new Frame { ReturnType = method.ReturnType, Line = d.Line, Reserved = reservedTopLevel, Class = symbol };
-                var receiver = new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, d.Line) { Read = true };
-                frame.Scope.Variables[receiver.Name] = receiver;
-                model.RecordThis(method, receiver);
+                frame = new Frame { ReturnType = method.ReturnType, Line = d.Line, Reserved = reservedTopLevel, Class = symbol, Static = method.IsStatic };
+                if (!method.IsStatic)
+                {
+                    var receiver = new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, d.Line) { Read = true };
+                    frame.Scope.Variables[receiver.Name] = receiver;
+                    model.RecordThis(method, receiver);
+                }
                 foreach (var (p, node) in method.Parameters.Zip(d.Parameters))
                 {
                     DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
@@ -252,10 +386,45 @@ public sealed partial class Checker
         return null;
     }
 
-    /// <summary>K7: inside a method, a name that is a field of its class, read through <c>this</c>; a lambda that reads it captures <c>this</c> (F15).</summary>
-    private FieldSymbol? ImplicitField(string name) => CurrentClass()?.Field(name);
+    /// <summary>
+    /// K7: whether the code being checked stands in a <c>static</c> method of its class, or in the initial value of a <c>static</c>
+    /// field, where no instance is.
+    /// </summary>
+    private bool InStaticMember()
+    {
+        for (var f = frame; f is not null; f = f.Outer)
+        {
+            if (f.Class is not null)
+            {
+                return f.Static;
+            }
+        }
 
-    /// <summary>K7: inside a method, the methods of its class of a name a call names alone.</summary>
+        return false;
+    }
+
+    /// <summary>
+    /// K7: inside a method of the instance, a name that is a field of its class, read through <c>this</c>; a lambda that reads it captures
+    /// <c>this</c> (F15). A <c>static</c> member has no instance, so none is found there (<see cref="InstanceFieldInStatic"/>).
+    /// </summary>
+    private FieldSymbol? ImplicitField(string name) => InStaticMember() ? null : CurrentClass()?.Field(name);
+
+    /// <summary>K7, K19: inside a <c>static</c> member, a name that is a field of an instance of its class, which is <c>static-mismatch</c>.</summary>
+    private bool InstanceFieldInStatic(string name, int line)
+    {
+        if (!InStaticMember() || CurrentClass()?.Field(name) is null)
+        {
+            return false;
+        }
+
+        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a field of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+        return true;
+    }
+
+    /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
+    private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
+
+    /// <summary>K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>.</summary>
     private List<FunctionSymbol>? ImplicitMethods(string name) => CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list) ? list : null;
 
     /// <summary>The variable <c>this</c> of the method around the place, read and, from a lambda, captured (F15).</summary>
@@ -266,14 +435,20 @@ public sealed partial class Checker
     }
 
     /// <summary>K7, V9: inside a method, whether a name is a member of its class, which a declaration of the name would hide.</summary>
-    private bool IsMemberName(string name) => CurrentClass() is { } c && (c.Field(name) is not null || c.Methods.ContainsKey(name));
+    private bool IsMemberName(string name) => CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || c.Methods.ContainsKey(name));
 
-    /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10).</summary>
+    /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10), and a <c>static</c> member has none (K19).</summary>
     private Typed CheckThis(ThisExpression t)
     {
         if (CurrentClass() is null)
         {
             Report(ErrorIds.UnknownName, t.Line, "`this` is the instance inside a method of a class, and no method is around it (K7, V10)");
+            return Typed.Error;
+        }
+
+        if (InStaticMember())
+        {
+            Report(ErrorIds.StaticMismatch, t.Line, "a `static` member has no instance, and so no `this` (K7, K19)");
             return Typed.Error;
         }
 
@@ -321,6 +496,113 @@ public sealed partial class Checker
         }
     }
 
+    // ---- static members ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// K18: a read of a <c>static</c> field, by its name inside the class or as <c>T.F</c>: a value of its type, which the emitter gives
+    /// as the constant the field holds, and no constant itself, as a C# <c>static readonly</c> field is none, but in the initial value of a
+    /// later <c>static</c> field of the same class (K20).
+    /// </summary>
+    private Typed ReadStaticField(Expression node, StaticFieldSymbol field)
+    {
+        if (field.Refused || Types.IsError(field.Type))
+        {
+            return Typed.Error; // E1: refused at its declaration
+        }
+
+        if (initializing is { } being && ReferenceEquals(being.Owner, field.Owner))
+        {
+            var fields = field.Owner.StaticFields;
+            if (fields.IndexOf(field) >= fields.IndexOf(being))
+            {
+                Report(ErrorIds.UnknownName, node.Line, $"`{field.Name}` is not declared above `{being.Name}`: the initial value of a `static` field reads the `static` fields declared above it (K20, V10)");
+                return Typed.Error;
+            }
+
+            model.RecordStaticField(node, field);
+            return new Typed(field.Type, field.Value);
+        }
+
+        model.RecordStaticField(node, field);
+        return new Typed(field.Type);
+    }
+
+    /// <summary>
+    /// K7, K18, K19: <c>T.F</c>, a member of a class reached by its name: a <c>static</c> field, <c>not-visible</c> where it is private and
+    /// the read stands outside the class (F9); a member of an instance is <c>static-mismatch</c>.
+    /// </summary>
+    private Typed ClassStaticMember(ClassSymbol symbol, MemberAccess m)
+    {
+        if (symbol.StaticField(m.Member) is { } field)
+        {
+            if (!field.IsPub && !ReferenceEquals(CurrentClass(), symbol))
+            {
+                Report(ErrorIds.NotVisible, m.Line, $"`{field.Name}` of `{symbol.Name}` is private to its class: a field is visible outside it with `pub` (F9)");
+                return Typed.Error;
+            }
+
+            return ReadStaticField(m, field);
+        }
+
+        if (symbol.Field(m.Member) is not null)
+        {
+            Report(ErrorIds.StaticMismatch, m.Line, $"`{m.Member}` is a field of an instance of `{symbol.Name}`, not of the class: read it from an instance (K7, K19)");
+            return Typed.Error;
+        }
+
+        if (symbol.Methods.ContainsKey(m.Member))
+        {
+            NotSupported(m.Line, "a method as a value, named without a call (K7, F11)");
+            return Typed.Error;
+        }
+
+        Report(ErrorIds.UnknownName, m.Line, $"`{symbol.Name}` has no member `{m.Member}` (V10)");
+        return Typed.Error;
+    }
+
+    /// <summary>
+    /// K7, K19: <c>T.M(args)</c>, a call of a <c>static</c> method by its class's name, the one of its name whose parameters fit (F13);
+    /// a method of an instance called so is <c>static-mismatch</c>, as C#'s CS0120 refuses it.
+    /// </summary>
+    private Typed CallStatic(ClassSymbol symbol, MemberAccess m, CallExpression c, KurzType? expected)
+    {
+        if (symbol.Methods.TryGetValue(m.Member, out var methods))
+        {
+            var statics = methods.Where(f => f.IsStatic).ToList();
+            if (statics.Count > 0)
+            {
+                return PickMethod(statics, c, expected, m.Line, out _);
+            }
+
+            Report(ErrorIds.StaticMismatch, m.Line, $"`{m.Member}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+        }
+        else if (symbol.StaticField(m.Member) is not null || symbol.Field(m.Member) is not null)
+        {
+            var value = ClassStaticMember(symbol, m);
+            if (!value.IsError)
+            {
+                model.RecordType(m, value);
+                return CallValue(value.Type, c); // F11: what a call of a value of another type says
+            }
+        }
+        else
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`{symbol.Name}` has no member `{m.Member}` (V10)");
+        }
+
+        CheckArgumentsLoosely(c);
+        return Typed.Error;
+    }
+
+    /// <summary>K18: an assignment of a <c>static</c> field, or of a path that starts at one, which holds one value for the program.</summary>
+    private void AssignStaticField(StaticFieldSymbol field, int line)
+    {
+        if (!field.Refused)
+        {
+            Report(ErrorIds.AssignImmutable, line, $"`{field.Name}` is a `static` field, which holds one immutable value for the program: nothing assigns it (K18)");
+        }
+    }
+
     // ---- members of an instance ----------------------------------------------------------------------
 
     /// <summary>
@@ -337,6 +619,12 @@ public sealed partial class Checker
         if (type.Symbol.Methods.ContainsKey(member))
         {
             NotSupported(line, "a method as a value, named without a call (K7, F11)");
+            return Typed.Error;
+        }
+
+        if (type.Symbol.StaticField(member) is not null)
+        {
+            Report(ErrorIds.StaticMismatch, line, $"`{member}` is a `static` field of `{type.Symbol.Name}`: read it as `{type.Symbol.Name}.{member}` (K7, K19)");
             return Typed.Error;
         }
 
@@ -360,18 +648,37 @@ public sealed partial class Checker
                 return CallValue(field.Type, c); // F11: a field of function type is called as any function value
             }
 
-            Report(ErrorIds.UnknownName, m.Line, $"`{type.Symbol.Name}` has no method `{m.Member}` (V10)");
+            if (type.Symbol.StaticField(m.Member) is not null)
+            {
+                ClassMember(type, m.Member, m.Line); // K19: a `static` field reached through an instance
+            }
+            else
+            {
+                Report(ErrorIds.UnknownName, m.Line, $"`{type.Symbol.Name}` has no method `{m.Member}` (V10)");
+            }
+
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
 
-        return PickMethod(methods, c, expected, m.Line);
+        var instance = methods.Where(f => !f.IsStatic).ToList();
+        if (instance.Count == 0)
+        {
+            Report(ErrorIds.StaticMismatch, m.Line, $"`{m.Member}` is a `static` method of `{type.Symbol.Name}`: call it as `{type.Symbol.Name}.{m.Member}(...)` (K7, K19)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        return PickMethod(instance, c, expected, m.Line, out _);
     }
 
-    /// <summary>The method of the candidates a call picks (F13), recorded as a call of a method; <c>not-visible</c> where it is private and the call stands outside its class (F9).</summary>
-    private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line)
+    /// <summary>
+    /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
+    /// <c>not-visible</c> where it is private and the call stands outside its class (F9).
+    /// </summary>
+    private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked)
     {
-        var typed = ResolveCall(methods, c, expected, out var picked, CallKind.Method);
+        var typed = ResolveCall(methods, c, expected, out picked, CallKind.Method);
         if (picked is not null && !Visible(picked))
         {
             Report(ErrorIds.NotVisible, line, $"`{picked.Name}` of `{picked.Owner!.Name}` is private to its class: a method is visible outside it with `pub` (F9)");
@@ -381,11 +688,27 @@ public sealed partial class Checker
         return typed;
     }
 
-    /// <summary>K7: a call that names a method of the class alone, inside one of its methods: the method of <c>this</c>.</summary>
+    /// <summary>
+    /// K7: a call that names a method of the class alone, inside one of its methods: a method of <c>this</c>, or a <c>static</c> one; inside
+    /// a <c>static</c> member, which has no instance, a <c>static</c> one alone, and a method of an instance is <c>static-mismatch</c> (K19).
+    /// </summary>
     private Typed CallImplicitMethod(List<FunctionSymbol> methods, NameExpression n, CallExpression c, KurzType? expected)
     {
-        model.RecordImplicitField(n, ThisVariable(), null);
-        return PickMethod(methods, c, expected, n.Line);
+        var candidates = InStaticMember() ? methods.Where(f => f.IsStatic).ToList() : methods;
+        if (candidates.Count == 0)
+        {
+            Report(ErrorIds.StaticMismatch, n.Line, $"a `static` member has no instance: `{n.Name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        var typed = PickMethod(candidates, c, expected, n.Line, out var picked);
+        if (picked is { IsStatic: false })
+        {
+            model.RecordImplicitField(n, ThisVariable(), null);
+        }
+
+        return typed;
     }
 
     /// <summary>K1: an instance made by the class's name, with the arguments of its primary constructor, bound as D11 binds them; a class without one takes none.</summary>

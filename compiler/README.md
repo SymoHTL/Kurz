@@ -1281,8 +1281,8 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
-its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7, K9 and K18 to K20, for a class with its primary constructor or none,
+its fields, its methods, its `static` fields and methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17) and its cycle rule judged by the types of the fields (R2, R4), and 13 (files, sockets and the process: S1 to S11 and S13 to S15; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X10), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
@@ -1321,7 +1321,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `native-not-allowed`, `native-type`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1334,12 +1334,15 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field or a constructor in its body (K7, K14, K18), a method that is
-`static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
-section 4), a field that holds `weak` at any depth, since R2 cannot judge the class until `weak` is
-read (R2, R3), each of which leaves the class and every value of it unread, and of a class it reads, a
-field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
-value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
+(K6, K10), `equal by` (K8), a field of the instance or a constructor in its body (K7, K14), a
+`static` field with a modifier other than `pub` and `mut` (K18, R13), a method that is `virtual`,
+`override`, `prot` or `extern` or that has type parameters of its own (K7, section 4), a field that
+holds `weak` at any depth, since R2 cannot judge the class until `weak` is read (R2, R3), each of
+which leaves the class and every value of it unread, and of a class it reads, a `static` field
+without an initial value, with one that is no constant, which section 4 computes at the field's
+first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
+`char`, a `string`, a time or an enum (K18), a field of a function type, whose cycle R9 judges by
+the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
 on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
 K12); of chapter 4, a nullable `void` and a
@@ -1737,7 +1740,9 @@ round can ask about it by the rule's id.
 - K7 with V8 and V9: inside a method a field of its instance is a name, read and assigned as
   `Count = Count + 1`, as C# reads it, so a parameter or a variable of a method named as a field, and
   a method named as a field, are `redeclared`, as two fields of one name are; `this` outside a method
-  is `unknown-name`.
+  is `unknown-name`. A `static` field or method of the class is a name there too, and in a `static`
+  method, and a method of the class, `static` or not, hides a top-level function of its name inside
+  the class, as C# reads it.
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the

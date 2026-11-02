@@ -121,6 +121,19 @@ public sealed partial class Checker
                         return CallValue(field.Type, c); // F11: a field of function type
                     }
 
+                    if (ImplicitStaticField(n.Name) is not null || InstanceFieldInStatic(n.Name, n.Line))
+                    {
+                        var value = CheckName(n); // K18, K19: what a call of a `static` field's value says
+                        if (!value.IsError)
+                        {
+                            model.RecordType(n, value);
+                            return CallValue(value.Type, c);
+                        }
+
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
                     {
                         CheckName(n);
@@ -1184,8 +1197,12 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name)
-                || (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null))
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
+            {
+                return CallStatic(classSymbol, m, c, null); // K7: `T.M(args)`, as a method on an instance is read (CallMethod)
+            }
+
+            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
@@ -1917,7 +1934,8 @@ public sealed partial class Checker
         if (picked is not null && !typed.IsError)
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
-            model.RecordCall(c, new CallInfo(kind, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            var recorded = kind == CallKind.Method && picked.Function is { IsStatic: true } ? CallKind.Function : kind; // K7: a `static` method has no instance
+            model.RecordCall(c, new CallInfo(recorded, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
         }
 
         return typed;

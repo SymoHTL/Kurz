@@ -1,0 +1,9 @@
+// expect: error assign-immutable at 8
+// rules: K18
+
+class Limits(int Size) {
+    pub static int Max = 10
+}
+
+Limits.Max = 20
+print(Limits.Max)
