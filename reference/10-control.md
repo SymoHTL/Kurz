@@ -250,7 +250,11 @@ the loop started: the collection is a value (M1), and a change to the variable i
 change to the variable, not to what the loop walks. For a map §4 states it, in the words of the option the owner
 chose, "The loop walks the map as it was when the loop started" (the owner, 2026-10-30, "Key and
 Value, as C#", the option that also named the entry's `Key` and `Value`); for a list and a range §4 states nothing, and it is
-*(proposed: a reading of M3)*. The record's stream sample uses this form.
+*(proposed: a reading of M3)*. The record's stream sample uses this form. The lines of a file are walked
+by `for line in f.Lines() { }`, which pulls them one at a time, with an `else` after the block for the
+cases a pull fails with: S16 states it. They are the exception to the collection as it was when the
+loop started: the loop pulls each line when it needs it, so that a `Read` or a second `Lines()` on the
+same `File` in the block takes what the loop would have pulled next (S16) *(assumed, §12)*.
 
 Case: [control/for-in.kz](../corpus/control/for-in.kz)
 ```kurz

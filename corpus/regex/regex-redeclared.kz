@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: G1
+
+data Match(int Index)
+
+print(1)

@@ -1,0 +1,8 @@
+// expect: error redeclared at 4
+// rules: A17
+
+void eprint(string text) {
+    print(text)
+}
+
+print(1)

@@ -34,6 +34,9 @@ public sealed partial class Checker
 
         /// <summary>A call with cases beside its success: its whole result, which a parameter of a written union keeps, where <see cref="Typed"/> is the success every other parameter takes (O4, O2).</summary>
         public UnionType? Whole { get; init; }
+
+        /// <summary>Of a list literal, the whole result of each item that is a call with cases beside its success, null for every other item, which a parameter's item type keeps or unwraps as it does a call's (O4).</summary>
+        public IReadOnlyList<UnionType?> ItemWholes { get; init; } = [];
     }
 
     private sealed class Candidate
@@ -86,6 +89,11 @@ public sealed partial class Checker
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
+        }
+
+        if (model.HasCall(c) && model.CallOf(c).Kind == CallKind.FileLines)
+        {
+            return result; // S16: the loop takes the cases of `f.Lines()`, after its `else` (CheckForIn)
         }
 
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
@@ -187,7 +195,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name))
+                    if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -377,6 +385,10 @@ public sealed partial class Checker
         if (Types.IsVoid(t.Type))
         {
             Report(ErrorIds.Syntax, c.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!t.IsError && HoldsVector(t.Type))
+        {
+            NotSupported(c.Line, VectorText);
         }
         else if (!t.IsError && !HasText(t.Type))
         {
@@ -718,7 +730,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var element = Resolve(c.TypeArguments[0]);
+        var element = ResolveTypeArgument(c.TypeArguments[0], "`List`");
         if (Types.IsError(element))
         {
             CheckArgumentsLoosely(c);
@@ -781,8 +793,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var key = Resolve(c.TypeArguments[0]);
-        var value = Resolve(c.TypeArguments[1]);
+        var key = ResolveTypeArgument(c.TypeArguments[0], "`Map`");
+        var value = ResolveTypeArgument(c.TypeArguments[1], "`Map`");
         if (Types.IsError(key) || Types.IsError(value))
         {
             CheckArgumentsLoosely(c);
@@ -1083,7 +1095,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(Resolve)).ToDictionary(p => p.First, p => p.Second);
+            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`"))).ToDictionary(p => p.First, p => p.Second);
         }
 
         if (typeArguments is not null)
@@ -1120,9 +1132,14 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (CheckIntrinsicCall(m, c) is { } intrinsic)
+        {
+            return intrinsic; // R18
+        }
+
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
@@ -1213,6 +1230,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (target.Type is VectorType vector)
+        {
+            return CheckVectorMethod(vector, m, c); // R18
+        }
+
         if (target.Type is ClassType classType)
         {
             return CallMethod(classType, m, c, null); // K7
@@ -1277,6 +1299,43 @@ public sealed partial class Checker
                         if (!result.IsError)
                         {
                             MutReceiver(c, m.Target, c.Line, "`AddRange` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
+                case "Insert":
+                    {
+                        // X11: C#'s names, `index` and `item`; the item stored before the list changes, as `Add` stores it (M7)
+                        if (RefusesTypeArguments(c, "`Insert`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [new Slot("index", Types.Int, false, false, false), new Slot("item", list.Element, false, false, false)], Result = Types.Void };
+                        var result = Record(c, CallKind.ListInsert, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`Insert` changes the list it is called on"); // after the call's own error nothing more (E1)
+                        }
+
+                        return result;
+                    }
+
+                case "RemoveAt":
+                    {
+                        // X11: the item taken out, as Rust's `Vec::remove` gives it and the map's `Remove` gives its value (section 12, the
+                        // owner, 2026-11-01, "C# names, RemoveAt gives item")
+                        if (RefusesTypeArguments(c, "`RemoveAt`"))
+                        {
+                            return Typed.Error;
+                        }
+
+                        var candidate = new Candidate { Slots = [new Slot("index", Types.Int, false, false, false)], Result = list.Element };
+                        var result = Record(c, CallKind.ListRemoveAt, Call([candidate], c, null, out var picked), picked);
+                        if (!result.IsError)
+                        {
+                            MutReceiver(c, m.Target, c.Line, "`RemoveAt` changes the list it is called on"); // after the call's own error nothing more (E1)
                         }
 
                         return result;
@@ -1738,7 +1797,8 @@ public sealed partial class Checker
     /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
-        var typeArguments = c.TypeArguments.Select(Resolve).ToList(); // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        // once: an error in one is one diagnostic, whatever the number of overloads (E1)
+        var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
@@ -1801,7 +1861,7 @@ public sealed partial class Checker
                 // M11: typed by its items for the pick, with what that reports kept back, since the parameter's type reaches it
                 Push();
                 var own = CheckExpression(a.Value, null);
-                pres.Add(new Pre { Argument = a, Typed = own, Diagnostics = Pop(commit: false), ListLiteral = true });
+                pres.Add(new Pre { Argument = a, Typed = own, Diagnostics = Pop(commit: false), ListLiteral = true, ItemWholes = ItemWholes((ListLiteral)Unwrap(a.Value)) });
                 continue;
             }
 
@@ -1845,7 +1905,7 @@ public sealed partial class Checker
             {
                 // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
                 // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => p.Whole is not null && Types.KeepsCases(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p.Whole)).ToArray();
+                candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
             }
 
             if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
@@ -1938,6 +1998,54 @@ public sealed partial class Checker
         }
 
         return typed;
+    }
+
+    /// <summary>
+    /// O4: whether an argument keeps the cases of a call on a parameter of this type: a call whose cases the written union names, and a list
+    /// literal with an item call whose cases the item type of the list that stands there names (the owner, 2026-11-01, "The union one").
+    /// </summary>
+    private static bool KeepsAt(KurzType parameter, Pre pre) =>
+        pre.Whole is not null
+            ? Types.KeepsCases(parameter, pre.Whole)
+            : ListTarget(parameter) is { } list && pre.ItemWholes.Any(w => w is not null && Types.KeepsCases(list.Element, w));
+
+    /// <summary>O4: of each item of a list literal, the whole result of an item that is a call with cases beside its success, as an argument's (above), null for every other item.</summary>
+    private List<UnionType?> ItemWholes(ListLiteral l)
+    {
+        var wholes = new List<UnionType?>();
+        foreach (var item in l.Items)
+        {
+            UnionType? whole = null;
+            if (Unwrap(item) is CallExpression)
+            {
+                Push();
+                var typed = CheckExpression(item, null, keepCases: true);
+                Pop(commit: false);
+                if (!typed.IsError && typed.Type is UnionType u && Types.NonNull(u) is null && !Types.IsVoid(u.Cases[0]))
+                {
+                    whole = u;
+                }
+            }
+
+            wholes.Add(whole);
+        }
+
+        return wholes;
+    }
+
+    /// <summary>
+    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly, item by item as an argument does:
+    /// an item call by its whole result where the item type keeps its cases and by its success where it unwraps it, any other item by the
+    /// literal's own item type (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// </summary>
+    private static bool ItemsExact(Pre pre, KurzType type)
+    {
+        if (pre.Typed.IsError || type is not ListType list || pre.Typed.Type is not ListType own)
+        {
+            return !pre.Typed.IsError && Types.Same(pre.Typed.Type, type);
+        }
+
+        return pre.ItemWholes.All(w => w is not null && Types.KeepsCases(list.Element, w) ? Types.Same(w, list.Element) : Types.Same(own.Element, list.Element));
     }
 
     /// <summary>O4: the type an argument has on the parameter it lands on: a call's whole result where the parameter keeps its cases, its own type elsewhere.</summary>
@@ -2038,7 +2146,9 @@ public sealed partial class Checker
             {
                 types.Add(ArgumentType(candidate, pres, i));
             }
-            else if (!Unify(slot, ArgumentType(candidate, pres, i), map))
+            // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
+            // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
+            else if (!Unify(slot, pre.Whole is { } whole && candidate.Keeps[i] && slot is UnionType ? whole.Cases[0] : ArgumentType(candidate, pres, i), map))
             {
                 candidate.CannotInfer = true;
                 return;
@@ -2133,7 +2243,7 @@ public sealed partial class Checker
                 {
                     literal = items.Item;
                 }
-                else if (!pre.LiteralOnly || slot is not TypeParameterType tp || !ReferenceEquals(tp.Symbol, p))
+                else if (!pre.LiteralOnly || !LiteralPosition(slot, p, pre))
                 {
                     continue;
                 }
@@ -2171,6 +2281,21 @@ public sealed partial class Checker
 
         candidate.Map = map;
     }
+
+    /// <summary>
+    /// T27: whether a literal stands in a position of <paramref name="p"/>: a parameter that is <paramref name="p"/> itself, or, O4, a union of
+    /// <paramref name="p"/> and types none of which is the literal's own, <c>5</c> in <c>T | string</c> (the owner, 2026-11-01, "Bind T = int in
+    /// both"); a literal of a case the union names, <c>"a"</c> there, gives <paramref name="p"/> nothing, as a variable of its type does
+    /// (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// </summary>
+    private static bool LiteralPosition(KurzType slot, TypeParameterSymbol p, Pre pre) => slot switch
+    {
+        TypeParameterType tp => ReferenceEquals(tp.Symbol, p),
+        UnionType u => u.Cases.Count(c => c is TypeParameterType) == 1
+            && u.Cases.Any(c => c is TypeParameterType tp && ReferenceEquals(tp.Symbol, p))
+            && (pre.Typed.IsError || !u.Cases.Any(c => Types.Same(c, pre.Typed.Type))),
+        _ => false,
+    };
 
     /// <summary>
     /// M11 with T27: a list literal whose items are literals alone, <c>[1, 2]</c>, in a parameter of a list of a type parameter,
@@ -2238,15 +2363,43 @@ public sealed partial class Checker
             case UnionType u when u.Cases.Count(c => c is TypeParameterType) == 1:
                 {
                     // O4 (the owner, 2026-10-31, "Keep, infer T = int"): in `T | NotFound` the type parameter takes the cases of the argument
-                    // the union does not name, the success of a call that keeps its cases
+                    // the union does not name: of a call that keeps its cases its success alone, which Infer passes here (the owner,
+                    // 2026-11-01, "T = success only"), of any other argument its own type less the named cases (the owner, 2026-11-01, "T =
+                    // int | Rejected, as built"); a case of the argument whose shape another case of the union has, a case that holds the
+                    // type parameter, is read through that case first (the owner, 2026-11-01, "Same shape first"; every shape read here,
+                    // assumed, section 5)
+                    var bare = (TypeParameterType)u.Cases.First(c => c is TypeParameterType);
                     IEnumerable<KurzType> cases = argument is UnionType ua ? ua.Cases : [argument];
-                    var rest = cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))).ToList();
-                    return rest.Count == 0 || Unify(u.Cases.First(c => c is TypeParameterType), rest.Count == 1 ? rest[0] : new UnionType(rest), map);
+                    var rest = new List<KurzType>();
+                    foreach (var c in cases.Where(c => !u.Cases.Any(w => Types.Same(w, c))))
+                    {
+                        var shaped = u.Cases.FirstOrDefault(w => w is not TypeParameterType && Types.Mentions(w, bare.Symbol) && SameShape(w, c));
+                        if (shaped is null)
+                        {
+                            rest.Add(c);
+                        }
+                        else if (!Unify(shaped, c, map))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return rest.Count == 0 || Unify(bare, rest.Count == 1 ? rest[0] : new UnionType(rest), map);
                 }
             default:
                 return true; // nothing to bind here; whether the types fit is the fit's question
         }
     }
+
+    /// <summary>O4 with T27: whether an argument's case has the shape of a written case, the shapes <see cref="Unify"/> reads inside a type (assumed, section 5: the defaults of the product pass of 2026-11-01).</summary>
+    private static bool SameShape(KurzType written, KurzType argument) => (written, argument) switch
+    {
+        (ListType, ListType) => true,
+        (MapType, MapType) => true,
+        (DataType d, DataType da) => ReferenceEquals(d.Symbol, da.Symbol),
+        (FunctionType f, FunctionType fa) => f.Parameters.Count == fa.Parameters.Count,
+        _ => false,
+    };
 
     /// <summary>
     /// F13, F14: whether every argument fits its parameter by its own type, and whether all do exactly.
@@ -2290,7 +2443,7 @@ public sealed partial class Checker
                     }
                 }
 
-                exact &= !pre.Typed.IsError && Types.Same(pre.Typed.Type, type);
+                exact &= ItemsExact(pre, type);
                 continue;
             }
 
@@ -2552,6 +2705,26 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
+        if (variable is null && members.Count == 0 && ImplicitField(name.Name) is { } field)
+        {
+            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is
+            if (CapturedRoot(name) is { } captor)
+            {
+                Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{captor}` and cannot pass its field `{name.Name}` as `mut` (F11)");
+            }
+            else if (!field.Mut)
+            {
+                Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` is a field without `mut` and cannot be passed as `mut` (M7, K1)");
+            }
+            else if (paths.Contains(name.Name))
+            {
+                Report(ErrorIds.MutAtCall, a.Line, $"`{name.Name}` is passed as `mut` twice (M7)");
+            }
+
+            paths.Add(name.Name);
+            return;
+        }
+
         if (variable is null || Types.IsError(variable.Type))
         {
             return;
