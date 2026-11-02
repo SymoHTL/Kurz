@@ -1390,7 +1390,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `native-not-allowed`, `native-type`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `field-unassigned`, `native-not-allowed`, `native-type`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1408,7 +1408,7 @@ D17, D19, and the A-rules of their text); of a class, type parameters (T19), a b
 `override`, `prot` or `extern` or that has type parameters of its own (K7, section 4), a field that
 holds `weak` at any depth, since R2 cannot judge the class until `weak` is read (R2, R3), each of
 which leaves the class and every value of it unread, and of a class it reads, a `static` field
-without an initial value, with one that is no constant, which section 4 computes at the field's
+with an initial value that is no constant, which section 4 computes at the field's
 first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
 `char`, a `string`, a time or an enum (K18), a field of a function type, whose cycle R9 judges by
 the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`

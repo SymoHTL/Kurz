@@ -3016,6 +3016,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int Step = 2\n    pub static int Step() => 1\n}\n\nprint(1)"));
         // F9: a `static` field without `pub` is its class's own
         Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class C(int V) {\n    static int Step = 2\n}\n\nprint(C.Step)"));
+        // K18, K14: a `static` field without `=` takes no value, since no constructor assigns one, at the field
+        var (unassigned, _) = Check("class C {\n    pub static int Step\n}\n\nprint(1)");
+        Assert.Equal(["2: the `static` field `Step` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)"], unassigned.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
+        Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
     }
 
     [Theory]
@@ -3121,7 +3125,7 @@ public sealed class CheckerTests
     [InlineData("class K(int Id) equal by Id\n\nprint(1)", "1: `equal by` (K8)")]
     [InlineData("class C {\n    prot static int Step = 1\n}\n\nprint(1)", "2: the modifier `prot` of a `static` field (K7, K18, R13)")]
     [InlineData("class C {\n    pub static List<int> Steps = []\n}\n\nprint(1)", "2: a `static` field of type `List<int>`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)")]
-    [InlineData("class C {\n    pub static int Step\n}\n\nprint(1)", "2: a `static` field without an initial value after `=` (K7, K18)")]
+
     [InlineData("int Two() => 2\n\nclass C {\n    pub static int Step = Two()\n}\n\nprint(C.Step)", "4: the initial value of the `static` field `Step`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)")]
     [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
     [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
@@ -3149,7 +3153,7 @@ public sealed class CheckerTests
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields of the instance and constructors in the body
-        // (K7, K14), a `static` field of another modifier, of another type, without an initial value or with one that is no constant
+        // (K7, K14), a `static` field of another modifier, of another type, or with an initial value that is no constant
         // (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)

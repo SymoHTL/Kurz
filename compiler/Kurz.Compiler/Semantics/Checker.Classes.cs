@@ -228,7 +228,7 @@ public sealed partial class Checker
             {
                 if (s.Declaration.Value is not { } value)
                 {
-                    NotSupported(s.Line, "a `static` field without an initial value after `=` (K7, K18)");
+                    Report(ErrorIds.FieldUnassigned, s.Line, $"the `static` field `{s.Name}` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)");
                     s.Refused = true;
                     continue;
                 }

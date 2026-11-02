@@ -392,7 +392,9 @@ raw`, is the one exception the record decides to the reason of this rule, a C li
 variables standing open (§14) (§3, the owner, 2026-10-21), and a `static mut`
 field stays `static-state` there too *(assumed: as §3 marks it)*. An assignment of a `static` field,
 which holds one immutable value for the program, is the compile error `assign-immutable`, as one of
-a field without `mut` is *(proposed: the error, which the record does not name)*.
+a field without `mut` is *(proposed: the error, which the record does not name)*. A `static` field
+without `=` is the compile error `field-unassigned`, at the field: no constructor assigns a `static`
+field, and Kurz has no zero value it could hold (K14). The owner chose this on 2026-11-02.
 
 Case: [classes/body.kz](../corpus/classes/body.kz)
 
@@ -433,15 +435,24 @@ Limits.Max = 20
 print(Limits.Max)
 ```
 
-### K19 (proposed, §4) A member on the other side of `static`
+Case: [classes/static-unassigned.kz](../corpus/classes/static-unassigned.kz)
+```kurz
+class Limits(int Size) {
+    pub static int Max
+}
+
+print(Limits(1).Size)
+```
+
+### K19 (decided, §4) A member on the other side of `static`
 
 A member of an instance named where there is no instance, and a `static` member named through an
 instance, are the compile error `static-mismatch`, its message saying on which side the member is:
 a field or a method of the instance, or `this`, in a `static` method or in the initial value of a
 `static` field, and one named through its class, `Counter.Next()`; a `static` field or method named
-through an instance, `c.Of(3)`. C# refuses the same with CS0120, CS0026 and CS0176; one id whose
-text names the side is the smallest thing that tells them apart. The record names no error for
-them.
+through an instance, `c.Of(3)`. C# refuses the same with CS0120, CS0026 and CS0176; the owner chose
+one id whose text names the side on 2026-11-02, against reusing `unknown-name` and against an id
+for each of C#'s three.
 
 Case: [classes/static-mismatch.kz](../corpus/classes/static-mismatch.kz)
 ```kurz
@@ -452,14 +463,16 @@ class Counter(int Count) {
 print(Counter.Next())
 ```
 
-### K20 (proposed, §4) What the initial value of a `static` field reads
+### K20 (decided, §4) What the initial value of a `static` field reads
 
 The initial value of a `static` field reads constants and the `static` fields of its class declared
 above it, by their names inside the class or as `Money.CentsPerUnit`; a `static` field declared
 below it, and the field itself, are `unknown-name` (V10), as a field's default reads the fields
-above it (K7), and a member of an instance is K19's. Outside an initial value, a read of a `static`
-field is a value of its type and no constant, as C# reads a `static readonly` field: an `int` field
-does not go into a `byte` as an integer literal would (T7). The record computes a field at its
+above it (K7), and a member of an instance is K19's. The owner chose the fields above on
+2026-11-02, against literals alone and against any order with a cycle a compile error. Outside an
+initial value, a read of a `static` field is a value of its type and no constant, as C# reads a
+`static readonly` field: an `int` field does not go into a `byte` as an integer literal would (T7)
+*(assumed: as §4 marks it)*. The record computes a field at its
 first read (§4), and what an initializer does that reads, on a path of its calls, a field whose
 initializer reads the first stands open (§14); reading only the fields above keeps such a path out
 of reach.
