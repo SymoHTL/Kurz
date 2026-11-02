@@ -136,8 +136,28 @@ public sealed partial class Clang
     /// </summary>
     public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {
+        var (code, _, error) = Processes.Capture(Path, Arguments(irPath, outputPath, libraries, release, lines, cpuFlag), null, TimeSpan.FromMinutes(2));
+        if (code != 0)
+        {
+            throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+        }
+    }
+
+    /// <summary>
+    /// The arguments <see cref="Build"/> gives this clang, the one list on every target. A release build aligns every function at
+    /// 64 bytes, LLVM's <c>-align-all-functions=6</c>, where LLVM aligns a function at 16 bytes unless it is tiny, as rustc leaves
+    /// it: the owner's choice of 2026-11-02 (issue 156, comment 6580739215), an exception to "no row slower beyond noise" taken
+    /// for the rows it makes faster, against the 8 it makes slower. Of the sweep's 56 rows on Linux x86-64, 18 ran faster beyond
+    /// their band and 8 slower: parsing doubles of 17 digits took 111.90 ms against 136.91, and of 5 digits 43.39 against 55.76,
+    /// while setting and getting strings in a map took 77.35 against 71.07 and 69.96. The option goes to LLVM's code generator,
+    /// which the IR is handed to: clang's <c>-falign-functions</c> is read by its front end, which IR does not pass through, and
+    /// aligns nothing here. A test build keeps LLVM's alignment.
+    /// </summary>
+    internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
+    {
         ArgumentNullException.ThrowIfNull(libraries);
-        var arguments = new List<string> { release ? "-O2" : "-O0", irPath, "-o", outputPath };
+        var arguments = release ? new List<string> { "-O2", "-mllvm", "-align-all-functions=6" } : new List<string> { "-O0" };
+        arguments.AddRange([irPath, "-o", outputPath]);
         if (cpuFlag is not null)
         {
             arguments.Add(cpuFlag); // section 2: the CPU the build names, as rustc passes `-C target-cpu`
@@ -158,11 +178,8 @@ public sealed partial class Clang
         {
             arguments.Add("-lm");
         }
-        var (code, _, error) = Processes.Capture(Path, arguments, null, TimeSpan.FromMinutes(2));
-        if (code != 0)
-        {
-            throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
-        }
+
+        return arguments;
     }
 
     /// <summary>The option that names the CPU to clang, as rustc's <c>-C target-cpu</c> reaches LLVM: <c>-march</c> on x86-64, <c>-mcpu</c> on Arm.</summary>

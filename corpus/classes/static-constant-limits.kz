@@ -1,0 +1,18 @@
+// expect: output
+// | 5
+// | 2147483644
+// | 7
+// rules: K20
+
+class Limits {
+    pub static int Q = 10 / Two
+    pub static int Two = 2
+    pub static int Big = Half * 4
+    pub static int Half = 536870911
+    pub static long Wide = Small
+    pub static int Small = 7
+}
+
+print(Limits.Q)
+print(Limits.Big)
+print(Limits.Wide)

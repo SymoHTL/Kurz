@@ -62,7 +62,8 @@ public sealed partial class Emitter
             CallKind.MapClear => EmitMapClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.FileModified or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
-                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout => EmitFileCall(c, info),
+                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+                or CallKind.TcpShutdownWrite => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
@@ -206,7 +207,7 @@ public sealed partial class Emitter
             {
                 var a = c.Arguments[i].Value;
                 var value = owned ? Owned(a) : EmitExpression(a);
-                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line);
+                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line, owned);
             }
         }
 
@@ -268,7 +269,7 @@ public sealed partial class Emitter
         unit = declaredIn;
         try
         {
-            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line);
+            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line, owned);
         }
         finally
         {

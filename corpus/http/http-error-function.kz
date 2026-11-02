@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: W1
+
+int HttpError(int code) => code
+
+print(1)

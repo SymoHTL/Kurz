@@ -85,7 +85,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        EndChangeableNarrowing(); // N9: a call can assign a `mut` field through another reference (K2)
+        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -127,6 +127,27 @@ public sealed partial class Checker
                         var field = ReadImplicitField(n, implicitField);
                         model.RecordType(n, field);
                         return CallValue(field.Type, c); // F11: a field of function type
+                    }
+
+                    if (ImplicitStaticField(n.Name) is not null || InstanceFieldInStatic(n.Name, n.Line))
+                    {
+                        var value = CheckName(n); // K18, K19: what a call of a `static` field's value says
+                        if (!value.IsError)
+                        {
+                            model.RecordType(n, value);
+                            return CallValue(value.Type, c);
+                        }
+
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
+                    if (OutOfReachInDefault(n.Name, n.Line))
+                    {
+                        // K7, V10: a member of the class hides a name outside it in a default as in a method, as C# refuses it there
+                        // (CS0236), so a method of the instance is refused before a top-level function of its name is looked up
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
                     }
 
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -392,6 +413,10 @@ public sealed partial class Checker
         else if (PrivateText(t.Type, c.Line))
         {
             // A9, A15: reported
+        }
+        else if (HoldsHttpError(t.Type))
+        {
+            NotSupported(c.Line, HttpErrorText);
         }
         else if (HoldsRaw(t.Type, []))
         {
@@ -790,7 +815,7 @@ public sealed partial class Checker
 
         var key = ResolveTypeArgument(c.TypeArguments[0], "`Map`");
         var value = ResolveTypeArgument(c.TypeArguments[1], "`Map`");
-        if (Types.IsError(key) || Types.IsError(value))
+        if (Types.IsError(key) || Types.IsError(value) || WeakUnread(c.Line, "a key or a value of a map", key, value))
         {
             CheckArgumentsLoosely(c);
             return Typed.Error; // a type it cannot find comes first, as for `List<T>()` above, and nothing more (E1)
@@ -824,12 +849,20 @@ public sealed partial class Checker
     /// <c>float?</c> one's value as a <c>double</c> key's (section 4, the owner, 2026-10-30, "As plain double"; for the other types an
     /// assumption there). A map, a function value, a file and a socket take no <c>==</c>, and nor does a <c>data</c> value that holds one
     /// of them, so they are no key (<c>type-mismatch</c>, T18; section 4, the owner, 2026-10-30, "type-mismatch"); the rest are <c>not
-    /// supported</c>: a <c>decimal</c>, a pointer and a type parameter. A value is any type whose
+    /// supported</c>: a <c>decimal</c>, a pointer and a type parameter. An instance of a class is a key by its equality and its hash (K4,
+    /// K5); one whose <c>equal by</c> names a <c>mut</c> field is <c>mutable-key</c> as the key type itself (K12), and <c>not supported</c>
+    /// in a key type that holds it, which section 14 of the record leaves open. A value is any type whose
     /// nullable type the checker reads (N1, N11), a union and a function type among them (section 4, the owner, 2026-10-30, "Nullable
     /// form, as Option"), and a nullable one, which <c>map[key]</c> reads as it is (the owner, 2026-10-30, "Flatten, as C#").
     /// </summary>
     private KurzType MapOf(KurzType key, KurzType value, int line)
     {
+        if (key is ClassType { Symbol: var tag } && tag.EqualBy.FirstOrDefault(f => f.Mut) is { } changing)
+        {
+            Report(ErrorIds.MutableKey, line, $"`{key}` names the `mut` field `{changing.Name}` in its `equal by`, so a key's hash changes where the field is assigned: key the map by a copy of the field (K12)");
+            return Types.Error;
+        }
+
         switch (KeyOf(key, [], [], []))
         {
             case (true, var why):
@@ -872,8 +905,10 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
-            case ClassType:
-                return (false, $"the equality of an instance of `{type}` and its hash (K4, K12) are not read");
+            case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
+                return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
+            case ClassType c:
+                return ByFieldsThatCount(c, field => KeyOf(field.Type, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -978,8 +1013,8 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
-            case ClassType:
-                return (false, $"the equality of an instance of `{type}` (K4) is not read");
+            case ClassType c:
+                return ByFieldsThatCount(c, field => HeldEquality(field.Type, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1051,9 +1086,39 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             case ClassType:
-                return (false, $"the equality of an instance of `{item}` (K4) is not read");
+                return HeldEquality(item, [], [], []);
             default:
                 return (false, $"`==` on {Types.A(item)} is not read");
+        }
+    }
+
+    /// <summary>
+    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the fields that count, each read by <paramref name="why"/>:
+    /// none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that compares by content. A
+    /// class met again inside its own fields was read where the walk met it first.
+    /// </summary>
+    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<FieldSymbol, (bool Mismatch, string Why)?> why)
+    {
+        if (!classesCompared.Add(c.Symbol))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var field in c.Symbol.FieldsThatCount)
+            {
+                if (why(field) is { } refused)
+                {
+                    return refused with { Why = $"its field `{field.Name}`: {refused.Why}" };
+                }
+            }
+
+            return null;
+        }
+        finally
+        {
+            classesCompared.Remove(c.Symbol);
         }
     }
 
@@ -1087,7 +1152,14 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`"))).ToDictionary(p => p.First, p => p.Second);
+            var written = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`")).ToList();
+            if (WeakUnread(c.Line, "a type argument of a data type", [.. written]))
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -1201,8 +1273,12 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name)
-                || (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null))
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
+            {
+                return CallStatic(classSymbol, m, c, null); // K7: `T.M(args)`, as a method on an instance is read (CallMethod)
+            }
+
+            if ((data is not null && data.HasFields) || IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
                 CheckArgumentsLoosely(c);
@@ -1582,6 +1658,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (HoldsHttpError(item))
+        {
+            NotSupported(c.Line, HttpErrorText);
+            return Typed.Error;
+        }
+
         if (HoldsRaw(item, []))
         {
             NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
@@ -1786,6 +1868,12 @@ public sealed partial class Checker
     {
         // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
+        if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
+        {
+            function = null;
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
@@ -1977,7 +2065,8 @@ public sealed partial class Checker
         if (picked is not null && !typed.IsError)
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
-            model.RecordCall(c, new CallInfo(kind, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
+            var recorded = kind == CallKind.Method && picked.Function is { IsStatic: true } ? CallKind.Function : kind; // K7: a `static` method has no instance
+            model.RecordCall(c, new CallInfo(recorded, picked.Function, null, null, map, binding ?? picked.Binding, picked.Slots.Count, Types.Substitute(picked.Result, picked.Map)));
             if (kind == CallKind.Function)
             {
                 KeepGenericCall(c, picked.Function); // T33: a call that may make a copy
@@ -2694,12 +2783,9 @@ public sealed partial class Checker
         var (variable, captured) = Lookup(name.Name);
         if (variable is null && members.Count == 0 && ImplicitField(name.Name) is { } field)
         {
-            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is
-            if (CapturedRoot(name) is { } captor)
-            {
-                Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{captor}` and cannot pass its field `{name.Name}` as `mut` (F11)");
-            }
-            else if (!field.Mut)
+            // M7, K7: a `mut` field of the instance, named alone in its method; one without `mut` is `mut-required`, as a variable is.
+            // Inside a lambda it is passed too, through the reference to the instance the lambda holds (F11 with K2)
+            if (!field.Mut)
             {
                 Report(ErrorIds.MutRequired, a.Line, $"`{name.Name}` is a field without `mut` and cannot be passed as `mut` (M7, K1)");
             }
