@@ -1603,7 +1603,7 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
-`string.Join`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
+`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
 not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
