@@ -14,7 +14,8 @@ namespace Kurz.Compiler.Tests;
 /// give, through each member and each form; and the same under the allocator that makes every block it frees inaccessible, for the first
 /// 500 of the strings. Each kind of result is taken at least 100 times: a trim that takes from both ends, a Unicode trim that takes more
 /// than the ASCII one, a trim of a `char` from the start and from the end, a split into three pieces or more, a replace that changes the
-/// string, a replace of a `char` by a `char` that changes it and a change of case that changes it.
+/// string, a replace of a `char` by a `char` that changes it, one of a `char` of one byte by another that changes it, and a change of
+/// case that changes it.
 /// </summary>
 public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -55,7 +56,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
             hay = Make(alphabet, int((seed >> 40) % 41UL), seed, letters)
             pin = Make(alphabet, int((seed >> 20) % 4UL), seed ^ 77UL, letters)
             print("{hay.Trim().Bytes} {hay.TrimStart().Bytes} {hay.TrimEnd().Bytes} {hay.TrimAscii().Bytes} {hay.TrimStartAscii().Bytes} {hay.TrimEndAscii().Bytes} {hay.Trim('x').Bytes} {hay.Trim('ä').Bytes} {hay.TrimStart('x').Bytes} {hay.TrimEnd('ä').Bytes}")
-            print("{string.Join(bar, hay.Split(pin)).Bytes} {hay.Split(pin).Count} {string.Join(bar, hay.Split('a')).Bytes} {hay.Replace(pin, swap).Bytes} {hay.Replace('ä', none).Bytes} {hay.ToUpperAscii().Bytes} {hay.ToLowerAscii().Bytes} {hay.Replace('ä', 'x').Bytes} {hay.Replace('x', '€').Bytes} {string.Join('€', hay.Split(pin)).Bytes}")
+            print("{string.Join(bar, hay.Split(pin)).Bytes} {hay.Split(pin).Count} {string.Join(bar, hay.Split('a')).Bytes} {hay.Replace(pin, swap).Bytes} {hay.Replace('ä', none).Bytes} {hay.ToUpperAscii().Bytes} {hay.ToLowerAscii().Bytes} {hay.Replace('ä', 'x').Bytes} {hay.Replace('x', '€').Bytes} {string.Join('€', hay.Split(pin)).Bytes} {hay.Replace('a', 'b').Bytes}")
             n = n + 1
         }
 
@@ -90,7 +91,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var seed = 54321UL;
         var expected = new List<string>();
         var (both, unicode, pieces, replaced, cased) = (0, 0, 0, 0, 0);
-        var (start, end, swapped) = (0, 0, 0);
+        var (start, end, swapped, bytes) = (0, 0, 0, 0);
         for (var n = 0; n < Count; n++)
         {
             seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
@@ -127,7 +128,8 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 Bytes(AsciiCase(hay, upper: false)),
                 Bytes(hay.Replace('ä', 'x')),
                 Bytes(hay.Replace('x', '€')),
-                Bytes(string.Join('€', split))));
+                Bytes(string.Join('€', split)),
+                Bytes(hay.Replace('a', 'b'))));
             both += hay.TrimStart().Length < hay.Length && hay.TrimEnd().Length < hay.Length ? 1 : 0;
             unicode += hay.Trim().Length < trimAscii.Length ? 1 : 0;
             pieces += split.Length >= 3 ? 1 : 0;
@@ -136,6 +138,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
             start += hay.TrimStart('x').Length < hay.Length ? 1 : 0;
             end += hay.TrimEnd('ä').Length < hay.Length ? 1 : 0;
             swapped += hay.Contains('ä') ? 1 : 0;
+            bytes += hay.Contains('a') ? 1 : 0;
         }
 
         // the floors: each kind of result is taken often
@@ -147,6 +150,7 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(start >= 100, $"only {start} strings lose a `char` from the start");
         Assert.True(end >= 100, $"only {end} strings lose a `char` from the end");
         Assert.True(swapped >= 100, $"only {swapped} replaces of a `char` change their string");
+        Assert.True(bytes >= 100, $"only {bytes} replaces of a `char` of one byte by another change their string");
         foreach (var (runtime, suffix, count) in new[] { (toolchain.Runtime, "", Count), (ListTests.Fenced, "-fenced", FencedCount) })
         {
             var program = Program.Replace($"while n < {Count} {{", $"while n < {count} {{", StringComparison.Ordinal);

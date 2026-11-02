@@ -17,7 +17,8 @@ namespace Kurz.Compiler.Tests;
 /// <c>Hex.Decode</c> the bytes .NET's <c>Convert.FromHexString</c> gives, or the error at the length or the first byte that is no digit;
 /// and 2000 cuts of strings of letters of one to four bytes give the bytes of .NET's cut of their UTF-8 bytes, where the cut falls on no
 /// byte inside a code point; and the same for the first 500 of them under the allocator that makes every block it frees inaccessible. Each
-/// kind of result is taken at least 100 times. The parses of a floating-point number and of a <c>decimal</c> are the second fact's.
+/// kind of result is taken at least 100 times. Each byte that can begin a code point, as either digit of a pair of <c>Hex.Decode</c>, is
+/// the second fact's, and the parses of a floating-point number and of a <c>decimal</c> are the third's.
 /// </summary>
 public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -251,6 +252,42 @@ public sealed class ParseTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected.Take(3 * count), output); // three lines for each string
         }
+    }
+
+    /// <summary>
+    /// The code points whose first byte is each byte that can stand first in a code point of a string: every ASCII byte, and each first
+    /// byte of a code point of several bytes, 0xC2 to 0xF4, by the lowest code point it begins (X1). A byte after the first of a code point
+    /// is never the first byte that is no digit, since the first of its code point stands before it and is none.
+    /// </summary>
+    private static IEnumerable<int> FirstBytes() =>
+        Enumerable.Range(0, 128)
+            .Concat(Enumerable.Range(0xC2, 0xE0 - 0xC2).Select(b => (b - 0xC0) << 6))
+            .Concat(Enumerable.Range(0xE0, 0x10).Select(b => Math.Max(0x800, (b - 0xE0) << 12)))
+            .Concat(Enumerable.Range(0xF0, 5).Select(b => Math.Max(0x10000, (b - 0xF0) << 18)));
+
+    /// <summary>
+    /// H7, as the standard library reads the digits through the emitter's table of 256 bytes, two digits at a time: each byte that can
+    /// stand first in a code point, as the high digit of a pair, as the low one and as both, the string filled up with <c>0</c> to an even
+    /// length, gives through <c>Hex.Decode</c> the bytes .NET's <c>Convert.FromHexString</c> gives, or <c>invalid digit</c> at the first
+    /// byte that is no digit, the high one of a pair where both are none.
+    /// </summary>
+    [Fact]
+    public void Each_byte_that_can_begin_a_code_point_is_read_as_a_digit_or_stopped_at_in_either_half_of_a_pair()
+    {
+        static string Even(string s) => Encoding.UTF8.GetByteCount(s) % 2 == 0 ? s : s + "0";
+        static string Escaped(string s) => string.Concat(s.EnumerateRunes().Select(r => r.Value is >= ' ' and <= '~' and not ('\\' or '"' or '{') ? r.ToString() : $"\\U{r.Value:X8}"));
+        var strings = FirstBytes().Select(char.ConvertFromUtf32).SelectMany(c => (string[])[Even(c + "0"), Even("0" + c), Even(c + c)]).ToList();
+        var expected = strings.Select(Decoded).ToList();
+        Assert.Equal(66, expected.Count(e => e.StartsWith('['))); // the 22 digits, each in three strings
+        Assert.True(expected.Count(e => e == "invalid digit at 0") >= 200, "too few strings stop at the high digit of their first pair");
+        Assert.True(expected.Count(e => e == "invalid digit at 1") >= 100, "too few strings stop at the low digit of their first pair");
+        var program = "string Decoded(string s) => match Hex.Decode(s) {\n    Bytes b => \"{b}\"\n    HexError e => \"{e}\"\n}\n\n"
+            + string.Concat(strings.Select(s => $"print(Decoded(\"{Escaped(s)}\"))\n"));
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "hex-first-bytes"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(expected, output);
     }
 
     /// <summary>The program of the floating-point and <c>decimal</c> parses: a line of the strings' parses follows it for each string.</summary>

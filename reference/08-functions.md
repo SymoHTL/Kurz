@@ -151,10 +151,14 @@ c.Add()
 No case shows the folder part: it takes several folders, and a case of the corpus is a single
 file.
 
-### F10 (decided, §8) Folders and `use`
+### F10 (decided, §8, §13) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
-without imports. `use` brings in another folder or a package.
+without imports. `use` brings in another folder or a package. A type it holds is visible
+unqualified, `Json.Parse<T>(text)`, and a function at the top of the folder is reached through the
+folder's name, `sys.Write(...)`; two folders a file uses that both hold a type of one name are the
+compile error `ambiguous-name` at the bare use of that name (§13, the owner, 2026-11-01, "By kind of
+name"). *(assumed, §13: the id)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 

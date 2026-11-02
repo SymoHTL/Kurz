@@ -3891,36 +3891,243 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_key_is_hashed_by_SipHash_1_3_under_keys_the_system_gives_each_process()
+    public void SipHash_1_3_gives_the_vectors_of_the_reference()
     {
-        // the hash Rust's `HashMap` takes by default: the two vectors under keys of 0 are CPython's `siphash13` of the same bytes, the
-        // third is under the reference implementation's keys, from the same code in Python, which gives the reference's SipHash-2-4
-        // vectors with two and four rounds
+        // M9 (section 4): the hash Rust's `HashMap` takes by default, which a map moves onto past the bound: the two vectors under keys of 0
+        // are CPython's `siphash13` of the same bytes, the third is under the reference implementation's keys, from the same code in
+        // Python, which gives the reference's SipHash-2-4 vectors with two and four rounds
         const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
         const string hash = "    byte* p = Allocate(15)\n    raw {\n        p[0] = 97\n        p[1] = 98\n        p[2] = 99\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 3))\n    WriteError(\"\\n\")\n    raw {\n        for i in 0..<15 {\n            p[i] = byte(i)\n        }\n    }\n    WriteNumber(std.SipHash13(0, 0, p, 15))\n    WriteError(\"\\n\")\n    WriteNumber(std.SipHash13(506097522914230528UL, 1084818905618843912UL, p, 15))\n    WriteError(\"\\n\")\n";
         var runtime = Edited(("std/std.kz", "\nulong SipHash13(", "\npub ulong SipHash13("), ("runtime/common/runtime.kz", start, start + hash));
         Ran(BuildAndRun("print(1)\n", runtime, "map-siphash"), 0, ["1"], "13851880170939887858\n17514137373579004394\n15213397504630561110\n");
+    }
 
-        // the keys differ between two runs of one program, so the order of a map's 20 entries does too (M10), as in Rust
-        const string text = "mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n";
-        var compilation = Compile(text, toolchain.Runtime);
+    [Fact]
+    public void A_key_has_the_fast_hash_of_foldhash_s_fixed_state_and_a_map_prints_one_order_in_every_run()
+    {
+        // section 4 (the owner, 2026-11-01, "Switch, as .NET"; the pick assumed there): foldhash 0.2.0's `fast::FixedState`, its folded
+        // multiply in the crate's form for a target without a product of 128 bits. The values are the crate's own: its source at the tag
+        // v0.2.0, built with that form forced, `write` of the bytes (i * 37 + 200) % 256 of each count and then `finish`, through each of
+        // its paths, 0 to 3 bytes, 4 to 7, 8 to 16, two lanes past 16, four past 128 and six past 256; and `write_u64` of 0 to 5 words
+        // and then `finish`, the sponge folded into the accumulator at the third and the fifth. The fourth word, 0, goes into the
+        // sponge's high word, which held 0, so that four words hash as the first three, in the crate as here.
+        int[] counts = [.. Enumerable.Range(0, 25), 31, 32, 33, 63, 64, 65, 95, 96, 97, 127, 128, 129, 200, 256, 257, 300];
+        ulong[] bytes =
+        [
+            18381908264018682402UL, 10313515915333765677UL, 1929429560286372662UL, 3654902873879048536UL, 13737300313343162903UL,
+            14615724446555654224UL, 6818008286726094372UL, 4015009889731994202UL, 16611864332146022195UL, 8677002230768383255UL,
+            14855835650959486829UL, 13318177731941119817UL, 2137668317467798322UL, 1268008852833601159UL, 15454146103877839619UL,
+            14084194896136060238UL, 1034229071626006353UL, 12363388824720602842UL, 4844350055151983448UL, 11438981068341899001UL,
+            14547473599202013301UL, 4048246751756763233UL, 15937682811256106777UL, 14157417799970833427UL, 14295417949404985957UL,
+            9179077512255625425UL, 509270408215261943UL, 5655969144459170779UL, 7590674684585511704UL, 12808656483676525743UL,
+            8708528239955626882UL, 2991818355018454276UL, 5076192079195121934UL, 1748880783929899074UL, 2769889656097390526UL,
+            502028113298308887UL, 5898250822708355634UL, 14916995925869765630UL, 8332800458142957887UL, 16664090395458995668UL,
+            18242600445215221827UL,
+        ];
+        ulong[] words = [1UL, 18446744073709551615UL, 81985529216486895UL, 0UL, 42UL];
+        ulong[] wordHashes =
+        [
+            589684135938649225UL, 11635162890515786560UL, 16422133183253862721UL, 10749504763468978905UL, 10749504763468978905UL,
+            2957822281828288061UL,
+        ];
+        const string start = "pub void Start(int count, byte* values) {\n    sys.Start(count, values)\n";
+        var hash = new StringBuilder("    byte* p = Allocate(300)\n    byte* b = Allocate(48)\n    byte* s = Allocate(40)\n    raw {\n        for i in 0..<300 {\n            p[i] = byte((i * 37 + 200) % 256)\n        }\n\n        for i in 0..<48 {\n            b[i] = 0\n        }\n    }\n");
+        foreach (var n in counts)
+        {
+            hash.Append(CultureInfo.InvariantCulture, $"    WriteNumber(std.FoldHash(p, {n}))\n    WriteError(\"\\n\")\n");
+        }
+
+        // a block whose byte 36 is 0, a map's on the fast hash
+        hash.Append("    std.HashStart(b, s)\n    WriteNumber(std.HashEnd(s))\n    WriteError(\"\\n\")\n");
+        foreach (var word in words)
+        {
+            hash.Append(CultureInfo.InvariantCulture, $"    std.HashWord(s, {word}UL)\n    WriteNumber(std.HashEnd(s))\n    WriteError(\"\\n\")\n");
+        }
+
+        var runtime = Edited(("std/std.kz", "\nulong FoldHash(", "\npub ulong FoldHash("), ("runtime/common/runtime.kz", start, start + hash));
+        var expected = string.Concat(bytes.Concat(wordHashes).Select(h => $"{h}\n"));
+        Ran(BuildAndRun("print(1)\n", runtime, "map-fast-hash"), 0, ["1"], expected);
+
+        // with no keys of the system's in the hash, two runs of one program print a map's 20 entries in one order (M10)
+        var (first, second) = RunTwice("mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n", toolchain.Runtime, "map-order");
+        Assert.Equal(first, second);
+        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first).Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_map_whose_insert_passes_more_than_512_slots_moves_onto_SipHash_1_3_and_keeps_every_entry()
+    {
+        // section 4 (the owner, 2026-11-01, "Switch, as .NET"; the bound assumed there): keys whose fast hash starts their probe at the
+        // first group of every block of up to 1024 slots. In the block of 1024 slots that 449 to 896 entries take, the k-th of them passes
+        // the full groups of the k - 1 before it: the 520th passes 64 groups, 512 slots, and stays on the fast hash, so that two runs
+        // print one order; the 521st passes 65 and moves the map onto SipHash-1-3 under the keys the system gives each process, so that
+        // two runs print two orders, and the map gives every entry, before the move and after it. 1000 keys more after the 521 grow the
+        // switched map from 1024 slots to 2048, which stays on SipHash-1-3.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the cases take
+        var grown = keys.Concat(Enumerable.Range(1000000, 1000).Select(k => (long)k)).ToList();
+        foreach (var (name, set) in new[] { ("520", keys.Take(520).ToList()), ("521", keys), ("grown", grown) })
+        {
+            var (first, second) = RunTwice(Filled("int", set.Select(k => k.ToString(CultureInfo.InvariantCulture))), toolchain.Runtime, $"map-switch-{name}");
+            Assert.Equal($"{set.Count} {set.Count} -1", string.Join(" ", first.Take(3)));
+            Assert.Equal(set.Select((k, i) => $"{k}: {i}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+            if (name == "520")
+            {
+                Assert.Equal(first, second);
+            }
+            else
+            {
+                Assert.NotEqual(first, second);
+            }
+        }
+
+        // the positive control: the same 1521 keys under a bound no probe passes stay on the fast hash, one order in two runs, every entry
+        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound), "map-switch-none");
+        Assert.Equal(held.First, held.Second);
+        Assert.Equal("1521 1521 -1", string.Join(" ", held.First.Take(3)));
+
+        // a switch moves its own map alone (section 4, assumed there): a map of 20 keys made before the switched one and one made after
+        // it print one order in two runs, while the switched map prints two; and a write to a map value that shares the switched map's
+        // block copies the block with its hash (M3), so that the copy finds every entry and the map it was copied from keeps its count
+        var alone = RunTwice(
+            "mut before = Map<int, int>()\nfor i in 0..<20 {\n    before[i] = i\n}\n" +
+            Filled("int", keys.Select(k => k.ToString(CultureInfo.InvariantCulture))) +
+            "mut after = Map<int, int>()\nfor i in 0..<20 {\n    after[i] = i\n}\nmut twin = m\ntwin[-5] = -5\nmut kept = 0\n" +
+            "for i in 0..<keys.Count {\n    w = twin[keys[i]] ?? -1\n    if w == i {\n        kept = kept + 1\n    }\n}\n" +
+            "print(kept)\nprint(twin.Count)\nprint(m.Count)\nprint(before)\nprint(after)\n",
+            toolchain.Runtime,
+            "map-switch-alone");
+        Assert.Equal(9, alone.First.Count);
+        Assert.Equal("521 521 -1", string.Join(" ", alone.First.Take(3)));
+        Assert.NotEqual(alone.First[3], alone.Second[3]);
+        Assert.Equal("521 522 521", string.Join(" ", alone.First.Skip(4).Take(3)));
+        Assert.Equal(alone.First.Skip(7), alone.Second.Skip(7));
+        Assert.All(alone.First.Skip(7), line => Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), line.Trim('[', ']').Split(", ").Order()));
+
+        // an insert into the slot of a removed entry counts the walk its lookup of the key pays (section 4, assumed there, as .NET counts
+        // the chain its insert walks): 512 and 520 of the keys, one of them removed, which leaves the slot of a removed entry in a group
+        // with no slot of 255, and then the next key added, which takes that slot. Its lookup passes 64 groups, 512 slots, of the first
+        // map, which stays on the fast hash, and 65, 520 slots, of the second, which moves onto SipHash-1-3; each gives every entry
+        foreach (var count in new[] { 512, 520 })
+        {
+            var (first, second) = RunTwice(Removed(keys.Take(count + 1)), toolchain.Runtime, $"map-switch-removed-{count}");
+            Assert.Equal($"{count} {count} 0", string.Join(" ", first.Take(3)));
+            Assert.Equal(keys.Skip(1).Take(count).Select((k, i) => $"{k}: {i + 1}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+            if (count == 512)
+            {
+                Assert.Equal(first, second);
+            }
+            else
+            {
+                Assert.NotEqual(first, second);
+            }
+        }
+
+        // keys of 8 bytes hash as the word of their bytes: strings, whose blocks the move carries into the new block without a count
+        // more or less, under the allocator that makes every freed block inaccessible
+        var strings = SameGroupKeys(600, k => $"k{k:D7}");
+        Assert.Equal(600, strings.Count); // the floor: the keys the case takes
+        var fenced = RunTwice(Filled("string", strings.Select(s => $"\"{s}\"")), Fenced, "map-switch-strings-fenced");
+        Assert.Equal("600 600 -1", string.Join(" ", fenced.First.Take(3)));
+        Assert.NotEqual(fenced.First, fenced.Second);
+    }
+
+    [Fact]
+    public void The_map_programs_print_the_same_with_every_map_moved_onto_SipHash_1_3_at_its_first_insert()
+    {
+        // the bound of `MapEmpty` edited so that the first insert into each map passes it: every key type of the maps' programs is hashed
+        // by SipHash-1-3 from the map's second entry on, through growth, copies of a shared block, `Remove` and `Clear`; under the
+        // allocator that makes every freed block inaccessible, the block the move frees is not read again
+        (string Path, string Old, string New) first = ("std/std.kz", "if step - 8 > 512 && ", "if step - 8 > -1 && ");
+        var switched = Edited(first);
+        Ran(BuildAndRun(Maps, switched, "map-values-switched"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, switched, "map-members-switched"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Fields, switched, "field-collections-switched"), 0, FieldsPrint, "");
+        var fenced = Edited([.. Fence, first]);
+        Ran(BuildAndRun(Maps, fenced, "map-values-switched-fenced"), 0, MapsPrint, "");
+        Ran(BuildAndRun(MapMembers, fenced, "map-members-switched-fenced"), 0, MapMembersPrint, "");
+        Ran(BuildAndRun(Fields, fenced, "field-collections-switched-fenced"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-switched-fenced"), 0, ["20", "280"], "");
+
+        // the positive control that the edit moved them: two runs print a map's 20 entries in two orders
+        var (one, two) = RunTwice("mut m = Map<int, int>()\nfor i in 0..<20 {\n    m[i] = i\n}\nprint(m)\n", switched, "map-order-switched");
+        Assert.NotEqual(one, two);
+    }
+
+    /// <summary>The bound of <c>MapEmpty</c> edited to one no probe passes, which no map switches at.</summary>
+    private static readonly (string Path, string Old, string New) NoBound = ("std/std.kz", "if step - 8 > 512 && ", "if step - 8 > 1000000000 && ");
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/>, literals of the map's key type <paramref name="type"/>, into a map with its
+    /// index as its value, then prints how many of them the map gives back with that value, the map's count, what it gives for a key it
+    /// does not hold, and the map.
+    /// </summary>
+    private static string Filled(string type, IEnumerable<string> keys) =>
+        $"List<{type}> keys = [{string.Join(", ", keys)}]\nmut m = Map<{type}, int>()\nfor i in 0..<keys.Count {{\n    m[keys[i]] = i\n}}\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
+        $"print(found)\nprint(m.Count)\nprint(m[{(type == "string" ? "\"\"" : "-1")}] ?? -1)\nprint(m)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> but the last into a map with its index as its value, removes the first,
+    /// puts the last in, then prints how many of the keys after the first the map gives back with their index, the map's count, the
+    /// value the removal gave, and the map.
+    /// </summary>
+    private static string Removed(IEnumerable<long> keys) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nn = keys.Count - 1\nmut m = Map<int, int>()\n" +
+        "for i in 0..<n {\n    m[keys[i]] = i\n}\nremoved = m.Remove(keys[0]) ?? -1\nm[keys[n]] = n\nmut found = 0\n" +
+        "for i in 1..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\n" +
+        "print(found)\nprint(m.Count)\nprint(removed)\nprint(m)\n";
+
+    /// <summary>
+    /// The first <paramref name="count"/> keys from 0 up whose fast hash has bits 3 to 9 of 0, so that their probe starts at the first
+    /// group of a block of up to 1024 slots, each as <paramref name="shape"/> writes it, 8 bytes whose word is hashed (the number's
+    /// <c>long</c> where no shape is given).
+    /// </summary>
+    private static List<string> SameGroupKeys(int count, Func<int, string> shape) =>
+        [.. Enumerable.Range(0, int.MaxValue).Select(shape).Where(k => (FastHashOfWord(BitConverter.ToUInt64(Encoding.ASCII.GetBytes(k))) & 1016UL) == 0).Take(count)];
+
+    private static List<long> SameGroupKeys(int count) =>
+        [.. Enumerable.Range(0, int.MaxValue).Select(k => (long)k).Where(k => (FastHashOfWord((ulong)k) & 1016UL) == 0).Take(count)];
+
+    /// <summary>
+    /// The fast hash of a key of 8 bytes whose word is <paramref name="word"/>, as std's <c>FoldHash</c> takes it and as the test of the
+    /// fast hash's values holds it to foldhash 0.2.0: the accumulator turned right by 8, the word into both halves, one folded multiply
+    /// in the crate's form for a target without a product of 128 bits.
+    /// </summary>
+    private static ulong FastHashOfWord(ulong word)
+    {
+        unchecked
+        {
+            const ulong seed = 0x082efa98ec4e6c89UL;
+            var x = ((seed >> 8) | (seed << 56)) ^ word;
+            var y = 0x3f84d5b5b5470917UL ^ word;
+            ulong lx = x & 0xFFFFFFFFUL, hx = x >> 32, ly = y & 0xFFFFFFFFUL, hy = y >> 32;
+            var across = (hx * ly) ^ (lx * hy);
+            return (hx * hy) ^ (lx * ly) ^ ((across >> 32) | (across << 32));
+        }
+    }
+
+    /// <summary>Builds the program once and runs it twice, each run ending with 0 and no error line: what each run printed.</summary>
+    private (IReadOnlyList<string> First, IReadOnlyList<string> Second) RunTwice(string text, CheckedRuntime runtime, string name)
+    {
+        var compilation = Compile(text, runtime);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var program = toolchain.Build(compilation.Program, "map-order");
+        var program = toolchain.Build(compilation.Program, name);
         var first = Toolchain.Run(program);
         var second = Toolchain.Run(program);
         Assert.Equal((0, ""), (first.Code, first.Error));
         Assert.Equal((0, ""), (second.Code, second.Error));
-        Assert.NotEqual(first.Output, second.Output);
-        Assert.Equal(Enumerable.Range(0, 20).Select(i => $"{i}: {i}").Order(), Assert.Single(first.Output).Trim('[', ']').Split(", ").Order());
+        return (first.Output, second.Output);
     }
 
     [Fact]
     public void A_key_of_every_count_of_bytes_from_0_to_24_has_the_SipHash_1_3_of_the_reference()
     {
-        // SipHash13 reads each whole word of 8 bytes in one read and the bytes after the last one four, two and one at a time, as Rust's
-        // SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes (i * 37 + 200) % 256, half of them 128 or more, of every count
-        // from 0 to 24, under keys of 0 and under the reference implementation's keys, against SipHash-1-3 in Python, which gives
-        // CPython's `hash` of the same bytes under keys of 0 (`PYTHONHASHSEED=0`) and the three vectors of the test above
+        // M9 (section 4): SipHash13, the hash of a map that switched, reads each whole word of 8 bytes in one read and the bytes after the
+        // last one four, two and one at a time, as Rust's SipHasher13 reads them (`load_int_le` and `u8to64_le`): the bytes
+        // (i * 37 + 200) % 256, 14 of the 24 of them 128 or more, of every count from 0 to 24, under keys of 0 and under the reference
+        // implementation's keys, against SipHash-1-3 in Python, which gives CPython's `hash` of the same bytes under keys of 0
+        // (`PYTHONHASHSEED=0`) for the counts 1 to 24, CPython hashing no bytes as 0 without SipHash, and the three vectors of the test above
         ulong[] zero =
         [
             15130871412783076140UL, 12449551661063549815UL, 18410336655117930453UL, 14036337907613256389UL, 8188850183964244334UL,
@@ -3945,14 +4152,149 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Two_strings_are_equal_where_every_byte_is_compared_a_word_at_a_time_and_the_bytes_after()
+    public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares 8 bytes at a time and the bytes after the last 8 one at a time: a string of every count from 0
-        // to 20 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
+        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
+        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
-        // byte 128 or more, against one letter changed at each place, which changes its second byte alone
-        const string text = "s = \"abcdefghijklmnopqrst\"\nmut long n = 0\nfor count in 0..<21 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
-        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["21000", "21000"], "");
+        // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
+        // where a changed string of 16 or 32 bytes ends where its page ends, so that a word read past its end ends the process
+        const string text = "s = \"abcdefghijklmnopqrstuvwxyz0123456789ABCDE\"\nmut long n = 0\nfor count in 0..<41 {\n    a = s.Substring(0, count)\n    for k in 0..<count {\n        b = \"{s.Substring(0, k)}#{s.Substring(k + 1, count - k - 1)}\"\n        if a == b {\n            n = n + 1\n        }\n    }\n\n    if a == \"{s.Substring(0, count)}\" {\n        n = n + 1000\n    }\n}\nprint(n)\nt = \"àáâãäåæçèéêëìíîïðñòó\"\nmut long m = 0\nfor count in 0..<21 {\n    a = t.Substring(0, 2 * count)\n    for k in 0..<count {\n        b = \"{t.Substring(0, 2 * k)}ÿ{t.Substring(2 * k + 2, 2 * (count - k - 1))}\"\n        if a == b {\n            m = m + 1\n        }\n    }\n\n    if a == \"{t.Substring(0, 2 * count)}\" {\n        m = m + 1000\n    }\n}\nprint(m)\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-words"), 0, ["41000", "21000"], "");
+        Ran(BuildAndRun(text, Fenced, "string-same-words-fenced"), 0, ["41000", "21000"], "");
+    }
+
+    [Fact]
+    public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
+    {
+        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
+        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
+        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
+        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
+        // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
+        // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
+        // that a word read past its end ends the process
+        const string text = """
+            string Sign(string x, string y) {
+                mut t = ""
+                if x < y {
+                    t = "{t}<"
+                }
+
+                if x == y {
+                    t = "{t}="
+                }
+
+                if x > y {
+                    t = "{t}>"
+                }
+
+                return t
+            }
+
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
+            for count in 0..<41 {
+                a = s.Substring(0, count)
+                mut line = ""
+                for k in 0..<count {
+                    head = s.Substring(0, k)
+                    mut up = "{head}~"
+                    mut down = "{head} "
+                    if k + 1 < count {
+                        rest = s.Substring(k + 2, count - k - 2)
+                        up = "{head}~ {rest}"
+                        down = "{head} ~{rest}"
+                    }
+
+                    wide = "{head}é{s.Substring(k + 1, count - k - 1)}"
+                    line = "{line}{Sign(a, up)}{Sign(up, a)}{Sign(a, down)}{Sign(down, a)}{Sign(a, wide)}{Sign(wide, a)}"
+                }
+
+                longer = s.Substring(0, count + 1)
+                padded = "{a}!"
+                again = padded.Substring(0, count)
+                print("{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, again)}")
+            }
+
+            """;
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        var lines = new List<string>();
+        for (var count = 0; count <= 40; count++)
+        {
+            var a = s[..count];
+            var line = new StringBuilder();
+            for (var k = 0; k < count; k++)
+            {
+                var head = s[..k];
+                var (up, down) = k + 1 < count ? (head + "~ " + s[(k + 2)..count], head + " ~" + s[(k + 2)..count]) : (head + "~", head + " ");
+                var wide = head + "é" + s[(k + 1)..count];
+                foreach (var b in new[] { up, down, wide })
+                {
+                    line.Append(Sign(a, b)).Append(Sign(b, a));
+                }
+            }
+
+            var longer = s[..(count + 1)];
+            lines.Add($"{line}{Sign(a, longer)}{Sign(longer, a)}{Sign(a, a)}{Sign(a, a)}");
+        }
+
+        Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>
+    private static string Sign(string x, string y)
+    {
+        var order = Encoding.UTF8.GetBytes(x).AsSpan().SequenceCompareTo(Encoding.UTF8.GetBytes(y));
+        return order < 0 ? "<" : order == 0 ? "=" : ">";
+    }
+
+    [Fact]
+    public void A_piece_of_up_to_40_bytes_is_copied_whole_from_each_place_in_a_word()
+    {
+        // the standard library's `Copy`, with which `StringOf` copies a piece of a string's block: 8 to 16 bytes as two words of 8, the
+        // second ending where the bytes end, 4 to 7 as two words of 4, 1 to 3 as their first, middle and last byte, more byte by byte:
+        // every count from 0 to 40, copied from each of the 8 places of a word; and the same under the fence, where a piece of 16 or
+        // 32 bytes ends where its page ends, so that a byte written past its end ends the process
+        const string text = """
+            t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            s = "{t}{t}"
+            for count in 0..<41 {
+                mut line = ""
+                for at in 0..<8 {
+                    line = "{line}{s.Substring(at, count)}|"
+                }
+
+                print(line)
+            }
+
+            """;
+        const string t = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var lines = Enumerable.Range(0, 41).Select(count => string.Concat(Enumerable.Range(0, 8).Select(at => string.Concat((t + t).AsSpan(at, count), "|")))).ToArray();
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-copy-counts"), 0, lines, "");
+        Ran(BuildAndRun(text, Fenced, "string-copy-counts-fenced"), 0, lines, "");
+    }
+
+    [Fact]
+    public void A_replace_of_one_byte_by_one_byte_takes_no_block_where_it_finds_none()
+    {
+        // X5: a `Replace` of a character of one byte by another, given as `char`s or as strings, gives the string itself where it finds
+        // none, held once more, where Rust's `replace_ascii` makes a copy: 15000 such results of a string of 1024 bytes, all of them
+        // held, fit the 16 pieces of memory of `Budget`, where 15000 copies, each a block of 1040 bytes in the size class of 2048, are
+        // 30 megabytes and outgrow them, as the same replaces that find the byte do (the positive control); where it finds one it asks
+        // for the block of its result, 16 bytes of counts and the 3 of `axc`
+        const string held = "string Make(int n) {\n    mut s = \"x\"\n    mut i = 0\n    while i < n {\n        s = \"{s}{s}\"\n        i = i + 1\n    }\n    return s\n}\n\ntext = Make(10)\nmut all = List<string>()\nmut round = 0\nwhile round < 7500 {\n    round = round + 1\n    all.Add(text.Replace('q', 'y'))\n    all.Add(text.Replace(\"q\", \"y\"))\n}\nprint(all.Count)\n";
+        Ran(BuildAndRun(held, Budget(), "replace-byte-absent-held"), 0, ["15000"], "");
+        var copied = BuildAndRun(held.Replace("'q'", "'x'", StringComparison.Ordinal).Replace("\"q\"", "\"x\"", StringComparison.Ordinal), Budget(), "replace-byte-present-held");
+        Assert.Equal(1, copied.Code);
+        Assert.StartsWith("error: allocation-failed (", copied.Error, StringComparison.Ordinal);
+
+        var none = EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value);
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\n", none, "replace-byte-refused"), 1, [], "error: allocation-failed (19 bytes)\n");
+        Ran(BuildAndRun("print(\"abc\".Replace('b', 'x'))\nprint(\"abc\".Replace(\"c\", \"x\"))\n", toolchain.Runtime, "replace-byte-granted"), 0, ["axc", "abx"], ""); // the positive control
     }
 
     [Theory]
