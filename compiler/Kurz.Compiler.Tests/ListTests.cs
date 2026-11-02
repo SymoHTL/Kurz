@@ -2432,7 +2432,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
     // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
-    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
+    // read of a `weak` item through `?[`
     private const string Weak = """
         class Owner(string Name) {
             pub string Text() => Name
@@ -2479,6 +2480,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         print("{p.Keeper} {c.Members[1]}")
+        List<weak Owner?>? maybe = c.Members
+        print(maybe?[0]?.Name ?? "gone")
+        print(maybe?[1] != null)
+        print("{maybe?[0]} {maybe?[2]}")
         t = Tag("x", o)
         print(NameOf(t.By))
         mut Owner? strong = Owner("Fay")
@@ -2506,6 +2511,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Bob",
         "gone",
         "gone",
+        "Bob null",
+        "Bob",
+        "false", // R3 with N5: `?[` reads a `weak` item, so the freed `Eve` is null there as in `c.Members[1]`
         "Bob null",
         "Bob",
         "Fay",

@@ -711,7 +711,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
-  `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
+  `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
@@ -1884,7 +1884,7 @@ round can ask about it by the rule's id.
 - N4: `a ?? b` has the type `a` makes nullable where `b` fits it, and `a`'s nullable type where `b`
   fits that alone, as C# types it; after it holds what held before `b`, since `b` runs only where
   `a` is null.
-- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
+- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with (of a `weak` item its read, R3), and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
   `nullable-unchecked`, unless a test showed that member's path not null (N3), as C#'s analysis
