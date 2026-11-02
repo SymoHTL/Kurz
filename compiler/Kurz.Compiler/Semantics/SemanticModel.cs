@@ -194,6 +194,9 @@ public enum CallKind
     /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
     TcpSetAcceptTimeout,
 
+    /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
+    TcpShutdownWrite,
+
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
 

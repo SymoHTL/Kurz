@@ -358,6 +358,16 @@ listener", against the default of 5 seconds on `Accept` too). A listener's bound
 from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and how
 the bound holds for an actor's socket stands open (§14).
 
+`s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
+`TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
+(S3), and the stream still reads what the peer sends until it closes. It gives `void | IoError`, S5's
+error on a closed stream, and what the system answers as it is: a second call passes, and a call on a
+stream whose peer reset the connection is `NotConnected` with the number 107. A call through one
+holder ends the writes of every holder, so that a later write through any holder is `BrokenPipe` with
+the number 32, and the reads go on. A listener has no such member, and there is no `ShutdownRead` and
+no `Shutdown(how)` (§12, the owner, 2026-11-02, a half-close on `TcpStream` for the staged close of
+the HTTP server, and the answers to the product pass of the call).
+
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
 void | IoError Echo() {
@@ -587,6 +597,54 @@ void | IoError Refused() {
 }
 
 Refused() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/shutdown-write.kz](../corpus/system/shutdown-write.kz)
+```kurz
+// the writes of one end ended through one holder: its peer reads the end of the stream, a second call passes, and the other
+// holder still reads and has its write refused; a stream whose peer reset it, and a closed one, get the system's answer
+void | IoError Half() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    held = server
+    server.ShutdownWrite()
+    mut end = Bytes()
+    print(client.Read(mut end, 16))
+    server.ShutdownWrite()
+    print("again")
+    client.Write("hi".Bytes)
+    mut buffer = Bytes()
+    mut read = 1
+    while buffer.Count < 2 && read > 0 {
+        read = held.Read(mut buffer, 2 - buffer.Count)
+    }
+
+    print(string.FromUtf8(buffer) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+    held.Write("late".Bytes) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    // a peer that closes with a byte it never read, still in the system's queue, resets the connection
+    reset = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    accepted = listener.Accept()
+    accepted.Write("x".Bytes)
+    reset.Close()
+    accepted.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    server.Close()
+    server.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+}
+
+Half() else {
     IoError e => print(e)
 }
 ```

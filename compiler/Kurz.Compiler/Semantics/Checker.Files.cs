@@ -68,7 +68,8 @@ public sealed partial class Checker
     /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
     /// a <c>duration?</c>, <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (section 12, the owner,
     /// 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do (section
-    /// 12, assumed); each with the case <c>IoError</c>.
+    /// 12, assumed), and a stream's <c>ShutdownWrite()</c>, as Rust's <c>shutdown(Shutdown::Write)</c> (section 12, the owner, 2026-11-02);
+    /// each with the case <c>IoError</c>.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
@@ -89,6 +90,7 @@ public sealed partial class Checker
             "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
             "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
             "SetAcceptTimeout" when listener => (CallKind.TcpSetAcceptTimeout, [timeout], Types.Void),
+            "ShutdownWrite" when stream => (CallKind.TcpShutdownWrite, [], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };

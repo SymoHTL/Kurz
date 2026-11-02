@@ -2085,6 +2085,19 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_stream_ends_its_writes_and_a_listener_and_a_file_have_no_such_call()
+    {
+        // S9: a stream's `ShutdownWrite()` takes no argument and gives `void | IoError`, which its function passes on; a listener and a
+        // file have none
+        const string Program = "void | IoError Half() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.ShutdownWrite()\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nHalf() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.ShutdownWrite()", "l.ShutdownWrite()\n    c.Close()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("f.Close()", "f.ShutdownWrite()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(Program.Replace("c.ShutdownWrite()", "c.ShutdownWrite(1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(Program.Replace("c.ShutdownWrite()", "n = c.ShutdownWrite()\n    print(n)", StringComparison.Ordinal))); // O10: its success is `void`
+    }
+
+    [Fact]
     public void A_read_takes_its_list_as_mut_and_clear_changes_a_mut_list()
     {
         // S3 with M7: the list a read adds to is a `mut` argument, written so at the call
