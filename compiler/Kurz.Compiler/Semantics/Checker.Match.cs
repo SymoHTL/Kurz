@@ -358,7 +358,7 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
-        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)");
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)"); // `e.Line` is the `else` keyword's
 
         if (!isStatement && Types.IsVoid(success))
         {

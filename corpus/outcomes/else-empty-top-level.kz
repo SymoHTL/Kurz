@@ -1,0 +1,16 @@
+// expect: error unlisted-case at 14
+// rules: O9
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// an `else` with no arms handles no case, and top-level code has no caller to pass `NotFound` to
+value = Find(1) else {
+}
+print(value)
