@@ -604,7 +604,8 @@ the system completes without the accept.
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
-and `File.Modified` (S13 to S15; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
+and `File.Modified` (S13 to S15; §12, assumed), and a `Command`'s calls, `Stdin` and `Environment.Exit`
+(S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 
@@ -618,7 +619,7 @@ program's code to such a function needs the grant, so that no package borrows a 
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
 is the compile error `files-not-allowed` or `network-not-allowed` at the call. A package that reads a
 variable of the environment needs `allow env` in the same way, and a read without it is `env-not-allowed`;
-the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). For a package on the
+the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). A package that starts a program, by `Output()`, `Status()` or `Spawn()` of a `Command` (S17 to S19), needs `allow run` in the same way, and a call without it is `run-not-allowed`, while `Command.New` and the members that set a command need none, since nothing runs before a call that starts (§13, the owner, 2026-11-01, "allow run"); a read of standard input needs none (S22). *(assumed, §13: the id `run-not-allowed` and the members that set a command)* For a package on the
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
@@ -817,4 +818,745 @@ void | IoError Times() {
 Times() else {
     IoError e => print(e)
 }
+```
+
+### S16 (decided, §12) The lines of a file
+
+`for line in f.Lines() { }` runs its block once for each line of a file `File.Open` opened, pulling the
+lines one at a time, as Rust's `BufRead::lines()` and C#'s `File.ReadLines` pull them; `line` is a
+`string`. `\n` and `\r\n` end a line and are not part of it, as Rust's rule has it, where C# ends a
+line at a lone `\r` too; the last line needs no line break, and a final `\n` gives no empty line after
+it (§12, the owner, 2026-11-01, "Lazy, `for line in ...`",
+"`f.Lines()` on an open File" and "As Rust"). A lone `\r` stays in its line, and an empty file gives no
+line *(assumed, §12)*.
+
+Case: [system/lines-read.kz](../corpus/system/lines-read.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    // `\n` and `\r\n` end a line, and the last line needs no line break
+    File.WriteAll("lines-read.txt", "a\nb\r\n\r\nc".Bytes)
+    f = File.Open("lines-read.txt")
+    for line in f.Lines() {
+        print(line)
+    }
+
+    // a lone `\r` stays in its line, and a final `\n` gives no empty line after it
+    File.WriteAll("lines-read.txt", "x\ry\n".Bytes)
+    g = File.Open("lines-read.txt")
+    File.Delete("lines-read.txt")
+    for line in g.Lines() {
+        print(line.Bytes.Count)
+        print(line.Contains('\r'))
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
+Case: [system/lines-empty.kz](../corpus/system/lines-empty.kz)
+```kurz
+int | IoError | InvalidUtf8 Count(string text) {
+    File.WriteAll("lines-empty.txt", text.Bytes)
+    f = File.Open("lines-empty.txt")
+    File.Delete("lines-empty.txt")
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+// an empty file has no line, one line break alone one empty line, and an empty line between two counts
+print(Count("") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("\n") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("a\n\nb") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+```
+
+The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
+a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
+goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
+"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
+buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
+`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
+*(assumed, §12)*.
+
+Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-break.txt", "one\ntwo\nthree\nfour\n".Bytes)
+    f = File.Open("lines-break.txt")
+    File.Delete("lines-break.txt")
+    for line in f.Lines() {
+        print(line)
+        break
+    }
+
+    // the file stays open, and a `Read` takes the bytes the loop left in its buffer first
+    mut buffer = Bytes()
+    print(f.Read(mut buffer, 4))
+    print(string.FromUtf8(buffer).Trim())
+    // a second loop goes on where the `Read` stopped
+    for line in f.Lines() {
+        print(line)
+    }
+
+    print(f.Read(mut buffer, 4))
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
+`Close` gives up the bytes the buffer holds, so that a later `Lines()` or `Read` takes none of them
+and gets the error of a closed file (S5) *(proposed)*. A line longer than the buffer is read whole,
+and one of more bytes than the largest `int` ends the process with `allocation-failed`, as a string
+past it does *(assumed, §12)*. The loop keeps the `File` its collection gave when it started: an
+assignment to the variable in the block changes the variable, not what the loop pulls *(proposed)*.
+
+Case: [system/lines-keeps-its-file.kz](../corpus/system/lines-keeps-its-file.kz)
+```kurz
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-keeps-a.txt", "a1\na2\n".Bytes)
+    File.WriteAll("lines-keeps-b.txt", "b1\n".Bytes)
+    mut f = File.Open("lines-keeps-a.txt")
+    g = File.Open("lines-keeps-b.txt")
+    File.Delete("lines-keeps-a.txt")
+    File.Delete("lines-keeps-b.txt")
+    // the loop keeps the `File` it started with: the assignment changes the variable, not what the loop pulls
+    for line in f.Lines() {
+        print(line)
+        f = g
+    }
+
+    // after the loop the variable holds the other file
+    for line in f.Lines() {
+        print(line)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}
+```
+
+A failure part-way through the read ends the loop and leaves the function through it, as a case of a
+call does (O2, O3): a line that is not UTF-8 with the case `InvalidUtf8`, as `string.FromUtf8` gives it
+(T15), and a failed read with an `IoError` (S1). A postfix `else` after the loop's block, on the line of
+its closing brace, handles the cases it names, as after a call (O5), and the program goes on after the
+loop; top-level code, which has no caller, writes it (O9) (§12, the owner, 2026-11-01, "As Rust" and
+"Unwrap like a call"). The `At` of `InvalidUtf8` is the position in the line, and the line's bytes are
+taken, so that a later loop goes on after them; an `IoError` in the middle of a line gives no part of it
+*(assumed, §12)*, and the part read is taken as well *(proposed)*.
+
+Case: [system/lines-invalid-utf8.kz](../corpus/system/lines-invalid-utf8.kz)
+```kurz
+void | IoError Show() {
+    mut content = "first\nab".Bytes
+    content.Add(byte(255))
+    content.AddRange("\nthird\n".Bytes)
+    File.WriteAll("lines-invalid.txt", content)
+    f = File.Open("lines-invalid.txt")
+    File.Delete("lines-invalid.txt")
+    // a line that is not UTF-8 ends the loop with `InvalidUtf8`, whose `At` is the position in the line
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 u => print("bad line at {u.At}")
+    }
+
+    // its bytes were taken, and the next loop goes on after them
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("bad line")
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/lines-propagate.kz](../corpus/system/lines-propagate.kz)
+```kurz
+// a failure of the read leaves the function through the loop, as a case of a call does
+int | IoError | InvalidUtf8 Longest(File f) {
+    mut longest = 0
+    for line in f.Lines() {
+        if line.Bytes.Count > longest {
+            longest = line.Bytes.Count
+        }
+    }
+
+    return longest
+}
+
+void Show(Bytes content) {
+    File.WriteAll("lines-propagate.txt", content) else {
+        IoError => return
+    }
+
+    f = File.Open("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    File.Delete("lines-propagate.txt") else {
+        IoError => return
+    }
+
+    match Longest(f) {
+        int n => print(n)
+        IoError e => print(e)
+        InvalidUtf8 u => print("not UTF-8 at {u.At}")
+    }
+}
+
+Show("ab\nc\n".Bytes)
+mut bad = "x\n".Bytes
+bad.Add(byte(255))
+Show(bad)
+```
+
+On a file `File.Create` opened, and on a closed file, the first pull gives the error the system gives a
+descriptor that is not open to read, `Other` with the number 9 (S5) *(assumed, §12)*.
+
+Case: [system/lines-not-open-to-read.kz](../corpus/system/lines-not-open-to-read.kz)
+```kurz
+// a file created to write, and a closed one, give the system's error for a descriptor that is not open to read
+void | IoError Pull(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("not UTF-8")
+    }
+}
+
+void | IoError Show() {
+    created = File.Create("lines-created.txt")
+    File.Delete("lines-created.txt")
+    Pull(created) else {
+        IoError e => print(e)
+    }
+
+    File.WriteAll("lines-closed.txt", "a\n".Bytes)
+    closed = File.Open("lines-closed.txt")
+    File.Delete("lines-closed.txt")
+    closed.Close()
+    Pull(closed) else {
+        IoError e => print(e)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+A case the loop can fail with that the function's return type does not list is `unlisted-case`, at the
+loop's line, as for a call (O3, O9).
+
+Case: [system/lines-unlisted.kz](../corpus/system/lines-unlisted.kz)
+```kurz
+// the read's `InvalidUtf8` can leave the function through the loop, and its return type does not list it
+int | IoError Count(File f) {
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+print(1)
+```
+
+Case: [system/lines-top-level.kz](../corpus/system/lines-top-level.kz)
+```kurz
+f = File.Open("lines-top-level.txt") else {
+    IoError => throw
+}
+// top-level code has no caller: the loop's failures must be handled in an `else` after it, which this loop lacks
+for line in f.Lines() {
+    print(line)
+}
+```
+
+`f.Lines()` stands as the collection of a `for` loop alone and has no type name: anywhere else it is
+text no rule gives a meaning, `syntax` (E4) (§12, the owner, 2026-11-01, "Loop source only";
+*(proposed: the id)*). An arm of the `else` that names a case the collection cannot give is
+`type-mismatch` at the arm, as an arm of O5's that names no case of the call *(proposed)*, and after a
+loop over a list, a range or a map, which fails with no case, every such arm is *(proposed)*. An `else` with no
+arms there is `unreachable-arm` at the line of the `else`, as an `else` arm there is (§5, the owner,
+2026-11-02). Two names, `for i, line in f.Lines()`, are `type-mismatch` at the loop's line, as over a
+list (C6) *(proposed)*. An arm of the `else` stands after the loop: a `break` or `continue` in it
+belongs to a loop around the loop, and with none it is `break-outside-loop` (C7) *(proposed)*.
+
+Case: [system/lines-not-a-value.kz](../corpus/system/lines-not-a-value.kz)
+```kurz
+// `f.Lines()` stands as the collection of a `for` loop alone
+void Show(File f) {
+    print(f.Lines())
+}
+
+print(1)
+```
+
+Case: [system/lines-else-on-list.kz](../corpus/system/lines-else-on-list.kz)
+```kurz
+// an `else` after a loop takes the cases its collection can fail with: a list's has none
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/lines-else-empty-on-list.kz](../corpus/system/lines-else-empty-on-list.kz)
+```kurz
+// an `else` with no arms after a loop whose collection fails with no case: nothing can reach it
+xs = [1, 2]
+for x in xs {
+    print(x)
+} else {
+}
+```
+
+Case: [system/lines-two-names.kz](../corpus/system/lines-two-names.kz)
+```kurz
+// two names walk the entries of a map, and a file's lines are no map
+void Run(File f) {
+    for i, line in f.Lines() {
+        print(line)
+    } else {
+        IoError e => print(e)
+        InvalidUtf8 u => print(u)
+    }
+}
+
+print(1)
+```
+
+Case: [system/lines-break-in-arm.kz](../corpus/system/lines-break-in-arm.kz)
+```kurz
+// an arm of the `else` stands after the loop: its `break` belongs to a loop around the loop, and there is none
+void | IoError Run(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => break
+    }
+}
+
+print(1)
+```
+
+A pull takes a lock in the `File`, so that two holders that pull lines at once each take whole lines
+(§12, the owner, 2026-11-01, "Lock per pull"), and a `Read` takes it while it takes the buffered bytes
+*(proposed)*.
+
+No case: a case runs one actor, and two holders that pull at once need two.
+
+### S17 (decided, §12) A command
+
+`Command.New(program)` names a program to run, and the members of a `Command` set its arguments,
+`Arg(x)` and `Args(list)`, its working directory, `Dir(path)`, its environment, `Env(name, value)`,
+`EnvRemove(name)` and `EnvClear()`, its three streams, `Stdin(s)`, `Stdout(s)` and `Stderr(s)`, each a
+value of `enum Stdio { Inherit, Piped, Null }`, its input, `Input(bytes)` (S19), and a bound on its time,
+`Timeout(d)` (S20); `Output()` (S18), `Status()` (S18) and `Spawn()` (S19) run it (§12, the owner,
+2026-11-01, "Chain, each step a new value"). Each member gives a new `Command` and leaves the one it was
+called on as it was, so that a chain needs no `mut` and a loop writes `cmd = cmd.Arg(x)` on a `mut`
+variable; where no other value holds the command a member is called on, the new command is that one
+changed in place, as a write into a list's block that no other value holds (M3), so that a chain builds
+into one block and a command is copied only where a program keeps it and calls a member on it again
+(§12, the same answer). The names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus`, `Stdio` and
+`ExitError` are seen by every file, so that a file's own declaration of one is `redeclared` (V9), as of
+`Environment` (S14) (§12, the owner, 2026-11-01, "Mixed: ChildProcess, ProcessOutput"). A program that
+does not start is an `IoError` (S1) whose path is the program (S21). *(assumed, §12: `ExitError` among
+the names; a command without a text and without `==`)*
+
+Case: [system/command-output.kz](../corpus/system/command-output.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Show() {
+    out = Command.New("printf").Args(["%s-%s", "a"]).Arg("b").Output()
+    print(string.FromUtf8(out.Stdout))
+    print(out.Status.Code)
+    print(out.Stderr.Count)
+}
+
+Show() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-reuse.kz](../corpus/system/command-reuse.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Show() {
+    base = Command.New("printf").Arg("[%s]")
+    a = base.Arg("a")
+    b = base.Arg("b")
+    mut c = base
+    c = c.Arg("x")
+    print(string.FromUtf8(a.Output().Stdout))
+    print(string.FromUtf8(b.Output().Stdout))
+    print(string.FromUtf8(c.Output().Stdout))
+    print(string.FromUtf8(base.Output().Stdout))
+}
+
+Show() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-not-found.kz](../corpus/system/command-not-found.kz)
+```kurz
+match Command.New("kurz-case-no-such-program").Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => {
+        print(e)
+        print(e.Kind)
+    }
+    ExitError e => print(e)
+}
+```
+
+Case: [system/command-redeclared.kz](../corpus/system/command-redeclared.kz)
+```kurz
+data Command(string Program)
+
+print(1)
+```
+
+### S18 (decided, §12) Output, status and a code other than 0
+
+`Output()` runs the command to its end and gives `ProcessOutput | IoError | ExitError`, where `data
+ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the child wrote as bytes, which
+`string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A child that ends
+with a code other than 0, or that a signal ends, is the case `data ExitError(string Program,
+ProcessOutput Output)`, which the unwrap rule sends to the caller unless an `else` takes it (O2, O5)
+(§12, the owner, 2026-11-01, "A case of the call"). `ExitStatus` holds `Code`, an `int` that is 128 and
+the signal's number where a signal ended the child, `Signal`, an `int?` that holds that number, and
+`Success`, a `bool` (§12, the owner, 2026-11-01, "Code int + Signal int?"). `Status()` runs the command
+with the program's three streams and gives `void | IoError | ExitError`. The text of an `ExitError` is
+the words of what ended the child, a colon and the program: `exit status 3: sh`, `signal 15: sh`.
+*(assumed, §12: `Status()`'s result, its streams and its `ExitError` with no output, the name
+`ExitError`, its fields and its text, `ProcessOutput` keeping the status, `Success` where `Code` is 0 and
+`Signal` is `null`)*
+
+Case: [system/command-output.kz](../corpus/system/command-output.kz)
+
+Case: [system/command-exit-code.kz](../corpus/system/command-exit-code.kz)
+```kurz
+void | InvalidUtf8 Show(ExitError e) {
+    print(e)
+    print(e.Output.Status.Code)
+    print(e.Output.Status.Signal)
+    print(e.Output.Status.Success)
+    print(string.FromUtf8(e.Output.Stdout))
+    print(string.FromUtf8(e.Output.Stderr))
+}
+
+match Command.New("sh").Args(["-c", "printf out; printf err >&2; exit 3"]).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => {
+        Show(e) else {
+            InvalidUtf8 u => print(u)
+        }
+    }
+}
+```
+
+Case: [system/command-signal.kz](../corpus/system/command-signal.kz)
+```kurz
+match Command.New("sh").Args(["-c", "kill -TERM $$"]).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => {
+        print(e)
+        print(e.Output.Status.Code)
+        print(e.Output.Status.Signal)
+        print(e.Output.Status.Success)
+    }
+}
+```
+
+Case: [system/command-status.kz](../corpus/system/command-status.kz)
+```kurz
+void | IoError | ExitError Run() {
+    Command.New("true").Status()
+    print("true ended")
+    Command.New("false").Status()
+    print("not reached")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => {
+        print(e)
+        print(e.Output.Stdout.Count)
+    }
+}
+```
+
+### S19 (decided, §12) A child beside the program, and its input
+
+`Spawn()` starts the command and gives `ChildProcess | IoError`. A `ChildProcess`'s `Stdin`, `Stdout`
+and `Stderr` are each a `File?`, a stream where the command set it to `Stdio.Piped` and `null`
+otherwise, which is read, written and closed as a `File` is (S3 to S5); `Wait()` waits for the child's
+end and gives `void | IoError | ExitError`, `WaitWithOutput()` gives `ProcessOutput | IoError |
+ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoError`, and `Id` is its
+process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
+while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
+forms"). A second `Wait()` gives what the first gave; a child let go of without a `Wait()` is neither
+waited for nor killed. *(assumed, §12: the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the
+signal, the second `Wait()`, the child let go of, `Id`'s type, and an `Input` under `Spawn()`, written by
+the call that waits, the child's `Stdin` then `null`)*
+
+Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Run() {
+    child = Command.New("cat").Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
+    print(child.Id > 0)
+    match child.Stdout {
+        File => print("stdout piped")
+        null => print("no stdout")
+    }
+    match child.Stderr {
+        File => print("stderr piped")
+        null => print("no stderr")
+    }
+    match child.Stdin {
+        File input => {
+            input.Write("piped".Bytes)
+            input.Close()
+        }
+        null => print("no input")
+    }
+    out = child.WaitWithOutput()
+    print(string.FromUtf8(out.Stdout))
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/spawn-kill.kz](../corpus/system/spawn-kill.kz)
+```kurz
+void | IoError | ExitError Run() {
+    child = Command.New("sleep").Arg("10").Spawn()
+    child.Kill()
+    child.Wait()
+    print("not reached")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => {
+        print(e)
+        print(e.Output.Status.Code)
+        print(e.Output.Status.Signal)
+    }
+}
+```
+
+Case: [system/command-input.kz](../corpus/system/command-input.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Run() {
+    small = Command.New("cat").Input("hi".Bytes).Output()
+    print(string.FromUtf8(small.Stdout))
+    mut big = Bytes()
+    while big.Count < 1048576 {
+        big.Add(120)
+    }
+
+    echoed = Command.New("cat").Input(big).Output()
+    print(echoed.Stdout.Count)
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+### S20 (decided, §12) A bound on a child's time
+
+`Timeout(d)`, a `duration`, bounds the run from its start: when it has passed, the call that waits
+kills the child, waits for its end and gives an `IoError` of the kind `TimedOut` (S1) whose path is the
+program, `timed out: sleep`; without it a call waits without a bound (§12, the owner, 2026-11-01,
+"Optional .Timeout(d)"). *(assumed, §12: the kill by `SIGKILL`, the path, and a bound of 0 or below
+ending the child at once)*
+
+Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
+```kurz
+void | IoError | ExitError Run() {
+    Command.New("sleep").Arg("10").Timeout(100ms).Status()
+    print("not reached")
+}
+
+Run() else {
+    IoError e => {
+        print(e)
+        print(e.Kind)
+    }
+    ExitError e => print(e)
+}
+```
+
+### S21 (assumed, §12) How a child starts
+
+There is no shell: each argument reaches the program as it is written, and a program that wants a shell
+runs `sh -c`. A program named without a `/` is looked up in the `PATH` the child gets. A child inherits
+the program's environment, which `Env`, `EnvRemove` and `EnvClear` change, and runs in the program's
+working directory unless `Dir` names another. It gets back the default action of `SIGPIPE`, which the
+runtime sets to ignored at its start (§6), and no descriptor but its three streams. `Output()` pipes the
+child's output and error and gives it an input at its end; `Status()` and `Spawn()` give it the
+program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that. A call that waits for a
+child blocks its thread, or parks its actor, as a call on a file does (S10). A start that fails is an
+`IoError` (S1) whose path is the program, or the directory where that is what does not exist, and never
+an argument, the input or the output. A NUL byte in the program, an argument, the directory, or a name
+or a value of the environment is `InvalidInput` with the number 0 at the call that starts the child. A
+build for Windows says `not supported` to each of these calls, as to a call on a file (S11).
+
+Case: [system/command-not-found.kz](../corpus/system/command-not-found.kz)
+
+Case: [system/command-env-dir.kz](../corpus/system/command-env-dir.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Run() {
+    Directory.Create("command-dir")
+    script = "printf '%s|%s|%s' \"$KURZ_CASE_A\" \"$KURZ_CASE_B\" \"$(basename \"$(pwd -P)\")\""
+    out = Command.New("sh").Args(["-c", script]).Env("KURZ_CASE_A", "1").Env("KURZ_CASE_B", "2").EnvRemove("KURZ_CASE_B").Dir("command-dir").Output()
+    print(string.FromUtf8(out.Stdout))
+    words = Command.New("printf").Args(["%s", "$HOME *"]).Output()
+    print(string.FromUtf8(words.Stdout))
+    Directory.Delete("command-dir")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-nul.kz](../corpus/system/command-nul.kz)
+```kurz
+match Command.New("printf").Arg("a\0b").Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
+    ExitError e => print(e)
+}
+```
+
+### S22 (decided, §12) Standard input
+
+`Stdin` reads the program's standard input: `for line in Stdin.Lines() { }` takes its lines,
+`Stdin.ReadAll()` reads what is left into a `Bytes`, `Bytes | IoError`, `Stdin.Read(mut into, max)`
+appends up to `max` bytes as `f.Read` does (S3), and `Stdin.ReadLine()` gives one line, `string? |
+IoError | InvalidUtf8`, `null` at the end; one buffer serves the whole process, behind a lock taken for
+each pull (§12, the owner, 2026-11-01, "A type Stdin" and "Also Stdin.ReadLine()"). The lines are read
+as a file's are: `\n` and `\r\n` end a line and are taken off it, no empty line follows the last line
+break, a line that is not UTF-8 ends the read with `InvalidUtf8` (T15), `Stdin.Lines()` stands as a
+`for` loop's collection alone, a failure leaves the loop as a call's case leaves it, and the next read
+goes on where the loop stopped. `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
+needs no grant (S12); a file's own declaration of `Stdin` is `redeclared` (V9); and a build for Windows
+says `not supported` to it (S11). *(assumed, §12: the reading of the lines as a file's, `ReadAll`'s
+result, no `Close`, the path, the grant, the name and Windows)*
+
+Both cases read the standard input a case is given, which holds nothing (chapter 0).
+
+Case: [system/stdin-empty.kz](../corpus/system/stdin-empty.kz)
+```kurz
+match Stdin.ReadLine() {
+    string line => print(line)
+    null => print("end")
+    IoError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+
+void | IoError Rest() {
+    all = Stdin.ReadAll()
+    print(all.Count)
+    mut into = Bytes()
+    print(Stdin.Read(mut into, 16))
+}
+
+Rest() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/stdin-lines.kz](../corpus/system/stdin-lines.kz)
+```kurz
+void | IoError | InvalidUtf8 Echo() {
+    for line in Stdin.Lines() {
+        print(line)
+    }
+    print("end")
+}
+
+Echo() else {
+    IoError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/stdin-redeclared.kz](../corpus/system/stdin-redeclared.kz)
+```kurz
+data Stdin(int Descriptor)
+
+print(1)
+```
+
+### S23 (decided, §12) The exit code
+
+`Environment.Exit(code)` ends the process at once with `code`: the other actors end where they stand,
+no handle is closed at its last count but by the system, and nothing written is lost, since `print`
+and `f.Write` keep no buffer (§12, the owner, 2026-11-01, "Top-level return n + Exit"). No path
+goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
+of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
+Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
+the program with that code (F17). *(assumed, §12: the name, the end at once, the path after the call,
+the low 8 bits, any actor and Windows)*
+
+No case for a code other than 0: a case that expects output ends with 0.
+
+Case: [system/exit-in-function.kz](../corpus/system/exit-in-function.kz)
+```kurz
+int Stop() {
+    print("stopping")
+    Environment.Exit(0)
+}
+
+print("start")
+code = Stop()
+print(code)
 ```

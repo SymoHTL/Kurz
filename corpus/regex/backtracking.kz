@@ -1,0 +1,13 @@
+// expect: output
+// | hello hello
+// | 12
+// | a
+// | a
+// rules: G2
+
+twice = Regex.New(r"(\w+) \1", backtracking: true)
+print(twice.Match("say hello hello there")?.Value)
+weight = Regex.New(r"\d+(?= kg)", backtracking: true)
+print(weight.Match("5 m, 12 kg")?.Value)
+print(Regex.New("a|ab").Match("ab")?.Value)
+print(Regex.New("a|ab", backtracking: true).Match("ab")?.Value)

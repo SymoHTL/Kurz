@@ -72,6 +72,11 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Lines" && handle.Kind == Handle.File)
+        {
+            return CheckLines(c);
+        }
+
         var bytes = new ListType(Types.Byte);
         var listener = handle.Kind == Handle.TcpListener;
         var stream = handle.Kind == Handle.TcpStream;
@@ -103,6 +108,29 @@ public sealed partial class Checker
         return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
     }
 
+    /// <summary>
+    /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
+    /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else S16 makes it <c>syntax</c>, E4's id.
+    /// </summary>
+    private Typed CheckLines(CallExpression c)
+    {
+        if (!ReferenceEquals(c, loopSource))
+        {
+            Report(ErrorIds.Syntax, c.Line, "`f.Lines()` stands as the collection of a `for` loop alone (S16)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Lines`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = [], Result = Types.Union([Types.Void, IoError, new DataType(dataTypes["InvalidUtf8"], [])]) };
+        return Record(c, CallKind.FileLines, Call([candidate], c, null, out var picked), picked);
+    }
+
     // ---- the command line and the environment (chapter 13) -----------------------------------------------
 
     /// <summary>
@@ -112,6 +140,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
+        if (m.Member == "Exit")
+        {
+            NotSupported(m.Line, "`Environment.Exit`, the exit code (S23)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
         {
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
