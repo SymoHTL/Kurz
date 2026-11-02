@@ -150,8 +150,8 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>
     /// The program built for this machine and run with its runtime and with the fenced one, as <see cref="Ran"/> runs it, from IR in which
-    /// the call on a handle that follows a call of <c>Arm</c> (<see cref="Armed"/>), once it is in flight (<c>enter.handle</c>), first
-    /// meets a <c>Close</c> of that handle through another holder (<c>close.handle</c>), of a file where <c>Arm</c> was given 1 and of a
+    /// the call on a handle that follows a call of <c>ArmClose</c> (<see cref="Armed"/>), once it is in flight (<c>enter.handle</c>), first
+    /// meets a <c>Close</c> of that handle through another holder (<c>close.handle</c>), of a file where <c>ArmClose</c> was given 1 and of a
     /// socket where it was given 2, before it reads the descriptor: a close that races the call, held in one thread where it falls between
     /// the two. No program can make that race, since no handle reaches a second thread, a pointer to it being <c>counted-pointee</c> (R10).
     /// A <c>Close</c> there that gives anything but 0, the result of a close whose release a call in flight leaves to the last call out,
@@ -212,7 +212,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         static mut int armed = 0
 
         // the next call on a handle meets a `Close` of it while it is in flight: of a file (1) or of a socket (2)
-        void Arm(int kind) {
+        void ArmClose(int kind) {
             raw {
                 armed = kind
             }
@@ -240,7 +240,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             f = File.Open("in-flight.txt")
             g = f
             mut bytes = Bytes()
-            Arm(1)
+            ArmClose(1)
             n = f.Read(mut bytes, 2)
             print(n)
             print(Open(3))
@@ -249,7 +249,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             })
 
             lines = File.Open("in-flight.txt")
-            Arm(1)
+            ArmClose(1)
             for line in lines.Lines() {
                 print(line)
             } else {
@@ -257,7 +257,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             written = File.Create("in-flight-written.txt")
-            Arm(1)
+            ArmClose(1)
             written.Write("xyz".Bytes)
             print(File.ReadAll("in-flight-written.txt").Count)
             written.Write("x".Bytes) else {
@@ -307,7 +307,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             port = listener.Port
             first = TcpStream.Connect("127.0.0.1:{port}")
             second = TcpStream.Connect("127.0.0.1:{port}")
-            Arm(2)
+            ArmClose(2)
             Take(listener) else {
                 IoError e => print(e)
             }
@@ -325,33 +325,33 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             server = pair.Accept()
             client.Write("abcd".Bytes)
             mut bytes = Bytes()
-            Arm(2)
+            ArmClose(2)
             print(server.Read(mut bytes, 3))
             print(server.Read(mut bytes, 1) else {
                 IoError e => -e.Code
             })
 
-            Arm(2)
+            ArmClose(2)
             client.Write("e".Bytes) else {
                 IoError e => print(e.Code)
             }
 
             idle = TcpStream.Connect("127.0.0.1:{pair.Port}")
             idle.SetReadTimeout(100ms)
-            Arm(2)
+            ArmClose(2)
             print(idle.Read(mut bytes, 1) else {
                 IoError e => -e.Code
             })
 
             timed = TcpListener.Bind("127.0.0.1:0")
             a = TcpStream.Connect("127.0.0.1:{timed.Port}")
-            Arm(2)
+            ArmClose(2)
             a.SetReadTimeout(1s)
             a.SetWriteTimeout(1s) else {
                 IoError e => print(e.Code)
             }
 
-            Arm(2)
+            ArmClose(2)
             timed.SetAcceptTimeout(1s)
             timed.SetAcceptTimeout(1s) else {
                 IoError e => print(e.Code)
