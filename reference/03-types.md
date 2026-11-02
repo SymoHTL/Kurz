@@ -1236,7 +1236,9 @@ is not held to name every kind or end in an `else` arm, unlike one on a union or
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
-error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
+error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
+that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
 same error)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
@@ -1360,6 +1362,22 @@ void ShowKind<T>() {
 
 ShowKind<Order>()
 ShowKind<bool>()
+```
+
+Case: [types/type-kind-if-not-read.kz](../corpus/types/type-kind-if-not-read.kz)
+```kurz
+data Point(int X, int Y)
+
+void Show<T>(T value) {
+    if T.Kind == TypeKind.Data {
+        for f in T.Fields {
+            print(f.Name)
+        }
+    }
+}
+
+Show(Point(1, 2))
+Show(true)
 ```
 
 Case: [types/type-fields-kind-not-read.kz](../corpus/types/type-fields-kind-not-read.kz)
