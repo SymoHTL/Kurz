@@ -85,7 +85,7 @@ public sealed partial class Checker
     private Typed CheckCall(CallExpression c, KurzType? expected, bool keepCases)
     {
         var result = CallResult(c, expected);
-        EndChangeableNarrowing(); // N9: a call can assign a `mut` field through another reference (K2)
+        CallRan(); // N9: a call can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
         if (result.IsError || result.Type is not UnionType u || Types.NonNull(u) is not null || keepCases && (expected is null || Types.KeepsCases(expected, u)))
         {
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
@@ -405,6 +405,10 @@ public sealed partial class Checker
         else if (PrivateText(t.Type, c.Line))
         {
             // A9, A15: reported
+        }
+        else if (HoldsHttpError(t.Type))
+        {
+            NotSupported(c.Line, HttpErrorText);
         }
         else if (HoldsRaw(t.Type, []))
         {
@@ -803,7 +807,7 @@ public sealed partial class Checker
 
         var key = ResolveTypeArgument(c.TypeArguments[0], "`Map`");
         var value = ResolveTypeArgument(c.TypeArguments[1], "`Map`");
-        if (Types.IsError(key) || Types.IsError(value))
+        if (Types.IsError(key) || Types.IsError(value) || WeakUnread(c.Line, "a key or a value of a map", key, value))
         {
             CheckArgumentsLoosely(c);
             return Typed.Error; // a type it cannot find comes first, as for `List<T>()` above, and nothing more (E1)
@@ -1100,7 +1104,14 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            candidate.Map = data.TypeParameters.Zip(c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`"))).ToDictionary(p => p.First, p => p.Second);
+            var written = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{data.Name}`")).ToList();
+            if (WeakUnread(c.Line, "a type argument of a data type", [.. written]))
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -1599,6 +1610,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (HoldsHttpError(item))
+        {
+            NotSupported(c.Line, HttpErrorText);
+            return Typed.Error;
+        }
+
         if (HoldsRaw(item, []))
         {
             NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
@@ -1803,6 +1820,12 @@ public sealed partial class Checker
     {
         // once: an error in one is one diagnostic, whatever the number of overloads (E1)
         var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
+        if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
+        {
+            function = null;
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {

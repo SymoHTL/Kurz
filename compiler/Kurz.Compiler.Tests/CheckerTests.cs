@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
 using Kurz.Compiler.Text;
@@ -2054,6 +2055,76 @@ public sealed class CheckerTests
         Assert.EndsWith("(V9)", Assert.Single(Check("data Rejected\ndata Rejected").Diagnostics.Items).Message, StringComparison.Ordinal);
     }
 
+    // ---- the types of std/ every file sees (chapter 16) ------------------------------------------------
+
+    /// <summary>The runtime and <c>std/</c> checked once, for the tests that read the types of the prelude from <c>std/</c>'s checker (W1).</summary>
+    private static readonly Lazy<CheckedRuntime> StdRuntime = new(() => Builder.CheckRuntime(Target.Linux));
+
+    /// <summary>The checker's reading of a program that sees the types of <c>std/</c> the prelude names, as a build reads it.</summary>
+    private static (DiagnosticBag Diagnostics, Checker Checker) CheckSeeingStd(string program, CheckedRuntime? runtime = null)
+    {
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromString("test.kz", program), diagnostics);
+        Assert.Empty(diagnostics.Items);
+        return (diagnostics, Checker.Check(tree, diagnostics, [], (runtime ?? StdRuntime.Value).StdChecker));
+    }
+
+    [Fact]
+    public void A_type_of_std_that_the_prelude_names_is_std_s_own_in_the_file()
+    {
+        // W1: the file reads the symbols std/'s checker made, so that a value of one is of the same type in the file and in std/
+        var runtime = StdRuntime.Value;
+        var stdError = runtime.StdChecker.Model.DataTypeOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpError"));
+        var (diagnostics, checker) = CheckSeeingStd("e = HttpError(HttpKind.Protocol, \"no request line\")\nk = e.Kind\nprint(e.Detail)\nprint(k)\nprint(\"{e.Kind}: {e.Detail}\")\n");
+        Assert.Empty(diagnostics.Items);
+        Assert.Same(stdError, Assert.IsType<DataType>(checker.TopLevelVariables["e"]).Symbol);
+        Assert.Same(Assert.IsType<EnumType>(stdError.Fields[0].Type).Symbol, Assert.IsType<EnumType>(checker.TopLevelVariables["k"]).Symbol);
+
+        // the positive control: a checker given no std/ sees neither name
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 1)], Errors("e = HttpError(HttpKind.Protocol, \"x\")"));
+    }
+
+    [Theory]
+    [InlineData("pub data HttpError(", "e = HttpError(HttpKind.Protocol, \"x\")\nprint(e.Detail)\n", "print(HttpKind.Protocol)\n")]
+    [InlineData("pub enum HttpKind {", "print(HttpKind.Protocol)\n", "string Detail(HttpError e) => e.Detail\n\nprint(1)\n")]
+    public void A_name_of_the_prelude_that_std_does_not_declare_pub_is_seen_by_no_file(string declaration, string uses, string other)
+    {
+        // W1 with F9: a type of std/ without `pub` is private to its folder, so the list does not bring it in; the other stays seen
+        var runtime = ListTests.Edited(("std/std.kz", declaration, declaration["pub ".Length..]));
+        Assert.Contains((ErrorIds.UnknownName, 1), CheckSeeingStd(uses, runtime).Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd(uses).Diagnostics.Items); // the positive control: `pub` in std/ as it stands
+        Assert.Empty(CheckSeeingStd(other, runtime).Diagnostics.Items);
+    }
+
+    [Theory]
+    [InlineData("data HttpError(int Code)", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("enum HttpKind { Lost }", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
+    {
+        var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
+        Assert.Equal((ErrorIds.Redeclared, 1, message), (error.Id, error.Line, error.Message));
+        Assert.Empty(Check(text).Diagnostics.Items); // the positive control: without std/ the file's own type is the only one
+    }
+
+    [Theory]
+    [InlineData("print(e)")]
+    [InlineData("print(\"error: {e}\")")]
+    [InlineData("print(string.Join(\", \", [e]))")]
+    [InlineData("print([e])")]
+    [InlineData("int | HttpError u = e\nprint(u)")]
+    [InlineData("mut m = Map<string, HttpError>()\nm[\"a\"] = e\nprint(m)")]
+    [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
+    [InlineData("print(Held(e))")]
+    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    {
+        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
+        // not read (D16), so it takes no text of one, nor of a value that holds one
+        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
+        var refused = Assert.Single(diagnostics.Items);
+        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
+        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
+    }
+
     // ---- files (chapter 13) --------------------------------------------------------------------------------
 
     [Fact]
@@ -2118,6 +2189,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("c.Close()", "c.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetAcceptTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace("l.SetAcceptTimeout(50ms)", "l.SetAcceptTimeout(50)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_stream_ends_its_writes_and_a_listener_and_a_file_have_no_such_call()
+    {
+        // S9: a stream's `ShutdownWrite()` takes no argument and gives `void | IoError`, which its function passes on; a listener and a
+        // file have none
+        const string Program = "void | IoError Half() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.ShutdownWrite()\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nHalf() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.ShutdownWrite()", "l.ShutdownWrite()\n    c.Close()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(Program.Replace("f.Close()", "f.ShutdownWrite()", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(Program.Replace("c.ShutdownWrite()", "c.ShutdownWrite(1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(Program.Replace("c.ShutdownWrite()", "n = c.ShutdownWrite()\n    print(n)", StringComparison.Ordinal))); // O10: its success is `void`
     }
 
     [Fact]
@@ -3296,6 +3380,46 @@ public sealed class CheckerTests
         Assert.Equal(["5: an assignment into a value held by a field of an instance (K2, M4)"], NotSupported("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag([1]))\np.B.Items[0] = 2"));
     }
 
+    [Fact]
+    public void A_weak_reference_reads_as_a_strong_nullable_whose_narrowing_ends_where_a_count_can_be_let_go_of()
+    {
+        // R3 (the owner, 2026-11-01, "Anywhere a type stands"): a field, a list's item, a variable, a parameter and a result, which
+        // take a `T`, a `T?` and `null`
+        Clean("class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nweak Owner? Keep(weak Owner? w) {\n    return w\n}\n\no = Owner(\"Ann\")\nweak Owner? k = Keep(o)\np = Pet(k)\np.Keeper = null\nprint(k?.Name ?? \"gone\")\nprint(p.Keeper?.Name ?? \"gone\")");
+        Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
+        // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
+
+        // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field
+        const string Head = "class Owner(string Name)\nclass Pet(mut weak Owner? Keeper)\n\nbool Keep(Pet pet, Owner owner) {\n    pet.Keeper = owner\n    return true\n}\n\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Keep(p, o))\n    print(p.Keeper.Name)\n}"));
+        Clean(Head + "o = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(p.Keeper.Name)\n}");
+        // the same through a `weak` field without `mut`, which nothing assigns and a call can still free the target of
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nbool Touch() => true\n\no = Owner(\"Ann\")\np = Pet(o)\nif p.Keeper != null {\n    print(Touch())\n    print(p.Keeper.Name)\n}"));
+        // N9 (the owner, 2026-11-02, #156): a write into a list or a map that a variable holds, with no call in it, ends it too, since
+        // the item or the entry it lets go of can hold the target's last count, while a path with no `weak` reference in it keeps its
+        // narrowing there; the read before the write is narrowed
+        const string Kept = "class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\np = Pet(xs[0])\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(Kept + "if p.Keeper != null {\n    xs[0] = n\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\no = Owner(\"a\")\nmut m = Map<int, int>()\np = Pet(o)\nif p.Keeper != null {\n    m[0] = 1\n    print(p.Keeper.Name)\n}\nprint(m.Count)"));
+        Clean(Kept + "if p.Keeper != null {\n    print(p.Keeper.Name)\n    xs[0] = n\n}");
+        Clean("class Owner(string Name)\nclass Holder(mut Owner? Head)\n\nn = Owner(\"b\")\nmut xs = [Owner(\"a\")]\nmut m = Map<int, int>()\nh = Holder(n)\nif h.Head != null {\n    xs[0] = n\n    m[0] = 1\n    print(h.Head.Name)\n}\nprint(m.Count)");
+
+        // N9 (the owner, 2026-11-01, "Those ends stop narrowing"): a test after a call in the same condition narrows neither the block
+        // nor what the `if` leaves after it, since the condition's temporaries are let go of at its end, the case of the question; the
+        // same test in a condition of its own narrows its block
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n}"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 14)], Errors(Head + "void Show(Pet p) {\n    if Keep(p, Owner(\"Ann\")) && p.Keeper == null {\n        return\n    }\n\n    print(p.Keeper.Name)\n}\n\nShow(Pet(null))"));
+        Clean(Head + "p = Pet(null)\nif Keep(p, Owner(\"Ann\")) {\n    if p.Keeper != null {\n        print(p.Keeper.Name)\n    }\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 11)], Errors(Head + "p = Pet(null)\nwhile Keep(p, Owner(\"Ann\")) && p.Keeper != null {\n    print(p.Keeper.Name)\n    p.Keeper = null\n}"));
+
+        // N9 (the same answer): the end of a block that declares a variable ends it too, since the block lets go of its variables
+        // there; a block that declares none keeps it
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name != \"\" {\n            n = p.Keeper.Name\n            if n == \"x\" {\n                return\n            }\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))"));
+        Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nvoid Show(Pet p) {\n    if p.Keeper != null {\n        if p.Keeper.Name == \"x\" {\n            return\n        }\n\n        print(p.Keeper.Name)\n    }\n}\n\no = Owner(\"Ann\")\nShow(Pet(o))");
+    }
+
     [Theory]
     [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
     [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
@@ -3312,11 +3436,12 @@ public sealed class CheckerTests
     [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
-    [InlineData("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(List<weak Owner?> Keepers)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: weak (R3, R5)")]
-    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: weak (R3, R5)")]
+    [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: a `weak` reference as a type argument of a data type (R3)")]
+    [InlineData("class Owner(string Name)\nclass Pet(int | weak Owner? Keeper)\n\nprint(1)", "2: a nullable case of a union, `weak Owner?` (N1, D9)")]
+    [InlineData("class Owner(string Name)\n\nvoid Keep<T>(weak T? w) {\n}\n\nprint(1)", "3: `weak` before `T`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
+    [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
     [InlineData("class C(int N)\n\na = C(1)\nprint(a == a)", "4: `==` on a `C`: the equality of a class instance (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\n\nxs = [C(1)]\nprint(xs == xs)", "4: `==` on a `List<C>`: its items: the equality of an instance of `C` (K4) is not read (D3, M9)")]
     [InlineData("class C(int N)\ndata P(C Item)\n\np = P(C(1))\nprint(p == p)", "5: `==` on a `P`: its field `Item`: the equality of an instance of `C` (K4) is not read (D3, M9)")]
@@ -3331,7 +3456,9 @@ public sealed class CheckerTests
     {
         // generic classes (T19), bases and interfaces (K6, K10), `equal by` (K8), fields of the instance and constructors in the body
         // (K7, K14), a `static` field of another modifier, of another type, or with an initial value that is no constant
-        // (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` at any depth (R3), `==`
+        // (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
+        // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
+        // nullable cases are open (section 14), `==`
         // and a key at any depth (K4, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, and an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5)
         Assert.Equal([expected], NotSupported(program));
