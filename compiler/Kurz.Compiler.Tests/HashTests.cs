@@ -165,6 +165,42 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_crc_hasher_copied_between_two_updates_goes_on_apart_from_its_copy_and_finish_starts_each_over()
+    {
+        // H6: a copy of a `Crc32` hasher taken between two `Update`s is a value, the first `Update` after it writing a block of its own,
+        // so each goes on with its own bytes, against the CRC this class computes bit by bit; `Finish` starts each over, so a second
+        // `Finish` gives the CRC of no bytes (H3); under both allocators
+        const string text = """
+            mut message = Bytes()
+            while message.Count < 130 {
+                message.Add(byte((message.Count * 31 + 7) % 256))
+            }
+
+            mut c = Crc32.New()
+            c.Update(message[0..<70])
+            mut t = c
+            t.Update(message[70..<73])
+            c.Update(message[73..<130])
+            print(c.Finish())
+            print(t.Finish())
+            print(c.Finish())
+            print(t.Finish())
+
+            """;
+        var message = Message();
+        string[] expected = [Crc32([.. message[..70], .. message[73..]]).ToString(CultureInfo.InvariantCulture), Crc32(message[..73]).ToString(CultureInfo.InvariantCulture), "0", "0"];
+        Assert.NotEqual(expected[0], expected[1]); // the two diverge
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Compile(text, runtime);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "crc-copy" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    [Fact]
     public void Every_call_of_a_function_of_md5_is_the_lint_md5_insecure_once_at_its_line_and_the_program_is_built()
     {
         // `Update` and `Finish` of an `Md5` are no call of a function of `Md5`, and `Sha256` gets none (the positive control); two calls on

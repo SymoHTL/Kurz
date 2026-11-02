@@ -840,8 +840,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   time, as crc32fast's `update_fast_16` and `update_slow` do: 16 MiB hashed 10 times took 25.08 ms so, against
   250.19 ms a byte at a time, which built the table in every call, and 24.58 ms in crc32fast's software path.
   `HashTests` holds the table against the remainders a bit at a time, in a program that hashes one and in no other,
-  and the bytes `allocation-failed` names for the block of `Crc32.Hash` and of `Crc32.New()`; `Update` and
-  `Finish` take the block in
+  the bytes `allocation-failed` names for the block of `Crc32.Hash` and of `Crc32.New()`, and a CRC hasher copied
+  between two `Update`s, each going on with its own bytes; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
