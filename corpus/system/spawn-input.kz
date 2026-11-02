@@ -1,0 +1,15 @@
+// expect: output
+// | invalid input: cat
+// | invalid input: cat
+// rules: S19
+
+match Command.New("cat").Input("hi".Bytes).Spawn() {
+    ChildProcess c => print(c.Id > 0)
+    IoError e => print(e)
+}
+
+match Command.New("cat").Stdin(Stdio.Piped).Input("hi".Bytes).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => print(e)
+}
