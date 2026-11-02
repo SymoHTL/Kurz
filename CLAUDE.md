@@ -344,6 +344,18 @@ Gate: review rule "rules for sessions".
   the walk counts) for the shapes those tests hold; a borrowing construct no program reaches, and a
   change the walk does not count: review rule "compiler".
 
+- **A module global the emitter declares is declared where its existence is decided once.** A
+  helper builds the helpers it calls inside its own body (`Helper` in `Emit/Emitter.Data.cs`), so a
+  global declared at its first use, on a test of state its builder changes only after that body,
+  is declared again by a builder nested in it, and clang refuses the module. The flag of a release
+  under way reached `main` so with pull request 181: declared with the first class release while
+  the list of released classes was still empty, it was declared twice for every program whose
+  first released class held a field of another class
+  ([knowledge/a-global-declared-on-first-use-is-declared-twice.md](knowledge/a-global-declared-on-first-use-is-declared-twice.md)).
+  Gate: `compiler-tests`
+  (`ListTests.The_first_class_a_program_releases_may_hold_a_field_of_another_class`) for that flag;
+  another global declared at its first use: review rule "compiler".
+
 - **The case tables are generated, never edited.** `compiler/Kurz.Compiler/Emit/CaseTables.cs` is what
   `tools/unicode_tables.py` writes from the Unicode Character Database of the version Rust's stable
   release pins, each of its three files fetched and checked by its SHA-256 (section 12 of the design
