@@ -330,7 +330,10 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
-section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, at
+section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
+`HttpError` with its `HttpKind` (W2), types every program sees (W1: the checker of a program is given `std/`'s checker and takes the
+symbols it made of each `pub` type that `Checker.Prelude` names, where the built-in types every file sees, `IoError` among them, are
+the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -446,7 +449,10 @@ bits in nanoseconds holds at most about 292 years, far below it. A stream's read
 from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
 runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
 system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
-each piece the system takes, as Rust's `write_all` does, and can take longer in all. `LockWait` puts the thread to sleep on a file's lock word while it holds
+each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
+`SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
+call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
+`LockWait` puts the thread to sleep on a file's lock word while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
 as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
@@ -570,14 +576,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
   library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
-  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
-  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
-  once and writes the rest in a second walk, with the table of the
+  input's size, changes the run of ASCII after them 16 bytes at a time, as Rust's `convert_while_ascii`, and looks
+  up and writes the code points after it one at a time, Latin-1 by Rust's rules without the table and a code point
+  of two bytes on a path of its own, up to one whose mapping outgrows the block, from which it sizes the rest in a
+  walk, grows the block once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
-  gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
-  a binary search, the mappings to two or three code points, and for lowering the ranges of Cased and
-  Case_Ignorable, which a capital sigma reads for Final_Sigma, as Rust's `to_lowercase` and `to_uppercase` (X3); and
+  gate `unicode-tables` holds to that database: the levels of the deltas, an index of one byte for each block of 32
+  code points of the first two planes and a delta of 16 bits for each code point of each distinct block, as .NET's
+  `CharUnicodeInfo` holds its mappings, the mappings to two or three code points, found by a binary search, and for
+  lowering the ranges of Cased and Case_Ignorable, which a capital sigma reads for Final_Sigma, with the results of
+  Rust's `to_lowercase` and `to_uppercase` (X3); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change the letters `A` to `Z` or `a` to `z` and no other byte, as Rust's
   `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
@@ -602,8 +611,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
-  `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
-  and the final sigma and the mappings to several code points to fixed lines, each program a test build, which clang
+  `ToUpper` of every code point of the first two planes, alone and in a text, to `CaseTables`, read without the
+  standard library's lookup, the final sigma and the mappings to several code points to fixed lines, and lines
+  around the walks' own paths to Rust's results under a standard library that ends the process where a string's
+  count passes its room, each program a test build, which clang
   builds at `-O0`, so that a literal input runs the standard library's walk as any string's does; `PieceTests` holds the
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
@@ -701,7 +712,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
-  `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
+  `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
@@ -866,7 +877,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
-  not `null`, and each of a listener's
+  not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
@@ -1467,7 +1478,10 @@ flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged b
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
+types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
+build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
+file's own declaration of one is the file's own), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1561,7 +1575,9 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
+`string.Join`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
+not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
@@ -1869,7 +1885,7 @@ round can ask about it by the rule's id.
 - N4: `a ?? b` has the type `a` makes nullable where `b` fits it, and `a`'s nullable type where `b`
   fits that alone, as C# types it; after it holds what held before `b`, since `b` runs only where
   `a` is null.
-- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
+- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with (of a `weak` item its read, R3), and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
   `nullable-unchecked`, unless a test showed that member's path not null (N3), as C#'s analysis

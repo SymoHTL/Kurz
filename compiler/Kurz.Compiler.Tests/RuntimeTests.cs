@@ -56,6 +56,20 @@ public sealed class RuntimeTests
         }
     }
 
+    [Fact]
+    public void Every_name_of_the_prelude_is_a_pub_type_of_std()
+    {
+        // W1: the list the checker reads names `pub` types of std/, as Rust's prelude names public items of its std
+        var file = Runtime.Files.Single(f => f.Path == "std/std.kz");
+        var diagnostics = new DiagnosticBag();
+        var tree = Parser.Parse(SourceText.FromBytes(file.Path, file.Bytes, out _)!, diagnostics);
+        Assert.Empty(diagnostics.Items);
+        var pub = tree.Statements.OfType<TypeDeclaration>().Where(t => (t.Modifiers & Modifiers.Pub) != 0).Select(t => t.Name).ToList();
+        Assert.NotEmpty(Checker.Prelude);
+        Assert.Equal(Checker.Prelude.Count, Checker.Prelude.Distinct().Count());
+        Assert.All(Checker.Prelude, name => Assert.Contains(name, pub));
+    }
+
     private const string Std = "pub long Zero() => 0\n";
 
     private static List<RuntimeFile> Runtime3(string common, string linux, string windows, string std = Std) =>
