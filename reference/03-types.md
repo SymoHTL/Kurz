@@ -1346,12 +1346,14 @@ functions, directly or through others, so that the type argument comes back to t
 it grew from, each copy makes a larger one without end, and the call is the compile error
 `growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a
 type parameter unchanged, swaps two of them, or gives one to a function that takes it back out of
-a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. *(assumed, §4:
-the id; a type parameter that is a case of a union, `T | string`, makes no larger copy, since a
-union holds each case once; every call of the cycle where a type argument grows is refused, each
-one time, a written type argument as an inferred one, a call in a lambda of the body as one of the
-body; a generic function no call reaches is refused all the same; a generic function that reads
-its type (T33) is read in its copies alone, and none of its calls is read for such a cycle)*
+a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
+refused where it is written, whether or not a call reaches it. A generic function that reads its
+type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
+none of its calls is read for such a cycle, and a chain of more than 64 copies stays
+`not supported`. *(assumed, §4: the id; a type parameter that is a case of a union, `T | string`,
+makes no larger copy, since a union holds each case once; every call of the cycle where a type
+argument grows is refused, each one time, a written type argument as an inferred one, a call in a
+lambda of the body as one of the body)*
 
 Case: [types/generic-growing-cycle.kz](../corpus/types/generic-growing-cycle.kz)
 ```kurz
