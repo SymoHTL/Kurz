@@ -619,7 +619,7 @@ program's code to such a function needs the grant, so that no package borrows a 
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
 is the compile error `files-not-allowed` or `network-not-allowed` at the call. A package that reads a
 variable of the environment needs `allow env` in the same way, and a read without it is `env-not-allowed`;
-the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). A package that starts a program, by `Output()`, `Status()` or `Spawn()` of a `Command` (S17 to S19), needs `allow run` in the same way, and a call without it is `run-not-allowed`, while `Command.New` and the members that set a command need none, since nothing runs before a call that starts (§13, the owner, 2026-11-01, "allow run"); a read of standard input needs none (S22). *(assumed, §13: the id `run-not-allowed` and the members that set a command)* For a package on the
+the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). A package that starts a program, by `Output()`, `Status()` or `Spawn()` of a `Command` (S17 to S19), needs `allow run` in the same way (§13, the owner, 2026-11-01, "allow run"), and a call without it is `run-not-allowed`, while `Command.New` and the members that set a command need none, since nothing runs before a call that starts; a read of standard input needs none (S22). *(assumed, §13: the id `run-not-allowed` and the members that set a command)* For a package on the
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
@@ -1184,12 +1184,15 @@ value of `enum Stdio { Inherit, Piped, Null }`, its input, `Input(bytes)` (S19),
 called on as it was, so that a chain needs no `mut` and a loop writes `cmd = cmd.Arg(x)` on a `mut`
 variable; where no other value holds the command a member is called on, the new command is that one
 changed in place, as a write into a list's block that no other value holds (M3), so that a chain builds
-into one block and a command is copied only where a program keeps it and calls a member on it again
-(§12, the same answer). The names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus`, `Stdio` and
-`ExitError` are seen by every file, so that a file's own declaration of one is `redeclared` (V9), as of
-`Environment` (S14) (§12, the owner, 2026-11-01, "Mixed: ChildProcess, ProcessOutput"). A program that
-does not start is an `IoError` (S1) whose path is the program (S21). *(assumed, §12: `ExitError` among
-the names; a command without a text and without `==`)*
+into one block and a command is copied only where a program keeps it and calls a member on it again;
+in `cmd = cmd.Arg(x)`, where no value but `cmd` holds the command, it changes in place, since the
+assignment keeps no earlier command. The
+names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus` and `Stdio` are seen by every file, so
+that a file's own declaration of one is `redeclared` (V9), as of `Environment` (S14) (§12, the owner,
+2026-11-01, "Mixed: ChildProcess, ProcessOutput"), and so is `ExitError` (S18). A program that does not
+start is an `IoError` (S1) whose path S21 gives. *(assumed, §12: the change in place and
+its count, the answer given to a question on that answer, and `cmd = cmd.Arg(x)`; `ExitError` among the names; a command
+without a text and without `==`)*
 
 Case: [system/command-output.kz](../corpus/system/command-output.kz)
 ```kurz
@@ -1252,14 +1255,17 @@ print(1)
 `Output()` runs the command to its end and gives `ProcessOutput | IoError | ExitError`, where `data
 ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the child wrote as bytes, which
 `string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A child that ends
-with a code other than 0, or that a signal ends, is the case `data ExitError(string Program,
-ProcessOutput Output)`, which the unwrap rule sends to the caller unless an `else` takes it (O2, O5)
-(§12, the owner, 2026-11-01, "A case of the call"). `ExitStatus` holds `Code`, an `int` that is 128 and
+with a code other than 0, or that a signal ends, is a case of the call, which the unwrap rule sends to
+the caller unless an `else` takes it (O2, O5) (§12, the owner, 2026-11-01, "A case of the call"); that
+case is `data ExitError(string Program, ProcessOutput Output)`. `ExitStatus` holds `Code`, an `int` that is 128 and
 the signal's number where a signal ended the child, `Signal`, an `int?` that holds that number, and
 `Success`, a `bool` (§12, the owner, 2026-11-01, "Code int + Signal int?"). `Status()` runs the command
-with the program's three streams and gives `void | IoError | ExitError`. The text of an `ExitError` is
+with the program's three streams and gives `void | IoError | ExitError`; the `ExitError` of `Status()`
+and of `Wait()` (S19) holds the status and two empty `Bytes`. `ExitStatus` is `data ExitStatus(int Code,
+int? Signal, bool Success)`, whose text A4 gives. The text of an `ExitError` is
 the words of what ended the child, a colon and the program: `exit status 3: sh`, `signal 15: sh`.
-*(assumed, §12: `Status()`'s result, its streams and its `ExitError` with no output, the name
+*(assumed, §12: `Status()`'s result, its streams and the output of its `ExitError` and of `Wait()`'s, `ExitStatus` as a
+`data` type, the name
 `ExitError`, its fields and its text, `ProcessOutput` keeping the status, `Success` where `Code` is 0 and
 `Signal` is `null`)*
 
@@ -1328,10 +1334,19 @@ end and gives `void | IoError | ExitError`, `WaitWithOutput()` gives `ProcessOut
 ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoError`, and `Id` is its
 process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
 while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
-forms"). A second `Wait()` gives what the first gave; a child let go of without a `Wait()` is neither
-waited for nor killed. *(assumed, §12: the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the
-signal, the second `Wait()`, the child let go of, `Id`'s type, and an `Input` under `Spawn()`, written by
-the call that waits, the child's `Stdin` then `null`)*
+forms"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
+starts the child, so that a spawned child takes its input through `child.Stdin`, and `Status()` writes
+the input and closes the child's input (§12, the owner, 2026-11-02, "`Input` beside `Spawn()` or beside
+a `Stdin` member is `InvalidInput` at the start"). `Status()` with a `Stdout` set to `Stdio.Piped`
+closes the program's end of that pipe at once, so that a child that writes there is ended by `SIGPIPE`
+(S21) and the call gives an `ExitError` (§12, the owner, 2026-11-02, "`Status()` with a piped Stdout
+closes the program's end of that pipe at once"). A second wait of either kind gives the status the
+first gave, and `WaitWithOutput()` reads each pipe from where the program stopped, a pipe read to its
+end or closed giving empty `Bytes`; `Kill()` on a child that ended or was waited for gives `void` and
+sends no signal; a child let go of without a `Wait()` is neither waited for nor killed. *(assumed, §12:
+the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
+end, the child let go of, `Id`'s type, `Status()` writing the input under `poll`, and a piped `Stderr`
+under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 ```kurz
@@ -1404,13 +1419,46 @@ Run() else {
 }
 ```
 
+Case: [system/spawn-input.kz](../corpus/system/spawn-input.kz)
+```kurz
+match Command.New("cat").Input("hi".Bytes).Spawn() {
+    ChildProcess c => print(c.Id > 0)
+    IoError e => print(e)
+}
+
+match Command.New("cat").Stdin(Stdio.Piped).Input("hi".Bytes).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/status-piped.kz](../corpus/system/status-piped.kz)
+```kurz
+Command.New("yes").Stdout(Stdio.Piped).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/status-input.kz](../corpus/system/status-input.kz)
+```kurz
+Command.New("cat").Input("hi\n".Bytes).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 ### S20 (decided, §12) A bound on a child's time
 
 `Timeout(d)`, a `duration`, bounds the run from its start: when it has passed, the call that waits
 kills the child, waits for its end and gives an `IoError` of the kind `TimedOut` (S1) whose path is the
 program, `timed out: sleep`; without it a call waits without a bound (§12, the owner, 2026-11-01,
-"Optional .Timeout(d)"). *(assumed, §12: the kill by `SIGKILL`, the path, and a bound of 0 or below
-ending the child at once)*
+"Optional .Timeout(d)"). A bound of 0 or below has passed at the start, so that the child is killed at
+once and the call gives `TimedOut`. Under `Spawn()` the bound is held by `Wait()` and `WaitWithOutput()`,
+so that a read of the child's pipe before them and a child let go of are not bounded, and a child that
+ended before the bound gives its own status. *(assumed, §12: the kill by `SIGKILL`, the path, a bound of 0
+or below, the bound under `Spawn()` and the child's end)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
 ```kurz
@@ -1431,13 +1479,19 @@ Run() else {
 ### S21 (assumed, §12) How a child starts
 
 There is no shell: each argument reaches the program as it is written, and a program that wants a shell
-runs `sh -c`. A program named without a `/` is looked up in the `PATH` the child gets. A child inherits
-the program's environment, which `Env`, `EnvRemove` and `EnvClear` change, and runs in the program's
-working directory unless `Dir` names another. It gets back the default action of `SIGPIPE`, which the
+runs `sh -c`. A program named without a `/` is looked up in the `PATH` the child gets, and in the
+system's default path where it gets none; an empty program is `NotFound` (S1) at the call that starts
+it, with the empty path; a program named with a `/` but not from the root is found from the directory
+`Dir` names. A child inherits the program's environment, which `Env`, `EnvRemove` and `EnvClear` change,
+and runs in the program's working directory unless `Dir` names another; the members apply in the order
+they were called, the later one winning, so that `EnvClear()` drops what an earlier `Env` set and a
+second `Dir` replaces the first. It gets back the default action of `SIGPIPE`, which the
 runtime sets to ignored at its start (§6), and no descriptor but its three streams. `Output()` pipes the
 child's output and error and gives it an input at its end; `Status()` and `Spawn()` give it the
-program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that. A call that waits for a
-child blocks its thread, or parks its actor, as a call on a file does (S10). A start that fails is an
+program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that, and `Input` gives the
+child its input (S19); `Output()` gives empty `Bytes` for a stream set to `Stdio.Inherit` or `Stdio.Null`.
+A call that waits for a child blocks its thread in a program without actors, and in an actor parks it
+while the wait runs on the pool of threads for blocking calls, as a call on a file does (S10). A start that fails is an
 `IoError` (S1) whose path is the program, or the directory where that is what does not exist, and never
 an argument, the input or the output. A NUL byte in the program, an argument, the directory, or a name
 or a value of the environment is `InvalidInput` with the number 0 at the call that starts the child. A
@@ -1452,9 +1506,21 @@ void | IoError | ExitError | InvalidUtf8 Run() {
     script = "printf '%s|%s|%s' \"$KURZ_CASE_A\" \"$KURZ_CASE_B\" \"$(basename \"$(pwd -P)\")\""
     out = Command.New("sh").Args(["-c", script]).Env("KURZ_CASE_A", "1").Env("KURZ_CASE_B", "2").EnvRemove("KURZ_CASE_B").Dir("command-dir").Output()
     print(string.FromUtf8(out.Stdout))
+    Directory.Delete("command-dir")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-words.kz](../corpus/system/command-words.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Run() {
     words = Command.New("printf").Args(["%s", "$HOME *"]).Output()
     print(string.FromUtf8(words.Stdout))
-    Directory.Delete("command-dir")
 }
 
 Run() else {
@@ -1486,10 +1552,11 @@ each pull (§12, the owner, 2026-11-01, "A type Stdin" and "Also Stdin.ReadLine(
 as a file's are: `\n` and `\r\n` end a line and are taken off it, no empty line follows the last line
 break, a line that is not UTF-8 ends the read with `InvalidUtf8` (T15), `Stdin.Lines()` stands as a
 `for` loop's collection alone, a failure leaves the loop as a call's case leaves it, and the next read
-goes on where the loop stopped. `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
+goes on where the loop stopped. A read waits until the other end writes or closes, with no bound, and
+runs as a call on a file does (S10). `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
 needs no grant (S12); a file's own declaration of `Stdin` is `redeclared` (V9); and a build for Windows
 says `not supported` to it (S11). *(assumed, §12: the reading of the lines as a file's, `ReadAll`'s
-result, no `Close`, the path, the grant, the name and Windows)*
+result, the wait of a read, no `Close`, the path, the grant, the name and Windows)*
 
 Both cases read the standard input a case is given, which holds nothing (chapter 0).
 
@@ -1538,14 +1605,17 @@ print(1)
 
 ### S23 (decided, §12) The exit code
 
-`Environment.Exit(code)` ends the process at once with `code`: the other actors end where they stand,
-no handle is closed at its last count but by the system, and nothing written is lost, since `print`
-and `f.Write` keep no buffer (§12, the owner, 2026-11-01, "Top-level return n + Exit"). No path
+A program sets its exit code with `Environment.Exit(code)` and with a top-level `return n` (F17) (§12, the
+owner, 2026-11-01, "Top-level return n + Exit"). `Environment.Exit(code)` ends the process at once with
+`code`: the other actors end where they stand, no handle is closed at its last count but by the system,
+and nothing a write that returned before the call wrote is lost, since `print` and `f.Write` keep no
+buffer, while a write in progress in another actor can be cut short. No path
 goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
 of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
 Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
-the program with that code (F17). *(assumed, §12: the name, the end at once, the path after the call,
-the low 8 bits, any actor and Windows)*
+the program with that code, of which Linux takes the low 8 bits too, and a build for Windows says
+`not supported` to it (F17). *(assumed, §12: the name, the end at once and what it keeps and cuts,
+the path after the call, the low 8 bits, any actor and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 
