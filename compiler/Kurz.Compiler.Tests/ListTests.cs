@@ -3098,6 +3098,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Fact]
+    public void The_first_class_a_program_releases_may_hold_a_field_of_another_class()
+    {
+        // the release of `Outer`, the first one built, builds `Inner`'s for its field before `Outer` is in the emitter's list of
+        // released classes: the flag of a release at work is declared once all the same, with the function that works the lists off
+        const string outer = "class Inner(int N)\n\nclass Outer(Inner? I, int N)\n\nvoid Show() {\n    o = Outer(null, 1)\n    print(o.N)\n}\n\nShow()\n";
+        Ran(BuildAndRun(outer, toolchain.Runtime, "class-first-released-holds-a-class"), 0, ["1"], "");
+    }
+
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
     // all held
     private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";
