@@ -992,6 +992,48 @@ value = Find(2) else {
 print(value)
 ```
 
+An `else` with no arms handles no case: after a call with cases each of them propagates, and after a
+call with no case beside its success nothing can reach it, which is `unreachable-arm` at the line of
+the `else`, the error an `else` arm gets there (§5, the owner, 2026-11-02).
+
+Case: [outcomes/else-empty-propagates.kz](../corpus/outcomes/else-empty-propagates.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// an `else` with no arms after a call with cases handles none of them: each propagates
+int | NotFound Pass(int id) {
+    value = Find(id) else {
+    }
+    return value
+}
+
+match Pass(1) {
+    int n => print(n)
+    NotFound => print("not found")
+}
+match Pass(2) {
+    int n => print(n)
+    NotFound => print("not found")
+}
+```
+
+Case: [outcomes/else-empty-no-case.kz](../corpus/outcomes/else-empty-no-case.kz)
+```kurz
+int Plain() => 1
+
+// an `else` with no arms after a call with no case beside its success: nothing can reach it
+y = Plain() else {
+}
+print(y)
+```
+
 ### O6 (decided, §5, §6) Exceptions
 
 An exception is for a situation the function cannot recover from. There is no `catch`. An

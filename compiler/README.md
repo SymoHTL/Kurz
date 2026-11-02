@@ -1017,8 +1017,11 @@ reached from its actor's thread alone (section 3). So the fields of one instance
 order, and an instance one of them held last is freed after it, not in the middle of it. No count of an
 instance is elided. Pinned by `ListTests`: the classes' program under the allocator that makes every
 freed block inaccessible, twenty rounds of instances through every way out of a block there and 3000
-within the sixteen pieces, the same instances all kept not, and a chain of a million instances freed
-where a function that walks it by calling itself overflows the stack. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
+within the sixteen pieces, the same instances all kept not, a chain of a million instances freed
+where a function that walks it by calling itself overflows the stack, and a program whose first
+released class holds a field of another class, built and run: the flag of a release under way is
+declared once, with the function that works the lists off, since the first class release builds
+the releases of its fields' classes before its class is among the released. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is never freed, and the lists and strings it holds are never let go of: the
 memory of such a value, which the answer of 2026-10-23 leaves ungiven back (below), is read to hold
@@ -1095,7 +1098,7 @@ bytes of a string, a string of bytes, a part of a list of strings and a list mad
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
 command line, the environment or the clock in a build for Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
@@ -1645,7 +1648,10 @@ round can ask about it by the rule's id.
   reports nothing more: the argument may have been meant for any of the functions.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
-  is a prefix of, is `mut-at-call`.
+  is a prefix of, is `mut-at-call`. Inside a method, a field of the instance named alone (K7) stands
+  there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
+  `mut-at-call`, and one inside a lambda is `capture-assign` (F11); the emitter gives the call the
+  field's own place, so the callee's write is the field's.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
   the value it calls, then its arguments as written (D11), an operator's left operand, an index's
