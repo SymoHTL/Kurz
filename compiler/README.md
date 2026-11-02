@@ -1437,8 +1437,7 @@ type (A4, R10, R17); the names `X86`, `Arm`, `Vector128` and `Vector256` where n
 which the intrinsics and their vector types stand (R18); a member of a type parameter that reads its type beyond `Kind`,
 `T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
-larger type each time makes without end, and `void` as a type argument of such a function, `void` having no value of
-`TypeKind` (T33); and `use` (F10) of any folder but the runtime's `sys`;
+larger type each time makes without end (T33); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

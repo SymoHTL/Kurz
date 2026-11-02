@@ -3525,13 +3525,12 @@ public sealed class CheckerTests
     [Fact]
     public void A_type_argument_with_no_kind_is_not_supported_at_the_call_that_writes_it()
     {
-        // T33: `void` has no value of `TypeKind`, so a reader called with it, or a function that passes it on to one, is not supported
-        // at the call that writes it, where the checker takes it in any other generic call
+        // T33 with T17, T19: `void` has no value of `TypeKind`, and as any type argument it is not supported at the call that writes it, so a
+        // reader called with it, or a function that passes it on to one, gets that one line and no copy
         var reader = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\n";
-        Assert.Equal(["7: `void` as a type argument of `Only`, which reads its type, `void` having no kind of `TypeKind` (T33)"], NotSupported(reader + "Only<void>()"));
-        Assert.Equal(["11: `void` as a type argument of `Outer`, which reads its type, `void` having no kind of `TypeKind` (T33)"],
-            NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
-        Clean(reader + "void Other<T>() {\n    print(1)\n}\n\nOther<void>()\nOnly<int>()");
+        Assert.Equal(["7: `void` as a type argument of `Only` (T17, T19)"], NotSupported(reader + "Only<void>()"));
+        Assert.Equal(["11: `void` as a type argument of `Outer` (T17, T19)"], NotSupported(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
+        Clean(reader + "Only<int>()");
     }
 
     [Fact]
