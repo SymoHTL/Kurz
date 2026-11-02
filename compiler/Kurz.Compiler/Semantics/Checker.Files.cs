@@ -111,7 +111,7 @@ public sealed partial class Checker
     /// <summary>
     /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
     /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
-    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is text no rule gives a meaning, E4's <c>syntax</c>.
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else S16 makes it <c>syntax</c>, E4's id.
     /// </summary>
     private Typed CheckLines(CallExpression c)
     {
