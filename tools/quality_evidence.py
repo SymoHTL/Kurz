@@ -331,8 +331,26 @@ def cases_in(base):
                   (codes, reached, printed.getvalue()[:200])))
     with contextlib.redirect_stdout(io.StringIO()) as printed:
         codes = [run([], refresh), run(["--print"], refresh)]
+    said = printed.getvalue()
     cases.append(("call: the plain call reaches the recompute and writes, and --print reaches it and writes nothing",
-                  codes == [0, 0] and reached == [True, False] and "the recomputed page" in printed.getvalue(), (codes, reached, printed.getvalue()[:200])))
+                  codes == [0, 0] and reached == [True, False] and f"{EVIDENCE}: {len(BLOCKS)} blocks regenerated" in said
+                  and said.rstrip().endswith("the recomputed page"), (codes, reached, said[:200])))
+
+    def refused(path, compute, today, write=True):
+        raise kit.Refused("the forge did not answer")
+    with contextlib.redirect_stdout(io.StringIO()) as printed:
+        code = run([], refused)
+    cases.append(("call: a refusal during the run is exit 1, and says that nothing was written",
+                  code == 1 and "REFUSED, nothing written: Refused: the forge did not answer" in printed.getvalue(), (code, printed.getvalue())))
+    g, reached[:] = globals(), []
+    saved = g["self_test"]
+    g["self_test"] = lambda: 7  # stands in for the cases, which would run this one again
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = run(["--self-test"], refresh)
+    finally:
+        g["self_test"] = saved
+    cases.append(("call: --self-test alone runs the cases, with their exit code, and reaches no recompute", (code, reached) == (7, []), (code, reached)))
     cases.append(("the real guide has a marker for every block this tool computes, and no other",
                   sorted(m.group(1) for m in BLOCK.finditer(kit.read(os.path.join(kit.ROOT, EVIDENCE)))) == sorted(BLOCKS), ""))
 
