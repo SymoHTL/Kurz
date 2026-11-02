@@ -1106,7 +1106,8 @@ called on as it was, so that a chain needs no `mut` and a loop writes `cmd = cmd
 variable; where no other value holds the command a member is called on, the new command is that one
 changed in place, as a write into a list's block that no other value holds (M3), so that a chain builds
 into one block and a command is copied only where a program keeps it and calls a member on it again;
-in `cmd = cmd.Arg(x)` the command changes in place, since the assignment keeps no earlier command. The
+in `cmd = cmd.Arg(x)`, where no value but `cmd` holds the command, it changes in place, since the
+assignment keeps no earlier command. The
 names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus` and `Stdio` are seen by every file, so
 that a file's own declaration of one is `redeclared` (V9), as of `Environment` (S14) (§12, the owner,
 2026-11-01, "Mixed: ChildProcess, ProcessOutput"), and so is `ExitError` (S18). A program that does not
@@ -1361,6 +1362,14 @@ Command.New("yes").Stdout(Stdio.Piped).Status() else {
 }
 ```
 
+Case: [system/status-input.kz](../corpus/system/status-input.kz)
+```kurz
+Command.New("cat").Input("hi\n".Bytes).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 ### S20 (decided, §12) A bound on a child's time
 
 `Timeout(d)`, a `duration`, bounds the run from its start: when it has passed, the call that waits
@@ -1525,7 +1534,8 @@ buffer, while a write in progress in another actor can be cut short. No path
 goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
 of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
 Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
-the program with that code (F17). *(assumed, §12: the name, the end at once and what it keeps and cuts,
+the program with that code, of which Linux takes the low 8 bits too, and a build for Windows says
+`not supported` to it (F17). *(assumed, §12: the name, the end at once and what it keeps and cuts,
 the path after the call, the low 8 bits, any actor and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
