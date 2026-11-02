@@ -10,8 +10,9 @@ Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `Htt
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names is `redeclared` (V9). The names are a list the compiler holds, each a `pub` type of `std/`, as
 Rust's `std::prelude::rust_2021` lists the names every module sees (§12: the owner, 2026-11-01, Q7 (b),
-that every file sees them; the list of names, the two of `Uri`, and the list held in the compiler,
-against every `pub` type of `std/` and against a list written in `std/`, are the record's assumptions).
+that every file sees them, and 2026-11-02, that the compiler holds the list, against every `pub` type
+of `std/` and against a list written in `std/`; the list of names and the two of `Uri` are the
+record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -27,6 +28,8 @@ failure of the network, which stays an `IoError` (S1), neither wrapped in the ot
 2026-10-31, "HttpError + record's rule" and "IoError + HttpError"). Its kinds are
 `enum HttpKind { Protocol, TooLarge, Status, Unsupported }`. An `HttpError` prints its detail alone,
 `malformed response: no status line`, with no words of its kind (§12, the owner, 2026-11-01, Q4 (a)).
+It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
+text (A5) (§12, the owner, 2026-11-02).
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 ```kurz

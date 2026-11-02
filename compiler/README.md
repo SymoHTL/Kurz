@@ -1450,8 +1450,8 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
-`string.Join`, which W2 gives as its detail alone and no rule says how a type of `std/` gives, by a member of the type (D16) or as
-the compiler gives the text of an `IoError` (W2); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
+`string.Join`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
+not read (D16, A5, W2); the names `X86`, `Arm`, `Vector128` and `Vector256` where no declaration gives them, under
 which the intrinsics and their vector types stand (R18); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);

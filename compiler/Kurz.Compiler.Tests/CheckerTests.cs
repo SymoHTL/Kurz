@@ -2080,8 +2080,8 @@ public sealed class CheckerTests
     [InlineData("print(Held(e))")]
     public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
     {
-        // W2: the record gives its text, its detail alone; how a type of std/ gives it is open, so the checker takes no text of one, nor of
-        // a value that holds one
+        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
+        // not read (D16), so it takes no text of one, nor of a value that holds one
         var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
         var refused = Assert.Single(diagnostics.Items);
         Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
