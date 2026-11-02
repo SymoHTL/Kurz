@@ -2741,6 +2741,15 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_list_literal_that_nothing_types_has_its_own_cannot_infer_text()
+    {
+        // M11 with T27: `[]` and items of no one type keep the text of a list literal, which names no argument, where a call's text names
+        // the argument that gives a type parameter nothing
+        Assert.Equal("`[]` has no item type, and no list type stands where it does: `List<int> xs = []` (M11, T27)", Assert.Single(Check("x = []\nprint(x)").Diagnostics.Items).Message);
+        Assert.Equal("the items have no one type, and no list type stands where the list does (M11, T27)", Assert.Single(Check("x = [1, \"a\"]\nprint(x)").Diagnostics.Items).Message);
+    }
+
+    [Fact]
     public void A_list_literal_argument_takes_its_parameter_s_type()
     {
         // M11: `Take([1, 2])` (the owner, 2026-10-30, "[1, 2, 3], as C#"): the literal is read under its parameter's type, as a number
