@@ -2162,15 +2162,20 @@ public sealed class CheckerTests
     public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
     {
         // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
-        // no setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
+        // no read or write setter, and a time of another type, or `null` in the second form of `Connect`, fits no form
         const string Program = "void | IoError Bound() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)\n    c.SetReadTimeout(50ms)\n    c.SetWriteTimeout(null)\n    c.SetReadTimeout(timeout: 1s)\n    f = File.Open(\"a\")\n    f.Close()\n}\n\nBound() else {\n    IoError e => print(e)\n}";
         Clean(Program); // the positive control
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "l.SetReadTimeout(50ms)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(Program.Replace("c.SetWriteTimeout(null)", "l.SetWriteTimeout(null)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.UnknownName, 8)], Errors(Program.Replace("f.Close()", "f.SetReadTimeout(1s)", StringComparison.Ordinal)));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors(Program.Replace("c.SetReadTimeout(50ms)", "c.SetReadTimeout(50)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
-        Assert.NotEmpty(Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors(Program.Replace(", 2s)", ", null)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors(Program.Replace(", 2s)", ", 2s, 1)", StringComparison.Ordinal)));
+
+        // M7: a setter's time that changes the stream it is set on is `changed-while-held`, as a read's count is
+        const string Held = "duration Swap(mut TcpStream s, TcpStream other) {\n    s = other\n    return 1s\n}\n\nvoid | IoError Use() {\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    mut s = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    t = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    s.SetReadTimeout(Swap(mut s, t))\n}\n\nUse() else {\n    IoError e => print(e)\n}";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 10)], Errors(Held));
+        Clean(Held.Replace("    s.SetReadTimeout(Swap(mut s, t))", "    d = Swap(mut s, t)\n    s.SetReadTimeout(d)", StringComparison.Ordinal)); // the positive control
 
         // F13: the misfit names both forms of `Connect`, each with why it does not fit
         var (diagnostics, _) = Check(Program.Replace("TcpStream.Connect(\"127.0.0.1:{l.Port}\", 2s)", "TcpStream.Connect(l.Port)", StringComparison.Ordinal));
@@ -3187,6 +3192,67 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_field_of_a_class_body_takes_its_default_and_is_private_without_pub()
+    {
+        // K7: defaults that read a field of the primary constructor, a field above and a function outside the class, a `string` and a
+        // list among them, and a lambda over a field above; read and assigned by the methods, a `pub` one from outside (F9)
+        Clean("int Three() => 3\n\nclass Box(int Side) {\n    int area = Side * Side\n    pub mut int count = Three()\n    string label = \"box {area}\"\n    List<int> big = [1, 5, 9].Where(x => x > Side)\n\n    pub int Area() => area + big.Count\n    pub string Label() => label\n\n    pub void Add() {\n        count = count + 1\n    }\n}\n\nb = Box(4)\nb.Add()\nb.count = 10\nprint(b.Area())\nprint(b.Label())");
+        // K1, D11: a field of the body is no parameter of the constructor
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 5)], Errors("class C(int V) {\n    int a = 1\n}\n\nprint(C(1, 2).V)"));
+        // F9: a field of the body without `pub` is its class's own, read, assigned, called or reached by a `mut` method from outside
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nprint(c.count)"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nc.count = 2"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut List<int> items = []\n}\n\nc = C()\nc.items.Add(1)"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nf = () => c.count\nprint(f())"));
+        var (called, _) = Check("class C {\n    () => int f = () => 1\n}\n\nc = C()\nprint(c.f())"); // R9 leaves the field's type unread
+        Assert.Contains(called.Items, d => d.Id == ErrorIds.NotVisible && d.Line == 6);
+        // K1, K14: a field of the body without `mut` is assigned by nothing, from a method or from outside, and changed by no `mut` method (M5)
+        Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors("class C(int V) {\n    int a = 1\n\n    pub void Set() {\n        a = 2\n    }\n}\n\nC(1).Set()"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 7)], Errors("class C {\n    pub int n = 3\n}\n\nc = C()\nprint(c.n)\nc.n = 4"));
+        Assert.Equal([(ErrorIds.MutRequired, 5)], Errors("class C {\n    List<int> items = []\n\n    pub void Add() {\n        items.Add(1)\n    }\n}\n\nC().Add()"));
+        // V9: a field of the body of the name of a field of the primary constructor, of another field or of a method is `redeclared`
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class C(int V) {\n    int V = 2\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C {\n    int a = 1\n    int a = 2\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("class C(int V) {\n    int Get = 2\n\n    pub int Get() => 1\n}\n\nprint(1)"));
+        // T1, T6: a default of another type, or out of the field's range, as a variable's
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("class C(int V) {\n    int a = \"s\"\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("class C {\n    byte b = 300\n}\n\nprint(1)"));
+        // R2: a field of the body takes part in the cycle rule as a field of the primary constructor does
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Node {\n    pub mut Node? next = null\n}\n\nprint(1)"));
+        // F16: a default reads no top-level variable, as a method does not
+        var (topLevel, _) = Check("x = 5\n\nclass C(int V) {\n    int a = x\n}\n\nprint(1)");
+        Assert.Contains("4: `x` is a top-level variable, which a top-level function does not read (F16, V10)", topLevel.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+    }
+
+    [Theory]
+    [InlineData("class C(int V) {\n    int a = b\n    int b = 1\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "2: `b` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
+    [InlineData("class C(int V) {\n    int a = a + 1\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "2: `a` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
+    [InlineData("class C(int V) {\n    int a = Get()\n\n    pub int Get() => 1\n}\n\nprint(C(1).Get())", "2: `Get` is a method of `C`: a field's default reads no method of its instance (K7, V10)")]
+    [InlineData("class C(int V) {\n    int b = Make()\n    int a = Get()\n\n    pub static int Make() => 3\n    pub int Get() => b\n}\n\nprint(C(1).Get())", "3: `Get` is a method of `C`: a field's default reads no method of its instance (K7, V10)")]
+    [InlineData("class C(int V) {\n    int a = this.V\n\n    pub int A() => a\n}\n\nprint(C(1).A())", "2: a field's default reads no `this`: its instance is being built (K7, V10)")]
+    [InlineData("class C(int V) {\n    List<int> a = [1].Where(x => x > b)\n    int b = 1\n\n    pub int A() => a.Count\n}\n\nprint(C(1).A())", "2: `b` is not declared above `a`: a field's default reads the fields declared above it (K7, V10)")]
+    public void A_name_a_field_default_does_not_read_is_unknown_name_and_says_why(string program, string expected)
+    {
+        // K7, V10: a field's default runs before the constructor's body, as C#'s initializer, which refuses an instance member there;
+        // the product pass's Q4 default for the texts; a `static` method beside it is a name there (the owner, 2026-11-02)
+        var (diagnostics, _) = Check(program);
+        Assert.Equal([expected], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
+        Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.UnknownName, d.Id));
+    }
+
+    [Theory]
+    [InlineData("class C(int V) {\n    int b\n\n    pub int B() => b\n}\n\nprint(C(1).B())", "2: the field `b` takes no value: it has no `=`, and the constructor of `C` assigns no field of the body (K14)")]
+    [InlineData("class C {\n    mut int b\n\n    pub int B() => b\n}\n\nprint(C().B())", "2: the field `b` takes no value: it has no `=`, and the constructor of `C` assigns no field of the body (K14)")]
+    public void A_field_of_a_class_body_without_a_default_is_field_unassigned_at_the_field(string program, string expected)
+    {
+        // K14: the primary constructor, and the empty one of a class without one, assign no field of the body, `mut` or not; the
+        // product pass's Q1 and Q2 defaults for the class without a constructor and for the line
+        var (diagnostics, _) = Check(program);
+        Assert.Equal([expected], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
+        Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
+    }
+
+    [Fact]
     public void A_static_method_has_no_instance_and_is_called_by_its_class_name()
     {
         // K7: `T.M(args)` from outside, `M(args)` alone inside the class, from a method of the instance and from another `static` one,
@@ -3363,6 +3429,10 @@ public sealed class CheckerTests
         Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut m = Map<int, int>()\nif h.Head != null {\n    m[0] = 2\n    print(h.Head.V)\n}\nprint(m)");
         Clean(node + "data P(List<int> Xs)\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nmut p = P([1])\nif h.Head != null {\n    p.Xs[0] = 2\n    print(h.Head.V)\n}\nprint(p)");
         Clean(node + "class Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nn = Node(6, null)\nmut ns = [Node(5, null)]\nif h.Head != null {\n    ns[0] = n\n    print(h.Head.V)\n}\nprint(ns.Count)");
+        // except where the map's key type compares by a clause: the read or the write runs that `==` and the key's hash, a call (the
+        // owner, 2026-11-02, #110, comment 6586836827)
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(node + "class K(int Id) equal by Id\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nk = K(1)\nmut m = Map<K, int>()\nif h.Head != null {\n    m[k] = 2\n    print(h.Head.V)\n}\nprint(m.Count)"));
+        Assert.Equal([(ErrorIds.NullableUnchecked, 10)], Errors(node + "class K(int Id) equal by Id\nclass Holder(mut Node? Head)\n\nh = Holder(Node(1, null))\nk = K(1)\nm = Map<K, int>()\nif h.Head != null {\n    v = m[k]\n    print(h.Head.V)\n    print(v ?? 0)\n}"));
         // and the assignment of a field without `mut`, which is refused, narrows nothing, by the field's name or through the instance
         // *(assumed)*
         Assert.Equal([(ErrorIds.AssignImmutable, 5), (ErrorIds.NullableUnchecked, 6)], Errors(node + "class Holder(Node? Head)\n\nh = Holder(null)\nh.Head = Node(1, null)\nprint(h.Head.V)"));
@@ -3509,6 +3579,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(holder + "class K(int Id) equal by Id\n\na = [K(1)]\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(holder + "class K(int Id) equal by Id\ndata P(K Item)\n\na = P(K(1))\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        // the inner `Pair<K>` of a `Pair<Pair<K>>` too, and the walk of a type that holds itself with other arguments ends (#39, comment
+        // 6586837160)
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors(holder + "class K(int Id) equal by Id\ndata Pair<T>(T A, T B)\n\na = Pair(Pair(K(1), K(2)), Pair(K(1), K(2)))\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}"));
+        Clean(holder + "data Chain<T>(T V, Chain<List<T>>? Next)\n\na = Chain(1, null)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}");
         Clean(holder + "class K(int Id)\n\na = K(1)\nh = Holder(Node(1))\nif h.Head != null && a == a {\n    print(h.Head.V)\n}");
     }
 
@@ -3520,7 +3594,9 @@ public sealed class CheckerTests
     [InlineData("class C {\n    pub static List<int> Steps = []\n}\n\nprint(1)", "2: a `static` field of type `List<int>`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)")]
 
     [InlineData("int Two() => 2\n\nclass C {\n    pub static int Step = Two()\n}\n\nprint(C.Step)", "4: the initial value of the `static` field `Step`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)")]
-    [InlineData("class C {\n    mut int n = 0\n}\n\nprint(1)", "2: a field declared in the body of a class (K7, K14)")]
+    [InlineData("class C {\n    mut n = 0\n}\n\nprint(1)", "2: a field of a class body without a written type (K7, V2)")]
+    [InlineData("class C {\n    prot int n = 0\n}\n\nprint(1)", "2: the modifier `prot` of a field (K7, F9)")]
+    [InlineData("class C(int V) {\n    int a = 1\n\n    pub C() : this(0) { }\n}\n\nprint(1)", "4: a constructor declared in the body of a class (K14)")]
     [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
     [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nf = C.Make\nprint(f())", "5: a method as a value, named without a call (K7, F11)")]
@@ -3547,11 +3623,11 @@ public sealed class CheckerTests
     [InlineData("class C(int N) {\n    class D(int M)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
-        // generic classes (T19), bases and interfaces (K6, K10), fields of the instance and constructors in the body
-        // (K7, K14), a `static` field of another modifier, of another type, or with an initial value that is no constant
-        // (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters, `weak` (R3) in a type argument of a
-        // data type, a function type or a map, before a type parameter or a union of classes, or as a case of a union, whose
-        // nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
+        // generic classes (T19), bases and interfaces (K6, K10), constructors in the body (K14), a field there without
+        // a written type or of another modifier than `pub` and `mut` (K7), a `static` field of another modifier, of another type, or with
+        // an initial value that is no constant (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters,
+        // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
+        // case of a union, whose nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
         // names a `mut` field, both open (section 14; K8, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
         // inside a method among them, and a type declared in the body (K7)

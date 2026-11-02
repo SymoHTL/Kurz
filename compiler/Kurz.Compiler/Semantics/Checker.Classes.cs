@@ -4,12 +4,13 @@ using Kurz.Compiler.Syntax;
 namespace Kurz.Compiler.Semantics;
 
 /// <summary>
-/// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c> (K1), its methods (K7, K9),
+/// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c>, of the primary constructor
+/// (K1) and of its body with their defaults (K7), its methods (K7, K9),
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
 /// judged by the types of the fields (R2, R4), its <c>static</c> methods and fields (K7, K18), and its equality and hash, by identity or
 /// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15). What else a class can write, a base or an interface,
-/// a field of an instance or a constructor in its body, a <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
+/// a constructor in its body, a field there without a written type, a <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
 /// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
@@ -77,8 +78,12 @@ public sealed partial class Checker
                     return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a `static` field (K7, K18, R13)");
                 case FieldDeclaration { Modifiers: var modifiers } when (modifiers & Modifiers.Static) != 0:
                     break; // K7, K18: read with the class (ResolveStaticField)
-                case FieldDeclaration f:
-                    return (f.Line, "a field declared in the body of a class (K7, K14)");
+                case FieldDeclaration { Type: null } f:
+                    return (f.Line, "a field of a class body without a written type (K7, V2)");
+                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & ~(Modifiers.Pub | Modifiers.Mut)) != 0:
+                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a field (K7, F9)");
+                case FieldDeclaration:
+                    break; // K7: read with the class (ResolveClass)
                 case ConstructorDeclaration c:
                     return (c.Line, "a constructor declared in the body of a class (K14)");
                 case FunctionDeclaration f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
@@ -168,6 +173,28 @@ public sealed partial class Checker
             }
 
             symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line));
+        }
+
+        foreach (var f in (d.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0))
+        {
+            var type = Resolve(f.Type!);
+            if (Types.IsVoid(type))
+            {
+                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (K1, F4)");
+                type = Types.Error;
+            }
+
+            if (symbol.Field(f.Name) is not null)
+            {
+                Report(ErrorIds.Redeclared, f.Line, $"the field `{f.Name}` is declared already (V9)");
+            }
+            else if (f.Value is null)
+            {
+                // K14: no constructor of the class assigns a field of its body, the primary one and the empty one of a class without one
+                Report(ErrorIds.FieldUnassigned, f.Line, $"the field `{f.Name}` takes no value: it has no `=`, and the constructor of `{symbol.Name}` assigns no field of the body (K14)");
+            }
+
+            symbol.Fields.Add(new FieldSymbol(f.Name, type, f.Value is not null, (f.Modifiers & Modifiers.Mut) != 0, f.Line, f)); // K7: after the primary constructor's, in their order
         }
 
         foreach (var s in symbol.StaticFields)
@@ -410,6 +437,46 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// K7: the default of each field of a class body, in declaration order, which may be any expression: it reads the fields of the
+    /// primary constructor and the fields declared above it through the instance being built, and functions outside the class, as C#
+    /// reads a field's initializer before the constructor's body; a field below it, a method of the class and <c>this</c> are no names
+    /// there (V10).
+    /// </summary>
+    private void CheckFieldDefaults()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            VariableSymbol? receiver = null;
+            foreach (var field in symbol.Fields.Where(f => f.Body?.Value is not null))
+            {
+                receiver ??= new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, symbol.Line) { Read = true };
+                frame = new Frame { ReturnType = Types.Void, Line = field.Line, Reserved = reservedTopLevel, Class = symbol, Initializing = field };
+                frame.Scope.Variables[receiver.Name] = receiver;
+                var value = field.Body!.Value!;
+                var t = CheckExpression(value, field.Type, keepCases: Types.KeepsCases(field.Type));
+                if (t.IsError || Types.IsError(field.Type))
+                {
+                    continue;
+                }
+
+                if (Types.IsVoid(t.Type))
+                {
+                    Report(ErrorIds.Syntax, value.Line, "a call with a `void` success used as a value (O10)");
+                }
+                else if (!Types.Assignable(t.Type, field.Type))
+                {
+                    ReportMismatch(t.Type, field.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(field.Type)} is required");
+                }
+            }
+
+            if (receiver is not null)
+            {
+                model.RecordFieldsThis(symbol, receiver);
+            }
+        }
+    }
+
     /// <summary>K7: the body of each method, with its instance as the variable <c>this</c>, through which its fields and methods are read by their names.</summary>
     private void CheckMethodBodies()
     {
@@ -487,9 +554,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// K7: inside a method of the instance, a name that is a field of its class, read through <c>this</c>; a lambda that reads it captures
-    /// <c>this</c> (F15). A <c>static</c> member has no instance, so none is found there (<see cref="InstanceFieldInStatic"/>).
+    /// <c>this</c> (F15). A <c>static</c> member has no instance, so none is found there (<see cref="InstanceFieldInStatic"/>). In a
+    /// field's default only the fields declared above it are names (V10).
     /// </summary>
-    private FieldSymbol? ImplicitField(string name) => InStaticMember() ? null : CurrentClass()?.Field(name);
+    private FieldSymbol? ImplicitField(string name) =>
+        !InStaticMember() && CurrentClass() is { } c && c.Field(name) is { } field && (Initializing() is not { } being || c.Fields.IndexOf(field) < c.Fields.IndexOf(being)) ? field : null;
 
     /// <summary>K7, K19: inside a <c>static</c> member, a name that is a field of an instance of its class, which is <c>static-mismatch</c>.</summary>
     private bool InstanceFieldInStatic(string name, int line)
@@ -514,8 +583,53 @@ public sealed partial class Checker
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
 
-    /// <summary>K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>.</summary>
-    private List<FunctionSymbol>? ImplicitMethods(string name) => CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list) ? list : null;
+    /// <summary>
+    /// K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>; a field's default
+    /// names the <c>static</c> ones alone, as C# refuses an instance member in an initializer and no <c>static</c> one (V10).
+    /// </summary>
+    private List<FunctionSymbol>? ImplicitMethods(string name) =>
+        CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list)
+        && (Initializing() is null ? list : list.Where(f => f.IsStatic).ToList()) is { Count: > 0 } reached ? reached : null;
+
+    /// <summary>K7: the field of a class body whose default is being read, through the lambdas around the place; null elsewhere.</summary>
+    private FieldSymbol? Initializing()
+    {
+        for (var f = frame; f is not null; f = f.Outer)
+        {
+            if (f.Class is not null)
+            {
+                return f.Initializing;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// K7, V10: in a field's default, a field of the class not declared above it, the field itself among them, or a method of the class
+    /// is no name, which the report says; false where the name is neither, and for every name outside a default.
+    /// </summary>
+    private bool OutOfReachInDefault(string name, int line)
+    {
+        if (Initializing() is not { } being || CurrentClass() is not { } c)
+        {
+            return false;
+        }
+
+        if (c.Field(name) is not null)
+        {
+            Report(ErrorIds.UnknownName, line, $"`{name}` is not declared above `{being.Name}`: a field's default reads the fields declared above it (K7, V10)");
+            return true;
+        }
+
+        if (c.Methods.ContainsKey(name))
+        {
+            Report(ErrorIds.UnknownName, line, $"`{name}` is a method of `{c.Name}`: a field's default reads no method of its instance (K7, V10)");
+            return true;
+        }
+
+        return false;
+    }
 
     /// <summary>The variable <c>this</c> of the method around the place, read and, from a lambda, captured (F15).</summary>
     private VariableSymbol ThisVariable()
@@ -539,6 +653,12 @@ public sealed partial class Checker
         if (InStaticMember())
         {
             Report(ErrorIds.StaticMismatch, t.Line, "a `static` member has no instance, and so no `this` (K7, K19)");
+            return Typed.Error;
+        }
+
+        if (Initializing() is not null)
+        {
+            Report(ErrorIds.UnknownName, t.Line, "a field's default reads no `this`: its instance is being built (K7, V10)");
             return Typed.Error;
         }
 
@@ -715,7 +835,7 @@ public sealed partial class Checker
     {
         if (type.Symbol.Field(member) is { } field)
         {
-            return new Typed(Types.Read(field.Type)); // R3: a `weak` field reads as a strong `T?`
+            return FieldVisible(field, type.Symbol, line) ? new Typed(Types.Read(field.Type)) : Typed.Error; // R3: a `weak` field reads as a strong `T?`
         }
 
         if (type.Symbol.Methods.ContainsKey(member))
@@ -734,6 +854,18 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
+    /// <summary>F9: a field of a class body without <c>pub</c> is private to its class; a use of it from outside the class is <c>not-visible</c>.</summary>
+    private bool FieldVisible(FieldSymbol field, ClassSymbol owner, int line)
+    {
+        if (field.IsPub || ReferenceEquals(CurrentClass(), owner))
+        {
+            return true;
+        }
+
+        Report(ErrorIds.NotVisible, line, $"`{field.Name}` of `{owner.Name}` is private to its class: a field is visible outside it with `pub` (F9)");
+        return false;
+    }
+
     /// <summary>F9: a method without <c>pub</c> is private to its class; a call of it from outside the class is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>
         (method.Declaration!.Modifiers & Modifiers.Pub) != 0 || ReferenceEquals(CurrentClass(), method.Owner);
@@ -745,6 +877,12 @@ public sealed partial class Checker
         {
             if (type.Symbol.Field(m.Member) is { } field)
             {
+                if (!FieldVisible(field, type.Symbol, m.Line))
+                {
+                    CheckArgumentsLoosely(c);
+                    return Typed.Error;
+                }
+
                 var value = new Typed(field.Type);
                 model.RecordType(m, value);
                 return CallValue(field.Type, c); // F11: a field of function type is called as any function value
@@ -816,7 +954,7 @@ public sealed partial class Checker
     /// <summary>K1: an instance made by the class's name, with the arguments of its primary constructor, bound as D11 binds them; a class without one takes none.</summary>
     private Typed CheckClassConstruction(ClassSymbol symbol, CallExpression c, KurzType? expected)
     {
-        var slots = symbol.Fields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, false)).ToList();
+        var slots = symbol.Fields.Where(f => f.Body is null).Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, false)).ToList(); // K7: a field of the body is no parameter
         var candidate = new Candidate { Slots = slots, Result = Types.Void };
         if (c.TypeArguments.Count > 0)
         {
@@ -895,6 +1033,12 @@ public sealed partial class Checker
         if (owner.Symbol.Field(last.Member) is not { } field)
         {
             ClassMember(owner, last.Member, last.Line);
+            CheckExpression(a.Value, Untyped(a.Value));
+            return;
+        }
+
+        if (!FieldVisible(field, owner.Symbol, last.Line))
+        {
             CheckExpression(a.Value, Untyped(a.Value));
             return;
         }

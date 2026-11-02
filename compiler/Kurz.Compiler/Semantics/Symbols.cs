@@ -85,8 +85,15 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
 }
 
-/// <summary>A field of a <c>data</c> type (D1), its own or inherited (D7).</summary>
-public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line);
+/// <summary>
+/// A field of a <c>data</c> type (D1), its own or inherited (D7), or of a class (K1); <paramref name="Body"/> is the declaration of a
+/// field of a class body (K7), which is no parameter of a constructor, and null for a field of a primary constructor.
+/// </summary>
+public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line, FieldDeclaration? Body = null)
+{
+    /// <summary>F9, D14: a field of a primary constructor is visible wherever its type is, one of a class body only with <c>pub</c>.</summary>
+    public bool IsPub => Body is null || (Body.Modifiers & Modifiers.Pub) != 0;
+}
 
 /// <summary>A <c>data</c> type (D1) with its fields, the base fields first (D7), its base (D6) and its type parameters (T19).</summary>
 public sealed class DataSymbol(string name, TypeDeclaration declaration)

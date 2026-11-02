@@ -558,7 +558,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line) || OutOfReachInDefault(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -850,13 +850,21 @@ public sealed partial class Checker
         return new Typed(Types.Nullable(map.Value));
     }
 
-    /// <summary>M9: the key of an index into the map, read or written.</summary>
+    /// <summary>
+    /// M9: the key of an index into the map, read or written. Where the key's type compares by a clause, the access runs that
+    /// <c>==</c> and the key's hash, a call that ends N9's narrowing (the owner, 2026-11-02, #110, comment 6586836827).
+    /// </summary>
     private void CheckKey(Expression index, MapType map)
     {
         var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
             ReportMismatch(key.Type, map.Key, index.Line, $"{Types.A(key.Type)} where a key of `{map}`, {Types.A(map.Key)}, is required", "M9");
+        }
+
+        if (ComparesByClause(map.Key, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+        {
+            EndChangeableNarrowing(); // N9: the access runs the key's `==` and hash, a call where its class names its fields (K5)
         }
     }
 
@@ -1497,13 +1505,17 @@ public sealed partial class Checker
 
     /// <summary>
     /// N9 with K5: whether <c>==</c> on two values of the type compares instances of a class that names its fields, which N9 counts
-    /// among the calls: the instances themselves, or instances the values hold where they compare by their fields or their items.
+    /// among the calls: the instances themselves, or instances the values hold where they compare by their fields or their items. A
+    /// data type met again is read through the arguments its fields hold (<see cref="HeldArguments"/>), so that the inner
+    /// <c>Pair&lt;K&gt;</c> of a <c>Pair&lt;Pair&lt;K&gt;&gt;</c> is read with its own argument, and the walk of a type that holds itself
+    /// with other arguments ends.
     /// </summary>
     private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
     {
         ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
         ListType l => ComparesByClause(l.Element, seen),
         UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
+        DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
         DataType d => seen.Add(d.Symbol)
             && (d.Symbol.Fields.Any(f => ComparesByClause(SubstituteData(d, f.Type), seen))
                 || dataTypes.Values.Where(x => x.Base == d.Symbol).Any(x => ComparesByClause(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen))),

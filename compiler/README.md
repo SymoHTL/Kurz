@@ -436,9 +436,9 @@ the program sets no other time, `DefaultBound` being the one definition of the 5
 `SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
 `poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
 call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
-once the addresses are known, after the lookup of a name, which it does not bound (section 14 holds that open),
-and holds over every address tried *(assumed: one bound over the addresses of a name; its cost is that a first
-address that never answers spends the whole bound, and the later addresses are not tried)*. A stream `Connect`
+once the addresses are known, after the lookup of a name, which it does not bound, as Rust's `connect` leaves
+`getaddrinfo`, and holds over every address tried, one bound over the addresses of a name, whose cost is that a
+first address that never answers spends the whole bound, and the later addresses are not tried (section 12). A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
 which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
@@ -532,7 +532,10 @@ The emitter (`Emit/`) takes a program the checker read without an error and with
 supported`, with the runtime checked for its target and the standard library, and writes one LLVM
 module of the three, which the
 pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` profile builds, and at
-`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), and links with the C
+`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
+it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
+at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
@@ -886,9 +889,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), counted as a list's block is and
-  closed at zero, the error of that close ignored, the buffer freed with the block, and `Close` writes -1 as the descriptor and gives up the buffer's bytes before it
-  closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
+  flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
+  freed with the block; each `Read`, `Write`, setter, `Accept` and pull of a line is a call in flight, which a compare-and-swap adds 2
+  to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction takes off at its end, and
+  `Close` sets the word's mark, 1, by an atomic or, so that every later call through any holder, a second `Close` among them, finds it
+  and gets the system's error of a descriptor that is not open, 9, with no system call, and the descriptor is released by the
+  `Close` where no call is in flight, the error of that close given, and else by the last call out, which ignores it, a socket's
+  `Close` with calls in flight shutting the socket down first by the runtime's `ShutdownSocket`, so that a stream's read and write and
+  a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
   the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
@@ -903,7 +912,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   none being the end of the file, and one added after room for it, which past the limit raises
   `allocation-failed` (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
-  descriptors, and the same files all held, which reach the limit; a close through a copy; a read
+  descriptors, and the same files all held, which reach the limit; a close through a copy; a read,
+  a pull, a write, an `Accept` and each setter that a close through another holder meets in flight, which the IR of the program
+  built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
+  the socket down, and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
@@ -1484,7 +1496,7 @@ generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path 
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K15 and K18 to K20, for a class with its primary constructor or none,
-its fields, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
@@ -1543,15 +1555,16 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), a field of the instance, a constructor or a type declared in its body (K7, K14), a
-`static` field with a modifier other than `pub` and `mut` (K18, R13), a method that is `virtual`,
-`override`, `prot` or `extern` or that has type parameters of its own (K7, section 4), each of
-which leaves the class and every value of it unread, and of a class it reads, a `static` field
-with an initial value that is no constant, which section 4 computes at the field's
-first read and whose open items section 14 holds, or of a type other than a number, a `bool`, a
-`char`, a `string`, a time or an enum, but for one that is or holds a class, which is `static-state`
-(K18), a field of a function type, whose cycle R9 judges by
-the lambdas of the program (R9), a method as a value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
+(K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
+or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
+than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+that has type parameters of its own (K7, section 4), each of which leaves the class and every
+value of it unread, and of a class it reads, a `static` field with an initial value that is no
+constant, which section 4 computes at the field's first read and whose open items section 14
+holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum, but for
+one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
+cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
+`data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
 method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a `weak` field, which
 section 14 leaves open (K8, R3), and a key type that holds, at any depth, an instance of a class whose
@@ -2008,6 +2021,13 @@ round can ask about it by the rule's id.
   is `static-mismatch` (K19). A `static` field or method of the class is a name there too, and in a `static`
   method, and a method of the class, `static` or not, hides a top-level function of its name inside
   the class, as C# reads it.
+  A field of the class body is a name in the default of a field below it, read
+  through the instance being built, before the defaults of the fields after it run, as C# runs a
+  field's initializer before the constructor's body. A `static` method of the class is a name in a
+  default too, and a method of the instance is none, as C# refuses an instance member in an
+  initializer and no `static` one. A field of the body of the name of a field of
+  the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
+  is no name in a default, as it is none in a method (F16).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is
