@@ -3267,6 +3267,16 @@ public sealed class CheckerTests
         // two cycles through one field are one error, the second reaching a field the first refused (E1); two apart are one each
         Assert.Equal([(ErrorIds.StaticCycle, 2)], Errors("class C(int V) {\n    pub static int A = B + E\n    pub static int B = A + 1\n    pub static int E = A + 2\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.StaticCycle, 2), (ErrorIds.StaticCycle, 7)], Errors("class C(int V) {\n    pub static int B = A + 1\n    pub static int A = B + 1\n}\n\nclass D(int V) {\n    pub static int X = Y\n    pub static int Y = X\n}\n\nprint(1)"));
+        // a cycle that closes on a field a reported cycle refused, the one under way or one read before it, adds no error, in any order (E1)
+        string[] shared = ["    pub static int P = Q", "    pub static int Q = R + P", "    pub static int R = Q"];
+        int[][] orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        foreach (var order in orders)
+        {
+            var program = "class C(int V) {\n" + string.Join("\n", order.Select(i => shared[i])) + "\n}\n\nprint(1)";
+            Assert.Equal([ErrorIds.StaticCycle], Errors(program).Select(e => e.Id));
+        }
+
+        Assert.Equal([(ErrorIds.StaticCycle, 3)], Errors("class C(int V) {\n    pub static int X = Y\n    pub static int Y = Z\n    pub static int Z = Y + W\n    pub static int W = X\n}\n\nprint(1)"));
         // a field that reads one whose initial value is no constant carries nothing beyond that field's `not supported` (E1)
         Assert.StartsWith("4: ", Assert.Single(NotSupported("int Seven() => 7\n\nclass C(int V) {\n    pub static int X = Seven()\n    pub static int Y = X + 1\n}\n\nprint(C.Y)")));
     }
@@ -3389,6 +3399,8 @@ public sealed class CheckerTests
         Clean("class Owner(string Name)\nclass Club(mut List<weak Owner?> Members)\n\no = Owner(\"Ann\")\nc = Club(List<weak Owner?>())\nc.Members.Add(o)\nc.Members.Add(null)\nfor m in c.Members {\n    print(m?.Name ?? \"gone\")\n}");
         // R3 (the owner, 2026-11-01, "A strong T?, held"): a read is a `T?`, which a `T?` variable and a `T?` parameter take as it is
         Clean("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nx = Owner(\"Ann\")\np = Pet(x)\nOwner? k = p.Keeper\nprint(NameOf(k))\nprint(NameOf(p.Keeper))");
+        // the same read through `?[` (N5), whose item a member, a `T?` variable and a `T?` parameter take
+        Clean("class Owner(string Name)\n\nstring NameOf(Owner? o) => o?.Name ?? \"gone\"\n\nList<weak Owner?>? Club(Owner owner) {\n    mut ys = List<weak Owner?>()\n    ys.Add(owner)\n    return ys\n}\n\nx = Owner(\"Ann\")\nxs = Club(x)\nprint(xs?[0]?.Name ?? \"gone\")\nOwner? k = xs?[0]\nprint(NameOf(k))\nprint(NameOf(xs?[0]))");
         Assert.Equal([(ErrorIds.NullableUnchecked, 5)], Errors("class Owner(string Name)\n\no = Owner(\"Ann\")\nweak Owner? w = o\nprint(w.Name)"));
 
         // N9: a call between the test and the use ends what the test showed of a path through `weak`, as of one through a `mut` field

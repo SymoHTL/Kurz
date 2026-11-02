@@ -34,6 +34,21 @@ instance stays the same either, because another reference to it can exist.
 
 Case: [classes/mut-field.kz](../corpus/classes/mut-field.kz)
 
+Case: [functions/capture-changes-instance.kz](../corpus/functions/capture-changes-instance.kz)
+```kurz
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)
+```
+
 ### K3 (decided, §4) References with identity
 
 Assigning a class instance does not copy it. Both variables refer to the same instance.
@@ -52,7 +67,11 @@ print(b.Count)
 
 A class with `mut` fields compares by identity. A class without them compares by content, each field
 by the equality Kurz gives its type, a `double` or `float` with NaN equal to NaN as under D3 and K5. Across
-inheritance (K6, K10) K13 holds.
+inheritance (K6, K10) K13 holds. A class with a `weak` field compares by identity too, as one with a
+`mut` field does: what the field holds turns `null` when its target is freed (§4, the owner,
+2026-11-01, "Class compares by identity", against leaving the field out of the comparison and the
+hash, and against comparing its target's identity, under which equality and the hash change when
+the target is freed).
 
 Case: [classes/equality-identity.kz](../corpus/classes/equality-identity.kz)
 ```kurz
@@ -69,6 +88,18 @@ Case: [classes/equality-content.kz](../corpus/classes/equality-content.kz)
 class Label(string Text)
 
 print(Label("x") == Label("x"))
+```
+
+Case: [classes/equality-weak-field.kz](../corpus/classes/equality-weak-field.kz)
+```kurz
+class Owner(string Name)
+class Pet(string Name, weak Owner? Keeper)
+
+o = Owner("Ann")
+a = Pet("Rex", o)
+b = Pet("Rex", o)
+print(a == b)
+print(a == a)
 ```
 
 ### K13 (decided, §4) Equality across inheritance

@@ -583,7 +583,12 @@ public sealed partial class Checker
             var at = readingStatics.IndexOf(field);
             if (at >= 0)
             {
-                ReportStaticCycle(readingStatics.GetRange(at, readingStatics.Count - at));
+                var cycle = readingStatics.GetRange(at, readingStatics.Count - at);
+                if (!cycle.Any(f => f.Refused))
+                {
+                    ReportStaticCycle(cycle); // a cycle through a field a reported cycle refused is that error's, in any order of the fields (E1)
+                }
+
                 return Typed.Error;
             }
 
