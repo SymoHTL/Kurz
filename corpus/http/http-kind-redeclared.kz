@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: W1
+
+enum HttpKind { Other }
+
+print(1)

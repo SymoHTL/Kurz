@@ -1,0 +1,31 @@
+// expect: output
+// | 0
+// | 1
+// | 3
+// rules: S16
+
+int | IoError | InvalidUtf8 Count(string text) {
+    File.WriteAll("lines-empty.txt", text.Bytes)
+    f = File.Open("lines-empty.txt")
+    File.Delete("lines-empty.txt")
+    mut count = 0
+    for line in f.Lines() {
+        count = count + 1
+    }
+
+    return count
+}
+
+// an empty file has no line, one line break alone one empty line, and an empty line between two counts
+print(Count("") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("\n") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})
+print(Count("a\n\nb") else {
+    IoError => -1
+    InvalidUtf8 => -2
+})

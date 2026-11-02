@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: K4
+
+class Tally(string Name, Map<string, int> Counts)
+
+t = Tally("a", Map<string, int>())
+print(t == t)

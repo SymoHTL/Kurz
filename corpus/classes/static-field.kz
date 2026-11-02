@@ -1,0 +1,9 @@
+// expect: output
+// | 100
+// rules: K18
+
+class Money(int Cents) {
+    pub static int CentsPerUnit = 100
+}
+
+print(Money.CentsPerUnit)

@@ -1,0 +1,31 @@
+// expect: output
+// | TimedOut 11
+// | true
+// | 1
+// rules: S9
+
+// a read whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, which the system counts in
+// its own ticks; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
+// floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
+// nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
+void | IoError Wait() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetReadTimeout(50ms)
+    mut buffer = Bytes()
+    start = timestamp.Now
+    match client.Read(mut buffer, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    elapsed = timestamp.Now - start
+    print(elapsed >= 40ms && elapsed < 4s)
+    server.Write("x".Bytes)
+    print(client.Read(mut buffer, 1))
+}
+
+Wait() else {
+    IoError e => print(e)
+}
