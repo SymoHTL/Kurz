@@ -196,7 +196,7 @@ public sealed partial class Checker
         Assignment a => ChangeOf(a).Concat(Muts(a.Value)),
         IfStatement i => Muts(i.Condition).Concat(Muts(i.Then)).Concat(i.Else is null ? [] : Muts(i.Else)),
         WhileStatement w => Muts(w.Condition).Concat(Muts(w.Body)),
-        ForInStatement f => Muts(f.Collection).Concat(Muts(f.Body)),
+        ForInStatement f => Muts(f.Collection).Concat(Muts(f.Body)).Concat((f.Arms ?? []).SelectMany(a => Muts(a.Body))),
         MatchStatement m => Muts(m.Subject).Concat(m.Arms.SelectMany(a => Muts(a.Body))),
         ReturnStatement { Value: { } v } => Muts(v),
         ThrowStatement { Value: { } v } => Muts(v),

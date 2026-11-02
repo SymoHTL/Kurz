@@ -1,0 +1,9 @@
+// expect: error syntax at 6
+// rules: S16
+
+// `f.Lines()` stands as the collection of a `for` loop alone
+void Show(File f) {
+    print(f.Lines())
+}
+
+print(1)
