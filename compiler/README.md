@@ -1074,7 +1074,7 @@ bytes of a string, a string of bytes, a part of a list of strings and a list mad
 A program that uses one of these gets one `not supported` at the construct's line, in the
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
-`data` type or a union (R14), a `mut` parameter given anything but a variable and a `mut` parameter of a lambda
+`data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
 (M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
 command line, the environment or the clock in a build for Windows (S11), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
@@ -1608,7 +1608,10 @@ round can ask about it by the rule's id.
   reports nothing more: the argument may have been meant for any of the functions.
 - M7 with M4: what stands after `mut` is a path of data fields from a `mut` variable; two fields
   of one variable are two values and may both be passed; the same path twice, or a path and one it
-  is a prefix of, is `mut-at-call`.
+  is a prefix of, is `mut-at-call`. Inside a method, a field of the instance named alone (K7) stands
+  there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
+  `mut-at-call`, and one inside a lambda is `capture-assign` (F11); the emitter gives the call the
+  field's own place, so the callee's write is the field's.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
   the value it calls, then its arguments as written (D11), an operator's left operand, an index's

@@ -859,6 +859,15 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutAtCall, 6)], Errors("void FillB(mut List<byte> xs) {\n    xs.Add(1)\n}\n\nmut s = \"abc\"\nFillB(mut s.Bytes)")); // M7: a path of data fields, which `Bytes` is not
         Assert.Equal([(ErrorIds.MutRequired, 2)], Errors("mut s = \"abc\"\ns.Bytes.Add(1)")); // M5 with M4: the same for a receiver
         Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut short s = 1\nBump(mut s)\nprint(s)")); // M7: the callee writes an `int` back
+
+        // M7 with K7: a `mut` field of the instance named alone in its method is passed as `mut`; one without `mut` is mut-required,
+        // one field twice is mut-at-call, and one inside a lambda is capture-assign
+        var box = "void Fill(mut List<int> xs) {\n    xs.Add(1)\n}\n\nvoid Two(mut List<int> a, mut List<int> b) {\n    a.Add(b.Count)\n}\n\n";
+        Clean(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
+        var (fixedField, _) = Check(box + "class Box(List<int> Items) {\n    pub void Grow() {\n        Fill(mut Items)\n    }\n}\n\nBox([]).Grow()");
+        Assert.Equal(["11: `Items` is a field without `mut` and cannot be passed as `mut` (M7, K1)"], fixedField.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        Assert.Equal([(ErrorIds.MutAtCall, 11)], Errors(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        Two(mut Items, mut Items)\n    }\n}\n\nBox([]).Grow()"));
+        Assert.Equal([(ErrorIds.CaptureAssign, 11)], Errors(box + "class Box(mut List<int> Items) {\n    pub void Grow() {\n        f = () => Fill(mut Items)\n        f()\n    }\n}\n\nBox([]).Grow()")); // F11: a lambda's `this`
     }
 
     [Fact]
