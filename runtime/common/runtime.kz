@@ -411,8 +411,10 @@ pub bool Same(string first, string second) {
 }
 
 // The rest of `Same`, more than 16 bytes whose first bytes agree: 16 bytes at a time in two words of 8, their differences joined by
-// `|`, and the 16 bytes that end the bytes: `==` of 20k lines of ten words with their copies, 200 rounds, took 18.95 ms so against
-// 28.41 on `main` (Rust 14.33 ms).
+// `|`, and the 16 bytes that end the bytes. Rust's `==` of two `str` calls the C library's `bcmp` here, after the test of the
+// lengths; the runtime of Kurz is written in Kurz (design record, section 2), so this function takes the place of that call, in
+// words of 8 as `memcmp` compares a small count, where Rust's call leaves the bytes to the C library: `==` of 20k lines of ten words
+// with their copies, 200 rounds, took 18.95 ms so against 28.41 on `main` (Rust 14.33 ms).
 bool SameBytes(byte* x, byte* y, long a) {
     mut ulong diff = 0
     raw {

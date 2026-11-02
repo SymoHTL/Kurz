@@ -4431,7 +4431,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // words read with their first byte highest, each an unsigned number: 1 to 3 as their first, middle and last byte, 4 to 16 as four
         // words of 4, more as 16 bytes at a time and then four words of 8, the first word that differs giving the order, and where the
         // shared bytes agree the lengths: a string of every count from 0
-        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // to 72, so that the loop of 16 bytes runs up to three steps, against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
         // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
         // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
         // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
@@ -4454,8 +4454,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return t
             }
 
-            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
-            for count in 0..<41 {
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk"
+            for count in 0..<73 {
                 a = s.Substring(0, count)
                 mut line = ""
                 for k in 0..<count {
@@ -4479,9 +4479,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk";
         var lines = new List<string>();
-        for (var count = 0; count <= 40; count++)
+        for (var count = 0; count <= 72; count++)
         {
             var a = s[..count];
             var line = new StringBuilder();
