@@ -272,7 +272,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// Whether a value of the type is or holds one of a type <paramref name="leaf"/> picks, as the text of a value shows it: an item, a
-    /// map's value, a case of a union or a field of a data type.
+    /// map's key or value, a case of a union or a field of a data type.
     /// </summary>
     private static bool Holds(KurzType type, Func<KurzType, bool> leaf, List<DataSymbol> seen)
     {
@@ -286,7 +286,7 @@ public sealed partial class Checker
             case ListType l:
                 return Holds(l.Element, leaf, seen);
             case MapType m:
-                return Holds(m.Value, leaf, seen);
+                return Holds(m.Key, leaf, seen) || Holds(m.Value, leaf, seen);
             case UnionType u:
                 return u.Cases.Any(c => Holds(c, leaf, seen));
             case DataType d when !seen.Contains(d.Symbol):

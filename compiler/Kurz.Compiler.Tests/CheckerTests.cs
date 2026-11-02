@@ -2107,6 +2107,7 @@ public sealed class CheckerTests
     [InlineData("print([e])")]
     [InlineData("int | HttpError u = e\nprint(u)")]
     [InlineData("mut m = Map<string, HttpError>()\nm[\"a\"] = e\nprint(m)")]
+    [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
     [InlineData("print(Held(e))")]
     public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
     {
