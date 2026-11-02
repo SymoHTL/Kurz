@@ -1323,11 +1323,30 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnlistedCase, 11)], Errors("data NotFound\ndata Rejected\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    NotFound => 0\n}\nprint(value)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors("data NotFound\ndata Rejected\ndata Other\n\nint | NotFound | Rejected Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nvalue = Find(2) else {\n    Other => 0\n    NotFound => 0\n}\nprint(value)")); // E1: which case the wrong arm meant is unknown, so `Rejected` is not reported beside it
         Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("int One() => 1\n\nx = One() else {\n    else => 0\n}\nprint(x)")); // a call with no case beside its success
+        // an `else` with no arms after such a call is `unreachable-arm` at its line, as `else =>` there is, while after a call with cases it is
+        // legal and every case propagates (section 5, the owner, 2026-11-02)
+        Assert.Equal([(ErrorIds.UnreachableArm, 3)], Errors("int One() => 1\n\nx = One() else {\n}\nprint(x)"));
+        Clean(find + "int | NotFound Run() {\n    x = Find(1) else {\n    }\n    return x\n}\n\nprint(1)");
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => {\n            if id > 0 {\n                print(1)\n            }\n        }\n    }\n    return value\n}\n\nprint(OrZero(1))")); // O5: the arm neither recovers, returns nor throws
         Assert.Equal([(ErrorIds.Redeclared, 12)], Errors(find + "int OrZero(int id) {\n    value = Nope(id) else {\n        NotFound id => 0\n    }\n    return value\n}\n\nprint(OrZero(1))").Where(e => e.Item1 == ErrorIds.Redeclared).ToList()); // after a call that did not type, a binding is still checked
         Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(find + "value = Find(2) else {\n    Nope => 0\n}\nprint(value)")); // E1: which case the arm meant is unknown, so no case is unlisted beside it
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Log() {\n}\n\nx = Nope() else {\n    NotFound => Log()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
         Assert.Equal([(ErrorIds.Syntax, 11)], Errors(find + "value = Find(2) else {\n    0 => 0\n}\nprint(value)")); // O5: an arm of `else` names a case type, not a literal (E4)
+    }
+
+    [Fact]
+    public void An_else_after_a_loop_with_no_case_to_reach_it_is_unreachable_and_one_after_a_collection_that_did_not_type_adds_no_error()
+    {
+        // S16 with section 5's answer of 2026-11-02: an `else` with no arms after a loop whose collection fails with no case is
+        // `unreachable-arm` at the line of the `else`, not of the loop; after a loop over a file's lines it is legal, every case propagating
+        Assert.Equal([(ErrorIds.UnreachableArm, 4)], Errors("xs = [1, 2]\nfor x in xs {\n    print(x)\n} else {\n}"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 3)], Errors("for i in 0..2 {\n    print(i)\n} else {\n}"));
+        Clean("void | IoError | InvalidUtf8 Run(File f) {\n    for line in f.Lines() {\n        print(line)\n    } else {\n    }\n}\n\nprint(1)");
+
+        // E1: where the collection did not type, its error is the one error, and the arms are read as after a call that did not type
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    IoError e => print(e)\n}"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for x in nope {\n    print(x)\n} else {\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("n = 5\nfor x in n {\n    print(x)\n} else {\n    IoError e => print(e)\n}"));
     }
 
     [Fact]
