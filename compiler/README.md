@@ -822,12 +822,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), counted as a list's block is and
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), counted as a list's block is and
   closed at zero, the error of that close ignored, the buffer freed with the block, and `Close` writes -1 as the descriptor and gives up the buffer's bytes before it
   closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
-  the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
+  holds, before it reads (S3), and under the lock takes the bytes the buffer holds first, at most `max`, with no system call; where it
+  holds none, a `max` of 8192 or more, and one of 0, is read straight into the list, and a smaller one fills the buffer, made at the
+  first such read, with one read of 8192 bytes and takes at most `max` of them, the buffer left as it was where the read failed and
+  keeping none of the rest where the descriptor is -1 when the read returns, a `Close` made while it waited (S3, S5); `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
   the bytes up to it in a list of bytes, whose block the line's string takes over, without the `\n` and a `\r` in front of it; a line

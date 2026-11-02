@@ -92,6 +92,22 @@ peer closed, reads no bytes and returns 0. `into` grows as `Add` grows a list (M
 A `max` below 0 raises `index-out-of-range`. `into.Clear()` empties a list and keeps its room (M9).
 *(assumed, §12: the room before the read and a `max` below 0)*
 
+A read goes through a buffer of 8 KiB that the handle keeps, a `File`'s and a `TcpStream`'s alike,
+as Rust's `BufReader::read` reads and C#'s `FileStream` buffers its reads: the bytes the buffer holds
+go first, at most `max` of them, with no system call; where it holds none, a `max` of 8 KiB or more
+is read straight into `into`, and a smaller one fills the buffer with one read of the system and
+takes at most `max` of what that read gave (§12, the owner, 2026-11-02, "the stream keeps a read
+buffer", 8 KiB "as Rust's `BufReader`", and a `File` "as C#'s `FileStream`"). No member shows or
+takes the buffered bytes: `Read` is the one way in (§12, the owner, 2026-11-02). The buffer is made
+at the handle's first read that fills it, and every holder shares it (S5); a read that fails, or
+whose time runs out (S9), stores nothing in it; and a `max` of 0 reads nothing and waits for no byte,
+as it did before the buffer. A `Write` after buffered reads of one handle would land where the
+program's reads ended, the position moved back over the bytes read ahead, as C#'s `FileStream`
+moves it, which no handle reaches, since `File.Open` opens a file to read and `File.Create` to write
+(S2) and a stream has no position; a second `File.Open` of a file has its own descriptor, position
+and buffer. *(assumed, §12: the buffer made at the first fill, the read that fails storing nothing,
+the `max` of 0, the write after buffered reads and the second handle)*
+
 Case: [system/read-appends.kz](../corpus/system/read-appends.kz)
 ```kurz
 void | IoError Chunks() {
@@ -131,6 +147,97 @@ Negative() else {
 }
 ```
 
+Case: [system/read-buffer.kz](../corpus/system/read-buffer.kz)
+```kurz
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+void | IoError Show() {
+    mut small = Bytes()
+    for i in 0..<3000 {
+        small.Add(byte(i % 251))
+    }
+
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    // 3000 bytes read one at a time from a stream: one read of the system fills the buffer of 8 KiB, and the others take their byte
+    // from it, where a read of the system for each byte made 3000
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(small)
+    mut got = Bytes()
+    before = Reads()
+    for i in 0..<3000 {
+        server.Read(mut got, 1)
+    }
+
+    after = Reads()
+    print("{got.Count} {got == small} {after - before < 100}")
+
+    // with nothing held and nothing sent, a `max` of 0 reads nothing and waits for no byte, and a read that goes straight to the
+    // list and runs out of time lets the next read in
+    server.SetReadTimeout(50ms)
+    print(server.Read(mut got, 0))
+    match server.Read(mut got, 10000) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write(small)
+    print(server.Read(mut got, 1))
+
+    // the same from a file
+    File.WriteAll("read-buffer.txt", sent)
+    f = File.Open("read-buffer.txt")
+    mut read = Bytes()
+    start = Reads()
+    for i in 0..<3000 {
+        f.Read(mut read, 1)
+    }
+
+    end = Reads()
+    print("{read.Count} {read == small} {end - start < 100}")
+
+    // a read of 8 KiB or more into an empty buffer goes straight to the list, and the bytes the buffer holds go first
+    g = File.Open("read-buffer.txt")
+    mut large = Bytes()
+    print(g.Read(mut large, 10000))
+    one = g.Read(mut large, 1)
+    rest = g.Read(mut large, 10000)
+    print("{one} {rest}")
+
+    // a second handle on the file has its own position and buffer
+    h = File.Open("read-buffer.txt")
+    File.Delete("read-buffer.txt")
+    mut first = Bytes()
+    h.Read(mut first, 1)
+    print(first[0])
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
 ### S4 (assumed, §12) Writing writes every byte
 
 `f.Write(bytes)` writes every byte of `bytes`, a `Bytes`, and returns `void | IoError`: where the
@@ -144,15 +251,20 @@ Case: [system/write-read.kz](../corpus/system/write-read.kz)
 A `File` is a handle: a copy is a second holder of the one file, as a list's copy holds its block
 (section 3 of the record), and the file closes when the last value that holds it lets go of it,
 ignoring an error of that close. `f.Close()` closes it before that and returns `void | IoError`; a
-`Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
+`Close` through one holder closes it for all. The bytes the file's buffer holds that no read took
+(S3) are dropped at the close, as dropping Rust's `BufReader` gives them up (§12, the owner,
+2026-11-02). Every call on a closed file, `Close` among them, returns
 the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
 the file was opened with, since a close stores -1 in the file's descriptor before the system closes
 it, so that no call that starts after that store passes the system a number it may have given
 another file. A call through another holder that read the descriptor before the store and enters
 the system after the close can still reach such a number, and so read or write a file its holder
 never opened, while a call already in the system keeps the file it entered with: the record names that hazard in the cost of the answer and keeps what bounds it open
-(§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
-error, the -1 stored at the close, the close that ignores its error, and no text)*
+(§12, §14). A read that fills the buffer (S3) and finds the descriptor -1 when the system returns,
+a `Close` made while it waited there, keeps none of the bytes past its `max` in the buffer, so that
+no read after the close takes them. A `File` has no text: `print(f)` is `no-text`. *(assumed, §12:
+the closed file's error, the -1 stored at the close, the close that ignores its error, the bytes of
+a fill that finds the file closed, and no text)*
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -287,7 +399,9 @@ it is written. An address that holds a NUL byte is `InvalidInput`, as a path is 
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
 Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
-and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
+and closes as a file does (S3, S4, S5), and a listener accepts and closes. The bytes a stream's
+buffer holds that no read took are dropped at its close, and only the bytes still in the system's
+queue make the close send the peer a reset (§12, the owner, 2026-11-02). A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
@@ -887,10 +1001,9 @@ print(Count("a\n\nb") else {
 The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
 a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
 goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
-"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
-buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
-`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
-*(assumed, §12)*.
+"`f.Lines()` on an open File" and "Stays open, continues"). The buffer is the one every `Read` goes
+through (S3), so that such a `Read` takes at most `max` of the buffered bytes first, and it holds
+8 KiB, as Rust's `BufReader` (§12, the owner, 2026-11-02).
 
 Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
 ```kurz

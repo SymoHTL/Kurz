@@ -245,8 +245,12 @@ public sealed partial class Emitter
     /// S3: <c>f.Read(mut into, max)</c>: a <c>max</c> below 0 raises <c>index-out-of-range</c>; then the room for <c>max</c> more bytes
     /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end; the kind of a
     /// failure is the one the runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
-    /// S16: the bytes a loop over the lines left in the buffer go first, at most <c>max</c> of them, under the lock a pull takes, and the
-    /// descriptor is read only where the buffer holds none, as Rust's <c>BufReader::read</c> gives what it holds before it reads.
+    /// The read goes through the handle's buffer of <see cref="LineBuffer"/> bytes, which a loop over the lines fills too (S16), under the
+    /// lock a pull takes, as Rust's <c>BufReader::read</c> reads (§12, the owner, 2026-11-02): the bytes the buffer holds go first, at most
+    /// <c>max</c> of them, with no system call; where it holds none, a <c>max</c> of 8 KiB or more, and one of 0, is read straight into the
+    /// list, and a smaller one fills the buffer with one read, made at the first such read, and takes at most <c>max</c> of what it read.
+    /// A failed read stores nothing; a fill that finds the descriptor -1 when the system returns, a <c>Close</c> made while it waited, keeps
+    /// none of the rest in the buffer (S5).
     /// </summary>
     private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome o, string handle, string kinds)
     {
@@ -262,35 +266,70 @@ public sealed partial class Emitter
         var more = fn.Value($"sext i32 {max} to i64");
         var block = Reserve(place, more);
         var reader = HandleField(handle, ReaderAt);
-        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
-        var buffered = fn.Label("buffered");
-        var unbuffered = fn.Label("unbuffered");
-        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, unbuffered);
-        fn.Block(buffered);
         var word = ReaderField(reader, ReaderLock);
+        void Unlock() => fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        void Append(string from, string count) // `count` bytes at `from` added to the list, for which `Reserve` made room
+        {
+            module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+            fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {from}, i64 {count}, i1 false)");
+            fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {count})");
+        }
+
         fn.Emit($"call void {LockReader()}(ptr {word})");
         var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
         var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
         var take = fn.Label("take");
         var empty = fn.Label("empty");
         fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, empty);
+
+        // the bytes the buffer holds, at most `max` of them, with no system call
         fn.Block(take);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
         var taken = fn.Value($"select i1 {fn.Value($"icmp slt i32 {held}, {max}")}, i32 {held}, i32 {max}");
-        var wide = fn.Value($"sext i32 {taken} to i64");
-        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, i64 {wide}, i1 false)");
-        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {wide})");
+        Append(fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}"), fn.Value($"sext i32 {taken} to i64"));
         fn.Emit($"store i32 {fn.Value($"add i32 {at}, {taken}")}, ptr {ReaderField(reader, ReaderPosition)}");
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Unlock();
         Succeed(o, taken);
+
+        // none held: a `max` of 8 KiB or more, as Rust's `BufReader` passes such a read by, and one of 0, which waits for no byte, read
+        // straight into the list
         fn.Block(empty);
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
-        fn.Branch(unbuffered);
-        fn.Block(unbuffered);
+        var straight = fn.Label("straight");
+        var fill = fn.Label("fill");
+        var large = fn.Value($"icmp sge i32 {max}, {LineBuffer}");
+        fn.CondBranch(fn.Value($"or i1 {large}, {fn.Value($"icmp eq i32 {max}, 0")}"), straight, fill);
+        fn.Block(straight);
         var r = SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}");
-        FailBelowZero(o, r, HandlePath(handle), kinds: kinds);
+        FailBelowZero(o, r, HandlePath(handle), Unlock, kinds);
         fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
+        Unlock();
         Succeed(o, fn.Value($"trunc i64 {r} to i32"));
+
+        // a smaller one: one read of up to 8 KiB into the buffer, made at the first, and at most `max` of it taken
+        fn.Block(fill);
+        var slot = ReaderField(reader, ReaderBuffer);
+        var none = fn.Label("unbuffered");
+        var made = fn.Label("buffered");
+        fn.CondBranch(fn.Value($"icmp eq ptr {fn.Value($"load ptr, ptr {slot}")}, null"), none, made);
+        fn.Block(none);
+        fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {LineBuffer})")}, ptr {slot}");
+        fn.Branch(made);
+        fn.Block(made);
+        var filled = fn.Value($"load ptr, ptr {slot}");
+        var read = SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {filled}, i64 {LineBuffer}");
+        FailBelowZero(o, read, HandlePath(handle), Unlock, kinds);
+        var given = fn.Value($"select i1 {fn.Value($"icmp slt i64 {read}, {more}")}, i64 {read}, i64 {more}");
+        Append(filled, given);
+        var kept = fn.Label("kept");
+        var done = fn.Label("filled");
+        fn.CondBranch(fn.Value($"icmp ne i32 {HandleDescriptor(handle)}, -1"), kept, done);
+        fn.Block(kept);
+        fn.Emit($"store i32 {fn.Value($"trunc i64 {given} to i32")}, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Emit($"store i32 {fn.Value($"trunc i64 {read} to i32")}, ptr {ReaderField(reader, ReaderCount)}");
+        fn.Branch(done);
+        fn.Block(done);
+        Unlock();
+        Succeed(o, fn.Value($"trunc i64 {given} to i32"));
     }
 
     /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>; the kind of a failure as <see cref="EmitFileRead"/> gives it.</summary>
