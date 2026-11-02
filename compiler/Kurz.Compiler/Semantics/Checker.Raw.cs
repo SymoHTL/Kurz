@@ -658,6 +658,8 @@ public sealed partial class Checker
         {
             EndChangeableNarrowing(); // N9: the write, which runs after its value and its key, ends what was known of a path through a `mut` field
         }
+
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -684,6 +686,8 @@ public sealed partial class Checker
         {
             EndChangeableNarrowing(); // N9: the write, which runs after its value and its index, ends what was known of a path through a `mut` field
         }
+
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
