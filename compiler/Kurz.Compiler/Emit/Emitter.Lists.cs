@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
@@ -208,6 +208,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is WeakRefType)
+        {
+            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -246,6 +252,12 @@ public sealed partial class Emitter
         if (type is ClassType c)
         {
             fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w)
+        {
+            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -2984,21 +2996,30 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The global that holds the case table of one direction (X3), written once into a program that changes case by Unicode's mapping in
-    /// that direction: four counts, of the runs, the mappings to several code points and the ranges of Cased and Case_Ignorable, then
-    /// those numbers of <see cref="CaseTables"/> in that order, as the standard library's <c>CaseMapped</c> reads them. Only lowering reads
-    /// the ranges, for the final sigma, so the table of uppercasing holds none.
+    /// that direction, as the standard library's <c>CaseMapped</c> reads it: four counts of 32 bits, of the blocks of deltas, the mappings
+    /// to several code points and the ranges of Cased and Case_Ignorable; the index of the levels, a byte for each block of 32 code points
+    /// of the first two planes; the deltas, 16 bits each; then the mappings to several code points and the ranges, 32 bits each, from
+    /// <see cref="CaseTables"/>. Only lowering reads the ranges, for the final sigma, so the table of uppercasing holds none. The fields
+    /// stand without padding, and the global at a multiple of 4, so that each number stands at a multiple of its size.
     /// </summary>
     private string CaseTable(bool upper)
     {
         var name = upper ? "@\"case.upper\"" : "@\"case.lower\"";
         if (helpers.Add(name))
         {
-            var runs = upper ? CaseTables.UpperRuns : CaseTables.LowerRuns;
+            var index = upper ? CaseTables.UpperIndex : CaseTables.LowerIndex;
+            var deltas = upper ? CaseTables.UpperDeltas : CaseTables.LowerDeltas;
             var multis = upper ? CaseTables.UpperMultis : CaseTables.LowerMultis;
             var cased = upper ? [] : CaseTables.Cased;
             var ignorable = upper ? [] : CaseTables.CaseIgnorable;
-            int[] words = [runs.Length / 4, multis.Length / 4, cased.Length / 2, ignorable.Length / 2, .. runs, .. multis, .. cased, .. ignorable];
-            module.Global($"{name} = private unnamed_addr constant [{words.Length} x i32] [{string.Join(", ", words.Select(w => $"i32 {w}"))}]");
+            int[] counts = [deltas.Length / 32, multis.Length / 4, cased.Length / 2, ignorable.Length / 2];
+            int[] rest = [.. multis, .. cased, .. ignorable];
+            var type = $"<{{ [4 x i32], [{index.Length} x i8], [{deltas.Length} x i16], [{rest.Length} x i32] }}>";
+            var value = $"<{{ [4 x i32] [{string.Join(", ", counts.Select(w => $"i32 {w}"))}], " +
+                $"[{index.Length} x i8] [{string.Join(", ", index.Select(w => $"i8 {unchecked((sbyte)w)}"))}], " +
+                $"[{deltas.Length} x i16] [{string.Join(", ", deltas.Select(w => $"i16 {unchecked((short)w)}"))}], " +
+                $"[{rest.Length} x i32] [{string.Join(", ", rest.Select(w => $"i32 {w}"))}] }}>";
+            module.Global($"{name} = private unnamed_addr constant {type} {value}, align 4");
         }
 
         return name;
@@ -3298,9 +3319,24 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), body, exit);
         fn.Block(body);
         var wide = fn.Value($"sext i32 {i} to i64");
-        fn.Emit($"store {Ir(type.Element)} {fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}")}, ptr {slot}");
+        var item = fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}");
         loops.Push((exit, next, regions.Count, scopes.Count));
-        EmitBlock(f.Body);
+        if (type.Element is WeakRefType weak)
+        {
+            // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
+            InScope(() =>
+            {
+                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                Declare(slot, Types.Read(weak));
+                EmitBlock(f.Body);
+            });
+        }
+        else
+        {
+            fn.Emit($"store {Ir(type.Element)} {item}, ptr {slot}");
+            EmitBlock(f.Body);
+        }
+
         loops.Pop();
         fn.Block(next);
         var again = fn.Value($"load i32, ptr {counter}");

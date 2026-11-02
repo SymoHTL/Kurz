@@ -86,7 +86,8 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout)
+        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+            or CallKind.TcpShutdownWrite)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
             var socket = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener };
@@ -106,6 +107,16 @@ public sealed partial class Emitter
                 case CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout:
                     EmitSetTimeout(c, info, outcome, handle);
                     break;
+                case CallKind.TcpShutdownWrite:
+                    {
+                        // S9: the writes ended by the system's `shutdown`, the descriptor kept, so that the stream still reads; a call in
+                        // flight on the handle (S5), so that through a holder of a closed stream it gets the closed handle's error
+                        var o = Enter(outcome, handle, "ErrorKind");
+                        FailBelowZero(o, SysCall("ShutdownWrite", $"i32 {HandleDescriptor(handle)}"), HandlePath(handle));
+                        Succeed(o, null);
+                        Leave(o, outcome, handle);
+                        break;
+                    }
                 default:
                     EmitFileClose(outcome, handle, socket);
                     break;

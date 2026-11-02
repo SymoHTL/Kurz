@@ -2430,6 +2430,99 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[m: 2]",
     ];
 
+    // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
+    // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
+    // read of a `weak` item through `?[`
+    private const string Weak = """
+        class Owner(string Name) {
+            pub string Text() => Name
+        }
+
+        class Pet(string Name, mut weak Owner? Keeper)
+
+        class Club(mut List<weak Owner?> Members)
+
+        data Tag(string Label, weak Owner? By)
+
+        weak Owner? Remember(weak Owner? w) {
+            return w
+        }
+
+        string NameOf(weak Owner? w) => w?.Name ?? "gone"
+
+        Pet Adopt() {
+            ann = Owner("Ann")
+            return Pet("Rex", ann)
+        }
+
+        o = Owner("Bob")
+        p = Pet("Tom", o)
+        print(NameOf(p.Keeper))
+        lost = Adopt()
+        print(NameOf(lost.Keeper))
+        p.Keeper = Owner("Cy")
+        print(NameOf(p.Keeper))
+        held = Remember(o)
+        print(held?.Name ?? "none")
+        p.Keeper = o
+        if p.Keeper != null {
+            print(p.Keeper.Name)
+        }
+
+        c = Club(List<weak Owner?>())
+        c.Members.Add(o)
+        c.Members.Add(Owner("Eve"))
+        c.Members.Add(null)
+        print(c.Members)
+        for m in c.Members {
+            print(m?.Name ?? "gone")
+        }
+
+        print("{p.Keeper} {c.Members[1]}")
+        List<weak Owner?>? maybe = c.Members
+        print(maybe?[0]?.Name ?? "gone")
+        print(maybe?[1] != null)
+        print("{maybe?[0]} {maybe?[2]}")
+        t = Tag("x", o)
+        print(NameOf(t.By))
+        mut Owner? strong = Owner("Fay")
+        weak Owner? faint = strong
+        print(NameOf(faint))
+        strong = null
+        print(NameOf(faint))
+        print(strong?.Name ?? "freed")
+        mut Owner? gus = Owner("Gus")
+        pg = Pet("Max", gus)
+        Owner? kept = pg.Keeper
+        gus = null
+        print(NameOf(pg.Keeper))
+        print(kept?.Name ?? "freed")
+        """;
+
+    private static readonly string[] WeakPrint =
+    [
+        "Bob",
+        "gone", // R3: `Ann` was freed at the end of `Adopt`, and the block stayed for the weak reference to read
+        "gone", // a temporary, freed at the end of its statement
+        "Bob",
+        "Bob",
+        "[Bob, null, null]", // A4 with R3: the text of what each read gives
+        "Bob",
+        "gone",
+        "gone",
+        "Bob null",
+        "Bob",
+        "false", // R3 with N5: `?[` reads a `weak` item, so the freed `Eve` is null there as in `c.Members[1]`
+        "Bob null",
+        "Bob",
+        "Fay",
+        "gone",
+        "freed",
+        "Gus", // R3: the read `kept` stored holds its target after its other holder let go of it
+        "Gus",
+    ];
+
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
     // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
     // lambda's environment and a list's item, each holding a chain of links
@@ -2902,6 +2995,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
     }
 
     [Fact]
@@ -2986,6 +3080,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
+        // a release under way stands once in the program
+        Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
@@ -3631,6 +3729,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void Copy_writes_every_byte_of_0_to_17_and_24_wherever_it_reads_them_and_writes_them()
+    {
+        // The standard library's `Copy`, whose form for small counts the speed escape of issue 156 (comment 6575718942) kept: up to
+        // 16 bytes as the C library's `memcpy` copies a small count, two words of 8, two words of 4 or three bytes, overlapping where
+        // the count is no power of two, and more byte by byte. `Substring` copies through it from the offset it starts at, and `Join`
+        // to the offset of each part: for each count 0 to 17 and 24, bytes of 128 and above in every place of a word (letters of two
+        // bytes, after one byte of ASCII where the count is odd), cut 0, 1, 3 and 7 bytes into a string that holds a block, with 0 or 5
+        // bytes after them, so that a cut ends where its string ends; and the cut joined after the bytes before it, so that `Join`
+        // writes it at that offset. Under the fence too, where a block ends where its page ends
+        const string text = """
+            Bytes Content(int count) {
+                mut b = Bytes()
+                if count % 2 == 1 {
+                    b.Add(90)
+                }
+
+                for j in 0..<count / 2 {
+                    c = 128 + (41 * j + 7 * count) % 1920
+                    b.Add(byte(192 + c / 64))
+                    b.Add(byte(128 + c % 64))
+                }
+
+                return b
+            }
+
+            void Cut(string s, int at, int count) {
+                cut = s.Substring(at, count)
+                print(cut.Bytes)
+                print(string.Join("", [s.Substring(0, at), cut]).Bytes)
+            }
+
+            for n in 0..<19 {
+                mut count = n
+                if n == 18 {
+                    count = 24
+                }
+
+                content = Content(count)
+                for at in [0, 1, 3, 7] {
+                    for end in [0, 5] {
+                        mut b = Bytes()
+                        for i in 0..<at {
+                            b.Add(byte(97 + i))
+                        }
+
+                        b.AddRange(content)
+                        for i in 0..<end {
+                            b.Add(byte(65 + i))
+                        }
+
+                        match string.FromUtf8(b) {
+                            string s => Cut(s, at, count)
+                            InvalidUtf8 e => print(e.At)
+                        }
+                    }
+                }
+            }
+
+            """;
+        var lines = new List<string>();
+        foreach (var count in Enumerable.Range(0, 18).Append(24))
+        {
+            var content = new List<int>();
+            if (count % 2 == 1)
+            {
+                content.Add(90);
+            }
+
+            for (var j = 0; j < count / 2; j++)
+            {
+                var c = 128 + (((41 * j) + (7 * count)) % 1920);
+                content.Add(192 + (c / 64));
+                content.Add(128 + (c % 64));
+            }
+
+            foreach (var at in new[] { 0, 1, 3, 7 })
+            {
+                foreach (var _ in new[] { 0, 5 })
+                {
+                    lines.Add("[" + string.Join(", ", content) + "]");
+                    lines.Add("[" + string.Join(", ", Enumerable.Range(97, at).Concat(content)) + "]");
+                }
+            }
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "copy-counts"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "copy-counts-fenced"), 0, [.. lines], "");
     }
 
     [Fact]

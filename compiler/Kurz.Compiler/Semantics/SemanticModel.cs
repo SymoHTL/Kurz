@@ -194,6 +194,9 @@ public enum CallKind
     /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
     TcpSetAcceptTimeout,
 
+    /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
+    TcpShutdownWrite,
+
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
 
@@ -289,6 +292,7 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
@@ -388,6 +392,10 @@ public sealed class SemanticModel
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
 
+    /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
+    public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);
+
+    internal void RecordStaticField(Expression read, StaticFieldSymbol field) => staticFields[read] = field;
     /// <summary>Every test of a class's <c>IsSupported</c> the checker read, with its class (R18).</summary>
     public IEnumerable<(MemberAccess Access, IntrinsicClass Class)> SupportTests => supportTests.Select(p => (p.Key, p.Value));
 

@@ -1,0 +1,15 @@
+// expect: output
+// | 2
+// rules: F11, K2
+
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)

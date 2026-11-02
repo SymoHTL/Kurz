@@ -1,0 +1,8 @@
+// expect: output
+// | hi
+// rules: S19
+
+Command.New("cat").Input("hi\n".Bytes).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
