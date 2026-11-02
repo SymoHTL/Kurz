@@ -202,15 +202,15 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType)
+        if (type is ClassType retained)
         {
-            fn.Emit($"call void {RetainInstance()}(ptr {value})");
+            fn.Emit($"call void {RetainInstance()}(ptr {Address(value, retained.Symbol)})");
             return;
         }
 
-        if (type is WeakRefType)
+        if (type is WeakRefType weak)
         {
-            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            fn.Emit($"call void {RetainWeak()}(ptr {Address(value, weak.Target.Symbol)})"); // R3
             return;
         }
 
@@ -249,15 +249,27 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType c)
+        if (type is ClassType c && Layout.Fat(c.Symbol))
         {
-            fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            ReleaseThroughTable(value); // K6: the release of the instance's class
             return;
         }
 
-        if (type is WeakRefType w)
+        if (type is ClassType thin)
         {
-            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
+            fn.Emit($"call void {ReleaseInstance(thin.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w && Layout.Fat(w.Target.Symbol))
+        {
+            fn.Emit($"call void {ReleaseWeakThroughTable()}(%kz.obj {value})"); // R3 with K6
+            return;
+        }
+
+        if (type is WeakRefType w2)
+        {
+            fn.Emit($"call void {ReleaseWeak(w2.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -3326,7 +3338,7 @@ public sealed partial class Emitter
             // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
             InScope(() =>
             {
-                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                fn.Emit($"store {Ir(Types.Read(weak))} {Upgraded(item, weak)}, ptr {slot}");
                 Declare(slot, Types.Read(weak));
                 EmitBlock(f.Body);
             });

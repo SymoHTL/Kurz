@@ -347,32 +347,14 @@ public sealed partial class Emitter
                 }
 
             case ClassType c when c.Symbol.ComparesByIdentity:
-                return fn.Value($"icmp eq ptr {left}, {right}"); // K4: a class with a `mut` or a `weak` field, and no clause, by identity
+                // K4: a class with a `mut` or a `weak` field, and no clause, by identity, as is every class derived from it (K13)
+                return fn.Value($"icmp eq ptr {Address(left, c.Symbol)}, {Address(right, c.Symbol)}");
+
+            case ClassType c when Layout.Fat(c.Symbol):
+                return EqualThroughTable(left, right, c.Symbol); // K13: by the instances' classes, then by the equality of that class
 
             case ClassType c:
-                {
-                    // K4, K5: one instance equals itself, and two by the fields that count, each as a field of a `data` value compares (D3)
-                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
-                    {
-                        var fields = fn.Label("fields");
-                        var same = fn.Label("same");
-                        fn.CondBranch(fn.Value("icmp eq ptr %a0, %a1"), same, fields);
-                        fn.Block(same);
-                        fn.Return("i1 true");
-                        fn.Block(fields);
-                        var result = "true";
-                        foreach (var field in c.Symbol.FieldsThatCount)
-                        {
-                            var index = c.Symbol.Fields.IndexOf(field);
-                            var l = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(c.Symbol, "%a0", index)}");
-                            var r = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(c.Symbol, "%a1", index)}");
-                            result = And(result, Equal(l, r, field.Type, line));
-                        }
-
-                        fn.Return($"i1 {result}");
-                    });
-                    return fn.Value($"call i1 {name}(ptr {left}, ptr {right})");
-                }
+                return fn.Value($"call i1 {ClassEqual(c.Symbol)}(ptr {left}, ptr {right})");
 
             case ListType list:
                 {
@@ -633,6 +615,32 @@ public sealed partial class Emitter
     /// as <c>%a0</c>, <c>%a1</c> and so on, while the function being emitted waits; <paramref name="attributes"/> are its own function
     /// attributes.
     /// </summary>
+    /// <summary>
+    /// K4, K5: the equality of two instances of the class, by their addresses: by identity, or one instance equal to itself and two by
+    /// the fields that count, each as a field of a <c>data</c> value compares (D3).
+    /// </summary>
+    private string ClassEqual(ClassSymbol symbol) => symbol.ComparesByIdentity
+        ? Helper("equal.identity", "i1", ["ptr", "ptr"], () => fn.Return($"i1 {fn.Value("icmp eq ptr %a0, %a1")}"))
+        : Helper($"equal.{Lower.Mangle(new ClassType(symbol))}", "i1", ["ptr", "ptr"], () =>
+        {
+            var fields = fn.Label("fields");
+            var same = fn.Label("same");
+            fn.CondBranch(fn.Value("icmp eq ptr %a0, %a1"), same, fields);
+            fn.Block(same);
+            fn.Return("i1 true");
+            fn.Block(fields);
+            var result = "true";
+            foreach (var field in symbol.FieldsThatCount)
+            {
+                var index = symbol.Fields.IndexOf(field);
+                var l = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(symbol, "%a0", index)}");
+                var r = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(symbol, "%a1", index)}");
+                result = And(result, Equal(l, r, field.Type, symbol.Line));
+            }
+
+            fn.Return($"i1 {result}");
+        });
+
     private string Helper(string key, string result, IReadOnlyList<string> parameters, Action body, params string[] attributes)
     {
         var name = $"@\"{key}\"";

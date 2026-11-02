@@ -83,6 +83,12 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     /// as C#'s static method and Rust's associated function, which takes no <c>self</c>.
     /// </summary>
     public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
+
+    /// <summary>K7: the method of a base class this <c>override</c> overrides; null for any other function.</summary>
+    public FunctionSymbol? Overridden { get; set; }
+
+    /// <summary>K7: whether a call through a reference of a base class's type runs the override of the instance's class: a method marked <c>virtual</c> or <c>override</c>.</summary>
+    public bool IsVirtual => Declaration is not null && (Declaration.Modifiers & (Modifiers.Virtual | Modifiers.Override)) != 0;
 }
 
 /// <summary>
@@ -141,6 +147,36 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     public int Line => Declaration.Line;
 
+    /// <summary>K6, K10: the class this one inherits from, whose fields come first in <see cref="Fields"/>; null for a class without one.</summary>
+    public ClassSymbol? Base { get; set; }
+
+    /// <summary>K6: whether a class of the program names this one as its base, so that a value of its type can be an instance of another class.</summary>
+    public bool Derived { get; set; }
+
+    /// <summary>Set once the base and the fields are resolved, and while they are, so that a class named as a base of itself is met once.</summary>
+    public bool Resolved { get; set; }
+
+    /// <summary>K10, K11, K16: the parameters of the primary constructor in the order a construction binds them, each with the field it gives.</summary>
+    public List<ConstructorSlot> Constructor { get; } = [];
+
+    /// <summary>K10: the explicit form's arguments of the base, read as a construction of the base; null for the short form and for a class without a base.</summary>
+    public CallExpression? BaseCall { get; set; }
+
+    /// <summary>The class and its bases, the class first.</summary>
+    public IEnumerable<ClassSymbol> Chain
+    {
+        get
+        {
+            for (var c = this; c is not null; c = c.Base)
+            {
+                yield return c;
+            }
+        }
+    }
+
+    /// <summary>K6: whether the class is <paramref name="other"/> or derives from it.</summary>
+    public bool HasBaseOrIs(ClassSymbol other) => Chain.Any(c => ReferenceEquals(c, other));
+
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
 
     public StaticFieldSymbol? StaticField(string name) => StaticFields.FirstOrDefault(f => f.Name == name);
@@ -150,15 +186,17 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     /// <summary>K5, K8, K15: the fields an <c>equal by</c> clause names, each once, in its order; empty where the class has no clause.</summary>
     public List<FieldSymbol> EqualBy { get; } = [];
 
-    /// <summary>K4: whether two instances compare by identity: a class without a clause that has a <c>mut</c> or a <c>weak</c> field.</summary>
-    public bool ComparesByIdentity => EqualBy.Count == 0 && Fields.Any(f => f.Mut || f.Type is WeakRefType);
+    /// <summary>K4: whether two instances compare by identity: a class without a clause that has a <c>mut</c> field or a field whose type
+    /// holds a <c>weak</c> reference, <c>List&lt;weak Owner?&gt;</c> as well as <c>weak Owner?</c> (the owner, 2026-11-02, #110, comment 6580085338).</summary>
+    public bool ComparesByIdentity => EqualBy.Count == 0 && Fields.Any(f => f.Mut || Types.ReachesWeak(f.Type));
 
     /// <summary>K4, K5: the fields <c>==</c> and the hash read: those the clause names, or every field of a class that compares by content.</summary>
     public IReadOnlyList<FieldSymbol> FieldsThatCount => EqualBy.Count > 0 ? EqualBy : ComparesByIdentity ? [] : Fields;
 
-    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
+    /// <summary>A5, A9: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result, its own or the nearest base's; null where the chain has none.</summary>
     public FunctionSymbol? TextMethod =>
-        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+        Chain.Select(c => c.Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null)
+            .FirstOrDefault(f => f is not null);
 }
 
 /// <summary>
@@ -187,6 +225,9 @@ public sealed class StaticFieldSymbol(FieldDeclaration declaration, ClassSymbol 
     /// <summary>F9: a field without <c>pub</c> is private to its class.</summary>
     public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
 }
+
+/// <summary>K10, K11, K16: a parameter of a class's primary constructor: the field it gives, own or the base's, the class whose declaration writes it, and that parameter.</summary>
+public sealed record ConstructorSlot(FieldSymbol Field, ClassSymbol Owner, Parameter Declaration);
 
 /// <summary>
 /// An <c>enum</c> (D12) with its values in the order written, each name once, and their numbers where the declaration writes them

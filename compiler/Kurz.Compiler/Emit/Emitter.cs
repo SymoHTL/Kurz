@@ -181,7 +181,9 @@ public sealed partial class Emitter
         End();
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
-        while (pending.Count > 0 || lambdas.Count > 0)
+        var prepared = 0;
+        var facets = new HashSet<string>(StringComparer.Ordinal);
+        while (true)
         {
             if (pending.Count > 0)
             {
@@ -189,9 +191,17 @@ public sealed partial class Emitter
                 features = compiled;
                 EmitFunction(function, instanceMap, name);
             }
-            else
+            else if (lambdas.Count > 0)
             {
                 EmitLambdaFunction(lambdas.Dequeue());
+            }
+            else if (prepared < tabled.Count)
+            {
+                PrepareTable(tabled[prepared++]); // K6: what a table holds, which can name more functions
+            }
+            else if (!TableFacets(facets))
+            {
+                break;
             }
         }
 
@@ -199,6 +209,8 @@ public sealed partial class Emitter
         {
             EmitDrain(); // K2 with section 3: the work lists of the instances released
         }
+
+        EmitTables(); // K6
 
         var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
         if (CpuRead() is { } read)
@@ -427,9 +439,9 @@ public sealed partial class Emitter
         var result = Types.Substitute(f.ReturnType, instanceMap);
         RequireSupported(result, d.Line);
         var parameters = new List<string>();
-        if (f.Owner is not null && !f.IsStatic)
+        if (f.Owner is { } owner && !f.IsStatic)
         {
-            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller; a `static` method has none
+            parameters.Add(Related(owner) ? $"{layout.Pair()} %this" : "ptr %this"); // K7: the instance, borrowed from the caller, with its table where its class has a base or derived classes (K6); a `static` method has none
         }
 
         for (var i = 0; i < f.Parameters.Count; i++)
@@ -443,10 +455,11 @@ public sealed partial class Emitter
         string[] attributes = unit.Runtime && OutOfLine.Contains($"{unit.Prefix}.{f.Name}") ? [.. FeatureAttributes(features), "noinline"] : FeatureAttributes(features);
         Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", attributes), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
-        if (f.Owner is not null && !f.IsStatic)
+        if (f.Owner is { } of && !f.IsStatic)
         {
-            var self = fn.Alloca("ptr", "this");
-            fn.Emit($"store ptr %this, ptr {self}");
+            var type = Ir(new ClassType(of));
+            var self = fn.Alloca(type, "this");
+            fn.Emit($"store {type} {(Related(of) && !Layout.Fat(of) ? fn.Value("extractvalue %kz.obj %this, 0") : "%this")}, ptr {self}");
             slots[Model.ThisOf(f)] = self;
         }
 

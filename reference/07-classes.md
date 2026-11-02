@@ -104,13 +104,18 @@ print(b.Count)
 
 ### K4 (decided, §4) Equality
 
-A class with `mut` fields compares by identity. A class without them compares by content, each field
+A class with `mut` fields compares by identity. A class with no `mut` field and no `weak` reference in
+its fields' types compares by content, each field
 by the equality Kurz gives its type, a `double` or `float` with NaN equal to NaN as under D3 and K5. Across
 inheritance (K6, K10) K13 holds. A class with a `weak` field compares by identity too, as one with a
 `mut` field does: what the field holds turns `null` when its target is freed (§4, the owner,
 2026-11-01, "Class compares by identity", against leaving the field out of the comparison and the
 hash, and against comparing its target's identity, under which equality and the hash change when
-the target is freed).
+the target is freed). So does a class whose field's type reaches a `weak` reference, an item of a
+list, a key or a value of a map, a nullable or a field of a `data` value, `class Club(List<weak Owner?> Members)`;
+content comes through K5's clause with fields that hold no `weak` (§4, the owner, 2026-11-02, #110,
+comment 6580085338). A class in between compares as its own class does, so a `weak` behind it does
+not count *(assumed, as §4 marks it)*.
 
 Case: [classes/equality-identity.kz](../corpus/classes/equality-identity.kz)
 ```kurz
@@ -147,6 +152,17 @@ class Tally(string Name, Map<string, int> Counts)
 
 t = Tally("a", Map<string, int>())
 print(t == t)
+```
+
+Case: [classes/equality-weak-in-list.kz](../corpus/classes/equality-weak-in-list.kz)
+```kurz
+class Owner(string Name)
+class Club(List<weak Owner?> Members)
+
+o = Owner("Ann")
+a = Club([o])
+print(a == Club([o]))
+print(a == a)
 ```
 
 ### K13 (decided, §4) Equality across inheritance
@@ -341,8 +357,43 @@ overrides, where C# 9 allows a more derived class type (the owner, 2026-10-09, c
 reference's reading, and on 2026-10-10 the exact return type against the covariant return of C# 9;
 `sealed override` was not offered as an option): an override whose return type differs is the compile error
 `override-return-type`, at the method (the owner, 2026-10-09, against `type-mismatch` at the
-method's line, whose message would name no override). There is no property syntax until
-something needs it.
+method's line, whose message would name no override). An override is as visible as it writes,
+whatever the method it overrides writes: one without `pub` is private to its class, so a call
+through the base reaches it while a call on the derived type outside the class is `not-visible`,
+and one with `prot` is `prot` (§4, the owner, 2026-11-02, #110, comment 6573113786, "allowed as
+written", against C#'s compile error CS0507 for an override that changes the visibility and against
+the override taking the base method's visibility; the cost is a method that a call through the base
+reaches and a call on the derived type is refused). A class derived from the one with such an
+override takes it as the method of that name, so a call of it on that class is `not-visible` too
+*(assumed: the nearest override stands for the method it overrides, as F13's candidates are read)*.
+There is no property syntax until something needs it.
+
+Case: [classes/override-private.kz](../corpus/classes/override-private.kz)
+```kurz
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    override string Sound() => "woof"
+}
+
+Animal a = Dog()
+print(a.Sound())
+```
+
+Case: [classes/override-private-not-visible.kz](../corpus/classes/override-private-not-visible.kz)
+```kurz
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    override string Sound() => "woof"
+}
+
+print(Dog().Sound())
+```
 
 Case: [classes/field-default-expression.kz](../corpus/classes/field-default-expression.kz)
 ```kurz
@@ -907,9 +958,21 @@ print(Point(1).Y())
 The fields that count (K5) are named in a clause after the head of the class:
 `class User(int Id, mut string Name) equal by Id`. `equal` and `by` are core words (L12). A class
 without the clause compares as K4 says. Whether a `mut` field can be named is K12; the form of the
-clause with several fields, and its errors, is K15.
+clause with several fields, and its errors, is K15. A clause that names a `weak` field is the
+compile error `equal-by-weak`, at the clause, naming the field, since a freed target would change
+`==` (§4, the owner, 2026-11-02, #110, comment 6580137405); a field whose type reaches a `weak`
+reference as K4 reads it counts as one, and the id is the record's proposal *(assumed, as §4 marks
+them)*.
 
 Case: [classes/equality-named.kz](../corpus/classes/equality-named.kz)
+
+Case: [classes/equal-by-weak.kz](../corpus/classes/equal-by-weak.kz)
+```kurz
+class Owner(string Name)
+class Pet(string Name, weak Owner? Keeper) equal by Name, Keeper
+
+print(Pet("Rex", null) == Pet("Rex", null))
+```
 
 ### K12 (decided, §4) A `mut` field in the clause
 

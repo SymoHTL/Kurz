@@ -67,7 +67,6 @@ public sealed class CorpusTests
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
-        ["types/generic-cannot-infer-classes.kz"] = "a base class (K6)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
 
