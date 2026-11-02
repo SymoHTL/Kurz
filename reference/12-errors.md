@@ -54,7 +54,7 @@ expects it (V12).
 | `native-type` | R16 | a declaration of a block of C functions with a type that cannot cross to C or with a `mut` parameter, or an argument in the place of its `...` that is a `bool`, a `float` or a number smaller than an `int` |
 | `semicolon` | L5 | a `;` that ends, starts or follows a statement: a statement ends where its line ends; a `;` anywhere else is `syntax` |
 | `reserved-word` | L12, L18, L19 | a core word, a built-in type's name, or a keyword the file imports, used as a name |
-| `capture-assign` | F11 | an assignment inside a lambda to a variable around it |
+| `capture-assign` | F11 | an assignment inside a lambda to a variable around it, or another change of the lambda's copy of it: an assignment into a path from it that reaches no instance, `d.Item = Counter(2)` on a captured `data` value among them, a `mut` method on it or on such a path, or passing either as `mut` |
 | `reversed-range` | C8, M9 | a range between literals whose end lies below its start, in a `for` loop or as the part of a list |
 | `ambiguous-call` | F13, O4 | a call that fits more than one function, none of them exactly; two functions that both keep the cases of a call passed to them, neither exactly (O4) |
 | `cannot-infer` | T27, F7, M11, X6, O4 | a call of a generic function whose type arguments are neither written nor inferable from its arguments, two instances of different classes with one base in one parameter's positions included, two type parameters in one written union and a literal of a case that a union beside its type parameter names, `"a"` for a union of `T` and `string`, included (O4), and a list literal where no list type stands whose items give no one type, `[]` and `[1, "a"]` among them (M11), `string.Join(",", [])` too (X6) |
