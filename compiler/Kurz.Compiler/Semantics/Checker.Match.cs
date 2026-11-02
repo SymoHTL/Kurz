@@ -358,12 +358,37 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)");
+
+        if (!isStatement && Types.IsVoid(success))
+        {
+            Report(ErrorIds.Syntax, e.Line, "a call with a `void` success used as a value (O10)");
+            return Typed.Error;
+        }
+
+        return new Typed(success);
+    }
+
+    /// <summary>
+    /// O5: the arms of an <c>else</c> over the cases of <paramref name="rest"/>, beside the success, of a call or of a loop's collection
+    /// (S16); a case no arm handles leaves the function at <paramref name="line"/> (O2, O3, O9). An <c>else</c> with no arms where there
+    /// is no case, after what <paramref name="after"/> names, is <c>unreachable-arm</c> at <paramref name="elseLine"/>, as an
+    /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02).
+    /// </summary>
+    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after)
+    {
+        if (arms.Count == 0 && rest.Count == 0)
+        {
+            Report(ErrorIds.UnreachableArm, elseLine, $"an `else` with no arms after {after}");
+            return;
+        }
+
         var handled = new List<KurzType>();
         var hasElse = false;
         var armWrong = false;
         var start = frame.Known; // N3: the success goes on with what held after the call, an arm with that too, and after both holds what each keeps
         var reaching = new List<ImmutableHashSet<NullPath>> { start };
-        foreach (var arm in e.Arms)
+        foreach (var arm in arms)
         {
             PushScope();
             frame.Known = start;
@@ -433,16 +458,8 @@ public sealed partial class Checker
         {
             // E1: an arm that names no case was reported at the arm; which case it meant is unknown, so no case is reported as unlisted
             // beside it, the one defect carrying the one error
-            Propagate(rest.Where(c => !handled.Any(h => IsCaseOf(c, h))), e.Line);
+            Propagate(rest.Where(c => !handled.Any(h => IsCaseOf(c, h))), line);
         }
-
-        if (!isStatement && Types.IsVoid(success))
-        {
-            Report(ErrorIds.Syntax, e.Line, "a call with a `void` success used as a value (O10)");
-            return Typed.Error;
-        }
-
-        return new Typed(success);
     }
 
     /// <summary>The arms of an <c>else</c> after a call that did not type: what does not depend on the call's cases is still checked, with the success unknown (E1).</summary>

@@ -1012,7 +1012,11 @@ print("b" > "b")
 
 ### T17 (decided, §4) Generics
 
-Generic types are written as in C#: `List<int>`, `Map<int, User>`.
+Generic types are written as in C#: `List<int>`, `Map<int, User>`. `void` is no type argument:
+`List<void>`, `Map<string, void>` and `Other<void>()` are the compile error `void-type-argument`
+where `void` is written, as C# refuses it (CS1547), while the result of a function type inside a
+type argument, `List<(int) => void>`, stands (§4, the owner, 2026-11-02, "refused, as CS1547").
+*(assumed, §4: the id, named for what it refuses)*
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -1021,6 +1025,13 @@ xs.Add(4)
 xs.Add(5)
 print(xs.Count)
 print(xs[1])
+```
+
+Case: [types/void-type-argument.kz](../corpus/types/void-type-argument.kz)
+```kurz
+fs = List<(int) => void>()
+names = Map<string, void>()
+print(fs.Count + names.Count)
 ```
 
 ### T19 (decided, §4) Declaring generic functions and types
@@ -1152,7 +1163,7 @@ print(x.Count)
 Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
 ```kurz
 List<T> Pair<T>(T a, List<T> b) => b
-List<T> Pick<T>(List<T> a, List<T> b) => b
+List<T> Both<T>(List<T> a, List<T> b) => b
 
 r1 = Pair(1L, [1])
 List<long> y1 = r1
@@ -1160,14 +1171,14 @@ print(y1)
 r2 = Pair(1, [2L])
 List<long> y2 = r2
 print(y2)
-r3 = Pick([1], [2L])
+r3 = Both([1], [2L])
 List<long> y3 = r3
 print(y3)
 r4 = Pair(1, [2, 3])
 List<int> y4 = r4
 print(y4)
 List<long> xs = [1]
-r5 = Pick(xs, [7])
+r5 = Both(xs, [7])
 List<long> y5 = r5
 print(y5)
 byte small = 1
@@ -1236,7 +1247,9 @@ is not held to name every kind or end in an `else` arm, unlike one on a union or
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
-error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
+error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
+that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
 same error)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
@@ -1360,6 +1373,22 @@ void ShowKind<T>() {
 
 ShowKind<Order>()
 ShowKind<bool>()
+```
+
+Case: [types/type-kind-if-not-read.kz](../corpus/types/type-kind-if-not-read.kz)
+```kurz
+data Point(int X, int Y)
+
+void Show<T>(T value) {
+    if T.Kind == TypeKind.Data {
+        for f in T.Fields {
+            print(f.Name)
+        }
+    }
+}
+
+Show(Point(1, 2))
+Show(true)
 ```
 
 Case: [types/type-fields-kind-not-read.kz](../corpus/types/type-fields-kind-not-read.kz)

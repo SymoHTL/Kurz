@@ -109,14 +109,17 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 315 : 336;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 324 : 345;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
     [
         "system/bad-address.kz", "system/bind-name.kz", "system/close-twice.kz", "system/connect-refused.kz", "system/delete-rename-size.kz",
         "system/directories.kz", "system/open-missing.kz", "system/path-with-nul.kz", "system/read-appends.kz", "system/read-negative-max.kz",
-        "system/tcp-echo.kz", "system/whole-file.kz", "system/write-read.kz", "system/file-modified.kz",
+        "system/tcp-echo.kz", "system/whole-file.kz", "system/write-read.kz", "system/file-modified.kz", "system/read-timeout.kz",
+        "system/write-timeout.kz", "system/connect-timeout.kz", "system/timeout-refused.kz", "system/accept-timeout.kz",
+        "system/lines-break-read.kz", "system/lines-empty.kz", "system/lines-invalid-utf8.kz", "system/lines-not-open-to-read.kz",
+        "system/lines-propagate.kz", "system/lines-read.kz", "system/lines-keeps-its-file.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>

@@ -49,7 +49,9 @@ public sealed partial class Emitter
                 }
 
             case NameExpression n:
-                return Instance(Model.FunctionNameOf(n), NoMap); // R17: a function of the C calling convention as a value, its address
+                return Instance(Model.FunctionNameOf(n), NoMap, NoFeatures); // R17: a function of the C calling convention as a value, its address, never a copy (R18)
+            case MemberAccess m when Model.SupportTestOf(m) is { } tested:
+                return EmitSupportTest(tested); // R18
             case MemberAccess m when Model.IsChainMember(m, out var member):
                 return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
             case MemberAccess m when Model.IsClockRead(m):
@@ -261,12 +263,14 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The pieces in one block of <c>string.Allocate</c> that holds their bytes together, each written after the one before, as Rust's
-    /// <c>format!</c> writes its pieces into one <c>String</c> and C#'s interpolation into one buffer, with no text made of the pieces
-    /// before the last: a text copied, and an integer's digits counted first and written in place by the runtime's
-    /// <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its text has them (A2), so that no text of it is made, as Rust's
-    /// <c>Display</c> of an integer writes its digits into the buffer it was given; more bytes than the largest <c>int</c> end the
-    /// process with the count asked for (T15). Pieces of no bytes together are the empty string, with no block, as Rust's
-    /// <c>format!</c> asks for none.
+    /// <c>format!</c> writes its pieces into one <c>String</c>, and C#'s interpolation into a rented buffer that it grows where a hole
+    /// does not fit and copies into the string once, with no text made of the pieces before the last: a text copied, and an integer's
+    /// digits counted first and written in place by the runtime's <c>WriteDigits</c>, a <c>-</c> before those of a negative one, as its
+    /// text has them (A2), so that no text of it is made, where Rust's <c>Display</c> of an integer writes them into a buffer of its own
+    /// on the stack and copies them; more bytes than the largest <c>int</c> end the process with the count asked for (T15). Pieces of
+    /// no bytes together are the empty string, with no block, as Rust's <c>format!</c> asks for none. A hole of a string read from a
+    /// place holds no count of it until the block is written, and nothing changes that place before then: the checker refuses a later
+    /// hole that changes it (M7, <c>changed-while-held</c>).
     /// </summary>
     private string InOneBlock(List<InterpolationPiece> pieces)
     {
@@ -460,6 +464,8 @@ public sealed partial class Emitter
         var rightType = TypeOf(b.Right);
         switch (op)
         {
+            case TokenKind.AmpersandAmpersand or TokenKind.BarBar when ConstantTest(b) is bool known:
+                return known ? "true" : "false"; // R18: tests the CPU or the function's sets answer
             case TokenKind.AmpersandAmpersand or TokenKind.BarBar:
                 {
                     // T18: the right side runs only when the left leaves the answer open
@@ -471,7 +477,7 @@ public sealed partial class Emitter
                     var done = fn.Label("logic");
                     fn.CondBranch(left, isAnd ? right : done, isAnd ? done : right);
                     fn.Block(right);
-                    InRegion(() => fn.Emit($"store i1 {EmitExpression(b.Right)}, ptr {slot}")); // what the right side makes is let go of where it ran
+                    EmitLogicalRight(b.Right, slot);
 
                     fn.Branch(done);
                     fn.Block(done);

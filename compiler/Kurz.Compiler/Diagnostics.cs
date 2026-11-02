@@ -130,6 +130,7 @@ public static class ErrorIds
     public const string CountedPointee = "counted-pointee";
     public const string NakedNotAllowed = "naked-not-allowed";
     public const string NakedBody = "naked-body";
+    public const string IntrinsicUnguarded = "intrinsic-unguarded";
     public const string NativeNotAllowed = "native-not-allowed";
     public const string NativeType = "native-type";
     public const string AsmOperand = "asm-operand";
@@ -161,6 +162,7 @@ public static class ErrorIds
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
     public const string KindNotRead = "kind-not-read";
+    public const string VoidTypeArgument = "void-type-argument";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";
