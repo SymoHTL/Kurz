@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
 using Xunit;
@@ -109,6 +110,57 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "hash-pieces" + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>The register of CRC-32/ISO-HDLC, from 0, after the byte <paramref name="b"/> and <paramref name="zeros"/> bytes of zero, a bit at a time.</summary>
+    private static uint Remainder(byte b, int zeros)
+    {
+        uint c = b;
+        for (var k = 0; k < 8 * (zeros + 1); k++)
+        {
+            c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        }
+
+        return c;
+    }
+
+    [Fact]
+    public void A_crc_reads_a_table_of_16_rows_which_a_program_that_hashes_one_holds_as_a_constant()
+    {
+        // crc32fast's `CRC32_TABLE`, which its slicing-by-16 reads: 16 rows of 256, row k the remainder of a byte followed by k bytes of
+        // zero, row 0 zlib's table; a constant of the program, which `Crc32.Hash` and a hasher's `Update` pass to the standard library,
+        // and which a program that hashes no CRC does not hold, its size unchanged (the positive control: the first program holds it)
+        var program = Compile("mut c = Crc32.New()\nc.Update(\"a\".Bytes)\nprint(Crc32.Hash(Bytes()) + c.Finish())\n", toolchain.Runtime).Program;
+        Assert.True(program is not null, "no program");
+        var table = Regex.Match(program.Ir, @"\n@""crc32\.table"" = private unnamed_addr constant \[4096 x i32\] \[([^\]]*)\]");
+        Assert.True(table.Success, "no table of 4096 words");
+        var words = table.Groups[1].Value.Split(", ").Select(w => unchecked((uint)int.Parse(w["i32 ".Length..], CultureInfo.InvariantCulture))).ToList();
+        Assert.Equal(Enumerable.Range(0, 16).SelectMany(k => Enumerable.Range(0, 256).Select(b => Remainder((byte)b, k))), words);
+        Assert.Equal(0x77073096u, words[1]);
+        Assert.Equal(2, Regex.Count(program.Ir, @"call (i32|void) @""std\.Crc32(Hash|Update)[^""]*""\([^)]*ptr @""crc32\.table"""));
+        var none = Compile("print(Hex.Encode(Sha256.Hash(Bytes())))\n", toolchain.Runtime).Program;
+        Assert.True(none is not null, "no program");
+        Assert.DoesNotContain("crc32.table", none.Ir, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_crc_block_the_system_refuses_reports_the_bytes_of_a_hasher_s_block()
+    {
+        // `Crc32.Hash` and `Crc32.New()` each ask for a hasher's block: 16 bytes of a list's counts and 1028 of the register and the
+        // 1024 bytes after it, where the table stood before it was the program's, which keep the bytes `allocation-failed` names (H1)
+        foreach (var (text, name) in new[] { ("print(Crc32.Hash(Bytes()))\n", "crc-hash"), ("mut c = Crc32.New()\nprint(c.Finish())\n", "crc-new") })
+        {
+            var refused = Compile(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+            Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, name + "-refused"));
+            Assert.Equal((1, "error: allocation-failed (1044 bytes)\n"), (code, error));
+            Assert.Empty(output);
+            var granted = Compile(text, toolchain.Runtime); // the positive control
+            Assert.True(granted.Program is not null, string.Join("; ", granted.Diagnostics.Sorted));
+            var (grantedCode, printed, grantedError) = Toolchain.Run(toolchain.Build(granted.Program, name + "-granted"));
+            Assert.Equal((0, ""), (grantedCode, grantedError));
+            Assert.Equal(["0"], printed);
         }
     }
 
