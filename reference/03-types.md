@@ -1340,8 +1340,8 @@ ShowKind<bool>()
 
 A generic function becomes one copy of its code for each list of type arguments it is called with
 (§4). A call in a generic function's body whose type argument holds a type parameter of that
-function inside a list, a map, a `data` type, a function type or a pointer makes a copy for a
-larger type than the copy it stands in. Where such a call lies on a cycle of calls among generic
+function inside a form of a type, a list, a map, a `data` type and a function type among them,
+makes a copy for a larger type than the copy it stands in. Where such a call lies on a cycle of calls among generic
 functions, directly or through others, so that the type argument comes back to the type parameter
 it grew from, each copy makes a larger one without end, and the call is the compile error
 `growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a

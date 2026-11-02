@@ -255,7 +255,7 @@ public sealed partial class Checker
         TypeParameterSymbol From, TypeParameterSymbol To, bool Grows, FunctionSymbol Caller, FunctionSymbol Callee, CallExpression Call, KurzType Argument);
 
     /// <summary>
-    /// Whether a type holds the type parameter inside a list, a map, a data type, a function type or a pointer, so that a copy made for it is
+    /// Whether a type holds the type parameter inside a form of a type, a list, a map, a data type and a function type among them, so that a copy made for it is
     /// larger than the copy it stands in; a union holds each case once, so a case that is the type parameter itself makes no larger copy.
     /// </summary>
     private static bool Grows(KurzType type, TypeParameterSymbol parameter) => type switch

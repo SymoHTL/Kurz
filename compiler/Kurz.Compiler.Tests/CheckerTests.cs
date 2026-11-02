@@ -3611,6 +3611,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Map<string, T>(), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<() => T>(() => x, n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "f = () => Deep([x], n - 1)\n        f()")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 3)], Errors("void Deep<T>(T x, int n) {\n    if n > 0 {\n        Deep([x], n - 1)\n    }\n}"));
 
