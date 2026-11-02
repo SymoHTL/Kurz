@@ -34,7 +34,8 @@ real clang; the command has no option that keeps it.
   `op_g`'s forms, those also with `noundef` on the parameters of `Md5F` and `Md5G`: `noundef` raises
   the ors marked `disjoint` in the optimised IR from 41 to 73, and the machine code stays the same,
   byte for byte. The two forms give 699 and 646 instructions.
-- A program that hashes 16 MiB 20 times, of which filling the 16 MiB takes 18 to 30 ms, built in each
+- A program that hashes 16 MiB 20 times, of which filling the 16 MiB takes 17 to 36 ms (the same
+  program with no hash, 10 runs at a load average of 14.2), built in each
   form of F and G with the compiler of `main` at 2050e82. The three forms ran in turn, their order
   rotated every round, 21 runs each, at a load average of 7.3 before and 7.0 after on 20 CPUs:
 
@@ -45,7 +46,9 @@ real clang; the command has no option that keeps it.
   | its two terms joined by an or | its two terms added together first | 397 ms | 395 to 402 ms |
 
   The first two again, alternating, 40 runs each at a load average of 6.6 before and 6.4 after: 377
-  ms (373 to 408) against 369 ms (364 to 388), F's or the faster in 37 of the 40 rounds.
+  ms (373 to 408) against 369 ms (364 to 388). Of the 40 rounds, each the two runs back to back,
+  F's or was the faster in 37, the two took the same time in one, and std's form was the faster in
+  two.
 
 So the gap came from G's form, and F's or is the faster form of F. Why each form costs what it does
 is not shown; `noundef` is not it, since the machine code does not change with it.
