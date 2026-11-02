@@ -1152,7 +1152,7 @@ print(x.Count)
 Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
 ```kurz
 List<T> Pair<T>(T a, List<T> b) => b
-List<T> Pick<T>(List<T> a, List<T> b) => b
+List<T> Both<T>(List<T> a, List<T> b) => b
 
 r1 = Pair(1L, [1])
 List<long> y1 = r1
@@ -1160,14 +1160,14 @@ print(y1)
 r2 = Pair(1, [2L])
 List<long> y2 = r2
 print(y2)
-r3 = Pick([1], [2L])
+r3 = Both([1], [2L])
 List<long> y3 = r3
 print(y3)
 r4 = Pair(1, [2, 3])
 List<int> y4 = r4
 print(y4)
 List<long> xs = [1]
-r5 = Pick(xs, [7])
+r5 = Both(xs, [7])
 List<long> y5 = r5
 print(y5)
 byte small = 1
