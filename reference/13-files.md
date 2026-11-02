@@ -295,15 +295,19 @@ and closes as a file does (S3, S4, S5), and a listener accepts and closes. A `Cl
 or a listener also shuts the socket down, `shutdown(2)`, so that a call that blocks on it in another
 thread returns at once, as Go's close wakes it, a blocked `Accept` or `Read` with the error of a closed
 handle, S5's, and a listener's port is free right away (§12, the owner, 2026-11-02, against a call that
-waits for its bound). An actor waiting in the poller on a
+waits for its bound). The shutdown runs only while calls are in flight, a `Close` with none releasing
+the descriptor at once as before (against a shutdown at every `Close`); a blocked `Write` that the
+shutdown wakes gets that error too, as Go's close gives a blocked write `net.ErrClosed` (against the
+system's broken pipe or reset); a `Read` in flight that the shutdown meets with bytes the socket holds
+takes them, and the next call gets that error (against failing the call and dropping the bytes); and a
+stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte, after the mark gives
+that error, a real timeout or reset that races the `Close` among them (against the system's answer,
+which would depend on the race) (§12, the owner, 2026-11-02). An actor waiting in the poller on a
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
 that waits); the runtime of Linux has no poller, a call blocking its thread (S10), so that no actor
-waits in one there. *(assumed, §12: that the shutdown runs only where calls are in flight; that a
-blocked `Write` returns with that error too; that a `Read` the shutdown meets with bytes the socket
-holds takes them; and that every failure, and every read of no byte, of a stream's read or write or
-a listener's `Accept` that ends after the mark is that error)* A listener's socket reuses
+waits in one there. A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
@@ -375,7 +379,8 @@ from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a 
 the bound holds for an actor's socket stands open (§14).
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two; the runtime of
-Linux has no poller (S10).
+Linux has no poller (S10); and whether a `Close` with no call in flight shuts the socket down no
+program can see, since the runtime shares no descriptor across processes.
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
