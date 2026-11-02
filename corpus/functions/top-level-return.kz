@@ -1,0 +1,9 @@
+// expect: output
+// | a
+// rules: F17
+
+print("a")
+if args.Count == 0 {
+    return 0
+}
+print("b")

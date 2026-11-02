@@ -1,0 +1,14 @@
+// expect: error type-mismatch at 6
+// rules: S16
+
+// two names walk the entries of a map, and a file's lines are no map
+void Run(File f) {
+    for i, line in f.Lines() {
+        print(line)
+    } else {
+        IoError e => print(e)
+        InvalidUtf8 u => print(u)
+    }
+}
+
+print(1)

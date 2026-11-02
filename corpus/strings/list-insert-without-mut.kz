@@ -1,0 +1,6 @@
+// expect: error mut-required at 5
+// rules: X11
+
+xs = [1]
+xs.Insert(0, 2)
+print(xs)
