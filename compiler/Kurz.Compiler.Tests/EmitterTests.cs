@@ -263,6 +263,41 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_map_keeps_the_hash_of_a_key_whose_hash_reads_more_than_one_word()
+    {
+        // `KeepsHash`: a slot of a key of one word holds the key and the value, as hashbrown's bucket, and its growth hashes the key
+        // again; a slot of a key whose hash reads more holds its hash first, as .NET keeps an entry's hash code (issue 157, item 14,
+        // under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
+        const string program =
+            "enum Color { Red, Green }\ndata Pair(string A, string B)\n\nlongduration far = 100000days\n" +
+            "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
+            "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
+            "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
+            "mut j = Map<timestamp, int>()\nj[timestamp.Now] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
+            "mut m = Map<float, int>()\nm[1.5f] = 1\n" +
+            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count)\n";
+        var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(compiled is not null, "no program");
+        string[] layouts =
+        [
+            "Map<int, int>\" = type { i32, i32 }",
+            "Map<long, int>\" = type { i64, i32 }",
+            "Map<char, int>\" = type { i32, i32 }",
+            "Map<bool, int>\" = type { i1, i32 }",
+            "Map<Color, int>\" = type { i8, i32 }",
+            "Map<double, int>\" = type { double, i32 }",
+            "Map<timestamp, int>\" = type { i64, i32 }",
+            "Map<float, int>\" = type { float, i32 }",
+            "Map<string, int>\" = type { i64, %kz.str, i32 }",
+            "Map<Pair, int>\" = type { i64, %\"d.Pair\", i32 }",
+            "Map<List<int>, int>\" = type { i64, ptr, i32 }",
+            "Map<longduration, int>\" = type { i64, i128, i32 }",
+            "Map<int?, int>\" = type { i64, { i8, [1 x i32] }, i32 }",
+        ];
+        Assert.All(layouts, layout => Assert.Contains($"\n%\"entry.{layout}", compiled.Ir, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Remove_finds_the_slot_of_its_key_again_only_in_a_block_it_copied()
     {
         // hashbrown's `remove_entry` finds the key's slot once: the helper of `Remove` looks the key up a second time only on the branch

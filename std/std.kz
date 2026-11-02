@@ -3500,7 +3500,8 @@ ulong FiveDigits(int word) => match word {
 // keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
-// entry: the hash of its key, 8 bytes, then the key and the value; a slot without an entry holds what its
+// entry: the hash of its key, 8 bytes, then the key and the value, for a key whose hash reads more than one
+// word, and the key and the value alone for a key of one word (the emitter's `KeepsHash`); a slot without an entry holds what its
 // bytes held before. A slot's control byte is 255 where the slot holds no entry and a probe ends at its
 // group: never filled since the block was made or cleared, or emptied by `MapErase` in a group that
 // holds a 255 still; 128 where its entry was removed in a group with no 255, which a probe passes; and
@@ -3767,13 +3768,15 @@ bool MapOpen(byte* group) {
     return (word & (word << 1) & 0x8080808080808080UL) != 0
 }
 
-// For an entry added to a block no other value holds and that has no room left: a block with its
-// entries and its keys, the old block freed, as hashbrown's `reserve_rehash` makes one: of the same
-// slots where the entries and the one added fill no more than half of the entries it holds, so that
-// the slots of removed entries are taken again, else of twice its slots. Null with `asked` set to the
-// bytes asked for where the system refuses, and with the bytes of the grown block where its slots would
-// be more than the largest `int` counts.
-pub byte* MapGrow(byte* block, long entry, mut long asked) {
+// For an entry added to a block no other value holds and that has no room left: a block with its count
+// and its keys and no entry in a slot, which the entries of the old block go into, as hashbrown's
+// `reserve_rehash` makes one: of the same slots where the entries and the one added fill no more than
+// half of the entries it holds, so that the slots of removed entries are taken again, else of twice its
+// slots. Null with `asked` set to the bytes asked for where the system refuses, and with the bytes of the
+// grown block where its slots would be more than the largest `int` counts. A map whose slots keep their
+// entries' hashes moves them with `MapGrow`; the emitted code moves the entries of one that keeps none
+// under their keys' hashes taken again, as hashbrown does.
+pub byte* MapGrown(byte* block, long entry, mut long asked) {
     long room = long(MapRoom(block))
     mut long slots = room * 2
     if long(MapCount(block)) + 1 <= MapCapacity(room) / 2 {
@@ -3793,6 +3796,22 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     }
 
     byte* p = MapBlock(slots, entry, key0, key1, mut asked)
+    if p != null {
+        raw {
+            *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
+            *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
+        }
+    }
+
+    return p
+}
+
+// For an entry added to a block no other value holds and that has no room left, of a map whose slots keep
+// their entries' hashes: the block `MapGrown` makes, with the entries moved into it under the hashes their
+// slots keep, and the old block freed. Null as `MapGrown` gives it.
+pub byte* MapGrow(byte* block, long entry, mut long asked) {
+    long room = long(MapRoom(block))
+    byte* p = MapGrown(block, entry, mut asked)
     if p == null {
         return null
     }
@@ -3800,8 +3819,6 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     byte* control = MapControl(block)
     byte* from = MapSlots(block)
     raw {
-        *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
-        *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
         // the entries in the order of their slots, a group's 8 control bytes read as one word and its slots with an
         // entry, whose bytes have the high bit clear, taken lowest first, as hashbrown's `RawIter` takes them by
         // `match_full`; an entry's bytes moved a word at a time, since the emitted code lays out an entry from a word
