@@ -5033,30 +5033,15 @@ pub byte* HexEncode(byte* message, mut long asked) {
     return text
 }
 
-// The value of the hexadecimal digit `b`, 0 to 15, in upper or lower case, or -1 for a byte that is no
-// digit (H7), as the `hex` crate's `val` reads one.
-int HexValue(int b) {
-    if b >= 48 && b <= 57 {
-        return b - 48
-    }
-
-    if b >= 65 && b <= 70 {
-        return b - 55
-    }
-
-    if b >= 97 && b <= 102 {
-        return b - 87
-    }
-
-    return -1
-}
-
 // The bytes the hexadecimal digits of the `count` bytes at `text` give (H7): -1 with a new list of
 // `count / 2` bytes in `made`, two digits for each byte, the higher half first, null for no bytes, as the
 // `hex` crate's `decode`; else the position `HexError` holds, with null in `made`: `count` where it is
 // odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
-// null in `made` and `asked` set where the system refuses.
-pub long HexDecode(byte* text, long count, mut byte* made, mut long asked) {
+// null in `made` and `asked` set where the system refuses. `digits` is the emitter's table of the value
+// of each byte as a digit, 255 for a byte that is no digit, read as .NET's scalar `FromHexString` reads
+// its table: the two digits of a pair, one test of both, and where it fails the position of the high
+// byte where that is no digit, else of the low one.
+pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut long asked) {
     made = null
     if count % 2 != 0 {
         return count
@@ -5076,15 +5061,14 @@ pub long HexDecode(byte* text, long count, mut byte* made, mut long asked) {
     raw {
         mut long at = 0
         while at < count {
-            int high = HexValue(int(text[at]))
-            int low = HexValue(int(text[at + 1]))
-            if high < 0 {
+            int low = int(digits[int(text[at + 1])])
+            int high = int(digits[int(text[at])])
+            if (low | high) == 255 {
                 bad = at
-                break
-            }
+                if high != 255 {
+                    bad = at + 1
+                }
 
-            if low < 0 {
-                bad = at + 1
                 break
             }
 

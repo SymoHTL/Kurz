@@ -541,7 +541,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   which `ParseDecimal` reads as .NET's `NumberToDecimal` reads the digits, rounding half to even at the cut with every
   digit after it counted and holding the range after the rounding (X7); and `Hex.Decode(s)`, the bytes of
   a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
-  first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7). A piece of `Split`, a trimmed
+  first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7), the digits read two at a time
+  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's `FromHexString`
+  reads them. A piece of `Split`, a trimmed
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
