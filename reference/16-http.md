@@ -183,9 +183,9 @@ program runs, a class whose own `Text()` reads none being no such type, at the e
 2026-11-02, the design standing), so that the text of an HTTP outcome,
 `string | IoError | HttpError` among them, is `not supported` whatever case it holds, until a
 `match` gives each case its own arm, and an empty `List<HttpError>` and a null `HttpError?` are
-refused as well
-*(assumed: the values and the expressions named, the reading by the type and its cost, as §12 marks
-them)*, and to a call of that `Text()`, `e.Text()`, at the call, with the same words (§12, the
+refused as well (§12, the owner, 2026-11-03, Q2 (a))
+*(assumed: the values and the expressions named, as §12 marks them)*, and to a call of that
+`Text()`, `e.Text()`, at the call, with the same words (§12, the
 owner, 2026-11-02, against `unknown-name`, which says that the method does not exist, and against a
 `Text()` that builds by reading the body, the mechanism Q15 (a) set aside).
 
