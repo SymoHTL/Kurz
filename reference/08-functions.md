@@ -161,20 +161,34 @@ through the folder too, `json.Json`; a function at the top of the folder is reac
 folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives the folder another
 name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
 name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
-agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
-"Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
+agree are `redeclared` at the second `use` line, which `as` fixes, `use b/util as butil` (§8, §13,
+the owner, 2026-11-01, "By kind of name", "Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
 project and a line of `project.kz`, `use json` beside a folder `json`, is `ambiguous-name` at that
 line, in every file of the project, those of the folder `json` included, and with `as` too,
 `use json as j` (§8, the owner, 2026-11-02). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
-the folder's name as its qualifier in the file, the old name there being `unknown-name`; the names
-`redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
+the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
+nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
 the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
-and a path that holds `.` or `..` are `unknown-name` at the `use` line)*
+and a path that holds `.` or `..` are `unknown-name` at the `use` line, while the runtime's `use sys`
+and `use std` stand as §2 makes them, what they are in a program's file being open (§14); a longer
+path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
+`ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
+folder of the project, so that `use json` beside it names the line)*
 
-No case: it takes several files, and a case of the corpus is a single file.
+Case: [functions/use-names-nothing.kz](../corpus/functions/use-names-nothing.kz)
+```kurz
+use nothing_here
+
+print(1)
+```
+
+No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
+file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
+before the checker reads it.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
