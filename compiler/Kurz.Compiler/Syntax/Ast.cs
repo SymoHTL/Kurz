@@ -176,7 +176,8 @@ public sealed record WhileStatement(int Line, Expression Condition, Block Body) 
 
 /// <summary>
 /// <c>for name in collection { }</c> (C6, C8), and <c>for key, value in map { }</c>, whose second name is <paramref name="Second"/> (C6);
-/// <paramref name="Arms"/> are those of an <c>else</c> after the block, which handles the cases its collection fails with (S16), null without one.
+/// <paramref name="Arms"/> are those of an <c>else</c> after the block, which handles the cases its collection fails with (S16), null without one,
+/// and <paramref name="ElseLine"/> is the line of that <c>else</c> keyword, 0 without one.
 /// </summary>
 public sealed record ForInStatement(int Line, string Variable, int VariableLine, Expression Collection, Block Body, LoopName? Second = null, IReadOnlyList<MatchArm>? Arms = null, int ElseLine = 0) : Statement(Line);
 

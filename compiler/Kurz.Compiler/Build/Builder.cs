@@ -69,7 +69,7 @@ public static class Builder
             return new Compilation(diagnostics, null);
         }
 
-        var checker = Checker.Check(tree, diagnostics, grants);
+        var checker = Checker.Check(tree, diagnostics, grants, runtime.StdChecker); // W1: the file sees the types of std/ the prelude names
         if (diagnostics.HasErrors || diagnostics.HasNotSupported)
         {
             return new Compilation(diagnostics, null);

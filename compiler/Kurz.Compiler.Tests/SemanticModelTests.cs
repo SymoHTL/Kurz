@@ -50,7 +50,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             }
 
             var diagnostics = new DiagnosticBag();
-            var checker = Checker.Check(tree, diagnostics, header.Grants);
+            var checker = Checker.Check(tree, diagnostics, header.Grants, CorpusTests.StdChecker.Value); // W1: as a build reads it
             if (diagnostics.Items.Count == 0)
             {
                 yield return (file, tree, checker.Model);
@@ -670,9 +670,19 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
+                    foreach (var field in (t.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0 && f.Value is not null))
+                    {
+                        Need(Try(() => model.FieldsThisOf(model.ClassOf(t))), field.Line, $"the instance the default of `{field.Name}` reads"); // K7
+                        Expression(field.Value);
+                    }
+
                     foreach (var method in (t.Members ?? []).OfType<FunctionDeclaration>())
                     {
-                        Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7
+                        if ((method.Modifiers & Modifiers.Static) == 0)
+                        {
+                            Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7: a `static` one has none
+                        }
+
                         Statement(method);
                     }
 
@@ -781,9 +791,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    // a variable, a function, a data value without fields, an implicit field (K7), or the name of a type parameter that
+                    // a variable, a function, a data value without fields, an implicit field (K7), a static field, or the name of a type parameter that
                     // holds a constant, a value of its enum, an integer, a `bool` or a `char` a code generator reads whole (T34)
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant or IntegerConstant or BoolConstant or CharConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant or IntegerConstant or BoolConstant or CharConstant) || model.IsImplicitField(n, out _, out _) || model.IsStaticField(n, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7
@@ -794,6 +804,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // T33: `f.Name` in a pass of a loop over `T.Fields`, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
+                case MemberAccess m when model.IsStaticField(m, out _):
+                    break; // K18: `T.F`, a `static` field whose constant a code generator reads, with no instance
                 case MemberAccess m when model.SupportTestOf(m) is not null:
                     break; // R18: `X86.Sse41.IsSupported`, a test of the CPU a code generator reads whole
                 case MemberAccess m:

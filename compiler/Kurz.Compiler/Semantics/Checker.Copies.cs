@@ -385,13 +385,22 @@ public sealed partial class Checker
         }
 
         var passes = new List<Block>();
+        var redeclared = Redeclares(f.Variable, f.VariableLine); // V9: the loop's name, once, whatever the count of fields
         foreach (var field in walked.Symbol.Fields)
         {
             var pass = new FieldPass(f.Variable, n.Name, walked, field, SubstituteData(walked, field.Type));
             var body = SyntaxCopy.Copy(f.Body, (e, copyOf) => FieldGet(e, copyOf, pass));
             passes.Add(body);
             PushScope();
-            DeclareChecked(f.Variable, Types.Error, false, VariableKind.Loop, f.VariableLine, f);
+            if (redeclared)
+            {
+                DeclareUnreadable(f.Variable, VariableKind.Loop, f.VariableLine, f);
+            }
+            else
+            {
+                Declare(f.Variable, Types.Error, false, VariableKind.Loop, f.VariableLine, f);
+            }
+
             passVariables[frame.Scope.Variables[f.Variable]] = pass;
             activePasses.Add(pass);
             frame.Loops.Add(new LoopExits { Unrolled = true });
@@ -408,6 +417,12 @@ public sealed partial class Checker
             CountNamesRead(f.Body); // a type with no fields: the body runs in no pass, and what it names counts as read
         }
 
+        if (f.Arms is not null)
+        {
+            // S16: the fields fail with no case, as a list's items, so the `else` after the loop is read as after a list's
+            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)");
+        }
+
         model.RecordPasses(f, passes);
         return true;
     }
@@ -415,6 +430,13 @@ public sealed partial class Checker
     /// <summary>A pass's copy of <c>f.Get(value)</c>, with one value and no name, as <c>(value).Field</c>; null for any other expression.</summary>
     private MemberAccess? FieldGet(Expression e, Func<Expression, Expression> copyOf, FieldPass pass)
     {
+        if (e is MemberAccess earlier && fieldGets.TryGetValue(earlier, out var outer))
+        {
+            var again = earlier with { Target = copyOf(earlier.Target) }; // a pass of a loop inside a pass: the outer read keeps its pass
+            fieldGets[again] = outer;
+            return again;
+        }
+
         if (e is not CallExpression { Callee: MemberAccess { Target: NameExpression target, Member: "Get", Conditional: false }, TypeArguments.Count: 0, Arguments: [{ Name: null, Mut: false } argument] } call
             || target.Name != pass.Variable)
         {
