@@ -640,12 +640,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
-- a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
+- a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
   every node is new (`Syntax/SyntaxCopy.cs`), so that the model holds each copy's types apart, with
   the type parameter's name bound to the type argument and `T.Kind` a constant of `TypeKind`; a
   `match` on it reads the one arm that takes the copy's kind, and the emitter emits that arm alone;
+  a loop over `T.Fields` is unrolled in a copy into a pass for each field of the primary constructor
+  of the `data` type it binds (D14), in order, each a copy of the loop's body in which
+  `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
+  type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
+  emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
+  type, `Order.Source`, where a pass made the copy;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -691,8 +697,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
   strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
-  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
-  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
+  K8, K15), else by their addresses where a field is `mut` or `weak` (K4), and else field by field as a
+  `data` value compares (K4, D3), in a
   function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -977,10 +984,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
-  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
-  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
-  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
-  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
+  as the order, then words on the runtime's own path, where Rust's `<` of `str` calls the C library's `memcmp`,
+  reading no byte past the end of either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the
+  counts, the first bytes and up to 16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more,
+  which the emitter marks `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1419,12 +1426,18 @@ that sit under a rule by its id. Every one is pinned by a test.
   actor bodies write `mut users = Map<int, User>()`.
 - T17 with T19: how a call's type arguments are told from comparisons. The front end keeps the list
   when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
-  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
+  comparisons, a type argument that is a dotted name included, `a < b.c, d > (e)` being the call
+  `a<b.c, d>(e)` as in C#, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
   states no such rule.
+- T17: `void` as a type argument written in a type or a call, of a generic function, a generic `data`
+  type, `List` and `Map`, is `void-type-argument` where it is written, nested ones and one in a
+  result's or a field's type included, where `List<void>.FromRaw(p, n)` and `List<void>.Allocate(n)`
+  keep R14's `type-mismatch` and the result of a function type inside a type argument,
+  `List<(int) => void>`, stands.
 - R10 to R17: the raw forms, each edge with the rule it rests on.
   - `*` and `&` before a value are prefix operators that bind as `-` does, since R10 writes a pointer
     as C# writes it, so `*b.Next` reads through `b.Next`. A line that starts with `*` starts a
@@ -1623,8 +1636,10 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
-`T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
+`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
+call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
@@ -1645,10 +1660,7 @@ generic data type (T19), each of which leaves the data type, and every data type
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
-type or a time type (T10, T29); `void` as a type argument written in a type or a call, of a generic
-function, a generic `data` type, `List` and `Map`, which C# refuses and Rust's `()`, a type of no
-size, takes, and of which the record says neither (T17, T19), where `List<void>.FromRaw(p, n)` and
-`List<void>.Allocate(n)` keep R14's `type-mismatch` (below);
+type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -1692,7 +1704,8 @@ round can ask about it by the rule's id.
   has none; in a class that compares by identity or by its clause such a field is not compared, and is no
   error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
   `data` value, a union or an instance compared by content, compares that instance by its clause too, and
-  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  so ends a narrowing as N9's call, as `==` on the instance itself does (the owner, 2026-11-02, #110, comment 6586836827:
+  such an `==` is a call everywhere). A field named twice in
   one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
@@ -2071,9 +2084,11 @@ round can ask about it by the rule's id.
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
   reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
   field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
-  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
-  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
-  6573114335).
+  variable holds, itself or through `data` fields, `xs[0] = 2`, keeps the narrowing of a path with no
+  `weak` reference in it and ends it for one with a `weak` reference, while one into what a field of
+  an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment 6573114335). A read
+  or a write of a map's entry whose key type compares by an `equal by` clause, `m[k]` and `m[k] = 2`,
+  ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

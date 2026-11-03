@@ -446,6 +446,11 @@ public sealed partial class Checker
     private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
+        if (variable is not null && passVariables.TryGetValue(variable, out var pass))
+        {
+            return FieldVariableAsValue(pass, n.Line); // T33: `f` of a loop over `T.Fields` is no value
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
@@ -574,6 +579,16 @@ public sealed partial class Checker
 
     private Typed CheckMember(MemberAccess m)
     {
+        if (fieldGets.TryGetValue(m, out var pass))
+        {
+            return CheckFieldGet(m, pass); // T33: what `f.Get(value)` became in a pass
+        }
+
+        if (PassMember(m) is { } member)
+        {
+            return member; // T33: `f.Name`
+        }
+
         if (m.Conditional || InChain(m.Target))
         {
             return CheckChainMember(m); // N5
@@ -1471,7 +1486,8 @@ public sealed partial class Checker
             switch (refused)
             {
                 case (true, var why):
-                    var rules = left.Type is ClassType ? "T18, K4, D3, M9" : "T18, D3, M9"; // K4: a class compares each field as its type does
+                    // K4: a class compares each field as its type does, K5: a clause each field it names
+                    var rules = left.Type is ClassType c ? (c.Symbol.EqualBy.Count > 0 ? "T18, K5, D3, M9" : "T18, K4, D3, M9") : "T18, D3, M9";
                     Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} ({rules})");
                     return new Typed(Types.Bool);
                 case (false, var why):
