@@ -5496,46 +5496,46 @@ pub byte* Md5Hash(byte* message, mut long asked) {
     return digest
 }
 
-// CRC-32/ISO-HDLC's state at `s`, 1028 bytes: the register (0) and the remainders of the 256 bytes under
-// the reflected polynomial 0xEDB88320 (4), as zlib's `crc32` reads a byte at a time; the register starts
-// at all ones, and the CRC is the register with every bit flipped.
+// CRC-32/ISO-HDLC's state at `s`, 1028 bytes: the register (0), which starts at all ones, the CRC being the
+// register with every bit flipped, and 1024 bytes that nothing reads, which keep the hasher's block at the
+// size `allocation-failed` names for it (H1). The remainders of the reflected polynomial 0xEDB88320 are the
+// emitter's table `crc32.table`, 16 rows of 256, which each call takes, as crc32fast's `CRC32_TABLE`.
 void Crc32Start(byte* s) {
     raw {
         *Ptr<uint>(s) = 0xffffffff
-        uint* table = Ptr<uint>(s + 4)
-        mut int i = 0
-        while i < 256 {
-            mut uint c = uint(i)
-            mut int k = 0
-            while k < 8 {
-                if (c & 1) != 0 {
-                    c = 0xedb88320 ^ c >> 1
-                } else {
-                    c = c >> 1
-                }
-
-                k = k + 1
-            }
-
-            table[i] = c
-            i = i + 1
-        }
     }
 }
 
-// The `n` bytes at `p` through the register of the state at `s`.
-void Crc32Feed(byte* s, byte* p, long n) {
+// The register `start` after the `n` bytes at `p`, by the table at `table` (`crc32.table`): 64 bytes at a time,
+// as 4 steps of 16, each byte by the row of its distance from the step's end and the first four with the
+// register's bytes, then each byte after the last 64 by row 0, as crc32fast's `update_fast_16` and
+// `update_slow` take them.
+uint Crc32Bytes(uint start, byte* p, long n, uint* table) {
+    mut uint c = start
     raw {
-        uint* table = Ptr<uint>(s + 4)
-        mut uint c = *Ptr<uint>(s)
         mut long i = 0
+        while n - i >= 64 {
+            long end = i + 64
+            while i < end {
+                c = table[long(p[i + 15])] ^ table[256 + long(p[i + 14])] ^ table[512 + long(p[i + 13])] ^
+                    table[768 + long(p[i + 12])] ^ table[1024 + long(p[i + 11])] ^ table[1280 + long(p[i + 10])] ^
+                    table[1536 + long(p[i + 9])] ^ table[1792 + long(p[i + 8])] ^ table[2048 + long(p[i + 7])] ^
+                    table[2304 + long(p[i + 6])] ^ table[2560 + long(p[i + 5])] ^ table[2816 + long(p[i + 4])] ^
+                    table[3072 + long((uint(p[i + 3]) ^ c >> 24) & 255)] ^
+                    table[3328 + long((uint(p[i + 2]) ^ c >> 16) & 255)] ^
+                    table[3584 + long((uint(p[i + 1]) ^ c >> 8) & 255)] ^
+                    table[3840 + long((uint(p[i]) ^ c) & 255)]
+                i = i + 16
+            }
+        }
+
         while i < n {
             c = table[long((c ^ uint(p[i])) & 255)] ^ c >> 8
             i = i + 1
         }
-
-        *Ptr<uint>(s) = c
     }
+
+    return c
 }
 
 // A new hasher of CRC-32 (H3), as `Sha256New` makes one of SHA-256.
@@ -5548,10 +5548,12 @@ pub byte* Crc32New(mut long asked) {
     return block
 }
 
-// As `Sha256Update`, for CRC-32.
-pub void Crc32Update(byte* block, byte* message) {
+// As `Sha256Update`, for CRC-32, by the emitter's table at `table`.
+pub void Crc32Update(byte* block, byte* message, uint* table) {
     if message != null {
-        Crc32Feed(block + 16, ListItems(message), long(ListCount(message)))
+        raw {
+            *Ptr<uint>(block + 16) = Crc32Bytes(*Ptr<uint>(block + 16), ListItems(message), long(ListCount(message)), table)
+        }
     }
 }
 
@@ -5567,18 +5569,17 @@ pub uint Crc32Finish(byte* block) {
     return c
 }
 
-// CRC-32 of the bytes of the list `message` (H1), made on a state of its own, which it frees; 0, with
-// `asked` set, where the system refuses.
-pub uint Crc32Hash(byte* message, mut long asked) {
-    byte* block = Crc32New(mut asked)
-    if block == null {
-        return 0
+// CRC-32 of the bytes of the list `message` (H1), by the emitter's table at `table`, its register a local, as
+// crc32fast's `hash` keeps its state: it asks the system for no block, so no refusal ends it.
+pub uint Crc32Hash(byte* message, uint* table) {
+    mut uint c = 0xffffffff
+    if message != null {
+        raw {
+            c = Crc32Bytes(c, ListItems(message), long(ListCount(message)), table)
+        }
     }
 
-    Crc32Update(block, message)
-    uint c = Crc32Finish(block)
-    Free(block, 1044)
-    return c
+    return c ^ 0xffffffff
 }
 
 // HMAC-SHA256's state at `s`, 272 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
