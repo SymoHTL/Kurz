@@ -1,0 +1,10 @@
+// expect: error field-unassigned at 5
+// rules: K14
+
+class Point(int X) {
+    int y
+
+    pub int Y() => y
+}
+
+print(Point(1).Y())

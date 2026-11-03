@@ -1,0 +1,14 @@
+// expect: error unknown-name at 7
+// rules: K7
+
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    pub int Get() => V
+
+    pub int A() => a
+}
+
+print(C(1).A())

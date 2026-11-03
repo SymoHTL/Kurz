@@ -1,0 +1,7 @@
+// expect: error redeclared at 5
+// rules: W1
+
+if true {
+    int HttpKind = 2
+    print(HttpKind)
+}
