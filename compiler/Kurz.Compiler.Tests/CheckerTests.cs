@@ -2198,6 +2198,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("h = HttpHeaders()"));
     }
 
+    [Fact]
+    public void A_class_of_the_file_may_hold_a_class_of_std_in_its_fields()
+    {
+        // R2 with W1: the cycle rule walks the fields of the file's classes, and a class of std/ the prelude names is no class of the
+        // file: a field that holds one, `mut` or not, in a list or a nullable type, is no ring, and the walk passes over it
+        var (diagnostics, _) = CheckSeeingStd("class Message(mut HttpHeaders Headers, List<HttpHeaders> Parts, HttpHeaders? Trailer)\n\nm = Message(HttpHeaders(), List<HttpHeaders>(), null)\nprint(m.Headers.Get(\"Host\") ?? \"none\")\n");
+        Assert.Empty(diagnostics.Items);
+
+        // the positive control: a ring of the file's own classes beside such a field is still one
+        var (ring, _) = CheckSeeingStd("class Node(mut HttpHeaders Headers, mut Node? Next)\n\nprint(Node(HttpHeaders(), null).Next == null)\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], ring.Items.Select(d => (d.Id, d.Line)));
+    }
+
     [Theory]
     [InlineData("h = HttpHeaders()\nprint(h.names)\n", "a field is visible outside it with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside it with `pub` (F9)")]
