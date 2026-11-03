@@ -651,7 +651,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
   type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
   emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
-  type, `Order.Source`, where a pass made the copy;
+  type, `Order.Source`, where a pass made the copy; `T.Make(f => ...)` in a copy that binds a
+  `data` type becomes one call of its primary constructor, with an argument for each field in order,
+  each a copy of the lambda's body read as a pass of such a loop reads its body, and checked and
+  emitted as that call, a type with no fields giving its value;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -697,8 +700,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
   strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
-  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
-  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
+  K8, K15), else by their addresses where a field is `mut` or `weak` (K4), and else field by field as a
+  `data` value compares (K4, D3), in a
   function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -776,7 +780,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
   `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
   of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
-  they say, as Rust's `sort_by_cached_key`. Two forms are not Rust's and measured faster on the same
+  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made, so
+  that a key which changes it through an instance whose field holds it leaves its change standing and the
+  sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read while the field holds
+  another (section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment 6562795140), at one
+  count for each call. Two forms are not Rust's and measured faster on the same
   results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
   orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
   scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
@@ -960,7 +968,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
   holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
-  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  the 1024 bytes after it that nothing reads, which keep the count the block had while it held the table *(assumed:
+  the bytes `allocation-failed` names for these blocks (M9) stay as they were)*, 272 for HMAC's key and two states),
+  counted and freed as a list is; `Crc32.Hash` keeps CRC-32's register in a local, as crc32fast's `hash` does, and asks
+  for no block. CRC-32 reads a table of 16 rows of 256
+  remainders, a constant of a program that hashes one, as crc32fast's `CRC32_TABLE`, and takes 64 bytes at a time as
+  4 steps of 16, each byte by the row of its distance from the step's end, then the bytes after the last 64 one at a
+  time, as crc32fast's `update_fast_16` and `update_slow` do: 16 MiB hashed 10 times took 25.08 ms so, against
+  250.19 ms a byte at a time, which built the table in every call, and 24.58 ms in crc32fast's software path; 409,600
+  `Crc32.Hash` of 64 bytes took 3.99 ms with the register in a local, against 4.98 ms with a block for it and 4.80 ms in
+  crc32fast's software path.
+  `HashTests` holds the table against the remainders a bit at a time, in a program that hashes one and in no other,
+  the bytes `allocation-failed` names for the block of `Crc32.New()`, a `Crc32.Hash` that runs where the allocator
+  refuses every block, and a CRC hasher copied
+  between two `Update`s, each going on with its own bytes; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
@@ -1519,7 +1540,7 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K15 and K18 to K20, for a class with its primary constructor or none,
+M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
@@ -1635,9 +1656,9 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
-`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
-call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
+`Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
+in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
@@ -1663,7 +1684,7 @@ type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and two cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 
@@ -1703,7 +1724,8 @@ round can ask about it by the rule's id.
   has none; in a class that compares by identity or by its clause such a field is not compared, and is no
   error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
   `data` value, a union or an instance compared by content, compares that instance by its clause too, and
-  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  so ends a narrowing as N9's call, as `==` on the instance itself does (the owner, 2026-11-02, #110, comment 6586836827:
+  such an `==` is a call everywhere). A field named twice in
   one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
@@ -1718,7 +1740,7 @@ round can ask about it by the rule's id.
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
   type whose result is not `void`, which F11 makes `type-mismatch` at the lambda; `Name()` on a
-  data type without fields, whose value D8 writes as the bare name; a second data type among the
+  data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
   included (`print<int>(1)`, a conversion, a function value, a list's `Add` and `Where`), where a
@@ -1902,7 +1924,8 @@ round can ask about it by the rule's id.
   `T` = `int` in `T | List<T>` ("Same shape first"), and a literal binds the type parameter to its own type
   where the union names no case of that type, `F(5)` in `T | string` ("Bind T = int in both"): `Infer` and
   `Unify` in `Checker.Calls.cs`. A list literal keeps the cases at a parameter whose item type names a case
-  of an item call beyond its success, and fits exactly item by item, so that of `Show(List<int>)` and
+  of an item call beyond its success, and fits exactly by the whole result of each item call whose cases
+  the item type keeps and by its own item type for every other item, so that of `Show(List<int>)` and
   `Show(List<int | NotFound>)` the call `Show([Find(1)])` runs the second ("The union one", 2026-11-01).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
@@ -2082,9 +2105,11 @@ round can ask about it by the rule's id.
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
   reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
   field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
-  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
-  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
-  6573114335).
+  variable holds, itself or through `data` fields, `xs[0] = 2`, keeps the narrowing of a path with no
+  `weak` reference in it and ends it for one with a `weak` reference, while one into what a field of
+  an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment 6573114335). A read
+  or a write of a map's entry whose key type compares by an `equal by` clause, `m[k]` and `m[k] = 2`,
+  ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

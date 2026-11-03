@@ -103,6 +103,11 @@ public sealed partial class Checker
 
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
+        if (CheckMake(c) is { } made)
+        {
+            return made; // T33: `T.Make(f => ...)` in a copy
+        }
+
         switch (c.Callee)
         {
             case NameExpression n:
@@ -1122,8 +1127,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
-    private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected)
+    /// <summary>
+    /// D2, D7, D11: a data value made by the type's name with the base's fields first; <paramref name="typeArguments"/>, where given,
+    /// are a generic type's own, as the call <c>T.Make</c> became binds them (T33), and none is written.
+    /// </summary>
+    private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected, IReadOnlyList<KurzType>? typeArguments = null)
     {
         if (!data.HasFields)
         {
@@ -1160,6 +1168,11 @@ public sealed partial class Checker
             }
 
             candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
+        }
+
+        if (typeArguments is not null)
+        {
+            candidate.Map = data.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);
@@ -2119,9 +2132,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly, item by item as an argument does:
-    /// an item call by its whole result where the item type keeps its cases and by its success where it unwraps it, any other item by the
-    /// literal's own item type (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly: an item call by its whole result
+    /// where the item type keeps its cases, and every other item, a call the item type unwraps among them, by the literal's own item type, as
+    /// the exact fit of a list literal without such a call reads it (assumed, section 5: the defaults of the product pass of 2026-11-01 and the
+    /// readings the review of the change left).
     /// </summary>
     private static bool ItemsExact(Pre pre, KurzType type)
     {

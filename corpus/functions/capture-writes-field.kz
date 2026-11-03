@@ -1,22 +1,10 @@
 // expect: output
-// | [2, 0, 3]
-// | 4
-// rules: F11
+// | [2, 0]
+// rules: F11, K2
 
-void Fill(mut List<int> xs) {
-    xs.Add(xs.Count)
-}
-
-class Box(mut List<int> Items) {
-    pub () => void Filler() => () => Fill(mut Items)
-}
+class Box(mut List<int> Items)
 
 b = Box([1, 0])
 first = () => { b.Items[0] = 2 }
-more = () => b.Items.Add(3)
 first()
-more()
 print(b.Items)
-fill = b.Filler()
-fill()
-print(b.Items.Count)

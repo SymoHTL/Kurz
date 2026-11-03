@@ -1,0 +1,18 @@
+// expect: output
+// | [10, NotFound]
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// the item type of the list a method is called on is a written union, and keeps the cases of the call
+mut List<int | NotFound> ys = []
+ys.Add(Find(1))
+ys.Add(Find(2))
+print(ys)
