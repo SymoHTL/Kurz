@@ -35,6 +35,11 @@ tools/fixtures/ (GitHub, repository SymoHTL/Kurz; captured 2026-10-01 unless a l
                         gh api "repos/SymoHTL/Kurz/commits/<head>/statuses?per_page=100"
                         (2026-11-01): the head 7c696f8 of pull request 181, after its one review
                         round in CI had posted `review` as completed and NOT converged on one file
+  statuses-cap-error.json
+                        gh api "repos/SymoHTL/Kurz/commits/<head>/statuses?per_page=100"
+                        (2026-11-01): the head 3523ce1 of pull request 181, the merge of `main`
+                        after its round at the cap: the run that ended as `cap` posted `review` at
+                        `error`, and the paid round the owner chose posted `success` above it
   review-threads.json   gh api graphql with the query THREADS of tools/pr_gates.py, asked for the
                         first two threads only (reviewThreads(first: 2)), for pull request 8 on
                         2026-10-02, after the first review that posted threads; the query did not

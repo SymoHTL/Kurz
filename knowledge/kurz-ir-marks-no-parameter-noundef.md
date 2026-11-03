@@ -70,4 +70,5 @@ what they do is not shown; `noundef` is not it, since the machine code does not 
   from.
 - Measure the forms side by side, in turn, and keep the spread; no test tells them apart, since all
   give the same number.
-- The reason goes beside the code, as the comment on `Md5F` does, and this entry names it.
+- The reason goes beside the code, as the comment on `Md5F` gives the measured time of each form of
+  F and G, and this entry names it.

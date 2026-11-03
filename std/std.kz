@@ -5171,7 +5171,11 @@ pub uint LittleEndianWord(byte* p) {
 // select in 14 of the 16 steps and keeps the or in the last two. MD5 of 16 MiB hashed three times took
 // 51.76 ms so, 52.14 with the or and 53.28 with the two terms added into the sum one at a time (issue
 // 157, 2026-11-03, the best of 9). G adds each of its two terms into the sum, where RFC 1321 joins them
-// with an or and `op_g` adds them together first: G as the select `((b ^ c) & d) ^ c` took 56.41 ms.
+// with an or and `op_g` adds them together first: with F as above, MD5 took 51.81 ms so, 56.37 with the
+// or and 56.43 in `op_g`'s form (the best of 9, each beside a copy of its build), and 56.41 with G as the
+// select `((b ^ c) & d) ^ c`. In every step LLVM's code generator adds the constant `t` after the round's
+// function, one add more on the path from b than in OpenSSL's code
+// (knowledge/the-code-generator-adds-a-sums-constant-last.md).
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
     uint sum = a +% m +% t +% (((c ^ d) & b) ^ d)
     return (sum << r | sum >> (32 - r)) +% b
