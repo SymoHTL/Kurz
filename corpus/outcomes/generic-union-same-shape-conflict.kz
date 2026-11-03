@@ -1,0 +1,10 @@
+// expect: error cannot-infer at 10
+// rules: O4
+
+void Wide<T>(T | List<T> x) {
+    print(1)
+}
+
+string | List<int> v = "a"
+// the list's case gives `T` = `int` through `List<T>`, and the rest gives `T` = `string`: two types for one type parameter
+Wide(v)

@@ -43,6 +43,7 @@ extern "C" {
     int poll(void* fds, ulong count, int timeout)
     int bind(int fd, void* address, int length)
     int listen(int fd, int backlog)
+    int shutdown(int fd, int how)
     int getsockname(int fd, void* address, int* length)
     int connect(int fd, void* address, int length)
     int accept4(int fd, void* address, int* length, int options)
@@ -1859,6 +1860,18 @@ pub long CloseFile(int fd) {
     return result
 }
 
+// The socket `fd` shut down for reading and writing, `SHUT_RDWR` (2), at a `Close` while calls are in
+// flight on it (S5), which ends a call that blocks on it in another thread at once, as Go's close wakes
+// the calls that wait, while its descriptor stays open for them; 0, a failure ignored, since the `Close`
+// that calls it succeeds.
+pub long ShutdownSocket(int fd) {
+    raw {
+        shutdown(fd, 2)
+    }
+
+    return 0
+}
+
 // The file at `path` deleted, by `unlink`: 0, or the failure.
 pub long DeleteFile(byte* path) {
     mut long result = 0
@@ -2206,10 +2219,14 @@ pub int Variable(byte* key, mut string value) {
 // in its order until one binds or connects, the failure of the last being the call's, as Rust's
 // `each_addr` tries them. Beside the system's numbers negated, a call fails with -4097 for an address
 // that is no host and port, or a name that gives no address, `InvalidInput` to the caller, as Rust gives
-// it, with -4099 for a lookup that fails with `EAI_AGAIN` or `EAI_FAIL`, or with `EAI_SYSTEM` while `errno`
-// holds 0, `Other`, and with -4098 for one that fails with any other error of `getaddrinfo` but `EAI_SYSTEM`,
-// `NotFound` (S9). A connection whose bound runs out fails with -4100, `TimedOut` with the number 0, as
-// Rust's `connect_timeout` gives `TimedOut` with no error of the system.
+// it, with -4099, `Other`, for a lookup that fails with `EAI_AGAIN` or `EAI_FAIL`, or with `EAI_SYSTEM` while
+// `errno` holds 0, and for a connection whose `poll` gives `POLLERR` or `POLLHUP` while `SO_ERROR` holds no
+// error (`Connected`), and with -4098 for one that fails with any other error of `getaddrinfo` but
+// `EAI_SYSTEM`, `NotFound` (S9). A connection whose bound runs out fails with -4100, `TimedOut` with the
+// number 0, as Rust's `connect_timeout` gives `TimedOut` with no error of the system. The bounds of time
+// follow Rust's `set_timeout`, `connect_timeout` and `poll_connected` as `library/std/src/sys/net/connection/
+// socket/unix.rs` and `mod.rs` of rust-lang/rust hold them at the commit
+// ecedd45a734fd0d2a467e537944661d272495378, read on 2026-11-01; the comments below name them as Rust's.
 
 // The page of each thread that holds a call's address and what the calls of the system take by address,
 // mapped at its first use and never given back, not even when its thread ends: a literal address at its
@@ -2295,6 +2312,18 @@ pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
         *Ptr<long>(held + 128) = seconds
         *Ptr<long>(held + 136) = micros
         result = Checked(long(setsockopt(fd, 1, option, Ptr<void>(held + 128), 16)))
+    }
+
+    return result
+}
+
+// The writes of the socket `fd` ended, by `shutdown` with `SHUT_WR` (1), as Rust's `shutdown(Shutdown::Write)`
+// ends them (S9): the peer's read then gives 0, and the socket still reads. 0, or the failure, which the system
+// gives as it is: none for a second call, `ENOTCONN` (107) where the peer reset the connection.
+pub long ShutdownWrite(int fd) {
+    mut long result = 0
+    raw {
+        result = Checked(long(shutdown(fd, 1)))
     }
 
     return result
@@ -2511,8 +2540,8 @@ long Attempt(byte* address, int length, bool listening, long deadline) {
 // that binds or connects, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped. The port is
 // written into each address in the order of the network, its high byte first. A connection is bounded by
 // `nanoseconds` from the moment its addresses are known, after the lookup of a name, which the bound does
-// not cover (section 14 holds that open), over every address tried: once it runs out, -4100 ends the call
-// with no other address tried.
+// not cover, as Rust's `connect` leaves `getaddrinfo` (section 12), over every address tried: once it runs
+// out, -4100 ends the call with no other address tried.
 long EachAddress(byte* text, bool listening, long nanoseconds) {
     mut long result = -12
     raw {
@@ -2713,9 +2742,10 @@ pub IoKind SocketErrorKind(long failure) {
 // number on Linux, each abbreviation written out, `AddrInUse` as `AddressInUse`, `Other` for a number
 // it gives no kind, `InvalidData` for a name that is not UTF-8 (S1), `InvalidInput` for an address that
 // is no host and port or gives no address, `NotFound` for a lookup that failed with an error of `getaddrinfo`
-// other than `EAI_SYSTEM`, `EAI_AGAIN` and `EAI_FAIL`, -4098, and `Other` for one that failed with `EAI_AGAIN` or
-// `EAI_FAIL`, or with `EAI_SYSTEM` while `errno` holds 0, -4099, by the arm of a number it gives no kind, and
-// `TimedOut` for a connection whose bound ran out, -4100 (S9).
+// other than `EAI_SYSTEM`, `EAI_AGAIN` and `EAI_FAIL`, -4098, `Other` for -4099, a lookup that failed with
+// `EAI_AGAIN` or `EAI_FAIL`, or with `EAI_SYSTEM` while `errno` holds 0, and a connection whose `poll` gave
+// `POLLERR` or `POLLHUP` with no error in `SO_ERROR` (`Connected`, where Rust gives `Uncategorized`), by the
+// arm of a number it gives no kind, and `TimedOut` for a connection whose bound ran out, -4100 (S9).
 pub IoKind ErrorKind(long failure) => match -failure {
     1 => IoKind.PermissionDenied
     2 => IoKind.NotFound

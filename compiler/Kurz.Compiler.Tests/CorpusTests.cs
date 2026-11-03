@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Corpus;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
@@ -34,23 +35,30 @@ public sealed class CorpusTests
 
     private const int CheckerErrorFloor = 97;
 
+    /// <summary>The checker of <c>std/</c>, whose types of the prelude a case sees as a build does (W1); they are the same for every target.</summary>
+    internal static readonly Lazy<Checker> StdChecker = new(() => Builder.CheckRuntime(Target.Linux).StdChecker);
+
     private static readonly HashSet<string> FrontEndIds =
     [
         ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
     ];
 
     /// <summary>
-    /// The rules the checker does not read: the null chapter's paths through class instances (N9), the class chapter and the
+    /// The rules the checker does not read: the null chapter's paths through class instances (N9), the class chapter's bases and
+    /// interfaces (K6, K10, K11, K13, K16, K17), since the checker reads no class that names a base or an interface, the
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>flags</c>
     /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
     /// A10, A13, A15), the grants of files and sockets (S12), processes, standard input and the exit code
     /// (S17 to S23), standard error (A17), a top-level <c>return</c> with a value (F17), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
-    /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
+    /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The other rules of the
+    /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
+    /// (K14), a base or an interface among them, stands in <see cref="UnsupportedByConstruct"/>.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
-        rule[0] == 'K' || rule is "N9"
+        rule is "K6" or "K10" or "K11" or "K13" or "K16" or "K17"
+        || rule is "N9"
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
         || rule is "D13" or "D16" or "D17" or "D19" or "F9" or "F10" or "T19" or "M6" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A13" or "A15"
@@ -62,6 +70,20 @@ public sealed class CorpusTests
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
+        ["classes/constructor-assigns-twice.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/constructor-must-chain.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/field-read-before-assignment.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/field-unassigned.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/further-constructor.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/hides-member.kz"] = "a base class and a `virtual` method (K6, K7)",
+        ["classes/interface-method-inherited-private.kz"] = "an interface (K6)",
+        ["classes/interface-method-private.kz"] = "an interface (K6)",
+        ["classes/interface-missing-member.kz"] = "an interface (K6)",
+        ["classes/override-return-type.kz"] = "a base class and a `virtual` method (K6, K7)",
+        ["classes/override-without-virtual.kz"] = "a base class (K6)",
+        ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
+        ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
+        ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
         ["types/generic-cannot-infer-classes.kz"] = "a base class (K6)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
@@ -169,7 +191,7 @@ public sealed class CorpusTests
         }
 
         var diagnostics = new DiagnosticBag();
-        Checker.Check(tree, diagnostics, header.Grants);
+        Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
         var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
         var unsupported = diagnostics.Sorted.Where(IsNotSupported).Select(d => d.ToString()).ToList();
         var lints = diagnostics.Items.Where(d => d.Kind == DiagnosticKind.Warning).ToList(); // H5: a warning, which builds the program and which no header expects
@@ -224,7 +246,7 @@ public sealed class CorpusTests
             }
 
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics, header.Grants);
+            Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
             if (diagnostics.Items.Any(IsNotSupported))
             {
                 notSupported.Add(relativePath);
@@ -253,7 +275,7 @@ public sealed class CorpusTests
             Assert.False(frontEnd.HasErrors, relativePath);
             Assert.False(header.Rules.Any(OutsideTheChecker), $"{relativePath} cites a rule outside the checker ({string.Join(", ", header.Rules)}), so its entry ({construct}) is redundant");
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics, header.Grants);
+            Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
             Assert.True(diagnostics.Items.Any(IsNotSupported), $"{relativePath} is read in full, so its entry ({construct}) is stale");
         }
     }

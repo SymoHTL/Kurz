@@ -49,7 +49,9 @@ flowchart TD
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
         no longer turns its one named case red; fewer tools than the floor; a ledger written back in
-        another form than its one (one entry per line, two spaces in, text as it is; --format writes it). The replay runs each
+        another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
+        a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
+        (KURZ_RED_PROOF_REPLAY), refused before anything is copied. The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]

@@ -1,0 +1,8 @@
+// expect: output
+// | signal 13: yes
+// rules: S19
+
+Command.New("yes").Stdout(Stdio.Piped).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

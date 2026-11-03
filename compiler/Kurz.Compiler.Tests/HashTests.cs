@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
@@ -108,6 +109,118 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var compilation = Compile(text, runtime);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "hash-pieces" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>The register of CRC-32/ISO-HDLC, from 0, after the byte <paramref name="b"/> and <paramref name="zeros"/> bytes of zero, a bit at a time.</summary>
+    private static uint Remainder(byte b, int zeros)
+    {
+        uint c = b;
+        for (var k = 0; k < 8 * (zeros + 1); k++)
+        {
+            c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        }
+
+        return c;
+    }
+
+    [Fact]
+    public void A_crc_reads_a_table_of_16_rows_which_a_program_that_hashes_one_holds_as_a_constant()
+    {
+        // crc32fast's `CRC32_TABLE`, which its slicing-by-16 reads: 16 rows of 256, row k the remainder of a byte followed by k bytes of
+        // zero, row 0 zlib's table; a constant of the program, which `Crc32.Hash` and a hasher's `Update` pass to the standard library,
+        // and which a program that hashes no CRC does not hold, its size unchanged (the positive control: the first program holds it)
+        var program = Compile("mut c = Crc32.New()\nc.Update(\"a\".Bytes)\nprint(Crc32.Hash(Bytes()) + c.Finish())\n", toolchain.Runtime).Program;
+        Assert.True(program is not null, "no program");
+        var table = Regex.Match(program.Ir, @"\n@""crc32\.table"" = private unnamed_addr constant \[4096 x i32\] \[([^\]]*)\]");
+        Assert.True(table.Success, "no table of 4096 words");
+        var words = table.Groups[1].Value.Split(", ").Select(w => unchecked((uint)int.Parse(w["i32 ".Length..], CultureInfo.InvariantCulture))).ToList();
+        Assert.Equal(Enumerable.Range(0, 16).SelectMany(k => Enumerable.Range(0, 256).Select(b => Remainder((byte)b, k))), words);
+        Assert.Equal(0x77073096u, words[1]);
+        Assert.Equal(2, Regex.Count(program.Ir, @"call (i32|void) @""std\.Crc32(Hash|Update)[^""]*""\([^)]*ptr @""crc32\.table"""));
+        var none = Compile("print(Hex.Encode(Sha256.Hash(Bytes())))\n", toolchain.Runtime).Program;
+        Assert.True(none is not null, "no program");
+        Assert.DoesNotContain("crc32.table", none.Ir, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_crc_block_the_system_refuses_reports_the_bytes_of_a_hasher_s_block()
+    {
+        // `Crc32.New()` asks for a hasher's block: 16 bytes of a list's counts and 1028 of the register and the 1024 bytes after it,
+        // where the table stood before it was the program's, which keep the bytes `allocation-failed` names (H1); `Crc32.Hash` asks
+        // for none (the test below)
+        foreach (var (text, name) in new[] { ("mut c = Crc32.New()\nprint(c.Finish())\n", "crc-new") })
+        {
+            var refused = Compile(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+            Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, name + "-refused"));
+            Assert.Equal((1, "error: allocation-failed (1044 bytes)\n"), (code, error));
+            Assert.Empty(output);
+            var granted = Compile(text, toolchain.Runtime); // the positive control
+            Assert.True(granted.Program is not null, string.Join("; ", granted.Diagnostics.Sorted));
+            var (grantedCode, printed, grantedError) = Toolchain.Run(toolchain.Build(granted.Program, name + "-granted"));
+            Assert.Equal((0, ""), (grantedCode, grantedError));
+            Assert.Equal(["0"], printed);
+        }
+    }
+
+    [Fact]
+    public void Crc32_Hash_keeps_its_register_in_a_local_and_asks_for_no_block()
+    {
+        // H1: `Crc32.Hash` keeps its register in a local of `Crc32Hash`, as crc32fast's `hash` keeps its state, so it asks the system
+        // for no block (the owner, 2026-11-02, issue 157, comment 6573114059: the bytes `allocation-failed` names follow the layout).
+        // Where the system refuses every block, a program that hashes no bytes ends as it does with memory, where a block of the
+        // hasher's ended it with `allocation-failed`; it prints only where the CRC is not 0, and a print asks for a block of its own,
+        // so a wrong CRC ends it with `allocation-failed` too. The IR of `Crc32Hash` calls `Crc32Bytes`, the positive control, and
+        // neither `Crc32New` nor `ByteBlock`
+        var refused = Compile("if Crc32.Hash(Bytes()) != 0 {\n    print(1)\n}\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+        Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, "crc-hash-no-block"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Empty(output);
+        var ir = refused.Program.Ir;
+        var start = ir.IndexOf("define internal i32 @\"std.Crc32Hash.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "the program holds the standard library's `Crc32Hash`");
+        var hash = ir[start..];
+        hash = hash[..hash.IndexOf("\n}", StringComparison.Ordinal)];
+        Assert.Contains("call i32 @\"std.Crc32Bytes.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.Crc32New.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.ByteBlock.", hash, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_crc_hasher_copied_between_two_updates_goes_on_apart_from_its_copy_and_finish_starts_each_over()
+    {
+        // H6: a copy of a `Crc32` hasher taken between two `Update`s is a value, the first `Update` after it writing a block of its own,
+        // so each goes on with its own bytes, against the CRC this class computes bit by bit; `Finish` starts each over, so a second
+        // `Finish` gives the CRC of no bytes (H3); under both allocators
+        const string text = """
+            mut message = Bytes()
+            while message.Count < 130 {
+                message.Add(byte((message.Count * 31 + 7) % 256))
+            }
+
+            mut c = Crc32.New()
+            c.Update(message[0..<70])
+            mut t = c
+            t.Update(message[70..<73])
+            c.Update(message[73..<130])
+            print(c.Finish())
+            print(t.Finish())
+            print(c.Finish())
+            print(t.Finish())
+
+            """;
+        var message = Message();
+        string[] expected = [Crc32([.. message[..70], .. message[73..]]).ToString(CultureInfo.InvariantCulture), Crc32(message[..73]).ToString(CultureInfo.InvariantCulture), "0", "0"];
+        Assert.NotEqual(expected[0], expected[1]); // the two diverge
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Compile(text, runtime);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "crc-copy" + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected, output);
         }

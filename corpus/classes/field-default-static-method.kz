@@ -1,0 +1,16 @@
+// expect: output
+// | 7
+// | 12
+// rules: K7
+
+class Grid(int Side) {
+    int cells = Area(Side) + Border()
+
+    pub static int Area(int side) => side * side
+    static int Border() => 3
+
+    pub int Cells() => cells
+}
+
+print(Grid(2).Cells())
+print(Grid(3).Cells())

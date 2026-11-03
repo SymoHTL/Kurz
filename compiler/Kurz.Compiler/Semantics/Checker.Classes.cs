@@ -4,19 +4,20 @@ using Kurz.Compiler.Syntax;
 namespace Kurz.Compiler.Semantics;
 
 /// <summary>
-/// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c> (K1), its methods (K7, K9),
+/// Chapter 7: a <c>class</c> with its primary constructor or none, its fields with and without <c>mut</c>, of the primary constructor
+/// (K1) and of its body with their defaults (K7), its methods (K7, K9),
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
-/// judged by the types of the fields (R2, R4), and its <c>static</c> methods and fields (K7, K18). What else a class can write, a
-/// base or an interface, <c>equal by</c>, a field of an instance or a constructor in its body, a <c>virtual</c>, <c>override</c> or
-/// <c>prot</c> member, type parameters, and a field
-/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c>, and so are <c>==</c>
-/// on two instances (K4) and an instance in a map's key (K12) (<c>compiler/README.md</c>).
+/// judged by the types of the fields (R2, R4), its <c>static</c> methods and fields (K7, K18), and its equality and hash, by identity or
+/// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15). What else a class can write, a base or an interface,
+/// a constructor in its body, a field there without a written type, a <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
+/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
     private readonly Dictionary<string, ClassSymbol> classes = new(StringComparer.Ordinal);
     private readonly List<ClassSymbol> classDeclared = [];
+    private readonly HashSet<ClassSymbol> classesCompared = new(ReferenceEqualityComparer.Instance); // K4: the classes a walk of `==` is inside of
 
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
@@ -69,16 +70,6 @@ public sealed partial class Checker
             return (d.Bases[0].Line, "a base class or an interface after `:` (K6, K10)");
         }
 
-        if (d.EqualBy.Count > 0)
-        {
-            return (d.Line, "`equal by` (K8)");
-        }
-
-        if ((d.PrimaryConstructor ?? []).Select(p => WeakIn(p.Type)).FirstOrDefault(w => w is not null) is { } weak)
-        {
-            return (weak.Line, "weak (R3, R5)"); // R2: a `weak` field is no strong field, so the cycle rule cannot judge a class until `weak` is read
-        }
-
         foreach (var member in d.Members ?? [])
         {
             switch (member)
@@ -87,32 +78,74 @@ public sealed partial class Checker
                     return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a `static` field (K7, K18, R13)");
                 case FieldDeclaration { Modifiers: var modifiers } when (modifiers & Modifiers.Static) != 0:
                     break; // K7, K18: read with the class (ResolveStaticField)
-                case FieldDeclaration f:
-                    return (f.Line, "a field declared in the body of a class (K7, K14)");
+                case FieldDeclaration { Type: null } f:
+                    return (f.Line, "a field of a class body without a written type (K7, V2)");
+                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & ~(Modifiers.Pub | Modifiers.Mut)) != 0:
+                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a field (K7, F9)");
+                case FieldDeclaration:
+                    break; // K7: read with the class (ResolveClass)
                 case ConstructorDeclaration c:
                     return (c.Line, "a constructor declared in the body of a class (K14)");
                 case FunctionDeclaration f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
                     return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
-                default:
+                case FunctionDeclaration:
                     break;
+                default:
+                    return (member.Line, "a type declared in the body of a class (K7)");
             }
         }
 
         return null;
     }
 
-    /// <summary>R3: the first <c>weak</c> a written type holds, at any depth.</summary>
-    private static WeakType? WeakIn(TypeSyntax? type) => type switch
+    // ---- weak (R3, R5) -----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// R3, R5: <c>weak T?</c> of a class <c>T</c>. Before a type whose values are no instances of a class it is <c>weak-value</c>, and
+    /// without its <c>?</c> <c>weak-not-nullable</c>; before a type parameter or a union of classes the checker does not read it (T19, D9).
+    /// </summary>
+    private KurzType ResolveWeak(WeakType w)
     {
-        WeakType w => w,
-        NamedType n => n.TypeArguments.Select(WeakIn).FirstOrDefault(w => w is not null),
-        NullableType n => WeakIn(n.Inner),
-        Syntax.UnionType u => u.Cases.Select(WeakIn).FirstOrDefault(w => w is not null),
-        Syntax.FunctionType f => f.Parameters.Append(f.Result).Select(WeakIn).FirstOrDefault(w => w is not null),
-        _ => null,
-    };
+        var target = Resolve(w.Inner is NullableType nullable ? nullable.Inner : w.Inner);
+        if (target is ErrorType)
+        {
+            return Types.Error;
+        }
+
+        if (target is TypeParameterType || (target is UnionType u && u.Cases.Any(c => c is ClassType)))
+        {
+            NotSupported(w.Line, $"`weak` before `{target}`, which the checker does not read as a class (R5, T19, D9)");
+            return Types.Error;
+        }
+
+        if (target is not ClassType)
+        {
+            Report(ErrorIds.WeakValue, w.Line, $"`weak` stands before `{target}`, a value and no instance of a class, which has nothing to free (R5, M1)");
+            return Types.Error;
+        }
+
+        if (w.Inner is not NullableType)
+        {
+            Report(ErrorIds.WeakNotNullable, w.Line, $"`weak {target}` is written without its `?`: a weak reference is null once its target is freed, `weak {target}?` (R5)");
+            return Types.Error;
+        }
+
+        return new WeakRefType((ClassType)target);
+    }
+
+    /// <summary>Whether one of the types is a <c>weak</c> reference, where it stands in a place the checker does not read one: said <c>not supported</c> there (R3, E1).</summary>
+    private bool WeakUnread(int line, string where, params KurzType[] types)
+    {
+        if (!types.Any(t => t is WeakRefType))
+        {
+            return false;
+        }
+
+        NotSupported(line, $"a `weak` reference as {where} (R3)");
+        return true;
+    }
 
     /// <summary>
     /// K1: the fields of a class, those of its primary constructor in their order, <c>mut</c> where written; a field and a method of
@@ -142,6 +175,28 @@ public sealed partial class Checker
             symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line));
         }
 
+        foreach (var f in (d.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0))
+        {
+            var type = Resolve(f.Type!);
+            if (Types.IsVoid(type))
+            {
+                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (K1, F4)");
+                type = Types.Error;
+            }
+
+            if (symbol.Field(f.Name) is not null)
+            {
+                Report(ErrorIds.Redeclared, f.Line, $"the field `{f.Name}` is declared already (V9)");
+            }
+            else if (f.Value is null)
+            {
+                // K14: no constructor of the class assigns a field of its body, the primary one and the empty one of a class without one
+                Report(ErrorIds.FieldUnassigned, f.Line, $"the field `{f.Name}` takes no value: it has no `=`, and the constructor of `{symbol.Name}` assigns no field of the body (K14)");
+            }
+
+            symbol.Fields.Add(new FieldSymbol(f.Name, type, f.Value is not null, (f.Modifiers & Modifiers.Mut) != 0, f.Line, f)); // K7: after the primary constructor's, in their order
+        }
+
         foreach (var s in symbol.StaticFields)
         {
             ResolveStaticField(symbol, s);
@@ -152,6 +207,27 @@ public sealed partial class Checker
             if (symbol.Field(name) is not null || symbol.StaticField(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+
+            if (name is "Equals" or "GetHashCode")
+            {
+                Report(ErrorIds.EqualsMethod, methods[0].Line, $"a method of a class is named `{name}`: `==` and the hash of an instance are K4's, or come from the fields an `equal by` clause names, `equal by Id` (K5, K8)");
+            }
+        }
+
+        foreach (var name in d.EqualBy)
+        {
+            if (symbol.Field(name) is not { } field)
+            {
+                Report(ErrorIds.EqualByUnknown, d.Line, $"`{name}` is no field of `{symbol.Name}`: `equal by` names fields of the class (K15)");
+            }
+            else if (field.Type is WeakRefType)
+            {
+                NotSupported(d.Line, $"`equal by` that names the `weak` field `{name}`, which section 14 of the record leaves open (K8, R3)");
+            }
+            else if (!symbol.EqualBy.Contains(field))
+            {
+                symbol.EqualBy.Add(field);
             }
         }
     }
@@ -214,70 +290,103 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K18, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of the same
-    /// class declared above counts as the constant it holds (K20); one declared below, or the field itself, is <c>unknown-name</c>, so
-    /// that no order and no cycle exist. An initial value that is no constant is computed at the field's first read (section 4),
-    /// whose open items of section 14 leave it <c>not supported</c>; a field without one is <c>field-unassigned</c>, since no type has a
-    /// default value (K14).
+    /// K18, K20, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of any
+    /// class, declared above or below, counts as the constant it holds, its own initial value read first, as Rust evaluates a static's
+    /// (<see cref="ReadStaticField"/>): the values are read in the order their reads need, and a cycle among them is
+    /// <c>static-cycle</c>. An initial value that is no constant is computed at the field's first read (section 4), whose open items of
+    /// section 14 leave it <c>not supported</c>; a field without one is <c>field-unassigned</c>, since no type has a default value (K14).
     /// </summary>
     private void CheckStaticFields()
     {
         foreach (var symbol in classDeclared)
         {
-            foreach (var s in symbol.StaticFields.Where(s => !s.Refused))
+            foreach (var s in symbol.StaticFields)
             {
-                if (s.Declaration.Value is not { } value)
-                {
-                    Report(ErrorIds.FieldUnassigned, s.Line, $"the `static` field `{s.Name}` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)");
-                    s.Refused = true;
-                    continue;
-                }
-
-                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = s.Line, Class = symbol, Static = true };
-                var reading = readingConstant;
-                readingConstant = true;
-                initializing = s;
-                var t = CheckExpression(value, s.Declaration.Type is null ? null : s.Type);
-                initializing = null;
-                readingConstant = reading;
-                if (t.IsError)
-                {
-                    s.Refused = true;
-                    continue;
-                }
-
-                if (s.Declaration.Type is null)
-                {
-                    s.Type = t.Type;
-                    JudgeStaticFieldType(s);
-                    if (s.Refused)
-                    {
-                        continue;
-                    }
-                }
-
-                if (t.Constant is null)
-                {
-                    NotSupported(value.Line, $"the initial value of the `static` field `{s.Name}`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)");
-                    s.Refused = true;
-                }
-                else if (!Types.Assignable(t.Type, s.Type))
-                {
-                    ReportMismatch(t.Type, s.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(s.Type)} is required");
-                    s.Refused = true;
-                }
-                else
-                {
-                    s.Value = t.Constant;
-                }
+                CheckStaticField(s);
             }
+        }
+    }
+
+    /// <summary>
+    /// K18, K20: the initial value of one <c>static</c> field, read once, at the top level of the file or from the initial value of
+    /// another field that reads it; the place the reading of that other value stands at is kept and given back.
+    /// </summary>
+    private void CheckStaticField(StaticFieldSymbol s)
+    {
+        if (s.Refused || s.Value is not null || readingStatics.Contains(s))
+        {
+            return;
+        }
+
+        if (s.Declaration.Value is not { } value)
+        {
+            Report(ErrorIds.FieldUnassigned, s.Line, $"the `static` field `{s.Name}` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)");
+            s.Refused = true;
+            return;
+        }
+
+        var outer = (frame, typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth, readingConstant, stateRead, initializing);
+        frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = s.Line, Class = s.Owner, Static = true };
+        (typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth) = (null, false, null, false, 0, 0);
+        (readingConstant, stateRead, initializing) = (true, false, s);
+        readingStatics.Add(s);
+        var t = CheckExpression(value, s.Declaration.Type is null ? null : s.Type);
+        readingStatics.RemoveAt(readingStatics.Count - 1);
+        (frame, typeContext, inElseArm, loopSource, realKeepsOwnType, blockDepth, rawDepth, readingConstant, stateRead, initializing) = outer;
+        if (t.IsError)
+        {
+            s.Refused = true; // E1: refused inside its value, a cycle it stands in among it (K20)
+            return;
+        }
+
+        if (s.Declaration.Type is null)
+        {
+            s.Type = t.Type;
+            JudgeStaticFieldType(s);
+            if (s.Refused)
+            {
+                return;
+            }
+        }
+
+        if (t.Constant is null)
+        {
+            NotSupported(value.Line, $"the initial value of the `static` field `{s.Name}`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)");
+            s.Refused = true;
+        }
+        else if (!Types.Assignable(t.Type, s.Type))
+        {
+            ReportMismatch(t.Type, s.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(s.Type)} is required");
+            s.Refused = true;
+        }
+        else
+        {
+            s.Value = t.Constant;
+        }
+    }
+
+    /// <summary>
+    /// K20: a cycle of initial values, each reading the next and the last reading the first, reported once, at the field of the cycle
+    /// that stands first in the file, its message naming the fields from there in the order they read each other; every field of the
+    /// cycle is refused, so that it and a field that reads it carry nothing more (E1).
+    /// </summary>
+    private void ReportStaticCycle(List<StaticFieldSymbol> cycle)
+    {
+        var first = cycle.IndexOf(cycle.MinBy(f => f.Line)!);
+        var names = cycle.Skip(first).Concat(cycle.Take(first)).Select(f => $"`{f.Owner.Name}.{f.Name}`").ToList();
+        var path = string.Concat(names.Skip(1).Select((name, i) => i == 0 ? $" reads {name}" : $", which reads {name}"));
+        var text = names.Count == 1 ? $"{names[0]} reads {names[0]}" : $"{names[0]}{path}, which reads {names[0]}";
+        Report(ErrorIds.StaticCycle, cycle[first].Line, $"{text}: the initial values of `static` fields read each other in a cycle (K20)");
+        foreach (var field in cycle)
+        {
+            field.Refused = true;
         }
     }
 
     /// <summary>
     /// K7, F1: the parameter and result types of each method. A method takes no <c>mut</c> marker, which is for values (K9, M5): one
     /// written is text no rule gives a meaning (E4), and so is <c>naked</c> before a method (R12). Two methods of one name with the same
-    /// parameters are <c>duplicate-function</c>, as two functions are (F13).
+    /// parameters are <c>duplicate-function</c>, as two functions are (F12).
     /// </summary>
     private void ResolveMethods()
     {
@@ -305,7 +414,7 @@ public sealed partial class Checker
                 {
                     if (list.Take(i).Any(earlier => SameParameters(earlier, list[i])))
                     {
-                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F13)");
+                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F12)");
                     }
                 }
             }
@@ -324,6 +433,46 @@ public sealed partial class Checker
                 {
                     CheckDefault(p.Default, field.Type, p.Line);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// K7: the default of each field of a class body, in declaration order, which may be any expression: it reads the fields of the
+    /// primary constructor and the fields declared above it through the instance being built, and functions outside the class, as C#
+    /// reads a field's initializer before the constructor's body; a field below it, a method of the class and <c>this</c> are no names
+    /// there (V10).
+    /// </summary>
+    private void CheckFieldDefaults()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            VariableSymbol? receiver = null;
+            foreach (var field in symbol.Fields.Where(f => f.Body?.Value is not null))
+            {
+                receiver ??= new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, symbol.Line) { Read = true };
+                frame = new Frame { ReturnType = Types.Void, Line = field.Line, Reserved = reservedTopLevel, Class = symbol, Initializing = field };
+                frame.Scope.Variables[receiver.Name] = receiver;
+                var value = field.Body!.Value!;
+                var t = CheckExpression(value, field.Type, keepCases: Types.KeepsCases(field.Type));
+                if (t.IsError || Types.IsError(field.Type))
+                {
+                    continue;
+                }
+
+                if (Types.IsVoid(t.Type))
+                {
+                    Report(ErrorIds.Syntax, value.Line, "a call with a `void` success used as a value (O10)");
+                }
+                else if (!Types.Assignable(t.Type, field.Type))
+                {
+                    ReportMismatch(t.Type, field.Type, value.Line, $"{Types.A(t.Type)} where {Types.A(field.Type)} is required");
+                }
+            }
+
+            if (receiver is not null)
+            {
+                model.RecordFieldsThis(symbol, receiver);
             }
         }
     }
@@ -405,9 +554,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// K7: inside a method of the instance, a name that is a field of its class, read through <c>this</c>; a lambda that reads it captures
-    /// <c>this</c> (F15). A <c>static</c> member has no instance, so none is found there (<see cref="InstanceFieldInStatic"/>).
+    /// <c>this</c> (F15). A <c>static</c> member has no instance, so none is found there (<see cref="InstanceFieldInStatic"/>). In a
+    /// field's default only the fields declared above it are names (V10).
     /// </summary>
-    private FieldSymbol? ImplicitField(string name) => InStaticMember() ? null : CurrentClass()?.Field(name);
+    private FieldSymbol? ImplicitField(string name) =>
+        !InStaticMember() && CurrentClass() is { } c && c.Field(name) is { } field && (Initializing() is not { } being || c.Fields.IndexOf(field) < c.Fields.IndexOf(being)) ? field : null;
 
     /// <summary>K7, K19: inside a <c>static</c> member, a name that is a field of an instance of its class, which is <c>static-mismatch</c>.</summary>
     private bool InstanceFieldInStatic(string name, int line)
@@ -421,11 +572,64 @@ public sealed partial class Checker
         return true;
     }
 
+    /// <summary>K19: a method of an instance named through its class, <c>Counter.Next()</c> or <c>Counter.Next</c>.</summary>
+    private void InstanceMethodThroughClass(ClassSymbol symbol, string name, int line) =>
+        Report(ErrorIds.StaticMismatch, line, $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+
+    /// <summary>K19: a method of an instance named alone, with a call or without one, in a <c>static</c> member, which has no instance.</summary>
+    private void InstanceMethodInStatic(string name, int line) =>
+        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
 
-    /// <summary>K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>.</summary>
-    private List<FunctionSymbol>? ImplicitMethods(string name) => CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list) ? list : null;
+    /// <summary>
+    /// K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>; a field's default
+    /// names the <c>static</c> ones alone, as C# refuses an instance member in an initializer and no <c>static</c> one (V10).
+    /// </summary>
+    private List<FunctionSymbol>? ImplicitMethods(string name) =>
+        CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list)
+        && (Initializing() is null ? list : list.Where(f => f.IsStatic).ToList()) is { Count: > 0 } reached ? reached : null;
+
+    /// <summary>K7: the field of a class body whose default is being read, through the lambdas around the place; null elsewhere.</summary>
+    private FieldSymbol? Initializing()
+    {
+        for (var f = frame; f is not null; f = f.Outer)
+        {
+            if (f.Class is not null)
+            {
+                return f.Initializing;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// K7, V10: in a field's default, a field of the class not declared above it, the field itself among them, or a method of the class
+    /// is no name, which the report says; false where the name is neither, and for every name outside a default.
+    /// </summary>
+    private bool OutOfReachInDefault(string name, int line)
+    {
+        if (Initializing() is not { } being || CurrentClass() is not { } c)
+        {
+            return false;
+        }
+
+        if (c.Field(name) is not null)
+        {
+            Report(ErrorIds.UnknownName, line, $"`{name}` is not declared above `{being.Name}`: a field's default reads the fields declared above it (K7, V10)");
+            return true;
+        }
+
+        if (c.Methods.ContainsKey(name))
+        {
+            Report(ErrorIds.UnknownName, line, $"`{name}` is a method of `{c.Name}`: a field's default reads no method of its instance (K7, V10)");
+            return true;
+        }
+
+        return false;
+    }
 
     /// <summary>The variable <c>this</c> of the method around the place, read and, from a lambda, captured (F15).</summary>
     private VariableSymbol ThisVariable()
@@ -452,6 +656,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (Initializing() is not null)
+        {
+            Report(ErrorIds.UnknownName, t.Line, "a field's default reads no `this`: its instance is being built (K7, V10)");
+            return Typed.Error;
+        }
+
         model.RecordImplicitField(t, ThisVariable(), null);
         return new Typed(new ClassType(CurrentClass()!));
     }
@@ -460,28 +670,29 @@ public sealed partial class Checker
     private Typed ReadImplicitField(NameExpression n, FieldSymbol field)
     {
         model.RecordImplicitField(n, ThisVariable(), field);
-        return Narrowed(n, new Typed(field.Type)); // N3, N9
+        return Narrowed(n, new Typed(Types.Read(field.Type))); // N3, N9; R3
     }
 
     /// <summary>
     /// K1, K2, K7: an assignment to a field by its name inside a method: the field of <c>this</c>, which takes a value only where it is
-    /// <c>mut</c>; inside a lambda it is the change of a captured value, <c>capture-assign</c> (F11).
+    /// <c>mut</c>; inside a lambda too, which holds a reference to the same instance (F11, K2).
     /// </summary>
     private void AssignImplicitField(AssignOrDeclare a, FieldSymbol field)
     {
-        var (receiver, captured) = Lookup("this");
-        model.RecordImplicitField(a, receiver!, field);
-        if (captured)
-        {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `this` and cannot change its field `{a.Name}` (F11)");
-        }
-        else if (!field.Mut)
+        var receiver = ThisVariable();
+        model.RecordImplicitField(a, receiver, field);
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Name}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
+        if (value.IsError)
+        {
+            return;
+        }
+
         if (Types.IsVoid(value.Type))
         {
             Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -490,41 +701,46 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else if (!captured && field.Mut)
+        else if (field.Mut)
         {
-            Assigned(new NullPath(receiver!, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
+            Assigned(new NullPath(receiver, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
     }
 
     // ---- static members ------------------------------------------------------------------------------
 
     /// <summary>
-    /// K18: a read of a <c>static</c> field, by its name inside the class or as <c>T.F</c>: a value of its type, which the emitter gives
-    /// as the constant the field holds, and no constant itself, as a C# <c>static readonly</c> field is none, but in the initial value of a
-    /// later <c>static</c> field of the same class (K20).
+    /// K18, K20: a read of a <c>static</c> field, by its name inside the class or as <c>T.F</c>. In the initial value of a <c>static</c>
+    /// field it is the constant the field holds, of any class and declared above or below, whose own initial value is read first; a
+    /// field whose initial value is being read closes a cycle, <c>static-cycle</c>. Elsewhere it is a value of its type, which the
+    /// emitter gives as the constant the field holds, and no constant itself, as a C# <c>static readonly</c> field is none.
     /// </summary>
     private Typed ReadStaticField(Expression node, StaticFieldSymbol field)
     {
-        if (field.Refused || Types.IsError(field.Type))
+        if (initializing is not null && !field.Refused)
         {
-            return Typed.Error; // E1: refused at its declaration
-        }
-
-        if (initializing is { } being && ReferenceEquals(being.Owner, field.Owner))
-        {
-            var fields = field.Owner.StaticFields;
-            if (fields.IndexOf(field) >= fields.IndexOf(being))
+            var at = readingStatics.IndexOf(field);
+            if (at >= 0)
             {
-                Report(ErrorIds.UnknownName, node.Line, $"`{field.Name}` is not declared above `{being.Name}`: the initial value of a `static` field reads the `static` fields declared above it (K20, V10)");
+                var cycle = readingStatics.GetRange(at, readingStatics.Count - at);
+                if (!cycle.Any(f => f.Refused))
+                {
+                    ReportStaticCycle(cycle); // a cycle through a field a reported cycle refused is that error's, in any order of the fields (E1)
+                }
+
                 return Typed.Error;
             }
 
-            model.RecordStaticField(node, field);
-            return new Typed(field.Type, field.Value);
+            CheckStaticField(field); // K20: its own initial value first
+        }
+
+        if (field.Refused || Types.IsError(field.Type))
+        {
+            return Typed.Error; // E1: refused at its declaration, or in a cycle
         }
 
         model.RecordStaticField(node, field);
-        return new Typed(field.Type);
+        return initializing is null ? new Typed(field.Type) : new Typed(field.Type, field.Value);
     }
 
     /// <summary>
@@ -550,8 +766,14 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (symbol.Methods.ContainsKey(m.Member))
+        if (symbol.Methods.TryGetValue(m.Member, out var methods))
         {
+            if (!methods.Any(f => f.IsStatic))
+            {
+                InstanceMethodThroughClass(symbol, m.Member, m.Line); // K19, with a call or without one
+                return Typed.Error;
+            }
+
             NotSupported(m.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -574,7 +796,7 @@ public sealed partial class Checker
                 return PickMethod(statics, c, expected, m.Line, out _);
             }
 
-            Report(ErrorIds.StaticMismatch, m.Line, $"`{m.Member}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+            InstanceMethodThroughClass(symbol, m.Member, m.Line);
         }
         else if (symbol.StaticField(m.Member) is not null || symbol.Field(m.Member) is not null)
         {
@@ -613,7 +835,7 @@ public sealed partial class Checker
     {
         if (type.Symbol.Field(member) is { } field)
         {
-            return new Typed(field.Type);
+            return FieldVisible(field, type.Symbol, line) ? new Typed(Types.Read(field.Type)) : Typed.Error; // R3: a `weak` field reads as a strong `T?`
         }
 
         if (type.Symbol.Methods.ContainsKey(member))
@@ -632,6 +854,18 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
+    /// <summary>F9: a field of a class body without <c>pub</c> is private to its class; a use of it from outside the class is <c>not-visible</c>.</summary>
+    private bool FieldVisible(FieldSymbol field, ClassSymbol owner, int line)
+    {
+        if (field.IsPub || ReferenceEquals(CurrentClass(), owner))
+        {
+            return true;
+        }
+
+        Report(ErrorIds.NotVisible, line, $"`{field.Name}` of `{owner.Name}` is private to its class: a field is visible outside it with `pub` (F9)");
+        return false;
+    }
+
     /// <summary>F9: a method without <c>pub</c> is private to its class; a call of it from outside the class is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>
         (method.Declaration!.Modifiers & Modifiers.Pub) != 0 || ReferenceEquals(CurrentClass(), method.Owner);
@@ -643,6 +877,12 @@ public sealed partial class Checker
         {
             if (type.Symbol.Field(m.Member) is { } field)
             {
+                if (!FieldVisible(field, type.Symbol, m.Line))
+                {
+                    CheckArgumentsLoosely(c);
+                    return Typed.Error;
+                }
+
                 var value = new Typed(field.Type);
                 model.RecordType(m, value);
                 return CallValue(field.Type, c); // F11: a field of function type is called as any function value
@@ -697,7 +937,7 @@ public sealed partial class Checker
         var candidates = InStaticMember() ? methods.Where(f => f.IsStatic).ToList() : methods;
         if (candidates.Count == 0)
         {
-            Report(ErrorIds.StaticMismatch, n.Line, $"a `static` member has no instance: `{n.Name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+            InstanceMethodInStatic(n.Name, n.Line);
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -714,7 +954,7 @@ public sealed partial class Checker
     /// <summary>K1: an instance made by the class's name, with the arguments of its primary constructor, bound as D11 binds them; a class without one takes none.</summary>
     private Typed CheckClassConstruction(ClassSymbol symbol, CallExpression c, KurzType? expected)
     {
-        var slots = symbol.Fields.Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, false)).ToList();
+        var slots = symbol.Fields.Where(f => f.Body is null).Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, false)).ToList(); // K7: a field of the body is no parameter
         var candidate = new Candidate { Slots = slots, Result = Types.Void };
         if (c.TypeArguments.Count > 0)
         {
@@ -768,9 +1008,9 @@ public sealed partial class Checker
 
     /// <summary>
     /// K1, K2: an assignment of a field of an instance, <c>c.Count = 1</c>: the field is <c>mut</c>, the variable that holds the
-    /// reference need not be, since the reference does not change; through a lambda's captured value it is <c>capture-assign</c> (F11).
-    /// A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before the path, as
-    /// M4 reads an assignment into a path (the emitter's order).
+    /// reference need not be, since the reference does not change; a lambda that captured the instance, or a value that holds it, assigns
+    /// it too (F11). A path that goes on into a data value after the instance's field is <c>not supported</c>. The value is read before
+    /// the path, as M4 reads an assignment into a path (the emitter's order).
     /// </summary>
     private void AssignThroughInstance(Assignment a, List<MemberAccess> members)
     {
@@ -797,18 +1037,20 @@ public sealed partial class Checker
             return;
         }
 
-        model.RecordType(last, new Typed(field.Type));
-        if (CapturedRoot(last.Target) is { } root)
+        if (!FieldVisible(field, owner.Symbol, last.Line))
         {
-            Report(ErrorIds.CaptureAssign, a.Line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
+            CheckExpression(a.Value, Untyped(a.Value));
+            return;
         }
-        else if (!field.Mut)
+
+        model.RecordType(last, new Typed(field.Type));
+        if (!field.Mut)
         {
             Report(ErrorIds.AssignImmutable, a.Line, $"`{last.Member}` is a field without `mut`, which nothing assigns (K1)");
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         var value = CheckExpression(a.Value, field.Type, keepCases: Types.KeepsCases(field.Type));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
         if (value.IsError)
         {
             return;
@@ -822,34 +1064,16 @@ public sealed partial class Checker
         {
             ReportMismatch(value.Type, field.Type, a.Value.Line, $"{Types.A(value.Type)} where {Types.A(field.Type)} is required");
         }
-        else
+        else if (field.Mut)
         {
             Assigned(PathOf(a.Target), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
-        }
-    }
-
-    /// <summary>F11: the name of the variable a path starts at where a lambda captured it, <c>this</c> among them; null where it is the function's own.</summary>
-    private string? CapturedRoot(Expression e)
-    {
-        switch (Unwrap(e))
-        {
-            case NameExpression n when Lookup(n.Name) is (not null, var captured):
-                return captured ? n.Name : null;
-            case NameExpression n when ImplicitField(n.Name) is not null:
-                return Lookup("this").Captured ? "this" : null;
-            case ThisExpression:
-                return Lookup("this").Captured ? "this" : null;
-            case MemberAccess m:
-                return CapturedRoot(m.Target);
-            default:
-                return null;
         }
     }
 
     /// <summary>
     /// M5 with K2: the receiver of a <c>mut</c> method that is a <c>mut</c> field of an instance, <c>node.Children.Add(x)</c>, which every
     /// reference reaches (M5's reading of K2 for paths); a field without <c>mut</c> is <c>mut-required</c>, a path that goes on into a
-    /// data value after the field is <c>not supported</c>, and inside a lambda the change of a captured value is <c>capture-assign</c> (F11).
+    /// data value after the field is <c>not supported</c>, and a lambda that captured the instance changes the field too (F11).
     /// Returns false where the receiver is no such field.
     /// </summary>
     private bool MutReceiverThroughInstance(Expression receiver, List<MemberAccess> members, int line, string what)
@@ -858,7 +1082,13 @@ public sealed partial class Checker
         {
             if (Unwrap(receiver) is NameExpression n && Lookup(n.Name).Variable is null && ImplicitField(n.Name) is { } implicitField)
             {
-                return MutField(receiver, implicitField, line, what);
+                return MutField(implicitField, line, what);
+            }
+
+            if (members.Count > 0 && Unwrap(members[0].Target) is NameExpression root && Lookup(root.Name).Variable is null && ImplicitField(root.Name) is not null)
+            {
+                NotSupported(line, "a `mut` method on a value held by a field of an instance (K2, M5)"); // K7: a field named alone is a step through `this`
+                return true;
             }
 
             return false;
@@ -877,7 +1107,7 @@ public sealed partial class Checker
             return true; // reported where the receiver was read
         }
 
-        return MutField(receiver, field, line, what);
+        return MutField(field, line, what);
     }
 
     /// <summary>
@@ -887,7 +1117,6 @@ public sealed partial class Checker
     /// </summary>
     private bool WrittenThroughInstance(Assignment a, IndexExpression index, List<MemberAccess> fields)
     {
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
         if (fields.Count > 0 && fields.FindLastIndex(m => PathType(m.Target) is ClassType) < fields.Count - 1)
         {
             NotSupported(a.Line, "an assignment into a value held by a field of an instance (K2, M4)");
@@ -900,13 +1129,9 @@ public sealed partial class Checker
         return true;
     }
 
-    private bool MutField(Expression receiver, FieldSymbol field, int line, string what)
+    private bool MutField(FieldSymbol field, int line, string what)
     {
-        if (CapturedRoot(receiver) is { } root)
-        {
-            Report(ErrorIds.CaptureAssign, line, $"a lambda reads `{root}` and cannot change what is reached through it (F11)");
-        }
-        else if (!field.Mut)
+        if (!field.Mut)
         {
             Report(ErrorIds.MutRequired, line, $"{what}, and `{field.Name}` is a field without `mut` (M5, K1)");
         }
@@ -918,33 +1143,61 @@ public sealed partial class Checker
 
     /// <summary>
     /// N9: whether a path known not null runs through a <c>mut</c> field of an instance, which a call can assign through another
-    /// reference (K2), so that what is known of it lasts up to the next call and the next assignment.
+    /// reference (K2), or through a <c>weak</c> reference, whose target a call can free (R3), so that what is known of it lasts up to the
+    /// next call and the next assignment.
     /// </summary>
-    private static bool Changeable(NullPath path)
+    private static bool Changeable(NullPath path) => Steps(path).Any(s => s.Mut || s.Type is WeakRefType);
+
+    /// <summary>N9: whether a path runs through a <c>weak</c> reference, the variable itself or a field on the way.</summary>
+    private static bool ThroughWeak(NullPath path) => Steps(path).Any(s => s.Type is WeakRefType);
+
+    /// <summary>N9: the root of a path and each field it reads, with its type and whether it is a <c>mut</c> field of an instance.</summary>
+    private static IEnumerable<(KurzType Type, bool Mut)> Steps(NullPath path)
     {
         var current = path.Root.Type;
+        yield return (current, false);
         foreach (var name in path.Fields.Length == 0 ? [] : path.Fields.Split('.'))
         {
             switch (Types.NonNull(current) ?? current)
             {
                 case ClassType c when c.Symbol.Field(name) is { } field:
-                    if (field.Mut)
-                    {
-                        return true;
-                    }
-
                     current = field.Type;
+                    yield return (current, field.Mut);
                     break;
                 case DataType d when d.Symbol.Field(name) is { } field:
                     current = SubstituteData(d, field.Type);
+                    yield return (current, false);
                     break;
                 default:
-                    return false;
+                    yield break;
             }
         }
-
-        return false;
     }
+
+    // N9: the calls read so far, so that a condition knows whether one ran in it
+    private int callsRun;
+
+    /// <summary>N9: a call ran, which ends what was known of every path a call can change, and counts for the end of a condition.</summary>
+    private void CallRan()
+    {
+        callsRun++;
+        EndChangeableNarrowing();
+    }
+
+    /// <summary>
+    /// N9 (the owner, 2026-11-01, "Those ends stop narrowing"): what a condition shows where it is true and where it is false, less every
+    /// path through a <c>weak</c> reference where a call ran in it since <paramref name="callsBefore"/>: a count let go of at the end of
+    /// the condition can free the target before the block runs.
+    /// </summary>
+    private (ImmutableHashSet<NullPath> True, ImmutableHashSet<NullPath> False) ConditionTests(Expression condition, int callsBefore)
+    {
+        var (whenTrue, whenFalse) = Tests(condition);
+        return callsRun == callsBefore ? (whenTrue, whenFalse) : (Unweak(whenTrue), Unweak(whenFalse));
+    }
+
+    /// <summary>N9: what is known of paths with no <c>weak</c> reference in them, which the end of a block that declares a variable keeps.</summary>
+    private static ImmutableHashSet<NullPath> Unweak(ImmutableHashSet<NullPath> known) =>
+        known.Any(ThroughWeak) ? known.Where(p => !ThroughWeak(p)).ToImmutableHashSet() : known;
 
     /// <summary>N9: a call or an assignment ends what was known of every path through a <c>mut</c> field of an instance.</summary>
     private void EndChangeableNarrowing() => frame.Known = Unchangeable(frame.Known);
@@ -1105,7 +1358,7 @@ public sealed partial class Checker
     /// <summary>Whether a value of the type holds an instance of a class at any depth, outside the instances themselves.</summary>
     private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> path) => type switch
     {
-        ClassType => true,
+        ClassType or WeakRefType => true,
         ListType l => HoldsInstance(l.Element, path),
         MapType m => HoldsInstance(m.Key, path) || HoldsInstance(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsInstance(c, path)),
@@ -1129,6 +1382,7 @@ public sealed partial class Checker
     private static ClassSymbol? PrivateTextClass(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         ClassType c when c.Symbol.TextMethod is { } text && (text.Declaration!.Modifiers & Modifiers.Pub) == 0 => c.Symbol,
+        WeakRefType w => PrivateTextClass(w.Target, path), // A4 with R3: the text of what its read gives
         ListType l => PrivateTextClass(l.Element, path),
         MapType m => PrivateTextClass(m.Key, path) ?? PrivateTextClass(m.Value, path),
         UnionType u => u.Cases.Select(c => PrivateTextClass(c, path)).FirstOrDefault(c => c is not null),

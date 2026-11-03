@@ -142,6 +142,8 @@ public static class ErrorIds
     public const string AmbiguousCall = "ambiguous-call";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
+    public const string EqualsMethod = "equals-method";
+    public const string MutableKey = "mutable-key";
     public const string BaseFieldClash = "base-field-clash";
     public const string NoText = "no-text";
     public const string BlockIndentation = "block-indentation";
@@ -150,6 +152,7 @@ public static class ErrorIds
     public const string UnknownEscape = "unknown-escape";
     public const string StaticState = "static-state";
     public const string StaticMismatch = "static-mismatch";
+    public const string StaticCycle = "static-cycle";
     public const string OverrideWithoutVirtual = "override-without-virtual";
     public const string HidesMember = "hides-member";
     public const string NoPrimaryConstructor = "no-primary-constructor";
@@ -164,6 +167,7 @@ public static class ErrorIds
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
     public const string KindNotRead = "kind-not-read";
+    public const string VoidTypeArgument = "void-type-argument";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

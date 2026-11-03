@@ -85,8 +85,15 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
 }
 
-/// <summary>A field of a <c>data</c> type (D1), its own or inherited (D7).</summary>
-public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line);
+/// <summary>
+/// A field of a <c>data</c> type (D1), its own or inherited (D7), or of a class (K1); <paramref name="Body"/> is the declaration of a
+/// field of a class body (K7), which is no parameter of a constructor, and null for a field of a primary constructor.
+/// </summary>
+public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line, FieldDeclaration? Body = null)
+{
+    /// <summary>F9, D14: a field of a primary constructor is visible wherever its type is, one of a class body only with <c>pub</c>.</summary>
+    public bool IsPub => Body is null || (Body.Modifiers & Modifiers.Pub) != 0;
+}
 
 /// <summary>A <c>data</c> type (D1) with its fields, the base fields first (D7), its base (D6) and its type parameters (T19).</summary>
 public sealed class DataSymbol(string name, TypeDeclaration declaration)
@@ -105,8 +112,12 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     /// <summary>Set when the checker starts resolving the type, whatever the outcome, so that it is resolved once and a cycle of bases ends.</summary>
     public bool Resolved { get; set; }
 
-    /// <summary>Whether the declaration writes a primary constructor: <c>data Empty</c> has none and one value (D8); an empty <c>()</c> is <c>syntax</c> and counts as written.</summary>
-    public bool HasFields => Declaration.PrimaryConstructor is not null;
+    /// <summary>
+    /// Whether the type has a field, of its own or of its base (D7, D21), or writes a primary constructor: <c>data Empty</c> has none
+    /// and one value (D8), as has <c>data Leaf : Empty</c>; an empty <c>()</c> is <c>syntax</c> and counts as written. The fields are
+    /// the resolved ones, so it is read after the type is resolved.
+    /// </summary>
+    public bool HasFields => Declaration.PrimaryConstructor is not null || Fields.Count > 0;
 
     public int Line => Declaration.Line;
 
@@ -139,6 +150,15 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     public StaticFieldSymbol? StaticField(string name) => StaticFields.FirstOrDefault(f => f.Name == name);
 
     public int FieldIndex(string name) => Fields.FindIndex(f => f.Name == name);
+
+    /// <summary>K5, K8, K15: the fields an <c>equal by</c> clause names, each once, in its order; empty where the class has no clause.</summary>
+    public List<FieldSymbol> EqualBy { get; } = [];
+
+    /// <summary>K4: whether two instances compare by identity: a class without a clause that has a <c>mut</c> or a <c>weak</c> field.</summary>
+    public bool ComparesByIdentity => EqualBy.Count == 0 && Fields.Any(f => f.Mut || f.Type is WeakRefType);
+
+    /// <summary>K4, K5: the fields <c>==</c> and the hash read: those the clause names, or every field of a class that compares by content.</summary>
+    public IReadOnlyList<FieldSymbol> FieldsThatCount => EqualBy.Count > 0 ? EqualBy : ComparesByIdentity ? [] : Fields;
 
     /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
     public FunctionSymbol? TextMethod =>
