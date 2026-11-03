@@ -565,4 +565,50 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("%\"c.Mid\" = type { i64, i64, i32, i32 }", program.Ir, StringComparison.Ordinal); // the counts, the base's `N`, then `M`
         Ran(Toolchain.Run(toolchain.Build(program, "class-layout")), 0, ["1", "5", "3", "8", "3", "true"], string.Empty);
     }
+
+    [Fact]
+    public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
+    {
+        // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for
+        // the interface, whose words are the class's release, its weak release, its equality and its hash where `==` or a key reads them,
+        // and a slot for each method of the interface in its order; its `null` is the pair of the address 0 (N1); a class nothing derives
+        // from has that table alone, and its own references stay the one word of the address
+        const string Program = """
+            interface Shape {
+                int Area()
+                int Twice(int k)
+            }
+
+            class Dot(int R) : Shape {
+                pub int Area() => R
+                pub int Twice(int k) => R * k
+            }
+
+            class Holder(Shape S, Shape? T)
+
+            int Both(Shape x, Shape? y) {
+                if y == null {
+                    return x.Area()
+                }
+
+                return x.Area() + y.Twice(2)
+            }
+
+            int Own(Dot d) => d.R
+
+            h = Holder(Dot(1), null)
+            print(Both(h.S, h.T))
+            print(Both(Dot(2), Dot(3)))
+            print(Own(Dot(4)))
+            """;
+        var program = Emit(Program);
+        string Parameters(string name) =>
+            Regex.Match(program.Ir, $@"^define [^@\n]*@""[^""]*\.{name}\.[0-9]+""\(([^)]*)\)", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal("%kz.obj %p0, %kz.obj %p1", Parameters("Both"));
+        Assert.Equal("ptr %p0", Parameters("Own"));
+        Assert.Contains("%\"c.Holder\" = type { i64, i64, %kz.obj, %kz.obj }", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("@\"table.Dot.Shape\" = internal constant [7 x ptr] [", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
+    }
 }

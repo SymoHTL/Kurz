@@ -554,6 +554,12 @@ public sealed partial class Checker
             return;
         }
 
+        if (d.Kind == TypeDeclarationKind.Interface && !clash)
+        {
+            DeclareInterface(d); // K6, K7
+            return;
+        }
+
         if (d.Kind != TypeDeclarationKind.Data)
         {
             if (clash)
@@ -1189,6 +1195,17 @@ public sealed partial class Checker
             return new ClassType(classSymbol); // K1
         }
 
+        if (interfaces.TryGetValue(n.Name, out var face))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (K6, T19)");
+                return Types.Error;
+            }
+
+            return new InterfaceType(face); // K6
+        }
+
         if (enums.TryGetValue(n.Name, out var enumSymbol))
         {
             if (n.TypeArguments.Count > 0)
@@ -1276,7 +1293,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1694,7 +1711,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>

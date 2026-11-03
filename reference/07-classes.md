@@ -333,7 +333,10 @@ print(d.Sound())
 ### K7 (decided, §4) The body of a class
 
 Class bodies follow C#. A class names its base class and its interfaces after `:`, the base class
-first. An interface is declared with `interface` and lists the signatures of its methods; they are
+first. An interface is declared with `interface` and lists the signatures of its methods alone: a
+body of one is `syntax`, at the method (§4, the owner, 2026-11-02, #110, comment 6573113786, against a
+default body as Rust's trait methods and C# 8's default interface methods have)
+*(assumed, §4: the id, as for text no rule gives a meaning, E4)*. The methods are
 visible wherever the interface is, and a method that implements one is written `pub`, as C# demands
 `public` of an implicit implementation: a class that names an interface and lacks one of its methods is the compile error
 `missing-member`, at the class, with the message naming the method, and a method that is there
@@ -341,7 +344,10 @@ without `pub` is `interface-method-private`, at the method (the owner, 2026-10-0
 implied by the interface, under which a method that looks private is public, and against one id for
 both mistakes). A method implements an interface method when its name, its parameter types in their
 order and its return type are the interface's; a `pub` method inherited from the base class counts,
-as in C# (the owner, 2026-10-10, confirming the reading proposed after the review of round 13); one
+as in C# (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). The
+parameters it marks `mut` are the interface's too: one whose `mut` parameters differ implements nothing,
+and the class is `missing-member` (§4, the owner, 2026-11-02, #110, comment 6573113786, against `mut`
+ignored, under which a call through the interface passes a value where the method takes a place, M7). One
 inherited without `pub` does not count, and the class is `missing-member` (the owner, 2026-10-10); it
 implements the interface with a `pub` method of its own, which hides nothing, since a base method the
 class cannot see is hidden by nothing (below).
@@ -697,6 +703,37 @@ class Dot : Shape {
 }
 
 print("dot")
+```
+
+Case: [classes/interface-method-mut-differs.kz](../corpus/classes/interface-method-mut-differs.kz)
+```kurz
+interface Bump {
+    void Go(mut int n)
+}
+
+class Step : Bump {
+    pub void Go(int n) {
+        print(n)
+    }
+}
+
+print(1)
+```
+
+Case: [classes/interface-method-body.kz](../corpus/classes/interface-method-body.kz)
+```kurz
+interface Shape {
+    int Area()
+    string Text() => "area {Area()}"
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+    pub string Text() => "dot"
+}
+
+Shape s = Dot()
+print(s.Area())
 ```
 
 Case: [classes/override-return-type.kz](../corpus/classes/override-return-type.kz)

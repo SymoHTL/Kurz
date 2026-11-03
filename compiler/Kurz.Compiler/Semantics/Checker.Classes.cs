@@ -10,10 +10,10 @@ namespace Kurz.Compiler.Semantics;
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
 /// judged by the types of the fields (R2, R4), its <c>static</c> methods and fields (K7, K18), and its equality and hash, by identity or
 /// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15), across inheritance (K13); its base class, in the
-/// short form and the explicit one (K6, K10, K11, K16, K17), and its <c>virtual</c>, <c>override</c> and <c>prot</c> methods (K7, F9).
-/// What else a class can write, an interface, a constructor in its body, a field there without a written type, a field in its body or
-/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18) and type parameters,
-/// is <c>not supported</c> (<c>compiler/README.md</c>).
+/// short form and the explicit one (K6, K10, K11, K16, K17), and its <c>virtual</c>, <c>override</c> and <c>prot</c> methods (K7, F9);
+/// the interfaces it names, which it implements with <c>pub</c> methods (K6, K7). What else a class can write, a constructor in its
+/// body, a field there without a written type, a field in its body or a <c>static</c> member of a class with a base or with classes
+/// derived from it (K6, K7, K18) and type parameters, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
@@ -21,6 +21,8 @@ public sealed partial class Checker
     private readonly List<ClassSymbol> classDeclared = [];
     private readonly HashSet<ClassSymbol> classesCompared = new(ReferenceEqualityComparer.Instance); // K4: the classes a walk of `==` is inside of
     private readonly HashSet<ClassSymbol> classesResolving = new(ReferenceEqualityComparer.Instance); // K6: the classes whose bases are being resolved
+    private readonly Dictionary<string, InterfaceSymbol> interfaces = new(StringComparer.Ordinal);
+    private readonly List<InterfaceSymbol> interfaceDeclared = [];
 
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
@@ -58,6 +60,71 @@ public sealed partial class Checker
         {
             symbol.StaticFields.Add(new StaticFieldSymbol(f, symbol)); // K7, K18: the one field of a class body the checker reads
         }
+    }
+
+    /// <summary>
+    /// K6, K7: an interface the checker reads is declared with its methods, each a signature; a body of one is <c>syntax</c>, at its
+    /// line, and the signature stands (the owner, 2026-11-02, #110, "signatures alone, as K7 says"; the id *(assumed)*, as text no
+    /// rule gives a meaning, E4). One that writes what the checker does not read is <c>not supported</c> at that line, and its name
+    /// joins the types the checker does not read (E1).
+    /// </summary>
+    private void DeclareInterface(TypeDeclaration d)
+    {
+        unsupportedBases[d.Name] = "an interface a data type names (K10)"; // D6: a data type's base is a data type
+        foreach (var f in (d.Members ?? []).OfType<FunctionDeclaration>().Where(f => f.ExpressionBody is not null || f.BlockBody is not null))
+        {
+            Report(ErrorIds.Syntax, f.Line, $"a body of the method `{f.Name}` of an interface, which lists the signatures of its methods alone (K7)");
+        }
+
+        if (UnreadInterfacePart(d) is { } unread)
+        {
+            NotSupported(unread.Line, unread.Construct);
+            unsupportedTypes.Add(d.Name);
+            return;
+        }
+
+        var symbol = new InterfaceSymbol(d.Name, d);
+        interfaces[d.Name] = symbol;
+        interfaceDeclared.Add(symbol);
+        foreach (var f in (d.Members ?? []).OfType<FunctionDeclaration>())
+        {
+            var method = new FunctionSymbol(f.Name, f) { Interface = symbol };
+            model.RecordFunction(f, method);
+            symbol.Methods.Add(method);
+        }
+    }
+
+    /// <summary>
+    /// The first part of an interface's declaration that the checker does not read, with its line; null where it reads all of it. K7
+    /// gives an interface the signatures of its methods: type parameters of the interface or of a method (T19, section 4), a
+    /// modifier, a default of a parameter and any member that is no method are parts no rule gives an interface or the checker does not
+    /// read; a body is <c>syntax</c> (<see cref="DeclareInterface"/>).
+    /// </summary>
+    private static (int Line, string Construct)? UnreadInterfacePart(TypeDeclaration d)
+    {
+        if (d.TypeParameters.Count > 0)
+        {
+            return (d.Line, "a generic interface (T19, K6)");
+        }
+
+        foreach (var member in d.Members ?? [])
+        {
+            switch (member)
+            {
+                case FunctionDeclaration f when f.Modifiers != Modifiers.None:
+                    return (f.Line, "a modifier of a method of an interface (K7)");
+                case FunctionDeclaration f when f.TypeParameters.Count > 0:
+                    return (f.Line, "a method of an interface with type parameters of its own (section 4, T19)");
+                case FunctionDeclaration f when f.Parameters.Any(p => p.Default is not null):
+                    return (f.Line, "a default of a parameter of a method of an interface (K7, F12)");
+                case FunctionDeclaration:
+                    break;
+                default:
+                    return (member.Line, "a member of an interface other than a method (K7)");
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The first part of a class's declaration that the checker does not read, with its line; null where it reads all of it.</summary>
@@ -113,6 +180,12 @@ public sealed partial class Checker
         var target = Resolve(w.Inner is NullableType nullable ? nullable.Inner : w.Inner);
         if (target is ErrorType)
         {
+            return Types.Error;
+        }
+
+        if (target is InterfaceType)
+        {
+            NotSupported(w.Line, $"`weak` before the interface `{target}`, which R3 and R5 do not name (K6)");
             return Types.Error;
         }
 
@@ -510,17 +583,36 @@ public sealed partial class Checker
 
     /// <summary>
     /// K6, K10: the base class a class names after <c>:</c>, resolved before the class, with the part of the declaration that names
-    /// it; null where it names none. What the checker does not read there is <c>not supported</c>: an interface, whose declaration
-    /// says so (K6), a type that is no class, a second class and a class that is its own base.
+    /// it; null where it names none; and the interfaces it names there, in their order (K6, K7). What the checker does not read there
+    /// is <c>not supported</c>: a type that is neither a class nor an interface, a second class, a class that is its own base, a class
+    /// after an interface, where K7 names the base class first, an interface named twice, and arguments after an interface.
     /// </summary>
     private BaseSpecifier? ResolveClassBase(ClassSymbol symbol)
     {
         BaseSpecifier? taken = null;
         foreach (var b in symbol.Declaration.Bases)
         {
+            if (b.Type is NamedType { TypeArguments.Count: 0 } namedFace && interfaces.TryGetValue(namedFace.Name, out var face))
+            {
+                if (b.Arguments is not null)
+                {
+                    NotSupported(b.Line, $"arguments after the interface `{face.Name}`, which has no constructor (K6, K10)");
+                }
+                else if (symbol.Interfaces.Contains(face))
+                {
+                    NotSupported(b.Line, $"the interface `{face.Name}` named twice after `:` (K6)");
+                }
+                else
+                {
+                    symbol.Interfaces.Add(face);
+                }
+
+                continue;
+            }
+
             if (b.Type is not NamedType { TypeArguments.Count: 0 } named || !classes.TryGetValue(named.Name, out var baseSymbol))
             {
-                var type = Resolve(b.Type); // a name that is no type is `unknown-name` there (V10), and an interface was said `not supported` at its declaration
+                var type = Resolve(b.Type); // a name that is no type is `unknown-name` there (V10), and an interface the checker does not read was said `not supported` at its declaration
                 if (!Types.IsError(type))
                 {
                     NotSupported(b.Line, $"`{type}` after `:`, where a class names its base class and its interfaces (K6, K7)");
@@ -534,6 +626,12 @@ public sealed partial class Checker
                 // W1 with K6: `std/`'s checker judged the class with no class derived from it, so the refusals of a class in a chain did not
                 // run on it, and its symbol is `std/`'s own, which the file's reading leaves as it is
                 NotSupported(b.Line, $"`{named.Name}` after `:`, a class of `std/` the prelude brings into the file (K6, W1)");
+                continue;
+            }
+
+            if (symbol.Interfaces.Count > 0)
+            {
+                NotSupported(b.Line, $"the base class `{named.Name}` after an interface, where a class names its base class first (K7)");
                 continue;
             }
 
@@ -565,6 +663,23 @@ public sealed partial class Checker
     /// </summary>
     private void ResolveMethods()
     {
+        foreach (var face in interfaceDeclared)
+        {
+            foreach (var method in face.Methods)
+            {
+                ResolveTypes(method, method.Declaration!);
+            }
+
+            for (var i = 1; i < face.Methods.Count; i++)
+            {
+                var later = face.Methods[i];
+                if (face.Methods.Take(i).Any(earlier => earlier.Name == later.Name && SameParameters(earlier, later)))
+                {
+                    Report(ErrorIds.DuplicateFunction, later.Line, $"`{face.Name}` has a method `{later.Name}` with these parameter types already (F12)");
+                }
+            }
+        }
+
         foreach (var symbol in classDeclared)
         {
             foreach (var method in symbol.Methods.Values.SelectMany(list => list))
@@ -614,7 +729,54 @@ public sealed partial class Checker
                 HidesProperty(symbol, field.Name, false, field.Line); // K7: a field of the class's own, its bases' fields coming first (K6)
             }
         }
+
+        foreach (var symbol in classDeclared)
+        {
+            CheckImplementations(symbol);
+        }
     }
+
+    /// <summary>
+    /// K7: each method of each interface a class names has a <c>pub</c> method of the same name, parameter types in their order and
+    /// return type, the class's own or one it inherits; one the class declares without <c>pub</c> is <c>interface-method-private</c> at
+    /// the method, and none, an inherited one without <c>pub</c> not counting, is <c>missing-member</c> at the class. <c>mut</c> is part
+    /// of the signature: a method whose <c>mut</c> parameters are not the interface method's implements nothing, and the class is
+    /// <c>missing-member</c> (the owner, 2026-11-02, #110, against <c>mut</c> ignored, under which a call through the interface passes a
+    /// value where the method takes a place, M7).
+    /// </summary>
+    private void CheckImplementations(ClassSymbol symbol)
+    {
+        foreach (var face in symbol.Interfaces)
+        {
+            foreach (var m in face.Methods)
+            {
+                if (Types.IsError(m.ReturnType) || m.Parameters.Any(p => Types.IsError(p.Type)))
+                {
+                    continue; // the signature carries its own error (E1)
+                }
+
+                var candidates = symbol.Chain.SelectMany(c => c.Methods.TryGetValue(m.Name, out var list) ? list : [])
+                    .Where(x => SameParameters(x, m) && SameMut(x, m) && x.TypeParameters.Count == 0 && Types.Same(x.ReturnType, m.ReturnType)).ToList();
+                var own = candidates.FirstOrDefault(x => ReferenceEquals(x.Owner, symbol));
+                var found = own ?? candidates.FirstOrDefault(x => (x.Declaration!.Modifiers & Modifiers.Pub) != 0);
+                if (own is not null && (own.Declaration!.Modifiers & Modifiers.Pub) == 0)
+                {
+                    Report(ErrorIds.InterfaceMethodPrivate, own.Line, $"`{own.Name}` implements the method of `{face.Name}` and has no `pub`: a method that implements one of an interface is written `pub` (K7)");
+                    continue;
+                }
+
+                if (found is null)
+                {
+                    var signature = $"{m.ReturnType} {m.Name}({string.Join(", ", m.Parameters.Select(p => (p.Mut ? "mut " : "") + p.Type))})";
+                    Report(ErrorIds.MissingMember, symbol.Line, $"`{symbol.Name}` names `{face.Name}` and has no `pub` method `{signature}`, its own or inherited (K7)");
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// <summary>K7 with M7: whether the two methods mark the same parameters <c>mut</c>, which is part of an interface method's signature.</summary>
+    internal static bool SameMut(FunctionSymbol a, FunctionSymbol b) => a.Parameters.Zip(b.Parameters).All(p => p.First.Mut == p.Second.Mut);
 
     /// <summary>
     /// K7 <i>(assumed)</i>: a property has no override (section 14: open), so a member of a derived class with the name of a property of a
@@ -1377,6 +1539,33 @@ public sealed partial class Checker
         return PickMethod(instance, c, expected, m.Line, out _, type);
     }
 
+    /// <summary>K6, K7: a member of a value of an interface read without a call: the interface has methods alone, and a method named without a call is no value (F11).</summary>
+    private Typed InterfaceMember(InterfaceType face, string member, int line)
+    {
+        if (face.Symbol.Methods.Any(f => f.Name == member))
+        {
+            NotSupported(line, "a method as a value, named without a call (K7, F11)");
+            return Typed.Error;
+        }
+
+        Report(ErrorIds.UnknownName, line, $"`{face.Symbol.Name}` has no member `{member}` (V10)");
+        return Typed.Error;
+    }
+
+    /// <summary>K6, K7: a call of a method of an interface on a value of it, the one of its name whose parameters fit (F13), visible wherever the interface is.</summary>
+    private Typed CallInterfaceMethod(InterfaceType face, MemberAccess m, CallExpression c)
+    {
+        var methods = face.Symbol.Methods.Where(f => f.Name == m.Member).ToList();
+        if (methods.Count == 0)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`{face.Symbol.Name}` has no method `{m.Member}` (V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        return ResolveCall(methods, c, null, out _, CallKind.Method);
+    }
+
     /// <summary>
     /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
     /// <c>not-visible</c> where it is private and the call stands outside its class, or <c>prot</c> and outside the classes derived from
@@ -1729,7 +1918,9 @@ public sealed partial class Checker
     /// captures besides (R9), of a lambda whose type the field's can hold, and of the lambdas a function value such a lambda captures
     /// can be, every lambda where a type on the way names a type parameter (R9, assumed), so the rule runs after every body, when the
     /// lambdas are known. Each ring is reported once, at the class of
-    /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
+    /// the ring declared first, the first class on the path (R9's case), and its message cites R8 where a step of it reaches its class
+    /// through an interface's type alone, else R2, and R9 besides where a step's field can hold a function value; a ring of classes of
+    /// <c>std/</c> or of a folder alone, which a
     /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring,
     /// and one that a lambda of <c>std/</c> or of a folder closes through a type argument only a call of the file gives, at the first
     /// such call (the owner, 2026-11-05).
@@ -1739,8 +1930,8 @@ public sealed partial class Checker
         var firstUse = new Dictionary<ClassSymbol, int>();
         var byLambda = new List<CapturingLambda>();
         var captured = CapturedClasses(firstUse, byLambda);
-        var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
-        List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
+        var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field, string Rule)>>();
+        List<(ClassSymbol To, FieldSymbol Field, string Rule)> EdgesOf(ClassSymbol c)
         {
             if (!edges.TryGetValue(c, out var list))
             {
@@ -1750,7 +1941,8 @@ public sealed partial class Checker
                 foreach (var field in c.Fields)
                 {
                     var reached = new HashSet<ClassSymbol>();
-                    ClassesHeld(field.Type, reached, []);
+                    var faces = new HashSet<ClassSymbol>();
+                    ClassesHeld(field.Type, reached, [], faces: faces);
                     if (HoldsFunctionValue(field.Type, []))
                     {
                         // R9 (assumed): a field holds only the functions its type can hold, so it reaches what a lambda of such a type
@@ -1780,7 +1972,8 @@ public sealed partial class Checker
                         }
                     }
 
-                    list.AddRange(reached.Select(r => (r, field)));
+                    list.AddRange(reached.Select(r => (r, field, "R2")));
+                    list.AddRange(faces.Except(reached).Select(r => (r, field, "R8"))); // R8: reached through an interface's type alone
                 }
 
                 edges[c] = list;
@@ -1802,7 +1995,7 @@ public sealed partial class Checker
                 var members = ring.Select(step => step.From).Distinct().ToList();
                 reported.UnionWith(members);
                 var path = string.Join(", ", ring.Select(step => $"`{step.From.Name}.{step.Field.Name}`{(step.Field.Mut ? " (mut)" : "")}"));
-                var rules = ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? "R2, R9" : "R2";
+                var rules = (ring.Any(step => step.Rule == "R8") ? "R8" : "R2") + (ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? ", R9" : "");
                 var first = members.Where(classDeclared.Contains).MinBy(classDeclared.IndexOf);
                 var line = first?.Line ?? members.Where(firstUse.ContainsKey).Select(m => firstUse[m]).DefaultIfEmpty(0).Min();
                 if (line > 0)
@@ -1915,25 +2108,25 @@ public sealed partial class Checker
     }
 
     /// <summary>A ring of fields from <paramref name="start"/> back to it with a <c>mut</c> field on it; null where there is none.</summary>
-    private static List<(ClassSymbol From, FieldSymbol Field)>? RingThroughMut(ClassSymbol start, Func<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>> edges)
+    private static List<(ClassSymbol From, FieldSymbol Field, string Rule)>? RingThroughMut(ClassSymbol start, Func<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field, string Rule)>> edges)
     {
         // a search over (class, a `mut` field met yet) from the start, back to the start with one met
         var queue = new Queue<(ClassSymbol At, bool Mut)>();
-        var cameFrom = new Dictionary<(ClassSymbol, bool), ((ClassSymbol, bool) From, FieldSymbol Field)>();
+        var cameFrom = new Dictionary<(ClassSymbol, bool), ((ClassSymbol, bool) From, FieldSymbol Field, string Rule)>();
         queue.Enqueue((start, false));
         var seen = new HashSet<(ClassSymbol, bool)> { (start, false) };
         while (queue.Count > 0)
         {
             var (at, mut) = queue.Dequeue();
-            foreach (var (to, field) in edges(at))
+            foreach (var (to, field, rule) in edges(at))
             {
                 var next = (to, mut || field.Mut);
                 if (ReferenceEquals(to, start) && next.Item2)
                 {
-                    var ring = new List<(ClassSymbol, FieldSymbol)> { (at, field) };
+                    var ring = new List<(ClassSymbol, FieldSymbol, string)> { (at, field, rule) };
                     for (var step = (at, mut); cameFrom.TryGetValue(step, out var back); step = back.From)
                     {
-                        ring.Insert(0, (back.From.Item1, back.Field));
+                        ring.Insert(0, (back.From.Item1, back.Field, back.Rule));
                     }
 
                     return ring;
@@ -1941,7 +2134,7 @@ public sealed partial class Checker
 
                 if (seen.Add(next))
                 {
-                    cameFrom[next] = ((at, mut), field);
+                    cameFrom[next] = ((at, mut), field, rule);
                     queue.Enqueue(next);
                 }
             }
@@ -1961,9 +2154,10 @@ public sealed partial class Checker
     /// <summary>
     /// The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values
     /// of a map, the cases of a union and the fields of a data value, and where <paramref name="arguments"/> is given, what the types it
-    /// gives a type parameter hold (R9); it gives a type parameter met before none.
+    /// gives a type parameter hold (R9); it gives a type parameter met before none; where <paramref name="faces"/> is given, the classes
+    /// it holds through an interface's type go there instead (R8).
     /// </summary>
-    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path, Func<TypeParameterSymbol, IEnumerable<KurzType>>? arguments = null)
+    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path, Func<TypeParameterSymbol, IEnumerable<KurzType>>? arguments = null, HashSet<ClassSymbol>? faces = null)
     {
         switch (type)
         {
@@ -1971,38 +2165,41 @@ public sealed partial class Checker
                 reached.Add(c.Symbol); // a class of std/ or of a folder is in no table of the file's classes (W1)
                 reached.UnionWith(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol))); // K6: an instance of a derived class stands where its base does
                 break;
+            case InterfaceType face:
+                (faces ?? reached).UnionWith(classDeclared.Where(x => x.Implements(face.Symbol))); // R8: any class of the program that implements it
+                break;
             case ListType l:
-                ClassesHeld(l.Element, reached, path, arguments);
+                ClassesHeld(l.Element, reached, path, arguments, faces);
                 break;
             case MapType m:
-                ClassesHeld(m.Key, reached, path, arguments);
-                ClassesHeld(m.Value, reached, path, arguments);
+                ClassesHeld(m.Key, reached, path, arguments, faces);
+                ClassesHeld(m.Value, reached, path, arguments, faces);
                 break;
             case UnionType u:
                 foreach (var c in u.Cases)
                 {
-                    ClassesHeld(c, reached, path, arguments);
+                    ClassesHeld(c, reached, path, arguments, faces);
                 }
 
                 break;
             case DataType d when path.Add(d.Symbol):
                 foreach (var f in d.Symbol.Fields)
                 {
-                    ClassesHeld(SubstituteData(d, f.Type), reached, path, arguments);
+                    ClassesHeld(SubstituteData(d, f.Type), reached, path, arguments, faces);
                 }
 
                 break;
             case DataType d:
                 foreach (var a in HeldArguments(d))
                 {
-                    ClassesHeld(a, reached, path, arguments);
+                    ClassesHeld(a, reached, path, arguments, faces);
                 }
 
                 break;
             case TypeParameterType p when arguments is not null:
                 foreach (var a in arguments(p.Symbol))
                 {
-                    ClassesHeld(a, reached, path, arguments);
+                    ClassesHeld(a, reached, path, arguments, faces);
                 }
 
                 break;
@@ -2085,7 +2282,7 @@ public sealed partial class Checker
     /// <summary>Whether a value of the type holds an instance of a class at any depth, outside the instances themselves.</summary>
     private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> path) => type switch
     {
-        ClassType or WeakRefType => true,
+        ClassType or InterfaceType or WeakRefType => true,
         ListType l => HoldsInstance(l.Element, path),
         MapType m => HoldsInstance(m.Key, path) || HoldsInstance(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsInstance(c, path)),

@@ -150,6 +150,7 @@ internal sealed class Layout(IrModule module)
                 DataType d when d.Symbol.IsGeneric && related.Contains(d.Symbol) => $"a generic data type in a relation of inheritance, `{d}` (D6, T19)",
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
                 ClassType c => c.Symbol.Fields.Select(f => Inner(type, f.Type)).FirstOrDefault(r => r is not null),
+                InterfaceType => null, // K6: each class that implements it is laid out where its instance is made
                 WeakRefType w => Refusal(w.Target),
                 DataType d => Fields(d).Select(f => Inner(type, f)).FirstOrDefault(r => r is not null),
                 UnionType u => u.Cases.Where(c => c is not VoidType).Select(c => Inner(type, c)).FirstOrDefault(r => r is not null),
@@ -185,6 +186,7 @@ internal sealed class Layout(IrModule module)
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
         ClassType { Symbol.Derived: true } => "zeroinitializer", // K6: the pair of the address 0 and no table, as Rust lays out `Option<Rc<dyn Trait>>`
+        InterfaceType => "zeroinitializer", // K6: the pair of the address 0 and no table, as for a class with derived classes
         ClassType => "null",
         CFunctionType => "null",
         FunctionType => "zeroinitializer",
@@ -196,6 +198,7 @@ internal sealed class Layout(IrModule module)
     {
         FunctionType => "%kz.fn",
         ClassType { Symbol.Derived: true } => "%kz.obj",
+        InterfaceType => "%kz.obj",
         _ => "ptr",
     };
 
@@ -228,6 +231,8 @@ internal sealed class Layout(IrModule module)
                 return Fat(c.Symbol) ? Pair() : "ptr"; // K2: an instance is the address of its block, K6: with its class's table where a class derives from its type
             case WeakRefType w when Fat(w.Target.Symbol):
                 return Pair(); // R3 with K6: the address of the target's block and the table of its class
+            case InterfaceType:
+                return Pair(); // K6: the address of the instance's block and the table of its class for the interface, as Rust lays out `Rc<dyn Trait>`
             case UnionType u when Niche(u) is not null:
                 return NicheIr(u) == "%kz.obj" ? Pair() : NicheIr(u);
             case DataType d:
@@ -303,6 +308,8 @@ internal sealed class Layout(IrModule module)
             case ClassType c:
                 return Fat(c.Symbol) ? (16, 8) : (8, 8);
             case WeakRefType w when Fat(w.Target.Symbol):
+                return (16, 8);
+            case InterfaceType:
                 return (16, 8);
             case UnionType u when Niche(u) is not null:
                 return NicheIr(u) == "ptr" ? (8, 8) : (16, 8);

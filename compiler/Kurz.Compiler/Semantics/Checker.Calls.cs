@@ -227,6 +227,13 @@ public sealed partial class Checker
                         return CheckClassConstruction(classSymbol, c, expected); // K1
                     }
 
+                    if (interfaces.ContainsKey(n.Name))
+                    {
+                        NotSupported(n.Line, $"a call of the interface `{n.Name}`, which has no constructor (K6)");
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     if (enums.ContainsKey(n.Name))
                     {
                         // D18: the value of a number is `Plan.From(n)`, against C#'s cast, which the option wrote `Plan(2)` and C# writes
@@ -936,6 +943,8 @@ public sealed partial class Checker
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
             case ClassType c:
                 return ByFieldsThatCount(c, held => KeyOf(held, seen, path, cut));
+            case InterfaceType face:
+                return ByImplementers(face, held => KeyOf(held, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -1042,6 +1051,8 @@ public sealed partial class Checker
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
                 return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
+            case InterfaceType face:
+                return ByImplementers(face, held => HeldEquality(held, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1112,11 +1123,28 @@ public sealed partial class Checker
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
             case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
                 return (true, $"`==` takes no `{item}`");
-            case ClassType:
+            case ClassType or InterfaceType:
                 return HeldEquality(item, [], [], []);
             default:
                 return (false, $"`==` on {Types.A(item)} is not read");
         }
+    }
+
+    /// <summary>
+    /// K13 with K6: why <c>==</c> or a key does not take a value of the interface, from each class that names it, whose instance the
+    /// value can be, read by <paramref name="why"/> with the classes derived from it, as a base's derived classes are read *(assumed)*.
+    /// </summary>
+    private (bool Mismatch, string Why)? ByImplementers(InterfaceType face, Func<KurzType, (bool Mismatch, string Why)?> why)
+    {
+        foreach (var x in classDeclared.Where(x => x.Interfaces.Contains(face.Symbol)))
+        {
+            if (why(new ClassType(x)) is { } refused)
+            {
+                return refused with { Why = $"its implementer `{x.Name}`: {refused.Why}" };
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1356,6 +1384,11 @@ public sealed partial class Checker
         if (target.Type is ClassType classType)
         {
             return CallMethod(classType, m, c, null); // K7
+        }
+
+        if (target.Type is InterfaceType face)
+        {
+            return CallInterfaceMethod(face, m, c); // K6, K7
         }
 
         if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Contains" or "StartsWith" or "EndsWith" or "IndexOf")

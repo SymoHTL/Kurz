@@ -414,6 +414,7 @@ public sealed partial class Checker
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         ClassType c => c.Symbol.TextMethod is not null, // A4, A5: an instance has the text its class declares, and none else
+        InterfaceType face => face.Symbol.TextMethod is not null, // A10: a value of an interface that declares `string Text()`
         WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
@@ -518,6 +519,12 @@ public sealed partial class Checker
         if (classes.ContainsKey(n.Name))
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a class, and no value stands here: an instance is made by `{n.Name}(...)` (K1; E4)");
+            return Typed.Error;
+        }
+
+        if (interfaces.ContainsKey(n.Name))
+        {
+            NotSupported(n.Line, $"the interface `{n.Name}` named where a value stands (K6)");
             return Typed.Error;
         }
 
@@ -631,6 +638,12 @@ public sealed partial class Checker
             if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
                 return ClassStaticMember(classSymbol, m); // K7, K18, K19
+            }
+
+            if (interfaces.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            {
+                NotSupported(m.Line, $"a member of the interface `{n.Name}` read through its name (K6, K7)");
+                return Typed.Error;
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
@@ -770,6 +783,8 @@ public sealed partial class Checker
 
             case ClassType c:
                 return ClassMember(c, member, line); // K1, F9
+            case InterfaceType face:
+                return InterfaceMember(face, member, line); // K6, K7
             case EnumType e when member == "Number":
                 if (e.Symbol.Refused)
                 {
@@ -1505,7 +1520,7 @@ public sealed partial class Checker
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is ListType && Types.Same(left.Type, right.Type))
-                || (left.Type is ClassType && right.Type is ClassType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
+                || (left.Type is ClassType or InterfaceType && right.Type is ClassType or InterfaceType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is UnionType && right.Type is UnionType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
@@ -1513,7 +1528,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => HeldEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type, [], [], []), // K13: the two as the base, whose derived classes it reads
+                ClassType or InterfaceType => HeldEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type, [], [], []), // K13: the two as the base, whose derived classes it reads, or as the interface, whose implementers it reads
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1573,6 +1588,7 @@ public sealed partial class Checker
         ClassType c => seen.Add(c.Symbol)
             && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))
                 || classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)).Any(x => ComparesByClause(new ClassType(x), seen))),
+        InterfaceType face => classDeclared.Where(x => x.Interfaces.Contains(face.Symbol)).Any(x => ComparesByClause(new ClassType(x), seen)),
         ListType l => ComparesByClause(l.Element, seen),
         UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
         DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),

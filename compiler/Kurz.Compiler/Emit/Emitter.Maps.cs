@@ -101,6 +101,9 @@ public sealed partial class Emitter
 
             case ClassType c when Layout.Fat(c.Symbol):
                 return HashThroughTable(block, key, c.Symbol); // K13: by the hash of the instance's class
+            case InterfaceType face:
+                hashedThroughInterface.Add(face.Symbol);
+                return HashPair(block, key); // K13 with K6: by the hash of the instance's class, which its table for the interface holds
 
             case DataType or ListType or UnionType or ClassType:
                 {
