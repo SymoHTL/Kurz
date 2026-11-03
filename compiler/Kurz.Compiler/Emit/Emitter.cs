@@ -781,9 +781,19 @@ public sealed partial class Emitter
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); S16: a file its lines (<see cref="EmitForInLines"/>); a `for` over anything else is not emitted.</summary>
+    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); S16: a file its lines (<see cref="EmitForInLines"/>); a loop over `T.Fields` its passes (T33); a `for` over anything else is not emitted.</summary>
     private void EmitForIn(ForInStatement f)
     {
+        if (Model.PassesOf(f) is { } passes)
+        {
+            foreach (var pass in passes)
+            {
+                EmitBlock(pass); // T33: a loop over `T.Fields`, unrolled: each pass in order, with no loop around them
+            }
+
+            return;
+        }
+
         if (Unwrap(f.Collection) is CallExpression call && Model.CallOf(call).Kind == CallKind.FileLines)
         {
             EmitForInLines(f, call);
