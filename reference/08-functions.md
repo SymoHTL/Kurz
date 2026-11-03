@@ -315,11 +315,12 @@ evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
 folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
-`data` value made by its name whose every argument is such a constant, a `data` value of constants
-among them, `Rate(240, 5s)`, as C# takes `new S()` for a value type, while `Rate(n, 1s)` with a
-variable `n`, and an instance of a class, stay no constant (§8, the owner, 2026-11-03, against any
-expression evaluated at each call that leaves it out, as Kotlin evaluates one) (C# also takes
-`default`, which the record does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, as C# takes
+`new S()` for a value type, while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
+one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
+default, and an instance of a class being no such value)* (C# also takes `default`, which the record
+does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
 

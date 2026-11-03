@@ -840,6 +840,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint One() => 1\n\nint PerSecond(Rate r = Rate(One(), 1s)) => r.BytesPerSecond\n\nprint(PerSecond())"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\ndata Pair(Rate First, Rate Second)\n\nint Sum(Pair p = Pair(Rate(1, 1s), Rate(One(), 2s))) => p.First.BytesPerSecond\n\nint One() => 1\n\nprint(Sum())"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class Counter(int Count)\n\nint Read(Counter c = Counter(1)) => c.Count\n\nprint(Read())"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("class Counter(int Count)\n\ndata Holder(Counter C)\n\nint Read(Holder h = Holder(Counter(1))) => h.C.Count\n\nprint(Read())"));
+
+        // the owner's own refusal, a variable among the arguments: the parameter before it is no constant
+        Assert.Contains((ErrorIds.DefaultNotConstant, 3), Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
+
+        // a generic data type, whose construction is a data value as any other
+        Clean("data Box<T>(T Value)\n\nint Get(Box<int> b = Box(1)) => b.Value\n\nprint(Get())");
     }
 
     [Theory]
