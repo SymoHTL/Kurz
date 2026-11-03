@@ -935,9 +935,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   2026-11-01, "Switch, as .NET"). A lookup of a key, a read's or a write's (`FindEntry`), that passes 65 groups
   without a slot of 255, more than 512 slots, in a block on the fast hash that no loop over a map holds (`MapWalk`
   counts those loops in the block's bytes 44 to 47, one more where a loop starts and one less where it ends, at its
-  end, a `break` or a `return`), marks the block as on SipHash-1-3 (`MapLongLookup`), writes each entry's hash under
-  the block's keys and moves the entries within the block as hashbrown's `rehash_in_place` moves them (the emitted
-  `rehash` helper and `MapRehashInPlace`), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
+  end, a `break` or a `return`), marks the block as on SipHash-1-3 (`MapLongLookup`), moves the entries within the
+  block as hashbrown's `rehash_in_place` moves them, each by its key's hash under the block's keys, which the emitted
+  `rehash` helper takes from the key for each entry it places, as hashbrown calls its hasher for a slot, and writes
+  into the entry where the map keeps the hash (`MapRehashMark`, `MapRehashPlace`, an entry whose bytes are no
+  multiple of 8 changed byte by byte), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
   count too"; the bound, the lookups of `m[k] = v` and `Remove` and the loop assumed there). Past the bound the
   lookup hands the rest of its probe to a helper out of line (`far`, `noinline` and `cold`) and gives what it gives:
   the test, the rehash and the second lookup, or the probe gone on with no bound where the block does not rehash.

@@ -5175,6 +5175,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("-1", fenced.First[1]);
         Assert.NotEqual(fenced.First[2], fenced.Second[2]);
         Assert.Equal("520", fenced.First[3]);
+
+        // a key of one word keeps no hash in its slot, so that the rehash takes each entry's hash from its key: an entry of an `int` and
+        // a `data` value of two `int`s takes 12 bytes, which change places byte by byte; after the read every key is found with its
+        // value, the walk sums them, and two runs walk the map in two orders
+        var wide = $"data D(int A, int B)\n\nList<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\n" +
+            "mut m = Map<int, D>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = D(i, i * 2)\n}\n" + $"gone = m[{absent}] ?? D(-1, -1)\nprint(gone.A)\n" +
+            "mut found = 0\nfor i in 0..<keys.Count {\n    d = m[keys[i]] ?? D(-1, -1)\n    if d.A == i && d.B == i * 2 {\n        found = found + 1\n    }\n}\nprint(found)\n" +
+            "mut sum = 0\nmut long order = 0\nfor k, v in m {\n    sum = sum + v.B - v.A\n    order = (order * 31 + k) % 1000000007\n}\nprint(sum)\nprint(order)\n";
+        var (one, two) = RunTwice(wide, toolchain.Runtime, "map-read-past-wide");
+        Assert.Equal(["-1", "520", "134940"], one.Take(3));
+        Assert.NotEqual(one[3], two[3]);
     }
 
     [Fact]

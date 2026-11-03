@@ -345,13 +345,19 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on:
-    /// each entry's hash written again under the block's keys, then every entry moved to the slot its new hash probes first
-    /// (<c>MapRehashInPlace</c>), as hashbrown's <c>rehash_in_place</c>, so that every value that holds the block finds its entries.
+    /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on,
+    /// as hashbrown's <c>rehash_in_place</c> does, so that every value that holds the block finds its entries: every entry marked as not
+    /// yet placed (<c>MapRehashMark</c>), then, for each slot that holds such an entry, its key's hash under the block's keys, as
+    /// hashbrown's <c>rehash_in_place</c> calls its hasher for the slot, written into the entry where the map keeps the hash
+    /// (<see cref="KeepsHash"/>), and the entry put in the slot that hash probes first (<c>MapRehashPlace</c>), until the slot holds no
+    /// entry marked so: the one it changed places with is the next. A key of one word, whose slot keeps no hash, is so placed by the
+    /// hash of its key, and every key is hashed once.
     /// </summary>
     private void RehashBody(MapType type)
     {
         var entry = EntryType(type);
+        var size = EntrySize(type);
+        fn.Emit($"call void {StdFunction("MapRehashMark")}(ptr %a0)");
         var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr %a0)")} to i64");
         var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr %a0)");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr %a0)");
@@ -368,17 +374,21 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
         fn.Block(body);
         var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
-        fn.CondBranch(fn.Value($"icmp sge i8 {mark}, 0"), held, next); // 255 and 128 hold none
+        fn.CondBranch(fn.Value($"icmp eq i8 {mark}, -128"), held, next); // 128: an entry not yet in the slot its new hash probes first
         fn.Block(held);
         var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        fn.Emit($"store i64 {KeyHash("%a0", key, type.Key)}, ptr {slot}");
-        fn.Branch(next);
+        var hash = KeyHash("%a0", fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}"), type.Key);
+        if (KeepsHash(type.Key))
+        {
+            fn.Emit($"store i64 {hash}, ptr {slot}");
+        }
+
+        fn.Emit($"call void {StdFunction("MapRehashPlace")}(ptr %a0, i64 {size}, i64 {i}, i64 {hash})");
+        fn.Branch(body); // the slot holds the entry placed, none, or the one it changed places with, marked 128
         fn.Block(next);
         fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {counter}");
         fn.Branch(check);
         fn.Block(done);
-        fn.Emit($"call void {StdFunction("MapRehashInPlace")}(ptr %a0, i64 {EntrySize(type)})");
         fn.Return(null);
     }
 
