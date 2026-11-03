@@ -167,7 +167,7 @@ public sealed partial class Emitter
 
     /// <summary>
     /// N5: <c>xs?[i]</c>, a value of its own that the caller makes a temporary of: <c>null</c> where the list is null, which stops the
-    /// rest of the chain, and otherwise its item at the index, counted once more, made a value of the chain's nullable type; the index
+    /// rest of the chain, and otherwise its item at the index, counted once more, or a <c>weak</c> item's read (R3), made a value of the chain's nullable type; the index
     /// runs only where the list is not null, as C#'s <c>?[]</c> runs it. The list is read without a count of its own past the index:
     /// an index that changes it, <c>names?[Pop(mut names)]</c>, is the checker's <c>changed-while-held</c> (M7).
     /// </summary>
@@ -187,8 +187,9 @@ public sealed partial class Emitter
         fn.Block(read);
         InRegion(() =>
         {
-            var item = Retained(ListItem(Payload(target, targetType, list), i, list), list.Element);
-            fn.Emit($"store {Ir(result)} {Convert(item, list.Element, result, i.Line)}, ptr {slot}");
+            var stored = ListItem(Payload(target, targetType, list), i, list);
+            var item = list.Element is WeakRefType ? Upgraded(stored) : Retained(stored, list.Element); // R3: a `weak` item's read, a strong `T?`
+            fn.Emit($"store {Ir(result)} {Convert(item, Types.Read(list.Element), result, i.Line)}, ptr {slot}");
         });
         fn.Branch(done);
         fn.Block(done);

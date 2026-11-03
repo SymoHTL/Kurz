@@ -1,0 +1,6 @@
+// expect: output
+// | malformed response: no status line
+// rules: W2
+
+e = HttpError(HttpKind.Protocol, "malformed response: no status line")
+print(e.Text())

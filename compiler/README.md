@@ -37,7 +37,8 @@ corpus under `corpus/` is what it is measured against. This directory holds a .N
   runtime" below). A sixth builds
   every corpus case that expects a run with the pinned clang and runs it, and checks what it
   prints, its exit code and its error line against the case's header, then builds and runs it again
-  under an allocator that makes every block it frees inaccessible (`RunTests`); a seventh
+  under an allocator that makes every block it frees inaccessible, but for a case that allocator
+  cannot hold, which it lists with why (`RunTests`); a seventh
   builds the programs that pin what no case can, a refused write and a refused allocation among
   them (`EmitterTests`), and an eighth those of data values and unions, with the width of a tag and
   the copy of a block before a write (`DataTests`); a ninth makes and removes the places of `run`
@@ -329,7 +330,10 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 `runtime/linux/` and `runtime/windows/` the code of one target each. The standard library's Kurz
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
-section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, at
+section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
+`HttpError` with its `HttpKind` (W2), types every program sees (W1: the checker of a program is given `std/`'s checker and takes the
+symbols it made of each `pub` type that `Checker.Prelude` names, where the built-in types every file sees, `IoError` among them, are
+the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -432,9 +436,9 @@ the program sets no other time, `DefaultBound` being the one definition of the 5
 `SOCK_NONBLOCK`, made blocking again by `ioctl` with `FIONBIO`, and a connection in progress waited for by
 `poll` in whole milliseconds, cut down and at least 1, until a deadline of the monotonic clock, after which the
 call fails with -4100, `TimedOut` with the number 0, as Rust's gives no error of the system. The deadline is set
-once the addresses are known, after the lookup of a name, which it does not bound (section 14 holds that open),
-and holds over every address tried *(assumed: one bound over the addresses of a name; its cost is that a first
-address that never answers spends the whole bound, and the later addresses are not tried)*. A stream `Connect`
+once the addresses are known, after the lookup of a name, which it does not bound, as Rust's `connect` leaves
+`getaddrinfo`, and holds over every address tried, one bound over the addresses of a name, whose cost is that a
+first address that never answers spends the whole bound, and the later addresses are not tried (section 12). A stream `Connect`
 made and one `Accept` gave get `SO_RCVTIMEO` and `SO_SNDTIMEO` of 5 seconds, two calls of `setsockopt` for each
 stream; a listener gets neither, so that `Accept` waits without a bound until `SetAcceptTimeout` sets its `SO_RCVTIMEO`,
 which bounds an `accept` (socket(7)), and the stream it gives is set explicitly, since Linux copies a listener's options to the sockets it accepts. `SetTimeout` sets either option,
@@ -445,7 +449,10 @@ bits in nanoseconds holds at most about 292 years, far below it. A stream's read
 from `SocketErrorKind`, which gives `TimedOut` for `EAGAIN`, with which a blocking socket's call returns when its time
 runs out, the number staying the system's 11; every other `EAGAIN` keeps `WouldBlock`. The bound holds for each
 system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many bytes waits at most the bound for
-each piece the system takes, as Rust's `write_all` does, and can take longer in all. `LockWait` puts the thread to sleep on a file's lock word while it holds
+each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
+`SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
+call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
+`LockWait` puts the thread to sleep on a file's lock word while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
 as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
@@ -525,7 +532,10 @@ The emitter (`Emit/`) takes a program the checker read without an error and with
 supported`, with the runtime checked for its target and the standard library, and writes one LLVM
 module of the three, which the
 pinned clang compiles unoptimised, at `-O0`, in a test build, as Cargo's `dev` profile builds, and at
-`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), and links with the C
+`-O2` in a release build (the owner, 2026-10-29, "As Rust's dev profile, -O0"), every function of which
+it aligns at 64 bytes through LLVM's `-align-all-functions=6`, where LLVM, and rustc with it, aligns one
+at 16 (the owner, 2026-11-02, issue 156, comment 6580739215; pinned by
+`ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`), and links with the C
 library as the platform links it, on Linux its math library `libm` with it, as Rust's standard
 library links it through its `libc` crate (checked 2026-10-29: the `libc` crate's `src/unix/mod.rs`,
 which links `m` beside `c` on Linux), whose `fmod` an unoptimised `%` of a `double` calls, and with the
@@ -554,7 +564,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the standard library's `Find`, for one byte two words of 8 bytes at a time, the first two read at any
   address and the rest from an address that is a multiple of 8, with the place taken from the mask of Rust's
   `contains_zero_byte` test, and Crochemore and Perrin's two-way search for more, as
-  Rust's `str::find`, and its `BytesAt` for the start and the end (X1);
+  Rust's `str::find`, but for a needle of 2 to 32 bytes where the CPU has SSE2, which takes
+  Rust's `simd_contains` (R18), and its `BytesAt` for the start and the end (X1);
   `s.Trim()`, `s.TrimStart()`, `s.TrimEnd()`, their ASCII forms, `s.Trim(c)`, `s.TrimStart(c)` and `s.TrimEnd(c)`,
   which take Unicode's White_Space,
   ASCII's five whitespace characters or the `char`'s UTF-8 bytes from the ends, through the standard library's
@@ -568,14 +579,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
   library's `UnicodeCase`, which copies the bytes before the first code point that changes into a block of the
-  input's size and looks up and writes the code points after them one at a time, Latin-1 by Rust's rules without
-  the table, up to one whose mapping outgrows the block, from which it sizes the rest in a walk, grows the block
-  once and writes the rest in a second walk, with the table of the
+  input's size, changes the run of ASCII after them 16 bytes at a time, as Rust's `convert_while_ascii`, and looks
+  up and writes the code points after it one at a time, Latin-1 by Rust's rules without the table and a code point
+  of two bytes on a path of its own, up to one whose mapping outgrows the block, from which it sizes the rest in a
+  walk, grows the block once and writes the rest in a second walk, with the table of the
   direction the emitter writes into the program once, `case.lower` or `case.upper`, from `Emit/CaseTables.cs`, which
   `tools/unicode_tables.py` generates from the Unicode Character Database of the version Rust's stable pins and the
-  gate `unicode-tables` holds to that database: the runs of code points with one delta and a step of 1 or 2, found by
-  a binary search, the mappings to two or three code points, and for lowering the ranges of Cased and
-  Case_Ignorable, which a capital sigma reads for Final_Sigma, as Rust's `to_lowercase` and `to_uppercase` (X3); and
+  gate `unicode-tables` holds to that database: the levels of the deltas, an index of one byte for each block of 32
+  code points of the first two planes and a delta of 16 bits for each code point of each distinct block, as .NET's
+  `CharUnicodeInfo` holds its mappings, the mappings to two or three code points, found by a binary search, and for
+  lowering the ranges of Cased and Case_Ignorable, which a capital sigma reads for Final_Sigma, with the results of
+  Rust's `to_lowercase` and `to_uppercase` (X3); and
   `s.ToLowerAscii()` and `s.ToUpperAscii()`, which change the letters `A` to `Z` or `a` to `z` and no other byte, as Rust's
   `to_ascii_lowercase` (X3); `s.Substring(startIndex, length)`, whose cut the standard library's `SubstringCut` reads,
   `index-out-of-range` where it reaches outside the string, read first, and else `not-char-boundary` where its start or
@@ -600,8 +614,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
   or a change of case that changes nothing gives the string itself, held once more; `CaseTests` holds `ToLower` and
-  `ToUpper` of every code point of the first two planes to `CaseTables`, read without the standard library's search,
-  and the final sigma and the mappings to several code points to fixed lines, each program a test build, which clang
+  `ToUpper` of every code point of the first two planes, alone and in a text, to `CaseTables`, read without the
+  standard library's lookup, the final sigma and the mappings to several code points to fixed lines, and lines
+  around the walks' own paths to Rust's results under a standard library that ends the process where a string's
+  count passes its room, each program a test build, which clang
   builds at `-O0`, so that a literal input runs the standard library's walk as any string's does; `PieceTests` holds the
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
@@ -672,13 +688,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
-  arguments by name, both counts at one; a field read through an instance, and by its name inside a
+  arguments by name, both counts at one, the defaults of the class's body in one function of the module
+  per class, which each construction calls with the instance and a trace names by the class, so that a
+  default which builds its own class recurses when it runs and is built once (K7); a field read through an instance, and by its name inside a
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
   the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
   its `Text()` gives (A5); and a `T?` of a class, the address alone, its `null` the address 0, as Rust
-  lays out `Option<Rc<T>>` (N1). The counting is below;
+  lays out `Option<Rc<T>>` (N1); and a `weak T?`, the address alone too, which holds the instance's weak
+  count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
+  and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
+  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
+  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
+  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  function per class that gives true for one address before it reads a field. The
+  counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
   (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
@@ -704,7 +729,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its type (N3); `==` with a nullable side is `false` for one `null` and `true` for two, `!=` the
   reverse, and both compare the values otherwise (N10); `a ?? b` runs `b` only where `a` is null, and a chain of
   `?.` and `?[` reads each member and item only where the value before it is not null, the index of
-  `?[` among it, each a value of its own that takes a count of what it read (N4, N5); a `T?` of a
+  `?[` among it, each a value of its own that takes a count of what it read, and of a `weak` item its read (N4, N5, R3); a `T?` of a
   type parameter that a nullable type fills is that type, as `Substitute` flattens a union (N11);
 - lists (M9): `List<T>()`, `Bytes()` and the type `Bytes`, the second name of `List<byte>`, which a
   message names so (section 4, the owner, 2026-10-29, "Bytes = List<byte>"), `Add`, `Count`, `list[i]`,
@@ -730,8 +755,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   program with `allocation-failed` and the bytes of its items after the `Add` (M9); `Clear`, which
   lets go of the items and keeps the room, or of the block where another value holds it (M9, M3);
   `IndexOf(item)` and `IndexOf(value)` of a run, an `int?`, which compare items as `==` compares two
-  items of a list, a list of one-byte items through the standard library's two-way search, as a string,
-  and a run of other items at each position in turn, as Rust's `windows`; `AddRange(collection)`, which
+  items of a list, a list of one-byte items through the standard library's `Find`, as a string, a list
+  of 64 bytes or more of an integer type of 2, 4 or 8 bytes or of `char`s through its `FindShort`,
+  `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
+  each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
   items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
   where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
@@ -741,18 +768,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   holding its item before the list moves, as `Add` does, and move the items after the index by a memmove,
   as Rust's `Vec::insert` and `Vec::remove`, `RemoveAt` giving the item it takes out and keeping the room; and `Sort()`, `SortUnstable()` and `SortBy(keySelector)`
   (X8), which copy such a block first too and move the items in place, ordered as `<` orders them, a
-  `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first: `Sort` a merge sort, which keeps
-  equal items in their order, runs of 20 items sorted by insertion and merged in pairs through a buffer of
-  half the items, rounded up, as Rust's stable sort asks for at the least; `SortUnstable` a quicksort without a buffer, as Rust's `sort_unstable`, its pivot the
-  median of three, insertion below 21 items and a heapsort past twice the base-2 logarithm of the count
-  in splits; and `SortBy` the key of each item made once, in order, kept with the item's position in a
-  pair, the pairs sorted by the quicksort and the items moved where they say, as Rust's
-  `sort_by_cached_key`; a buffer or a block of pairs the system refuses ends the program with
-  `allocation-failed` (M9); `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300
-  generated lists of each of five item types, `int`, `byte`, `double`, `string` and `int?`, the unstable
-  sort of `double` items with `-0` read as `0`, and `SortBy` of the `int` lists by an `int`, a `string` and
-  a `double` key, the first 50 under the allocator that makes every freed block inaccessible as well, and the quicksort to a list McIlroy's adversary built against its pivots, which reaches the
-  heapsort;
+  `double` or a `float` as C#'s `CompareTo`, NaN first, and `null` first, each sort as Rust 1.82's: up to
+  20 items by insertion; `Sort` past them by driftsort, which keeps equal items in their order: runs found
+  and reversed where they fall, merged in the order of powersort, and what lies between them sorted by a
+  stable quicksort, or eagerly by the small sort up to 64 items, through a scratch of every item up to
+  8,000,000 bytes of them and of half the items past that, from 4096 bytes on the stack where it fits
+  them; `SortUnstable` past them by ipnsort without a buffer: a list that is one run left or reversed,
+  any other split by a branchless partition around a recursive pseudo-median, the items equal to a
+  pivot split off, a heapsort past twice the base-2 logarithm of the count in splits, and up to 32 items
+  a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
+  `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
+  of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
+  they say, as Rust's `sort_by_cached_key`. Two forms are not Rust's and measured faster on the same
+  results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
+  orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
+  scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
+  `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five
+  item types, `int`, `byte`, `double`, `string` and `int?`, the unstable sort of `double` items with `-0`
+  read as `0`, and `SortBy` of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an
+  enum and a `duration` key, the first 50 under the allocator that makes every freed block inaccessible
+  as well; over 65 lists of `double` items of eight shapes, runs that rise and that fall among them, of up
+  to 64,000 items and one of 1,100,000, and over lists of `decimal` items whose equal values print apart;
+  and the quicksorts of both sorts to lists McIlroy's adversary built against their pivots, which reach
+  the heapsort and the driftsort they fall back on;
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
@@ -806,7 +844,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
   and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
   SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
-  2026-11-01, "Switch, as .NET").
+  2026-11-01, "Switch, as .NET"). A key that is an instance is hashed by its address where `==`
+  compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
+  K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -856,13 +896,21 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
-  not `null`, and each of a listener's
+  not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), counted as a list's block is and
-  closed at zero, the error of that close ignored, the buffer freed with the block, and `Close` writes -1 as the descriptor and gives up the buffer's bytes before it
-  closes, so that every call after it gets the system's error of a descriptor that is not open (S5);
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
+  flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
+  freed with the block; each `Read`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
+  takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
+  second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
+  descriptor is released by the `Close` where no call is in flight, the error of that close given, and else by the last call out,
+  which ignores it, a socket's `Close` with calls in flight adding a count of its own with its mark, shutting the socket down by the
+  runtime's `ShutdownSocket` and then giving that count back, so that the last call out releases the descriptor only after the
+  shutdown, and a stream's read and write and a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle
+  give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
   the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
@@ -877,7 +925,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   none being the end of the file, and one added after room for it, which past the limit raises
   `allocation-failed` (S6). `FileTests` pins what no case can: 200 opens of a
   file, and the files and directories the calls on a path open for themselves, under a limit of 32
-  descriptors, and the same files all held, which reach the limit; a close through a copy; a read
+  descriptors, and the same files all held, which reach the limit; a close through a copy; a read,
+  a pull, a write, an `Accept` and each setter that a close through another holder meets in flight, which the IR of the program
+  built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
+  the socket down and releases a listener's descriptor once its `Accept` is out, as `F_GETFD` shows; a socket's close with a call in
+  flight, into whose window before the shutdown the IR puts that call's end and a new socket that listens, which does not take the
+  closed socket's number and still listens after the shutdown; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
+  leaves that stream's writes alone; and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
@@ -931,8 +985,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
-  runtime's `Same` and `Order` comparing the first byte, then words of 8 bytes, the last ending where the bytes
-  end, as the C library's `memcmp` compares them;
+  runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
+  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
+  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
+  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
+  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1048,7 +1105,9 @@ while the expression still uses what it read (K2, K9), which neither M7 nor a pa
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
 and so is `this`. The last count lets go of the fields in their order, as Rust drops them, then of the
 weak count all the strong ones held, whose last gives the block back to `Free`, as Rust's `Rc` and
-`Weak` do. The last count of an instance that another release lets go of puts it on its class's work
+`Weak` do. A `weak` reference takes a weak count where it is stored and lets go of it where a strong one
+lets go of its count, so the block of an instance whose strong count ended stays while a `weak`
+reference to it is held, with the strong count at 0, which its read finds (R3). The last count of an instance that another release lets go of puts it on its class's work
 list, linked through its strong count, which is no count from there on, and the release that came first
 works the lists off before it returns, so that a chain of any length is freed with no stack deeper than
 the nesting of the types in it and nothing allocated (the owner, 2026-11-01, "Iterative, never
@@ -1078,7 +1137,9 @@ same lines, and so do the strings' program and twenty rounds of strings through 
 and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
 lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
-and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+and maps in fields written through paths by each `mut` member, beside copies, a block's among them, a `Where` over 100000 items in five rounds, and in a
+build for Linux a read and a write on the file a field of a class instance holds, whose argument gives the field another file, by
+the field's path and by its name in a method, each through the file the field held when the call began, and which keeps no freed block of more than 262144 bytes,
 since a kept block stays readable, so that a write into one freed under it ends the process, and in which every block ends at a page
 the system makes inaccessible, where its size rounded up to 16 ends, so that a write one byte past the end of a block of 16 bytes,
 of 300000 and of one `Reallocate` gave as a new block ends the process, and the last byte of each written does not, and whose `Free`
@@ -1139,7 +1200,10 @@ of one value or of every lane, `GetElement`, whose index outside the lanes raise
 where C# throws, and the `As` conversions, which keep the bits; and the functions of `X86.Sse2`,
 `X86.Ssse3`, `X86.Sse41`, `X86.Aes` and `X86.Sha` that R18's cases and the standard library call, each
 as LLVM's instruction or intrinsic for C#'s (`Shuffle` of `X86.Sse2` a `shufflevector`, of `X86.Ssse3`
-`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`), an immediate as the
+`llvm.x86.ssse3.pshuf.b.128`, `Sha256TwoRounds` `llvm.x86.sha256rnds2`; `CompareEqual` of `X86.Sse2`, of
+lanes of 1, 2 and 4 bytes, an `icmp eq` whose lanes are widened to all ones, `And` an `and`, and
+`MoveMask` of bytes the top bits of the lanes as an `i16`, which LLVM turns into `pmovmskb`, each held
+to .NET's result by `IntrinsicTests`), an immediate as the
 instruction reads it (`Extract` its low bits, `AlignRight` zeros past 31 bytes). A test of a class's
 `IsSupported` is a constant where the CPU of the build answers it: `true` for a class the CPU has,
 `X86.Sse2` on every x86-64 CPU and more with `--cpu`, `false` for a class under `Arm`. Otherwise it
@@ -1270,6 +1334,12 @@ ask about it.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
+- K4 with K1: a class with no field compares every two of its instances equal, as a `data` type with no
+  field does, since none of its fields is `mut` or `weak` *(assumed)*; and `==` and the hash of a chain of
+  instances recurse, a call per link, so that a chain long enough ends the program with the stack's
+  overflow, as Rust's derived `PartialEq` and `Hash` on an `Rc` chain do *(assumed)*. The equality
+  program of `ListTests` pins the class with no field and a chain of two links; no test builds a chain
+  long enough to end the program.
 
 ## What the compiler says about a program
 
@@ -1450,14 +1520,18 @@ The checker (`Semantics/`) takes a tree the parser read without an error and che
 chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type parameters and the
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
-class instance, not through a `weak` reference), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K3, K7 and K9, for a class with its primary constructor or none,
-its fields, its methods and `this`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K15 and K18 to K20, for a class with its primary constructor or none,
+its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), and the rules of `print` and of a value's text that
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
+types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
+build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
+file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1494,7 +1568,8 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, and
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`,
+`equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -1507,15 +1582,20 @@ body of a lambda where a type stands that the checker does not read: these are c
 error of their own, a name no declaration has among them, is reported beside the line. The list,
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
-(K6, K10), `equal by` (K8), a field or a constructor in its body (K7, K14, K18), a method that is
-`static`, `virtual`, `override`, `prot` or `extern` or that has type parameters of its own (K7,
-section 4), a field that holds `weak` at any depth, since R2 cannot judge the class until `weak` is
-read (R2, R3), each of which leaves the class and every value of it unread, and of a class it reads, a
-field of a function type, whose cycle R9 judges by the lambdas of the program (R9), a method as a
-value, an assignment into a `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
-method on a path that goes on after such a field, `p.Pos.Items.Add(1)` (K2, M4, M5), and `==`
-on two instances or on values that hold one, and an instance as a key of a map, at any depth (K4,
-K12); of chapter 4, a nullable `void` and a
+(K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
+or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
+than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+that has type parameters of its own (K7, section 4), each of which leaves the class and every
+value of it unread, and of a class it reads, a `static` field with an initial value that is no
+constant, which section 4 computes at the field's first read and whose open items section 14
+holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum, but for
+one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
+cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
+`data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
+method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
+method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a `weak` field, which
+section 14 leaves open (K8, R3), and a key type that holds, at any depth, an instance of a class whose
+`equal by` names a `mut` field, where whether `mutable-key` reaches it is open (K12, section 14); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),
 a call and an index after `?.` or `?[`, which C# reads inside the chain and section 4 does not say,
@@ -1525,8 +1605,10 @@ emitter does not read through a chain (N5, M9), and an assignment of a field, an
 through a nullable variable or field known not null, `o.I.X = 1` and `o.I.Items[0] = 1`, which the
 emitter does not write through, where an index written on a narrowed map or list, `o.Items[0] = 1`
 with a nullable field `Items`, is read (N3, M4), a `mut`
-method on such a path and such a path passed as `mut` (N3, M5, M7); `weak` (R3,
-R5); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
+method on such a path and such a path passed as `mut` (N3, M5, M7); a `weak` reference as a type
+argument of a `data` type, as a key or a value of a map and as a parameter or the result of a
+function type, which the emitter does not lay out, `weak` before a type parameter or a union of
+classes, and a `weak T?` as a case of a union, a nullable case of one (R3, R5, T19, D9); a pointer to a type that holds a type parameter, which R10 judges by the type (T19), and the
 address of state outside a function, which R13 says is no variable, where R10 names a variable
 (R10, R13); the address of a place through a pointer, `&*p`, `&p[i]` and `&(*b).Next`, where
 R10 says `&x` needs no `raw` block and Rust takes such a place in `unsafe` code alone (R10); an
@@ -1547,7 +1629,9 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
+`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
+not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
@@ -1616,6 +1700,14 @@ round can ask about it by the rule's id.
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
   separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+- K4 with K5, K12 and N9: a class that compares by content and holds a field of a type `==` does not take,
+  a map among them, makes `==` on its instances, and a key of it, `type-mismatch`, as a `data` value that
+  holds one does (D3, M9), since K4 compares each field by the equality Kurz gives its type and that type
+  has none; in a class that compares by identity or by its clause such a field is not compared, and is no
+  error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
+  `data` value, a union or an instance compared by content, compares that instance by its clause too, and
+  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
   checker can tell among them (D13's `match` on flags, O10's call). The checker reads these shapes
@@ -1745,7 +1837,8 @@ round can ask about it by the rule's id.
   of one variable are two values and may both be passed; the same path twice, or a path and one it
   is a prefix of, is `mut-at-call`. Inside a method, a field of the instance named alone (K7) stands
   there too, where it is `mut`: one without `mut` is `mut-required`, the same field twice is
-  `mut-at-call`, and one inside a lambda is `capture-assign` (F11); the emitter gives the call the
+  `mut-at-call`, and one inside a lambda is passed as well, through the reference to the instance the
+  lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment 6579495475); the emitter gives the call the
   field's own place, so the callee's write is the field's.
 - M7's reads, a reading of this directory of the rule the owner chose on 2026-10-24 and 2026-10-25:
   the checker reads each expression of a statement whole, in the order it runs: a call's receiver or
@@ -1854,7 +1947,7 @@ round can ask about it by the rule's id.
 - N4: `a ?? b` has the type `a` makes nullable where `b` fits it, and `a`'s nullable type where `b`
   fits that alone, as C# types it; after it holds what held before `b`, since `b` runs only where
   `a` is null.
-- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with, and
+- N5: a chain of `?.` and `?[` has the nullable type of the member or the item it ends with (of a `weak` item its read, R3), and
   that one's own type where it is nullable, never a `T??`; a member after them in the chain reads
   the member or the item before as its own type, so that a nullable one there is
   `nullable-unchecked`, unless a test showed that member's path not null (N3), as C#'s analysis
@@ -1950,17 +2043,51 @@ round can ask about it by the rule's id.
 - K7 with V8 and V9: inside a method a field of its instance is a name, read and assigned as
   `Count = Count + 1`, as C# reads it, so a parameter or a variable of a method named as a field, and
   a method named as a field, are `redeclared`, as two fields of one name are; `this` outside a method
-  is `unknown-name`.
+  is `unknown-name`, but in a `static` method and in the initial value of a `static` field, where it
+  is `static-mismatch` (K19). A `static` field or method of the class is a name there too, and in a `static`
+  method, and a method of the class, `static` or not, hides a top-level function of its name inside
+  the class, as C# reads it.
+  A field of the class body is a name in the default of a field below it, read
+  through the instance being built, before the defaults of the fields after it run, as C# runs a
+  field's initializer before the constructor's body. A `static` method of the class is a name in a
+  default too, and a method of the instance is none, as C# refuses an instance member in an
+  initializer and no `static` one. Both hold where a top-level function has the name, which a member
+  of the class hides in a default as in a method: the `static` method is called, and a method of the
+  instance, or a field below, is `unknown-name` with the reason (V10).
+  A field of the body of the name of a field of
+  the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
+  is no name in a default, as it is none in a method (F16).
+- K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
+  field by field, in source order, and a read of a field whose value is not checked yet checks that
+  field first, so that every read is the constant its field holds. A read of a field whose check is
+  under way closes a cycle: one `static-cycle` at the field of the cycle that comes first in the
+  file, its message naming the fields from there in the order they read each other, and every field
+  of the cycle refused, so that a read of one adds nothing (E1); two cycles that share a field are
+  one error, two that share none are two. An initial value that calls a function is `not
+  supported`, so the walk meets no call, and one that reads such a field, which K20 computes at its
+  own first read too, adds nothing to that field's `not supported` (E1).
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the
   instance, as an assignment into a path does (the owner, 2026-10-24, "Value first"), and Rust
-  evaluates the right side of an assignment first; through a captured variable, also through an
-  instance on the path, it is `capture-assign`, as F11 proposes.
+  evaluates the right side of an assignment first; a lambda that captured the instance, or a `data`
+  value that holds it, assigns the field and writes into what the field holds too, by the field's
+  name inside a method as well, while an assignment of the captured variable itself, or into a
+  `data` value's path, stays `capture-assign` (F11 with K2: the owner, 2026-11-01, #110, comment
+  6562487754, "Both allowed";
+  through a `data` value, assumed; a write into what the field holds, `b.Xs[0] = 2` and
+  `b.Xs.Add(2)`, as M5's proposed reading of K2 for paths takes it outside a lambda: the owner,
+  2026-11-02, #110, comment 6573113786).
 - N9: a path through a `mut` field of an instance is narrowed up to the next call or assignment of
   any kind, `print` and an interpolation that holds an instance among the calls (A5), so a lambda,
   which runs after them, knows nothing of such a path; a path through fields without `mut` keeps its
-  narrowing, as N7 reads it.
+  narrowing, as N7 reads it. An assignment ends it after its value, and a write into a list or a map
+  after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
+  reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
+  field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
+  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
+  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
+  6573114335).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

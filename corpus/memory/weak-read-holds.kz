@@ -1,0 +1,15 @@
+// expect: output
+// | Ann
+// | Ann
+// rules: R3
+
+class Owner(string Name)
+class Home(mut Owner Resident)
+class Pet(weak Owner? Keeper)
+
+h = Home(Owner("Ann"))
+p = Pet(h.Resident)
+k = p.Keeper
+h.Resident = Owner("Bob")
+print(k?.Name ?? "gone")
+print(p.Keeper?.Name ?? "gone")

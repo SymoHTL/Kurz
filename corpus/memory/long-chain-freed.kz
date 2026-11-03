@@ -1,0 +1,14 @@
+// expect: output
+// | 999999
+// | freed
+// rules: R1
+
+class Link(int Value, Link? Next)
+
+mut Link? head = null
+for i in 0..<1000000 {
+    head = Link(i, head)
+}
+print(head?.Value ?? -1)
+head = null
+print("freed")

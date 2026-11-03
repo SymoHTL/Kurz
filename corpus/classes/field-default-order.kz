@@ -1,0 +1,20 @@
+// expect: output
+// | a
+// | b
+// | c
+// | 3
+// rules: K7
+
+int Note(string s, int v) {
+    print(s)
+    return v
+}
+
+class Counter(int Start) {
+    int next = Note("b", Start + 1)
+    int last = Note("c", next + 1)
+
+    pub int Last() => last
+}
+
+print(Counter(Note("a", 1)).Last())

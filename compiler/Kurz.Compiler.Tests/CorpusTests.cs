@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Build;
 using Kurz.Compiler.Corpus;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
@@ -34,6 +35,9 @@ public sealed class CorpusTests
 
     private const int CheckerErrorFloor = 97;
 
+    /// <summary>The checker of <c>std/</c>, whose types of the prelude a case sees as a build does (W1); they are the same for every target.</summary>
+    internal static readonly Lazy<Checker> StdChecker = new(() => Builder.CheckRuntime(Target.Linux).StdChecker);
+
     private static readonly HashSet<string> FrontEndIds =
     [
         ErrorIds.Syntax, ErrorIds.Semicolon, ErrorIds.ReservedWord, ErrorIds.BracesRequired, ErrorIds.UnknownEscape, ErrorIds.BlockIndentation,
@@ -62,6 +66,8 @@ public sealed class CorpusTests
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
+        ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
+        ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
         ["types/generic-cannot-infer-classes.kz"] = "a base class (K6)",
         ["values/text-more.kz"] = "a flags type (D13)",
     };
@@ -169,7 +175,7 @@ public sealed class CorpusTests
         }
 
         var diagnostics = new DiagnosticBag();
-        Checker.Check(tree, diagnostics, header.Grants);
+        Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
         var errors = diagnostics.Sorted.Where(d => d.IsError).Select(d => (d.Id, d.Line)).ToList();
         var unsupported = diagnostics.Sorted.Where(IsNotSupported).Select(d => d.ToString()).ToList();
         var lints = diagnostics.Items.Where(d => d.Kind == DiagnosticKind.Warning).ToList(); // H5: a warning, which builds the program and which no header expects
@@ -224,7 +230,7 @@ public sealed class CorpusTests
             }
 
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics, header.Grants);
+            Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
             if (diagnostics.Items.Any(IsNotSupported))
             {
                 notSupported.Add(relativePath);
@@ -253,7 +259,7 @@ public sealed class CorpusTests
             Assert.False(frontEnd.HasErrors, relativePath);
             Assert.False(header.Rules.Any(OutsideTheChecker), $"{relativePath} cites a rule outside the checker ({string.Join(", ", header.Rules)}), so its entry ({construct}) is redundant");
             var diagnostics = new DiagnosticBag();
-            Checker.Check(tree, diagnostics, header.Grants);
+            Checker.Check(tree, diagnostics, header.Grants, StdChecker.Value);
             Assert.True(diagnostics.Items.Any(IsNotSupported), $"{relativePath} is read in full, so its entry ({construct}) is stale");
         }
     }

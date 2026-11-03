@@ -194,6 +194,9 @@ public enum CallKind
     /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
     TcpSetAcceptTimeout,
 
+    /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
+    TcpShutdownWrite,
+
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
 
@@ -291,10 +294,12 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ClassSymbol, VariableSymbol> buildReceivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
@@ -400,6 +405,10 @@ public sealed class SemanticModel
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
 
+    /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
+    public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);
+
+    internal void RecordStaticField(Expression read, StaticFieldSymbol field) => staticFields[read] = field;
     /// <summary>Every test of a class's <c>IsSupported</c> the checker read, with its class (R18).</summary>
     public IEnumerable<(MemberAccess Access, IntrinsicClass Class)> SupportTests => supportTests.Select(p => (p.Key, p.Value));
 
@@ -490,6 +499,9 @@ public sealed class SemanticModel
     /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
     public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
 
+    /// <summary>K7: the instance being built, through which the defaults of a class's body fields read the fields above them.</summary>
+    public VariableSymbol FieldsThisOf(ClassSymbol symbol) => buildReceivers.TryGetValue(symbol, out var v) ? v : throw Missing($"the instance the defaults of `{symbol.Name}` read", symbol.Line);
+
     /// <summary>
     /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
     /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
@@ -505,6 +517,8 @@ public sealed class SemanticModel
     internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
 
     internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordFieldsThis(ClassSymbol symbol, VariableSymbol thisVariable) => buildReceivers[symbol] = thisVariable;
 
     internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 
