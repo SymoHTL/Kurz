@@ -206,7 +206,7 @@ proposed after the review of round 13). A `double` or `float` among the named fi
 `data` value does (D3), NaN equal to NaN (the owner, 2026-10-10); under K4's content equality it
 compares the same way. A named field whose type `==` does not take, a map among them, makes `==` on
 the instances and a key of the class `type-mismatch`, at that `==` and at the line that writes the
-key type, as such a field does in a `data` value (D3, M9): no named field is skipped.
+key type, as such a field does in a `data` value (D3, M9): no named field is skipped (§4, the owner, 2026-11-02, #110, comment 6590315607).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -320,7 +320,7 @@ constructor runs, as C# evaluates an initializer, which refuses an instance memb
 declared below it, a method of its instance or `this` is `unknown-name` (V10), while a `static`
 method of the class is a name there, as C# refuses no `static` member in an initializer (§4, the
 owner, 2026-11-02); the cost is that such a
-default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
+default runs at every construction, which a constant one does not (the owner, 2026-10-11, confirming the reading proposed after the review of round 14). A default that builds its own class, itself or through the default of a class it builds, runs again at each construction it makes, so that the run recurses until it ends in `stack-overflow` (O11), as C# recurses on an initializer that constructs its own class (§8, the owner, 2026-11-02, against a compile error with an id of its own for such a default, which would refuse a guarded one too); the error line names the frame in which the stack ran out, in the allocator of `std/` or in a default, as O11 reads it, so no case pins it. A method is written as a function (chapter 8). Further constructors, `static` members and `override` are written as in C#. What a
 further constructor may do to a field without `mut` is K14; what a `static` field may hold is K18. A
 method that a derived class overrides is marked `virtual` in the base and `override` in the derived
 class, as in C#: `override` on a method that the nearest base class declaring it marks neither
@@ -435,6 +435,36 @@ class Grid(int Side) {
 
 print(Grid(2).Cells())
 print(Grid(3).Cells())
+```
+
+Case: [classes/field-default-method-hides-function.kz](../corpus/classes/field-default-method-hides-function.kz)
+```kurz
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    pub int Get() => V
+
+    pub int A() => a
+}
+
+print(C(1).A())
+```
+
+Case: [classes/field-default-static-hides-function.kz](../corpus/classes/field-default-static-hides-function.kz)
+```kurz
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    static int Get() => 2
+
+    pub int A() => a
+}
+
+print(C(1).A())
 ```
 
 Case: [classes/field-weak.kz](../corpus/classes/field-weak.kz)
@@ -650,7 +680,8 @@ print(Counter.Next())
 
 The initial value of a `static` field reads constants and the `static` field of any class, its own
 or another, in any order, by their names inside the class or as `Units.Count`, as a `static` of
-Rust reads another, and the compiler computes the initial values; a member of an instance is K19's.
+Rust reads another, and the compiler computes the initial values that are constants; a member of an
+instance is K19's.
 Initial values that read each other in a cycle, a field that reads itself among them (`Start =
 Start + 1`), are the compile error `static-cycle`, at the field of the cycle that comes first in the
 file, with a message that names the fields of the cycle in order, as Rust's E0391 names a cycle of
@@ -658,11 +689,22 @@ statics. The owner chose any order on 2026-11-02, against a class declared above
 class's own fields alone and against a cycle decided at run time, as C#'s type initializers, which
 give default values in a cycle without a word; on the same day this replaced the owner's earlier
 answer, the fields of its class declared above it. *(assumed: the id, the message and the place,
-which the build named and said back to the owner)* Inside an initial value, a read of a `static`
-field is the constant the field holds, of the field's type, so a constant built from such reads is
-checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the field's
-type `constant-overflow` (T6), and an `int` field read into a `byte` field `narrowing-conversion`
-(T7), as a typed `int` is *(assumed: as §4 marks it)*. Outside an initial value, a read of a
+which the build named and said back to the owner; the message's list starting at the field the error
+stands at; in a cycle across the files of a program, the place at the field that comes first where
+the files are read in the order of their paths, as for `base-cycle` (D6); every field of the cycle
+refused, so that a cycle through a field one reported refused, and a field that reads one, add no
+error (E1), as §4 marks it)* Inside an initial value, a read of a `static` field whose initial value
+is a constant is the constant the field holds, of the field's type, so a constant built from such
+reads is checked as any constant: `1 / Zero` is `constant-divide-by-zero` (T25), a product past the
+field's type `constant-overflow` (T6), and an `int` field read into a `byte` field
+`narrowing-conversion` (T7), as a typed `int` is *(assumed: as §4 marks it)*. An initial value that
+reads a field computed at its first read (§4) is no constant either, and its own field is computed
+at its own first read, which computes the field it reads first where that one is not computed yet:
+each field alone, and no initializer runs for the whole class, as one `LazyLock` of Rust reads
+another (§4, the owner, 2026-11-02, against the whole class at its first touch, as C#'s type
+initializer, and against constants only, with such a read an error of its own id). Such a field meets
+an exception in its initial value as one a function computes does (§4): the read raises it, and every
+read after it the same exception *(assumed: as §4 marks it)*. Outside an initial value, a read of a
 `static` field is a value of its type and no constant, as C# reads a `static readonly` field: an
 `int` field does not go into a `byte` as an integer literal would (T7) *(assumed: as §4 marks it)*.
 The cycle this rule names is one between the names initial values read; what a field that a
@@ -704,6 +746,77 @@ class Counter {
 
 print(Counter.Start)
 ```
+
+Case: [classes/static-constant-limits.kz](../corpus/classes/static-constant-limits.kz)
+```kurz
+class Limits {
+    pub static int Q = 10 / Two
+    pub static int Two = 2
+    pub static int Big = Half * 4
+    pub static int Half = 536870911
+    pub static long Wide = Small
+    pub static int Small = 7
+}
+
+print(Limits.Q)
+print(Limits.Big)
+print(Limits.Wide)
+```
+
+Case: [classes/static-divide-by-zero.kz](../corpus/classes/static-divide-by-zero.kz)
+```kurz
+class Ratio {
+    pub static int Q = 1 / Zero
+    pub static int Zero = 0
+}
+
+print(Ratio.Q)
+```
+
+Case: [classes/static-overflow.kz](../corpus/classes/static-overflow.kz)
+```kurz
+class Size {
+    pub static int Big = Half * 4
+    pub static int Half = 1073741824
+}
+
+print(Size.Big)
+```
+
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
+Case: [classes/static-reads-first-read.kz](../corpus/classes/static-reads-first-read.kz)
+```kurz
+int Compute() {
+    print("computing A")
+    return 3
+}
+
+int Never() {
+    print("computing C")
+    return 0
+}
+
+class Table {
+    pub static int A = Compute()
+    pub static int B = A + 1
+    pub static int C = Never()
+}
+
+print(Table.B)
+print(Table.A)
+```
+
+No case: the place of a cycle across the files of a program, since the compiler reads one file of a
+program and a case is one file.
 
 ### K14 (decided, §4) Further constructors and fields without `mut`
 

@@ -640,12 +640,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
-- a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
+- a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
   every node is new (`Syntax/SyntaxCopy.cs`), so that the model holds each copy's types apart, with
   the type parameter's name bound to the type argument and `T.Kind` a constant of `TypeKind`; a
   `match` on it reads the one arm that takes the copy's kind, and the emitter emits that arm alone;
+  a loop over `T.Fields` is unrolled in a copy into a pass for each field of the primary constructor
+  of the `data` type it binds (D14), in order, each a copy of the loop's body in which
+  `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
+  type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
+  emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
+  type, `Order.Source`, where a pass made the copy;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -679,7 +685,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
-  arguments by name, both counts at one; a field read through an instance, and by its name inside a
+  arguments by name, both counts at one, the defaults of the class's body in one function of the module
+  per class, which each construction calls with the instance and a trace names by the class, so that a
+  default which builds its own class recurses when it runs and is built once (K7); a field read through an instance, and by its name inside a
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
@@ -892,13 +900,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Write`, setter, `Accept` and pull of a line is a call in flight, which a compare-and-swap adds 2
-  to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction takes off at its end, and
-  `Close` sets the word's mark, 1, by an atomic or, so that every later call through any holder, a second `Close` among them, finds it
-  and gets the system's error of a descriptor that is not open, 9, with no system call, and the descriptor is released by the
-  `Close` where no call is in flight, the error of that close given, and else by the last call out, which ignores it, a socket's
-  `Close` with calls in flight shutting the socket down first by the runtime's `ShutdownSocket`, so that a stream's read and write and
-  a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle give that error too (S5, S9);
+  freed with the block; each `Read`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
+  takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
+  second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
+  descriptor is released by the `Close` where no call is in flight, the error of that close given, and else by the last call out,
+  which ignores it, a socket's `Close` with calls in flight adding a count of its own with its mark, shutting the socket down by the
+  runtime's `ShutdownSocket` and then giving that count back, so that the last call out releases the descriptor only after the
+  shutdown, and a stream's read and write and a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle
+  give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
   holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
   the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
@@ -916,7 +926,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   descriptors, and the same files all held, which reach the limit; a close through a copy; a read,
   a pull, a write, an `Accept` and each setter that a close through another holder meets in flight, which the IR of the program
   built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
-  the socket down, and a closed handle whose number the system gave another file; a read
+  the socket down and releases a listener's descriptor once its `Accept` is out, as `F_GETFD` shows; a socket's close with a call in
+  flight, into whose window before the shutdown the IR puts that call's end and a new socket that listens, which does not take the
+  closed socket's number and still listens after the shutdown; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
+  leaves that stream's writes alone; and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
   file the system names no size for; files of 1 to 1048579 bytes read without their list grown, under
@@ -970,8 +983,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
-  runtime's `Same` and `Order` comparing the first byte, then words of 8 bytes, the last ending where the bytes
-  end, as the C library's `memcmp` compares them;
+  runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
+  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
+  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
+  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
+  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1119,7 +1135,9 @@ same lines, and so do the strings' program and twenty rounds of strings through 
 and the maps' program and twenty rounds of maps, and the programs of a map's members, loops, entries kept
 past a `Clear`, keys, `double` keys, nullable keys and nullable values and of writes into a list's items and `==` on two
 lists, each read beside the change it can meet (section 4, the owner, 2026-10-30), and a program of lists
-and maps in fields written through paths by each `mut` member, beside copies, a block's among them, and a `Where` over 100000 items in five rounds, and which keeps no freed block of more than 262144 bytes,
+and maps in fields written through paths by each `mut` member, beside copies, a block's among them, a `Where` over 100000 items in five rounds, and in a
+build for Linux a read and a write on the file a field of a class instance holds, whose argument gives the field another file, by
+the field's path and by its name in a method, each through the file the field held when the call began, and which keeps no freed block of more than 262144 bytes,
 since a kept block stays readable, so that a write into one freed under it ends the process, and in which every block ends at a page
 the system makes inaccessible, where its size rounded up to 16 ends, so that a write one byte past the end of a block of 16 bytes,
 of 300000 and of one `Reallocate` gave as a new block ends the process, and the last byte of each written does not, and whose `Free`
@@ -1408,12 +1426,18 @@ that sit under a rule by its id. Every one is pinned by a test.
   actor bodies write `mut users = Map<int, User>()`.
 - T17 with T19: how a call's type arguments are told from comparisons. The front end keeps the list
   when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
-  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
+  comparisons, a type argument that is a dotted name included, `a < b.c, d > (e)` being the call
+  `a<b.c, d>(e)` as in C#, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
   states no such rule.
+- T17: `void` as a type argument written in a type or a call, of a generic function, a generic `data`
+  type, `List` and `Map`, is `void-type-argument` where it is written, nested ones and one in a
+  result's or a field's type included, where `List<void>.FromRaw(p, n)` and `List<void>.Allocate(n)`
+  keep R14's `type-mismatch` and the result of a function type inside a type argument,
+  `List<(int) => void>`, stands.
 - R10 to R17: the raw forms, each edge with the rule it rests on.
   - `*` and `&` before a value are prefix operators that bind as `-` does, since R10 writes a pointer
     as C# writes it, so `*b.Next` reads through `b.Next`. A line that starts with `*` starts a
@@ -1604,7 +1628,7 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
-`string.Join`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
+`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
 not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
@@ -1612,8 +1636,10 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
-`T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
+`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
+call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
@@ -1634,10 +1660,7 @@ generic data type (T19), each of which leaves the data type, and every data type
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
-type or a time type (T10, T29); `void` as a type argument written in a type or a call, of a generic
-function, a generic `data` type, `List` and `Map`, which C# refuses and Rust's `()`, a type of no
-size, takes, and of which the record says neither (T17, T19), where `List<void>.FromRaw(p, n)` and
-`List<void>.Allocate(n)` keep R14's `type-mismatch` (below);
+type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
@@ -2027,7 +2050,10 @@ round can ask about it by the rule's id.
   through the instance being built, before the defaults of the fields after it run, as C# runs a
   field's initializer before the constructor's body. A `static` method of the class is a name in a
   default too, and a method of the instance is none, as C# refuses an instance member in an
-  initializer and no `static` one. A field of the body of the name of a field of
+  initializer and no `static` one. Both hold where a top-level function has the name, which a member
+  of the class hides in a default as in a method: the `static` method is called, and a method of the
+  instance, or a field below, is `unknown-name` with the reason (V10).
+  A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
@@ -2037,7 +2063,8 @@ round can ask about it by the rule's id.
   file, its message naming the fields from there in the order they read each other, and every field
   of the cycle refused, so that a read of one adds nothing (E1); two cycles that share a field are
   one error, two that share none are two. An initial value that calls a function is `not
-  supported`, so the walk meets no call.
+  supported`, so the walk meets no call, and one that reads such a field, which K20 computes at its
+  own first read too, adds nothing to that field's `not supported` (E1).
 - K9 with E4: `mut` before a method of a class is `syntax`, since K9 gives the marker to the methods
   of values (M5) and a method of a class changes its instance without it.
 - M4 with K2: an assignment into a `mut` field of an instance reads its value first, then the

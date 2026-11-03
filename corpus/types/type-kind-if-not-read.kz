@@ -1,0 +1,15 @@
+// expect: error kind-not-read at 15
+// rules: T33
+
+data Point(int X, int Y)
+
+void Show<T>(T value) {
+    if T.Kind == TypeKind.Data {
+        for f in T.Fields {
+            print(f.Name)
+        }
+    }
+}
+
+Show(Point(1, 2))
+Show(true)

@@ -1,0 +1,25 @@
+// expect: output
+// | HttpError
+// | 7
+// | 3
+// | 2
+// | 4
+// rules: W1
+
+enum Error { HttpError, Io }
+
+data Reply(int HttpKind)
+
+class Server(int HttpError) {
+    pub static int HttpKind = 2
+
+    pub int Code() => HttpError
+
+    pub int HttpServer() => HttpError + 1
+}
+
+print(Error.HttpError)
+print(Server(7).Code())
+print(Server(2).HttpServer())
+print(Server.HttpKind)
+print(Reply(4).HttpKind)

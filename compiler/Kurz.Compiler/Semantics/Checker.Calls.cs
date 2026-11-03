@@ -142,6 +142,14 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
+                    if (OutOfReachInDefault(n.Name, n.Line))
+                    {
+                        // K7, V10: a member of the class hides a name outside it in a default as in a method, as C# refuses it there
+                        // (CS0236), so a method of the instance is refused before a top-level function of its name is looked up
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
                     if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
                     {
                         CheckName(n);
@@ -237,11 +245,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (!OutOfReachInDefault(n.Name, n.Line))
-                    {
-                        Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
-                    }
-
+                    Report(ErrorIds.UnknownName, n.Line, $"no `{n.Name}` is visible here (V10)");
                     CheckArgumentsLoosely(c);
                     return Typed.Error;
                 }
@@ -1542,6 +1546,15 @@ public sealed partial class Checker
         if (target.Type is HasherType hasher)
         {
             return CheckHasherMethod(hasher, m, c); // H3
+        }
+
+        if (m.Member == "Text" && IsHttpError(target.Type))
+        {
+            // W2: the `Text()` the body in `std/` declares gives that text, so a call of it has the answer and the place of printing
+            // one (the owner, 2026-11-02)
+            NotSupported(c.Line, HttpErrorText);
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
         }
 
         var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)

@@ -446,6 +446,11 @@ public sealed partial class Checker
     private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
+        if (variable is not null && passVariables.TryGetValue(variable, out var pass))
+        {
+            return FieldVariableAsValue(pass, n.Line); // T33: `f` of a loop over `T.Fields` is no value
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
@@ -485,6 +490,11 @@ public sealed partial class Checker
 
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
+        }
+
+        if (OutOfReachInDefault(n.Name, n.Line))
+        {
+            return Typed.Error; // K7, V10: a member of the class hides a name outside it in a default, as in a method (C#'s CS0236)
         }
 
         if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -558,7 +568,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line) || OutOfReachInDefault(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -569,6 +579,16 @@ public sealed partial class Checker
 
     private Typed CheckMember(MemberAccess m)
     {
+        if (fieldGets.TryGetValue(m, out var pass))
+        {
+            return CheckFieldGet(m, pass); // T33: what `f.Get(value)` became in a pass
+        }
+
+        if (PassMember(m) is { } member)
+        {
+            return member; // T33: `f.Name`
+        }
+
         if (m.Conditional || InChain(m.Target))
         {
             return CheckChainMember(m); // N5
