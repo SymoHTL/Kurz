@@ -5913,6 +5913,13 @@ pub class HttpHeaders {
         }
     }
 
+    // The name at the index, in the order the headers hold them: an index outside 0 to `Count - 1` stops the program
+    // with index-out-of-range, as a list's index does (W4; section 12: the owner, 2026-11-03).
+    pub string NameAt(int i) => names[i]
+
+    // The value at the index, the value of the name `NameAt(i)` gives, and outside them the same stop.
+    pub string ValueAt(int i) => values[i]
+
     // Whether a name or a value holds a CR or a LF, which would end its line in the head.
     static bool Breaks(string text) {
         for i in 0..<text.Bytes.Count {

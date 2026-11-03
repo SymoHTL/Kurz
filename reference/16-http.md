@@ -215,13 +215,15 @@ owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, 
 value often comes from outside input, and a CR or a LF in the name or the value is
 `HttpError(Protocol, "invalid header: CR or LF")`, refused where it is set, as Rust's `HeaderValue`
 and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110, comment
-6573113786, its form, comment 6573265513, and its text, 2026-11-03, comment 6613356831). The class
+6573113786, its form, comment 6573265513, and its text, 2026-11-03, comment 6613356831). `Add` and
+`Set` take an empty name and refuse a CR or a LF alone (§12, the owner, 2026-11-03, #110, comment
+6615254370). The class
 is made by `HttpHeaders()`, which holds no header; its members are `string? Get(string name)`,
 `List<string> GetAll(string name)`, `void | HttpError Add(string name, string value)`,
 `void | HttpError Set(string name, string value)` and `void Remove(string name)`; a refused `Add` or
 `Set` changes nothing, `Set` checking before it removes; `Set` puts its value after every value the
 headers hold, as a `Remove` and then an `Add`; `Remove` of a name the headers do not hold changes
-nothing; an empty name or value is taken; a name is written back as it was spelled in the head that
+nothing; an empty value is taken; a name is written back as it was spelled in the head that
 a writer of a request or a response writes; and `print(h)` gives the text of a class without a
 `Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
 empty start and the result of `Remove` among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
@@ -229,6 +231,9 @@ empty start and the result of `Remove` among them)*. A program walks the headers
 map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
 `GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
 names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
+`h.Count` is the read-only property `int Count` (K7), and `h.NameAt(i)` and `h.ValueAt(i)` give a
+`string` and, with `i` outside 0 to `Count - 1`, stop the program with `index-out-of-range`, as a
+list's index does (T14) (§12, the owner, 2026-11-03, #110, comment 6615254370).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
