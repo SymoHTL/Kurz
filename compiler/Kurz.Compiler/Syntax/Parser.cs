@@ -552,7 +552,7 @@ public sealed class Parser
                     ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
                     Advance();
                     return ParseStrayElseClause(token.Line);
-                case "pub": case "prot": case "static": case "mut": case "virtual": case "override": case "void": case "weak": case "naked": case "extern":
+                case "pub": case "prot": case "internal": case "static": case "mut": case "virtual": case "override": case "void": case "weak": case "naked": case "extern":
                     if (TryDeclaration(out var modified))
                     {
                         return modified!;
@@ -1203,6 +1203,7 @@ public sealed class Parser
                 {
                     "pub" => Modifiers.Pub,
                     "prot" => Modifiers.Prot,
+                    "internal" => Modifiers.Internal,
                     "static" => Modifiers.Static,
                     "mut" => Modifiers.Mut,
                     "virtual" => Modifiers.Virtual,
@@ -1223,6 +1224,13 @@ public sealed class Parser
                 // meaning, in a type body (K7: class bodies follow C#, which refuses it, CS1004) or outside one, and the id could be the
                 // checker's; the front end reports `syntax`
                 throw new ParseError(Current.Line, $"`{Current.Text}` is written twice");
+            }
+
+            if (((modifiers | flag) & (Modifiers.Pub | Modifiers.Internal)) == (Modifiers.Pub | Modifiers.Internal))
+            {
+                // F9: `pub` shows a member everywhere and `internal` in its folder alone, so the two contradict each other, as C# refuses two
+                // access modifiers (CS0107); a reading under E4's general clause, as a modifier written twice is above
+                throw new ParseError(Current.Line, "`pub` and `internal` both stand before one declaration: it takes one of them (F9)");
             }
 
             modifiers |= flag;
