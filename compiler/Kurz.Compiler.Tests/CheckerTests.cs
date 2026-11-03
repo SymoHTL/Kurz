@@ -2169,7 +2169,7 @@ public sealed class CheckerTests
         // W1, W4: a class of std/ on the list is the symbol std/'s checker made, its methods the ones std/ checked
         var runtime = StdRuntime.Value;
         var stdHeaders = runtime.StdChecker.Model.ClassOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpHeaders"));
-        var (diagnostics, checker) = CheckSeeingStd("h = HttpHeaders()\nh.Add(\"Host\", \"a\")\nv = h.Get(\"host\")\nall = h.GetAll(\"HOST\")\nh.Set(\"Host\", \"b\")\nh.Remove(\"Host\")\nprint(v ?? \"\")\nprint(all)\n");
+        var (diagnostics, checker) = CheckSeeingStd("void | HttpError Fill(HttpHeaders headers) {\n    headers.Add(\"Host\", \"a\")\n    headers.Set(\"Host\", \"b\")\n}\n\nh = HttpHeaders()\nFill(h) else {\n    HttpError e => print(e.Detail)\n}\nv = h.Get(\"host\")\nall = h.GetAll(\"HOST\")\nh.Remove(\"Host\")\nprint(v ?? \"\")\nprint(all)\n");
         Assert.Empty(diagnostics.Items);
         Assert.Same(stdHeaders, Assert.IsType<ClassType>(checker.TopLevelVariables["h"]).Symbol);
         Assert.Equal(new ListType(Types.String), checker.TopLevelVariables["all"]);
@@ -2179,14 +2179,35 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("h = HttpHeaders()\nprint(h.names)\n", "a field is visible outside it with `pub` (F9)")]
-    [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside it with `pub` (F9)")]
-    public void A_member_of_a_class_of_std_without_pub_is_private_to_it(string program, string end)
+    [InlineData("h = HttpHeaders()\nprint(h.names)\n")]
+    [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n")]
+    public void A_member_of_a_class_of_std_without_pub_is_private_to_it(string program)
     {
-        // W1 with F9: the file sees the class, and a member std/ declares without `pub` stays inside it
+        // W1 with F9: the file sees the class, and a member std/ declares without `pub` stays inside it,
+        // a field (the first row) as a method (the second)
         var error = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
         Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
-        Assert.EndsWith(end, error.Message);
+    }
+
+    [Theory]
+    [InlineData("h = HttpHeaders()\nh.Add(\"Host\", \"a\")\n")]
+    [InlineData("h = HttpHeaders()\nh.Set(\"Host\", \"a\")\n")]
+    public void Add_and_Set_of_HttpHeaders_give_an_HttpError_that_top_level_code_handles(string program)
+    {
+        // W4, O9: `Add` and `Set` give `void | HttpError`, whose case top-level code has no caller to pass to
+        var error = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
+        Assert.Equal((ErrorIds.UnlistedCase, 2), (error.Id, error.Line));
+
+        // the positive control: the same call with an `else` that handles the case
+        Assert.Empty(CheckSeeingStd(program.TrimEnd('\n') + " else {\n    HttpError e => print(e.Detail)\n}\n").Diagnostics.Items);
+    }
+
+    [Fact]
+    public void A_data_type_that_names_a_class_of_std_as_its_base_is_not_supported()
+    {
+        // D6 with W1: a data type's base is a data type, and `HttpHeaders` is a class of std/ that every file sees
+        var refused = Assert.Single(CheckSeeingStd("data D(int X) : HttpHeaders\n\nprint(D(1).X)\n").Diagnostics.Items);
+        Assert.Equal((true, 1, "a class a data type names (chapter 7)"), (refused.IsNotSupported, refused.Line, refused.Message));
     }
 
     [Theory]

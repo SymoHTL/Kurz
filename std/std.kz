@@ -5845,10 +5845,13 @@ pub enum HttpKind { Protocol, TooLarge, Status, Unsupported }
 
 pub data HttpError(HttpKind Kind, string Detail)
 
-// The headers of a request or a response, an ordered list of names and values (design record, section 12:
-// the owner, 2026-10-31, "Ordered list type"), as hyper's `HeaderMap` and ASP.NET Core's
-// `IHeaderDictionary` keep them: a name compares without regard to ASCII case and stays as it was spelled,
-// and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came (W1, W4).
+// The headers of a request or a response, one ordered list of names and values (design record, section 12:
+// the owner, 2026-10-31, "Ordered list type"): a name compares without regard to ASCII case and stays as it
+// was spelled, and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came
+// (W1, W4). hyper's `HeaderMap` keeps a name's values apart and in order but lowercases the name, and
+// ASP.NET Core's `IHeaderDictionary` holds a name's values as one `StringValues`: neither keeps one list.
+// A CR or a LF in a name or a value is refused where it is set, as the http crate's `HeaderValue` refuses
+// it, so that no header splits the head a writer writes (section 12: the owner, 2026-11-02, Q5).
 pub class HttpHeaders {
     mut List<string> names = List<string>()
     mut List<string> values = List<string>()
@@ -5877,13 +5880,22 @@ pub class HttpHeaders {
     }
 
     // A value of the name after every value the headers hold, as a repeated header of a message.
-    pub void Add(string name, string value) {
+    pub void | HttpError Add(string name, string value) {
+        if Breaks(name) || Breaks(value) {
+            return Refused()
+        }
+
         names.Add(name)
         values.Add(value)
     }
 
-    // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them.
-    pub void Set(string name, string value) {
+    // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them,
+    // and the value goes after every value the headers hold. A refused value takes out nothing.
+    pub void | HttpError Set(string name, string value) {
+        if Breaks(name) || Breaks(value) {
+            return Refused()
+        }
+
         Remove(name)
         Add(name, value)
     }
@@ -5899,6 +5911,22 @@ pub class HttpHeaders {
                 i = i + 1
             }
         }
+    }
+
+    // Whether a name or a value holds a CR or a LF, which would end its line in the head.
+    static bool Breaks(string text) {
+        for i in 0..<text.Bytes.Count {
+            if text.Bytes[i] == 13 || text.Bytes[i] == 10 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    // The refusal of a name or a value that holds a CR or a LF (section 12: the owner, 2026-11-03).
+    static HttpError Refused() {
+        return HttpError(HttpKind.Protocol, "invalid header: CR or LF")
     }
 
     // Whether two names are the same without regard to ASCII case, byte by byte, as Rust's `eq_ignore_ascii_case`.
