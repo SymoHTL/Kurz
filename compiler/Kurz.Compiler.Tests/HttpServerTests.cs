@@ -9,8 +9,9 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The decisions of the server's loop (W9; design record, section 12) that no corpus case pins: the text of the <c>Date</c> it writes,
 /// which a case cannot hold since it is the time of the run, read through a function an edited std/ adds and held to .NET's
-/// <c>"r"</c> form of the same second; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at the line
-/// of the program that calls <c>Serve</c> or <c>ServeConnection</c>.
+/// <c>"r"</c> form of the same second; a handler that throws, which ends the program at the throw, where a corpus case would name
+/// the rules of the throw and not the server's; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at
+/// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -39,6 +40,48 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         Assert.Equal((0, ""), (code, error));
         Assert.Equal("Sun, 06 Nov 1994 08:49:37 GMT", output[0]);
         Assert.Equal(seconds.Select(s => DateTimeOffset.FromUnixTimeSeconds(s).ToString("r", CultureInfo.InvariantCulture)), output);
+    }
+
+    [Fact]
+    public void A_handler_that_throws_ends_the_program_at_its_throw()
+    {
+        // the first request is served, the second throws in the handler: nothing after the call runs, and the error names the line
+        // of the throw in the program
+        const string text = """
+            void | IoError | HttpError All() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+                client.ShutdownWrite()
+                HttpServer.ServeConnection(server, (HttpRequest r) => {
+                    if r.Path == "/b" {
+                        throw "no handler for {r.Path}"
+                    }
+
+                    print("served")
+                    return HttpResponse.Empty(204)
+                })
+                print("after")
+            }
+
+            All() else {
+                IoError e => print(e)
+                HttpError e => print(e.Detail)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-server-throws"));
+        Assert.Equal(1, code);
+        Assert.Equal(["served"], output);
+        Assert.Equal("error: thrown at program.kz:9:\nno handler for /b\n", error);
     }
 
     [Theory]

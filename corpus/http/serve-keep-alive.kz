@@ -9,12 +9,17 @@
 // | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 4|Date: <29>|Connection: close||same]
 // | void
 // | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 4|Date: <29>||sameHTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 4|Date: <29>||same]
+// | void
+// | [HTTP/1.1 204 No Content|Date: <29>||]
+// | true
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /a]
 // rules: W9
 
 // a connection of HTTP/1.1 serves its requests in their order and stays open, each response with the server's `Date`, until the
 // client ends it between two requests; a connection that ends before its first request is answered with nothing; and the server
 // writes its `Date` and its `Connection` beside the handler's response without changing it, so that a response a handler gives
-// again is written as it was made
+// again is written as it was made, and a `Date` the handler set is kept; a connection whose client is idle after a request closes
+// at `KeepAliveTimeout`
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -100,3 +105,44 @@ same = HttpResponse.Text(200, "same")
 reused = (HttpRequest r) => same
 Exchange("GET /a HTTP/1.0\r\n\r\n", reused, HttpLimits())
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", reused, HttpLimits())
+dated = (HttpRequest r) => {
+    response = HttpResponse.Empty(204)
+    response.Headers.Set("Date", "Sun, 06 Nov 1994 08:49:37 GMT") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", dated, HttpLimits())
+Idle()
+
+// a client that sends one request and then nothing is served, and its connection closes without an answer once it has been idle
+// for `KeepAliveTimeout`
+void Idle() {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes) else {
+        IoError e => return
+    }
+
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}"), HttpLimits(KeepAliveTimeout: 100ms)) else {
+        IoError e => print(e)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+    print(Wire(client))
+}
