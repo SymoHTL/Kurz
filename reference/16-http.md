@@ -205,29 +205,172 @@ print(e.Text())
 `HttpHeaders` is an ordered list of names and values, a class of `std/`: `h.Get(name)` gives the
 first value of the name, a `string?`, `h.GetAll(name)` gives every value, and `h.Add(name, value)`,
 `h.Set(name, value)` and `h.Remove(name)` change it. A name compares without regard to ASCII case
-and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay apart, as hyper's
-`HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
-list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
-ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay apart (§12, the owner, 2026-10-31, "Ordered list type").
+hyper's `HeaderMap` keeps the values of a name apart and in their order but lowercases the name, and
+ASP.NET Core's `IHeaderDictionary` holds the values of a name as one `StringValues`, so that neither
+keeps one list of every name and value with each name's spelling (§12). `GetAll` gives a
+`List<string>`, `Set` replaces every value of the name by one, as ASP.NET Core's indexer does, and
+`Remove` removes every value of it *(assumed, §12: proposed with the product pass and not put to the
+owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, since a header's
+value often comes from outside input, and a CR or a LF in the name or the value is
+`HttpError(Protocol, "invalid header: CR or LF")`, refused where it is set, as Rust's `HeaderValue`
+and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110, comment
+6573113786, its form, comment 6573265513, and its text, 2026-11-03, comment 6613356831). `Add` and
+`Set` take an empty name and refuse a CR or a LF alone (§12, the owner, 2026-11-03, #110, comment
+6615254370). The class
+is made by `HttpHeaders()`, which holds no header; its members are `string? Get(string name)`,
+`List<string> GetAll(string name)`, `void | HttpError Add(string name, string value)`,
+`void | HttpError Set(string name, string value)` and `void Remove(string name)`; a refused `Add` or
+`Set` changes nothing, `Set` checking before it removes; `Set` puts its value after every value the
+headers hold, as a `Remove` and then an `Add`; `Remove` of a name the headers do not hold changes
+nothing; an empty value is taken; a name is written back as it was spelled in the head that
+a writer of a request or a response writes; and `print(h)` gives the text of a class without a
+`Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
+empty start and the result of `Remove` among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
 `h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
 map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
 `GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
 names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
+`h.Count` is the read-only property `int Count` (K7), and `h.NameAt(i)` and `h.ValueAt(i)` give a
+`string` and, with `i` outside 0 to `Count - 1`, stop the program with `index-out-of-range`, as a
+list's index does (T14) (§12, the owner, 2026-11-03, #110, comment 6615254370).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "example.com")
+}
+
 h = HttpHeaders()
-h.Add("Host", "example.com")
-h.Add("Set-Cookie", "a=1")
-h.Add("set-cookie", "b=2")
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
 print(h.Get("HOST") ?? "none")
+print(h.Get("host") ?? "none")
 print(h.Get("Accept") ?? "none")
+```
+
+Case: [http/http-headers-get-all.kz](../corpus/http/http-headers-get-all.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("Host", "example.com")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
 print(h.GetAll("SET-COOKIE"))
-h.Set("Set-Cookie", "c=3")
+print(h.GetAll("Accept"))
+```
+
+Case: [http/http-headers-set.kz](../corpus/http/http-headers-set.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("set-cookie", "b=2")
+    headers.Set("SET-COOKIE", "c=3")
+    headers.Set("Content-Type", "text/plain")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
 print(h.GetAll("set-cookie"))
-h.Remove("host")
-print(h.Get("Host") ?? "gone")
+print(h.Get("content-type") ?? "none")
+```
+
+Case: [http/http-headers-remove.kz](../corpus/http/http-headers-remove.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("Host", "example.com")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+h.Remove("SET-COOKIE")
+h.Remove("Accept")
+print(h.GetAll("set-cookie"))
+print(h.Get("host") ?? "none")
+```
+
+Case: [http/http-headers-refused.kz](../corpus/http/http-headers-refused.kz)
+```kurz
+h = HttpHeaders()
+h.Add("X-Name", "a\r\nInjected: 1") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Add("X-Na\nme", "a") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Add("Set-Cookie", "a=1") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Set("Set-Cookie", "b=2\r") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+print(h.Get("X-Name") ?? "none")
+print(h.GetAll("Set-Cookie"))
+```
+
+Case: [http/http-headers-walk.kz](../corpus/http/http-headers-walk.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "example.com")
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Count` is read without a call; each name keeps its spelling, and a repeated name stays apart, in the order it came
+print(h.Count)
+for i in 0..<h.Count {
+    print(h.NameAt(i))
+    print(h.ValueAt(i))
+}
+```
+
+Case: [http/http-headers-set-order.kz](../corpus/http/http-headers-set-order.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "a")
+    headers.Add("Accept", "text/plain")
+    headers.Set("host", "b")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Set` takes out every value of the name and puts its value after every value the headers hold
+print(h.NameAt(0))
+print(h.NameAt(1))
+print(h.ValueAt(1))
+```
+
+Case: [http/http-headers-empty-name.kz](../corpus/http/http-headers-empty-name.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("", "x")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// an empty name is taken, as std/'s class took it; a CR or a LF alone is refused
+print(h.Get("") ?? "none")
+print(h.Count)
 ```
 
 ### W5 (decided, §12) Reading a request

@@ -1,0 +1,12 @@
+// expect: error mut-required at 11
+// rules: K7
+
+class Bag {
+    mut List<int> items = []
+
+    pub List<int> Items => items
+}
+
+b = Bag()
+b.Items.Add(1)
+print(b.Items.Count)

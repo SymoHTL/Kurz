@@ -341,8 +341,24 @@ overrides, where C# 9 allows a more derived class type (the owner, 2026-10-09, c
 reference's reading, and on 2026-10-10 the exact return type against the covariant return of C# 9;
 `sealed override` was not offered as an option): an override whose return type differs is the compile error
 `override-return-type`, at the method (the owner, 2026-10-09, against `type-mismatch` at the
-method's line, whose message would name no override). There is no property syntax until
-something needs it.
+method's line, whose message would name no override). A read-only property is written as C#'s expression-bodied property, `pub int Count => names.Count`: a type,
+a name, `=>` and one expression. It is read as `h.Count`, as a list's `xs.Count` is (M9), without a call,
+and has no setter (§4, the owner, 2026-11-03, #110, comment 6615254370, against a method `h.Count()`,
+which departs from `h.Count` and from `xs.Count`, and against a `pub mut int Count` field kept in step,
+which any program could write). *(assumed, §4: readings of the product pass, #110, comment 6615484562,
+not put to the owner: the expression runs at every read, as C#'s does, so a read that looks like a
+field's runs code; an assignment of a property, through an instance or by its name inside its class, is
+`assign-immutable`; a call `h.Count()` calls the value the property gives, as a field's value is called
+(F11), which is `type-mismatch` on an `int`; another form, an accessor `{ get; }`, a setter or parameters,
+is `syntax` (E4); inside its class a method or another property reads it by its name alone, as a field,
+and a field's default does not, where it is `unknown-name` as a method of the instance is (V10); its body
+may change the instance, as a method's does (K9); a property without `pub` is private to its class (F9);
+a property and a field, a method or a parameter of the primary constructor of one name are `redeclared`
+(V9); a property is no field, so it stands in no list of the fields (T33), in no text `print` gives (A5)
+and in no equality (K4, K5), and one named `Text` gives an instance no text (A5); a read is a call, so a
+test of one read narrows no other (N9), and its value is no place that `mut` passes (M7) or that a `mut`
+method changes (M5))* A `static`, `virtual` or `override` property, one in an interface or in the body
+of a `data` type, and one of `void` or of a type that lists cases beside its success are open (§14).
 
 Case: [classes/field-default-expression.kz](../corpus/classes/field-default-expression.kz)
 ```kurz
@@ -580,6 +596,115 @@ class Money(int Cents) {
 }
 
 print(Money.Of(3).Units())
+```
+
+Case: [classes/property.kz](../corpus/classes/property.kz)
+```kurz
+class Bag(string Name) {
+    mut List<int> items = [1]
+
+    pub int Count => items.Count
+    pub string Label => "{Name}: {Count}"
+
+    pub void Add(int x) {
+        items.Add(x)
+    }
+
+    pub int Twice() => Count * 2
+}
+
+b = Bag("ann")
+print(b.Count)
+b.Add(5)
+print(b.Count)
+print(b.Twice())
+print(b.Label)
+```
+
+Case: [classes/property-assign.kz](../corpus/classes/property-assign.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+b.Count = 3
+print(b.Count)
+```
+
+Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())
+```
+
+Case: [classes/property-redeclared.kz](../corpus/classes/property-redeclared.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+    pub int Count(int x) => items.Count + x
+}
+
+print(Bag().Count)
+```
+
+Case: [classes/property-mut.kz](../corpus/classes/property-mut.kz)
+```kurz
+void Bump(mut int n) {
+    n = n + 1
+}
+
+class Counter {
+    mut int count = 0
+
+    pub int Count => count
+
+    pub void Run() {
+        Bump(mut Count)
+    }
+}
+
+Counter().Run()
+```
+
+Case: [classes/property-change.kz](../corpus/classes/property-change.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub List<int> Items => items
+}
+
+b = Bag()
+b.Items.Add(1)
+print(b.Items.Count)
+```
+
+Case: [classes/property-equality.kz](../corpus/classes/property-equality.kz)
+```kurz
+class Point(int X) {
+    pub int Loud => Say()
+
+    int Say() {
+        print("read")
+        return X
+    }
+}
+
+// a property is no field: equality compares the fields alone (K4), and runs no property, which would print
+print(Point(1) == Point(1))
+print(Point(1) == Point(2))
+print(Point(1).Loud)
 ```
 
 ### K18 (decided, §3, §4, §6) What a `static` field may hold

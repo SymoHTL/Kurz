@@ -89,6 +89,9 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     /// as C#'s static method and Rust's associated function, which takes no <c>self</c>.
     /// </summary>
     public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
+
+    /// <summary>K7: a read-only property, <c>pub int Count => names.Count</c>, a method without parameters that a read calls, <c>h.Count</c>.</summary>
+    public bool IsProperty => Declaration is { Property: true };
 }
 
 /// <summary>
@@ -171,7 +174,7 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
     public FunctionSymbol? TextMethod =>
-        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && !f.IsProperty && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
 }
 
 /// <summary>

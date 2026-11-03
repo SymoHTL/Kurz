@@ -43,6 +43,8 @@ public sealed partial class Emitter
         {
             case StringLiteral s:
                 return EmitInterpolation(s);
+            case MemberAccess or NameExpression when Model.PropertyCallOf(e) is { } property:
+                return EmitPropertyRead(property, type); // K7
             case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
                 return ImplicitField(n, field, type); // K7
             case ThisExpression t:
@@ -118,6 +120,20 @@ public sealed partial class Emitter
 
         Retain(value, type);
         return Temp(value, type);
+    }
+
+    /// <summary>
+    /// K7: a read of a property, <c>h.Count</c> or <c>Count</c> inside its class, the call of its method, the instance before the dot or
+    /// <c>this</c> borrowed for it as for any method; its result is a temporary of the statement, as a call's is.
+    /// </summary>
+    private string EmitPropertyRead(CallExpression call, KurzType type)
+    {
+        if (Model.CallOf(call).Result is WeakRefType weak)
+        {
+            return Upgrade(Temp(EmitCall(call)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
+        }
+
+        return Temp(EmitCall(call) ?? throw new InvalidOperationException($"a `void` property is read at line {call.Line}: the checker reports it"), type);
     }
 
     /// <summary>What an expression the emitter does not lay out is, for its <c>not supported</c>.</summary>

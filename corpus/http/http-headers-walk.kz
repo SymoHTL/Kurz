@@ -1,0 +1,26 @@
+// expect: output
+// | 3
+// | Host
+// | example.com
+// | Set-Cookie
+// | a=1
+// | set-cookie
+// | b=2
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "example.com")
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Count` is read without a call; each name keeps its spelling, and a repeated name stays apart, in the order it came
+print(h.Count)
+for i in 0..<h.Count {
+    print(h.NameAt(i))
+    print(h.ValueAt(i))
+}
