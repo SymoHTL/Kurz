@@ -103,6 +103,11 @@ public sealed partial class Checker
 
     private Typed CallResult(CallExpression c, KurzType? expected)
     {
+        if (CheckMake(c) is { } made)
+        {
+            return made; // T33: `T.Make(f => ...)` in a copy
+        }
+
         switch (c.Callee)
         {
             case NameExpression n:
@@ -1131,8 +1136,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>D2, D7, D11: a data value made by the type's name with the base's fields first.</summary>
-    private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected)
+    /// <summary>
+    /// D2, D7, D11: a data value made by the type's name with the base's fields first; <paramref name="typeArguments"/>, where given,
+    /// are a generic type's own, as the call <c>T.Make</c> became binds them (T33), and none is written.
+    /// </summary>
+    private Typed CheckConstruction(DataSymbol data, CallExpression c, KurzType? expected, IReadOnlyList<KurzType>? typeArguments = null)
     {
         if (!data.HasFields)
         {
@@ -1169,6 +1177,11 @@ public sealed partial class Checker
             }
 
             candidate.Map = data.TypeParameters.Zip(written).ToDictionary(p => p.First, p => p.Second);
+        }
+
+        if (typeArguments is not null)
+        {
+            candidate.Map = data.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
         }
 
         var typed = Call([candidate], c, expected);

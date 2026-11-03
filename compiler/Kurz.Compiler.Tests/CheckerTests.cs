@@ -4116,7 +4116,7 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("data P(int X)\n\nvoid Show<T>() {\n    fields = T.Fields\n}\n\nShow<P>()", "4: `T.Fields` anywhere but after `in` in a `for` loop (T33)")]
-    [InlineData("data P(int X)\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<P>())", "3: reading a type in generic code, `T.Make` (T33)")]
+    [InlineData("data P(int X)\n\nvoid Show<T>() {\n    make = T.Make\n}\n\nShow<P>()", "4: reading a type in generic code, `T.Make` (T33)")]
     [InlineData("enum Shape { Round }\n\nvoid Show<T>() {\n    print(T.Values)\n}\n\nShow<Shape>()", "4: reading a type in generic code, `T.Values` (T33)")]
     [InlineData("void Show<T>() {\n    print(T.Item)\n}\n\nShow<List<int>>()", "2: reading a type in generic code, `T.Item` (T33)")]
     [InlineData("void Show<T>() {\n    print(T.Key)\n}\n\nShow<Map<string, int>>()", "2: reading a type in generic code, `T.Key` (T33)")]
@@ -4124,8 +4124,8 @@ public sealed class CheckerTests
     [InlineData("void Show<T>() {\n    print(T.Inner)\n}\n\nShow<int?>()", "2: reading a type in generic code, `T.Inner` (T33)")]
     [InlineData("void Show<T>() {\n    print(T.Cases)\n}\n\nShow<int | string>()", "2: reading a type in generic code, `T.Cases` (T33)")]
     public void Reading_a_type_beyond_its_kind_and_its_fields_is_not_supported_in_a_copy(string program, string expected) =>
-        // T33: the members of a type parameter beyond `Kind`, and `Fields` outside the head of a `for`, at a member and at a member's
-        // call, in the copy the call makes (E1)
+        // T33: the members of a type parameter beyond `Kind`, `Fields` outside the head of a `for` and `Make` but in its call, at a member
+        // and at a member's call, in the copy the call makes (E1)
         Assert.Equal([expected], NotSupported(program));
 
     [Fact]
@@ -4461,6 +4461,65 @@ public sealed class CheckerTests
         var program = "data Empty\n\nvoid Show<T>(T value) {\n    label = \"field\"\n    for f in T.Fields {\n        print(label)\n    }\n}\n\nShow(Empty)";
         Clean(program);
         Assert.Equal([(ErrorIds.UnusedVariable, 4)], Errors(program.Replace("print(label)", "print(1)")));
+    }
+
+    // ---- T.Make (T33) -------------------------------------------------------------------------------
+
+    private const string Shapes = "data Point(int X, int Y)\ndata Named(string Name, long Size)\ndata Empty\ndata Box<T>(T Value)\ndata NotFound\n\n";
+
+    [Fact]
+    public void T_Make_is_a_call_of_the_primary_constructor_with_the_lambda_s_body_for_each_field()
+    {
+        // T33: an argument for each field in order, each the lambda's body checked with that field's type, `f.Name`, `f.Type` and
+        // `f.Get(value)` read in it as in a pass of a loop over `T.Fields`; a generic type's own type arguments, a type with no fields,
+        // a copy made in a pass for the field's type, and an outcome in an argument that leaves the function as from any call (O2); a
+        // variable named as the type parameter is a variable, and its `Make` a method; a name the lambda's body reads counts as read in a
+        // copy of a type with no fields, as in a loop over no fields, so that `unused-variable` does not depend on the copies (V5)
+        Clean(Shapes + "T Zero<T>() => match T.Kind {\n    TypeKind.Data => T.Make(f => Zero<f.Type>())\n    TypeKind.Int => 0\n    TypeKind.Long => 0L\n    TypeKind.String => \"none\"\n}\n\n" +
+            "T Copy<T>(T value) => T.Make(f => f.Get(value))\n\nint | NotFound Find(string key) => match key {\n    \"X\" => 1\n    else => NotFound\n}\n\n" +
+            "T | NotFound Load<T>() => T.Make(f => Find(f.Name))\n\nT Blank<T>() => T.Make(f => 0)\n\nT Boxed<T>() => T.Make(f => 0)\n\n" +
+            "print(Zero<Point>())\nprint(Zero<Named>())\nprint(Copy(Named(\"a\", 5L)))\nprint(Blank<Empty>())\nprint(Boxed<Box<long>>())\nprint(Load<Point>() else {\n    NotFound => Point(0, 0)\n})");
+        Clean(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => n)\n}\n\nprint(Blank<Empty>())"); // the body is made for no field, and `n` counts as read
+        Clean(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => n)\n}\n\nprint(Blank<Point>())"); // the positive control: read in each argument
+        Assert.Equal([(ErrorIds.UnusedVariable, 8)], Errors(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => 0)\n}\n\nprint(Blank<Empty>())")); // a name the body does not read
+        Clean(Shapes + "class Maker {\n    pub int Make((int) => int f) => f(1)\n}\n\nT Odd<T>() {\n    if true {\n        T = Maker()\n        print(T.Make(f => f + 1))\n    }\n\n    return T.Make(f => 0)\n}\n\nprint(Odd<Point>())");
+    }
+
+    [Theory]
+    [InlineData("T Bad<T>() => T.Make(f => \"x\")\n\nprint(Bad<Point>())", "7: type-mismatch: a `string` where an `int` is required (T1)")]
+    [InlineData("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<Named>())", "7: type-mismatch: an `int` where a `string` is required (T1)")]
+    [InlineData("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<int>())", "9: kind-not-read: `Bad<int>`: `int` is of the kind `TypeKind.Int`, and `T.Make` in `Bad` makes a value of a `data` type alone (T33)")]
+    [InlineData("data Pair(Point P, bool B)\n\nT Zero<T>() => match T.Kind {\n    TypeKind.Data => T.Make(f => Zero<f.Type>())\n    TypeKind.Int => 0\n}\n\nprint(Zero<Pair>())", "14: kind-not-read: `Zero<Pair>`: `Pair.B` of the type `bool` is of the kind `TypeKind.Bool`, which no arm of the `match` on `T.Kind` in `Zero` takes (T33)")]
+    [InlineData("T Bad<T>() => T.Make((int f) => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make(f => 0, f => 1)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make((f, g) => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make(0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make<int>(f => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make(mut f => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make((mut f) => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make(x: f => 0)\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T.Make(mut (f => 0))\n\nprint(Bad<Point>())", "7: syntax: `T.Make` takes one lambda of one parameter with no type, `T.Make(f => ...)` (T33)")]
+    [InlineData("T Bad<T>() => T?.Make(f => 0)\n\nprint(Bad<Point>())", "7: unknown-name: no `T` is visible here (V10)|7: : a call after `?.` or `?[` (N5)")]
+    [InlineData("T Bad<T>() => T.Make(f => f)\n\nprint(Bad<Point>())", "7: syntax: `f` walks the fields of `T`, and stands only in `f.Name`, `f.Type` as a type and `f.Get(value)` (T33)")]
+    [InlineData("int Grow(mut List<int> t) {\n    t.Add(9)\n    return 0\n}\n\nint Sum(List<int> xs, Point p) => p.X\n\nint Fill<T>(mut List<int> numbers) => Sum(numbers, T.Make(f => Grow(mut numbers)))\n\nmut list = List<int>()\nprint(Fill<Point>(mut list))", "14: changed-while-held: `numbers` is still in use while the call that takes `mut numbers` runs, and a `List<int>` is not copied: copy it into a variable of its own on a line before (M7)")]
+    [InlineData("T Bad<T>(T value) => T.Make(value => 0)\n\nprint(Bad(Point(1, 2)))", "7: redeclared: `value` is visible already (V9)")]
+    [InlineData("T Bad<T>(T value) => T.Make(f => f.Get(1))\n\nprint(Bad(Point(1, 2)))", "7: type-mismatch: `f.Get` reads a field of a `Point`, not of an `int` (T33, T1)")]
+    public void T_Make_is_held_to_its_form_and_to_the_constructor_s_fields(string program, string expected)
+    {
+        // T33: each argument is checked as an argument of the constructor's call, against its field, once where several fields refuse
+        // it alike; a type of another kind is `kind-not-read` at the call that made the copy, as for `T.Fields`, named by its path of
+        // fields where a copy is made for a field's type, and a call with anything but one lambda of one parameter with no type is
+        // `syntax`, as `f` is anywhere but its three forms, and `T?.Make` is no `T.Make` but a call after `?.`; the lambda's parameter
+        // named like a variable already visible is `redeclared`, as a loop's variable is (V9); a change in an argument while the
+        // expression around `T.Make` holds what it changes is `changed-while-held`, as in the constructor's call it became (M7)
+        Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Fact]
+    public void A_block_as_the_body_of_T_Make_s_lambda_is_not_supported()
+    {
+        // T33: an argument of a call is an expression, and no rule makes a block one
+        Assert.Equal(["7: a block as the body of the lambda `T.Make` takes (T33)"], NotSupported(Shapes + "T Bad<T>() => T.Make(f => {\n    return 0\n})\n\nprint(Bad<Point>())"));
     }
 
     [Theory]

@@ -651,7 +651,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
   type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
   emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
-  type, `Order.Source`, where a pass made the copy;
+  type, `Order.Source`, where a pass made the copy; `T.Make(f => ...)` in a copy that binds a
+  `data` type becomes one call of its primary constructor, with an argument for each field in order,
+  each a copy of the lambda's body read as a pass of such a loop reads its body, and checked and
+  emitted as that call, a type with no fields giving its value;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -1674,9 +1677,9 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
-`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
-call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
+`Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
+in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,

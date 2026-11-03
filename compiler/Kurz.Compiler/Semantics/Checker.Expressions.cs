@@ -23,7 +23,9 @@ public sealed partial class Checker
         }
 
         expressionDepth++;
-        var typed = CheckExpressionCore(expression, expected, keepCases, given);
+        var typed = madeArguments.TryGetValue(expression, out var made)
+            ? CheckMadeArgument(expression, made, () => CheckExpressionCore(expression, expected, keepCases, given)) // T33: in its field's pass
+            : CheckExpressionCore(expression, expected, keepCases, given);
         expressionDepth--;
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
         if (expressionDepth == 0)

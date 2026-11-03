@@ -69,7 +69,7 @@ public sealed partial class Emitter
                 return EmitNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
-            case CallExpression c when Model.CallOf(c).Result is WeakRefType weak:
+            case CallExpression c when !Model.IsMade(c, out _) && Model.CallOf(c).Result is WeakRefType weak: // `T.Make` is its construction, no call (T33)
                 return Upgrade(Temp(EmitCall(c)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
             case CallExpression c:
                 return Temp(EmitCall(c) ?? throw new InvalidOperationException($"a `void` call stands as a value at line {c.Line}: the checker reports it"), type);

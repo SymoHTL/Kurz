@@ -44,17 +44,19 @@ public sealed class CorpusTests
     ];
 
     /// <summary>
-    /// The rules the checker does not read: the null chapter's paths through class instances (N9), the class chapter and the
+    /// The rules the checker does not read: the null chapter's paths through class instances (N9), the
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>flags</c>
     /// (D13, D17, D19), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
     /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
     /// A10, A13, A15), the grants of files and sockets (S12), processes, standard input and the exit code
     /// (S17 to S23), standard error (A17), a top-level <c>return</c> with a value (F17), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
-    /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header.
+    /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
+    /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
+    /// (K14) or an interface (K6) among them, stands in <see cref="UnsupportedByConstruct"/>.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
-        rule[0] == 'K' || rule is "N9"
+        rule is "N9"
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
         || rule is "D13" or "D16" or "D17" or "D19" or "F9" or "F10" or "T19" or "M6" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A13" or "A15"
@@ -66,6 +68,16 @@ public sealed class CorpusTests
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
+        ["classes/constructor-assigns-twice.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/constructor-must-chain.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/field-read-before-assignment.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/field-unassigned.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/further-constructor.kz"] = "a constructor in the body of a class (K14)",
+        ["classes/inherit.kz"] = "an interface (K6)",
+        ["classes/interface-method-inherited-private.kz"] = "an interface (K6)",
+        ["classes/interface-method-private.kz"] = "an interface (K6)",
+        ["classes/interface-missing-member.kz"] = "an interface (K6)",
+        ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
         ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
         ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
         ["values/text-more.kz"] = "a flags type (D13)",
