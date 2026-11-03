@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Xunit;
 
 namespace Kurz.Compiler.Tests;
@@ -138,6 +139,36 @@ public sealed class CommandTests : IDisposable
     }
 
     [Fact]
+    public void Build_ends_for_a_default_that_builds_its_own_class_and_its_run_ends_in_stack_overflow()
+    {
+        // K7 with the owner's answer of 2026-11-02: the defaults of a class's body are one function per class that each construction
+        // calls, so a default that builds its own class, and two classes whose defaults build each other, end the build, where the
+        // emitter built them into each construction without end and the compiler's own stack ran out; the run recurses into
+        // `stack-overflow`, as C#'s initializer does. Where the stack runs out, in the allocator of `std/` or in a default, decides the
+        // error line, so the trace's frames at the defaults are held, each named by its class
+        (string Name, string Text, (string Class, int Line)[] Frames)[] programs =
+        [
+            ("self", "class A(int N) {\n    int d = A(N - 1).d\n\n    pub int D() => d\n}\n\nprint(A(1).D())\n", [("A", 2)]),
+            ("each-other", "class A(int N) {\n    int d = B(N).e\n\n    pub int D() => d\n}\n\nclass B(int M) {\n    pub int e = A(M).D()\n}\n\nprint(A(1).D())\n", [("A", 2), ("B", 8)]),
+        ];
+        foreach (var (name, text, frames) in programs)
+        {
+            var source = Path.Combine(root, $"{name}.kz");
+            File.WriteAllText(source, text);
+            var output = Path.Combine(root, OperatingSystem.IsWindows() ? $"{name}.exe" : name);
+            Assert.Equal((0, "", ""), Kurz("build", source, "-o", output));
+            var (code, printed, error) = Processes.Capture(output, [], null, TimeSpan.FromSeconds(60), new Dictionary<string, string?> { ["KURZ_TRACE"] = "1" });
+            Assert.Equal("", printed);
+            Assert.NotEqual(0, code);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.StartsWith("error: stack-overflow at ", error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+                Assert.All(frames, f => Assert.Contains($"\n  at {f.Class} in {source}:{f.Line}\n", error, StringComparison.Ordinal));
+            }
+        }
+    }
+
+    [Fact]
     public void Build_writes_the_line_tables_into_a_test_build_and_into_a_release_build_where_lines_says_so()
     {
         // the owner, 2026-10-29, "build, run and exec": `--lines` keeps them in a release build and changes nothing in a test build
@@ -184,7 +215,10 @@ public sealed class CommandTests : IDisposable
         var source = Path.Combine(root, "cpu.kz");
         File.WriteAllText(source, "print(1)\n");
         var (code, output, error) = Kurz("build", "--cpu", "pentium9", source);
-        var triple = Regex.Match(error, @"--target=(x86_64-\S+) ").Groups[1].Value;
+        var (printed, printedTriple, _) = Processes.Capture(clang.Path, ["-print-target-triple"], null, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, printed);
+        var triple = printedTriple.Trim(); // the triple clang builds for, as clang itself prints it, not as the text under test names it
+        Assert.StartsWith("x86_64-", triple, StringComparison.Ordinal);
         Assert.Equal(
             (1, "", $"error: clang {clang.Version} knows no x86-64 CPU named `pentium9`\n  note: `clang --target={triple} --print-supported-cpus` lists the ones it knows\n  help: name one of those, or native\n"),
             (code, output, error));
@@ -206,6 +240,73 @@ public sealed class CommandTests : IDisposable
         Assert.Equal((1, ""), (refused.Code, refused.Output));
         Assert.StartsWith($"{source}:1: unknown-name: ", refused.Error, StringComparison.Ordinal);
         Assert.DoesNotContain("pentium9", refused.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void For_a_64_bit_arm_machine_a_cpu_clang_does_not_know_is_unknown_and_one_with_sets_beyond_the_baseline_is_not_supported()
+    {
+        // clang's driver for a 64-bit Arm target refuses a CPU it does not know in the run that shows the target, which reads as a CPU
+        // clang does not know (section 2); a CPU with sets beyond the baseline has no start check that reads them there (the owner,
+        // 2026-11-02, #39: `not supported`), and the baseline's CPU is taken
+        var clang = Clang.Find().Found ?? throw new InvalidOperationException("no clang of the pinned major is found");
+        Assert.Null(clang.DescribeCpu("pentium9", x86: false, "aarch64-linux-gnu", out var target));
+        Assert.Equal("aarch64-unknown-linux-gnu", target);
+        string Refusal(string name)
+        {
+            using var error = new StringWriter();
+            Assert.Null(Command.CpuOf(name, Clang.Find, error, Cpu.ArmBaseline, "aarch64-linux-gnu")());
+            return error.ToString();
+        }
+
+        Assert.Equal($"error: clang {clang.Version} knows no 64-bit Arm CPU named `pentium9`\n  note: `clang --target=aarch64-unknown-linux-gnu --print-supported-cpus` lists the ones it knows\n  help: name one of those, or native\n", Refusal("pentium9"));
+        Assert.Equal("error: not supported: `neoverse-v2`, a 64-bit Arm CPU with sets beyond the baseline, which no start check reads (R18)\n  help: build without --cpu\n", Refusal("neoverse-v2"));
+        using var none = new StringWriter();
+        var generic = Command.CpuOf("generic", Clang.Find, none, Cpu.ArmBaseline, "aarch64-linux-gnu")();
+        Assert.Equal("", none.ToString());
+        Assert.Equal(("generic", false), (generic!.Name, generic.X86));
+        Assert.Empty(generic.Sets);
+        Assert.NotEmpty(clang.DescribeCpu("neoverse-v2", x86: false, "aarch64-linux-gnu", out _)!.Sets); // the refusal reads the sets, not the name
+    }
+
+    [Fact]
+    public void A_cpu_clang_gives_a_set_the_start_check_cannot_read_is_refused_naming_the_set()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the clang that answers so is a shell script, which Windows does not start: nothing checks the refusal there
+        }
+
+        // the owner, 2026-11-02 (#39): a set the table lacks fails the build with a text that names it; no clang of the pinned release
+        // gives one (`IntrinsicTests.Every_x86_64_cpu_clang_knows_has_only_sets_the_start_check_reads`), so a script answers as a later one could
+        var directory = Path.Combine(root, "bin");
+        Directory.CreateDirectory(directory);
+        var file = Path.Combine(directory, "clang-23");
+        File.WriteAllText(file, """
+            #!/bin/sh
+            for a in "$@"; do
+                if [ "$a" = "-###" ]; then echo 'Target: x86_64-unknown-linux-gnu' >&2; exit 0; fi
+            done
+            printf '#define __SSE__ 1\n#define __SSE2__ 1\n'
+            for a in "$@"; do
+                if [ "$a" = "-march=later" ]; then printf '#define __AVX2__ 1\n#define __AVX512NEXT__ 1\n'; fi
+                if [ "$a" = "-march=known" ]; then printf '#define __AVX2__ 1\n'; fi
+            done
+
+            """);
+        File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        ClangSearch Find() => Clang.Find(directory, null, windows: false, _ => "clang version 23.1.4\n");
+        var source = Path.Combine(root, "hello.kz");
+        File.WriteAllText(source, "print(1)\n");
+        Assert.Equal(
+            (1, "", "error: clang 23.1.4 gives the x86-64 CPU `later` a set the start check cannot read, `__AVX512NEXT__`\n  help: name a CPU without it, or none\n"),
+            Run(Find, "build", "--cpu", "later", source));
+        Assert.False(File.Exists(Path.Combine(root, "hello")));
+
+        // the positive control: the same clang's CPU without that set is taken, with the set the table reads
+        using var error = new StringWriter();
+        var known = Command.CpuOf("known", Find, error, Builder.HostCpu, null)();
+        Assert.Equal("", error.ToString());
+        Assert.Equal(["__AVX2__"], known!.Sets);
     }
 
     [Fact]

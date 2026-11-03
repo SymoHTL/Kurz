@@ -1,5 +1,5 @@
 // expect: error narrowing-conversion at 5
-// rules: K20
+// rules: K20, T7
 
 class Level {
     pub static byte Small = Wide

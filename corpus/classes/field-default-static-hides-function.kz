@@ -1,0 +1,15 @@
+// expect: output
+// | 2
+// rules: K7
+
+int Get() => 9
+
+class C(int V) {
+    int a = Get()
+
+    static int Get() => 2
+
+    pub int A() => a
+}
+
+print(C(1).A())

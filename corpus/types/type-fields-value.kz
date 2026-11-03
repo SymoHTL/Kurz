@@ -1,0 +1,12 @@
+// expect: error syntax at 8
+// rules: T33
+
+data Order(string Id)
+
+void Show<T>(T value) {
+    for f in T.Fields {
+        print(f)
+    }
+}
+
+Show(Order("a1"))

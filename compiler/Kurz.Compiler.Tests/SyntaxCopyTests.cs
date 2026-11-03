@@ -125,6 +125,24 @@ public sealed class SyntaxCopyTests
         Assert.Empty(expressions.Except(seen, ReferenceEqualityComparer.Instance));
     }
 
+    [Fact]
+    public void A_copy_of_a_block_puts_what_the_rewrite_gives_in_place_of_an_expression_and_copies_the_rest()
+    {
+        // T33: a pass of a loop over `T.Fields` is such a copy, in which `f.Get(value)` becomes `(value).Field`; the rewrite is shown
+        // every expression, in a hole, a lambda and an arm too, and copies what it keeps with the copier
+        var body = Parse().BlockBody!;
+        var copy = SyntaxCopy.Copy(body, (e, copyOf) => e is NameExpression { Name: "a" } n ? new ParenthesizedExpression(n.Line, copyOf(new NameExpression(n.Line, "z"))) : null);
+        var before = Nodes(body);
+        var after = Nodes(copy);
+        var named = before.OfType<NameExpression>().Count(n => n.Name == "a");
+        Assert.True(named >= 5, $"the body names `a` {named} times");
+        Assert.DoesNotContain(after.OfType<NameExpression>(), n => n.Name == "a");
+        Assert.Equal(named, after.OfType<NameExpression>().Count(n => n.Name == "z"));
+        Assert.Equal(before.OfType<ParenthesizedExpression>().Count() + named, after.OfType<ParenthesizedExpression>().Count());
+        Assert.Empty(before.Intersect(after, ReferenceEqualityComparer.Instance));
+        Assert.Equal(body.ToString(), SyntaxCopy.Copy(body, (_, _) => null).ToString(), StringComparer.Ordinal); // a rewrite that gives nothing copies
+    }
+
     /// <summary>Every syntax record under the declaration, in a fixed order: the nodes, and the arms, arguments, parameters and holes that hold them.</summary>
     private static List<object> Nodes(object root)
     {

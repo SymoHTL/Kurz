@@ -267,8 +267,11 @@ public sealed partial class Checker
     private static bool HoldsRaw(KurzType type, List<DataSymbol> seen) => Holds(type, t => t is PointerType or CFunctionType, seen);
 
     /// <summary>W2: whether a value of the type holds an <c>HttpError</c> of <c>std/</c>, whose text the compiler does not give.</summary>
-    private bool HoldsHttpError(KurzType type) =>
-        preludeSeen.Contains("HttpError") && Holds(type, t => t is DataType d && ReferenceEquals(d.Symbol, dataTypes["HttpError"]), []);
+    private bool HoldsHttpError(KurzType type) => preludeSeen.Contains("HttpError") && Holds(type, IsHttpError, []);
+
+    /// <summary>W1, W2: whether the type is the <c>HttpError</c> of <c>std/</c>.</summary>
+    private bool IsHttpError(KurzType type) =>
+        preludeSeen.Contains("HttpError") && type is DataType d && ReferenceEquals(d.Symbol, dataTypes["HttpError"]);
 
     /// <summary>
     /// Whether a value of the type is or holds one of a type <paramref name="leaf"/> picks, as the text of a value shows it: an item, a
@@ -947,7 +950,8 @@ public sealed partial class Checker
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c> and <c>List&lt;T&gt;.Allocate(n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {
-        // `List<void>` is read here, where no type argument is `void` elsewhere (T17), so that `void`'s lack of a size is the error (R14)
+        // `List<void>` is read here, where `void` as any other type argument is `not supported` (compiler/README.md), so that `void`'s
+        // lack of a size is the error (R14)
         var type = t.Type is NamedType { Name: "List", TypeArguments: [Syntax.VoidType] } ? new ListType(Types.Void) : Resolve(t.Type);
         if (type is ListType list && t.Member == "FromRaw")
         {
