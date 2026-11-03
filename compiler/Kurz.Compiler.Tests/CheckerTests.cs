@@ -1050,6 +1050,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(wrap + "fs.Add(Wrap(() => fs.Count))\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 8)], Errors(wrap + "fs.Add(Rule(() => fs.Count, 1).Step)\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(wrap + "r = Rule(() => 0, 1)\nfs.Add((r with { Step = () => fs.Count }).Step)\nprint(fs.Count)"));
+        // a class holds one where a field of it can (M7, R9; section 4 assumes it): an instance made in the argument, or given by a
+        // call, whose field keeps the lambda; one of a class whose fields hold none keeps nothing
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 4)], Errors("class Step(() => int Run)\n\n" + fs + "fs.Add(Step(() => fs.Count).Run)\nprint(fs.Count)"));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("class Step(() => int Run)\n\nStep Keep(() => int g) => Step(g)\n\nmut ss = List<Step>()\nss.Add(Keep(() => ss.Count))\nprint(ss.Count)"));
+        Clean("class Num(int V)\n\nNum Make(() => int g) => Num(g())\n\nmut ns = List<Num>()\nns.Add(Make(() => ns.Count))\nprint(ns.Count)");
         Clean(wrap + "fs.Add(Wrap(() => 0))\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(fs.Count + xs.Count)");
 
         // a value inside the argument that can hold no function value ends what the argument keeps (the owner, 2026-10-28, "Pass,
@@ -3390,8 +3395,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nc.count = 2"));
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut List<int> items = []\n}\n\nc = C()\nc.items.Add(1)"));
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nf = () => c.count\nprint(f())"));
-        var (called, _) = Check("class C {\n    () => int f = () => 1\n}\n\nc = C()\nprint(c.f())"); // R9 leaves the field's type unread
-        Assert.Contains(called.Items, d => d.Id == ErrorIds.NotVisible && d.Line == 6);
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    () => int f = () => 1\n}\n\nc = C()\nprint(c.f())")); // a field of a function type, called (R9)
         // F9: a member marked `internal`, a field, a method, a `static` field and a `static` method, is visible to the files of its folder
         // (the owner, 2026-11-03), so its own file reads, assigns and calls it from outside the class; before a function at the top
         // `internal` says what no modifier says (assumed, section 8); the same members without it are the class's own, the control
@@ -3654,6 +3658,49 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_field_of_a_function_type_reaches_every_class_an_instance_of_which_a_lambda_of_the_program_captures()
+    {
+        // R9: a field whose type can hold a function value, `mut` or not, reaches every class an instance of which a lambda of the
+        // program captures, so the ring is judged after every body; the text names R9 beside R2 (assumed)
+        const string button = "class Button(string Name, mut () => void OnClick)\n\n";
+        var (ring, _) = Check(button + "b = Button(\"ok\", () => print(\"clicked\"))\nb.OnClick = () => print(b.Name)\nb.OnClick()");
+        Assert.Equal(["1: `Button` can reach itself through strong fields, `Button.OnClick` (mut), one of them `mut`, and nothing would free such a ring (R2, R9)"], ring.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        // the positive control: no lambda captures an instance, so the field reaches no class; reassigned, called, and in a class body
+        Clean(button + "b = Button(\"ok\", () => print(\"clicked\"))\nb.OnClick = () => print(\"again\")\nb.OnClick()");
+        Clean("class Timer {\n    pub () => int Tick = () => 1\n}\n\nprint(Timer().Tick())");
+        // the ring through a field without `mut`, `Holder.B` the `mut` field on it, at the class declared first; and a ring without a
+        // function field keeps R2 alone
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Holder(mut Button? B)\nclass Button(string Name, () => void OnClick)\n\nh = Holder(null)\nb = Button(\"ok\", () => print(h.B?.Name ?? \"\"))\nh.B = b\nb.OnClick()"));
+        Assert.EndsWith("(R2)", Assert.Single(Check("class Node(mut Node? Next)\n\nprint(1)").Diagnostics.Items).Message);
+        // a lambda in a method captures `this` (K7, F15)
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Button(string Name, mut () => void OnClick) {\n    pub void Wire() {\n        OnClick = () => print(Name)\n    }\n}\n\nButton(\"ok\", () => print(1)).Wire()"));
+        // a list, a map and a nullable type that hold function values count as a field of a function type (assumed)
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Bus(mut List<() => void> Handlers)\n\nbus = Bus(List<() => void>())\nf = () => print(bus.Handlers.Count)\nf()"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Bus(mut Map<string, () => void> Handlers)\n\nbus = Bus(Map<string, () => void>())\nf = () => print(bus.Handlers.Count)\nf()"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class Slot(mut (() => void)? Run)\n\ns = Slot(null)\nf = () => print(s.Run == null)\nf()"));
+        // a lambda that captures a list of instances, or a value of a type parameter that a call gives an instance, captures the class
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + "bs = [Button(\"ok\", () => print(1))]\nf = () => print(bs.Count)\nf()"));
+        const string hold = "T Hold<T>(T x) {\n    f = () => x\n    return f()\n}\n\n";
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + hold + "print(Hold(Button(\"ok\", () => print(1))).Name)"));
+        Clean(button + hold + "print(Hold(1))");
+    }
+
+    [Fact]
+    public void A_class_of_std_with_a_field_of_a_function_type_reaches_the_classes_the_file_s_lambdas_capture()
+    {
+        // R9 with W1: a class of std/ with a field of a function type is read by the file's walk too, since the file's lambdas reach
+        // it; a ring of std/'s classes alone, which a lambda of the file closes, at that lambda's line (assumed), and one through a
+        // class of the file at that class
+        var runtime = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n"));
+        var (alone, _) = CheckSeeingStd("h = HttpHeaders()\nf = () => h.OnChange()\nprint(f())\n", runtime);
+        Assert.Equal(["2: `HttpHeaders` can reach itself through strong fields, `HttpHeaders.OnChange` (mut), one of them `mut`, and nothing would free such a ring (R2, R9)"], alone.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        var (through, _) = CheckSeeingStd("class App(mut HttpHeaders? H)\n\nint Zero(App app) => 0\n\na = App(null)\nh = HttpHeaders()\nh.OnChange = () => Zero(a)\na.H = h\n", runtime);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
+        // the positive control: no lambda of the file captures an instance
+        Assert.Empty(CheckSeeingStd("h = HttpHeaders()\nh.OnChange = () => 1\nprint(h.OnChange())\n", runtime).Diagnostics.Items);
+    }
+
+    [Fact]
     public void An_instance_is_a_counted_reference_that_no_pointer_and_no_state_outside_a_function_holds()
     {
         // R10, R13 with K2: an instance holds counted references as a list does
@@ -3828,8 +3875,6 @@ public sealed class CheckerTests
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<Tag?, int>()\nprint(m.Count)", "3: a map with keys of type `Tag?`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<List<Tag>, int>()\nprint(m.Count)", "3: a map with keys of type `List<Tag>`: its items: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class C(int N) {\n    pub int Get() => N\n}\n\nc = C(1)\nf = c.Get\nprint(f())", "6: a method as a value, named without a call (K7, F11)")]
-    [InlineData("class Button(string Name, mut () => void OnClick)\n\nprint(1)", "1: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
-    [InlineData("data W<T>(W<() => int>? Inner, T V)\nclass C(W<int>? N)\n\nprint(1)", "2: a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)")]
     [InlineData("data Pos(int X)\nclass P(mut Pos At)\n\np = P(Pos(0))\np.At.X = 1\nprint(p.At.X)", "5: an assignment into a value held by a field of an instance (K2, M4)")]
     [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B)\n\np = P(Bag(List<int>()))\np.B.Items.Add(1)\nprint(p.B.Items.Count)", "5: a `mut` method on a value held by a field of an instance (K2, M5)")]
     [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B) {\n    pub void Go() {\n        B.Items.Add(1)\n    }\n}\n\nP(Bag([1])).Go()", "4: a `mut` method on a value held by a field of an instance (K2, M5)")]
@@ -3842,8 +3887,8 @@ public sealed class CheckerTests
         // an initial value that is no constant (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters,
         // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
         // case of a union, whose nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
-        // names a `mut` field, both open (section 14; K8, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
-        // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
+        // names a `mut` field, both open (section 14; K8, K12), a method as a value, an assignment or a `mut` method into a value a field
+        // of an instance holds (K2, M4, M5), the field named alone
         // inside a method among them, and a type declared in the body (K7)
         Assert.Equal([expected], NotSupported(program));
     }

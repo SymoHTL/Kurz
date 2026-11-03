@@ -2486,6 +2486,121 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[u, t] g [g]", // the list the first hole took a count of, which the lambda replaced (K2)
     ];
 
+    // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets
+    // go of the environment it held; a field without `mut`; one of a class body, called by its name inside a method; a lambda that
+    // replaces the field it is called through while it runs, which the call holds to the end of its statement; a nullable one, a
+    // list of them, and an instance freed with the environment its field holds
+    private const string FunctionFields = """
+        class Button(string Name, mut () => string OnClick)
+
+        class Timer(() => int Tick)
+
+        class Panel {
+            pub mut (int) => int Step = (int x) => x + 1
+
+            pub int Twice(int x) => Step(Step(x))
+        }
+
+        class Relay(mut (Relay) => string Call)
+
+        class Slot(mut (() => string)? Run)
+
+        class Bus(mut List<() => string> Handlers)
+
+        () => string Words(int n) {
+            mut xs = List<string>()
+            for i in 0..<n {
+                xs.Add("w{i}")
+            }
+
+            return () => "{xs}"
+        }
+
+        (Relay) => string Swapping(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            return (Relay self) => {
+                self.Call = (Relay q) => "second"
+                return "first {xs}"
+            }
+        }
+
+        b = Button("ok", Words(2))
+        print(b.OnClick())
+        b.OnClick = Words(3)
+        print(b.OnClick())
+        t = Timer(() => 7)
+        print(t.Tick())
+        p = Panel()
+        print(p.Twice(1))
+        p.Step = (int x) => x * 10
+        print(p.Twice(2))
+        r = Relay(Swapping(3))
+        print(r.Call(r))
+        print(r.Call(r))
+        s = Slot(null)
+        print(s.Run == null)
+        s.Run = Words(1)
+        f = s.Run
+        print(f())
+        bus = Bus(List<() => string>())
+        bus.Handlers.Add(Words(1))
+        bus.Handlers.Add(() => "h")
+        for h in bus.Handlers {
+            print(h())
+        }
+        mut Button? last = Button("tmp", Words(4))
+        print(last?.Name ?? "none")
+        last = null
+        print("freed")
+        """;
+
+    private static readonly string[] FunctionFieldsPrint =
+    [
+        "[w0, w1]",
+        "[w0, w1, w2]", // the list of the first lambda let go of with its environment
+        "7",
+        "3",
+        "200",
+        "first [0, 1, 2]", // the environment the call holds, which the field no longer does
+        "second",
+        "true",
+        "[w0]",
+        "[w0]",
+        "h",
+        "tmp",
+        "freed",
+    ];
+
+    // the environments of fields of a function type, made, replaced and let go of with their instances each round
+    private const string FunctionFieldRounds = """
+        class Button(string Name, mut () => int OnClick)
+
+        () => int Counting(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            return () => xs.Count
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            b = Button("b", Counting(1000))
+            b.OnClick = Counting(1000)
+            total = total + b.OnClick()
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
     // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
     // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
@@ -3117,6 +3232,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
+        Ran(BuildAndRun(FunctionFields, toolchain.Runtime, "function-fields"), 0, FunctionFieldsPrint, "");
     }
 
     [Fact]
@@ -3319,6 +3435,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "2", "[9, 3, 1, 1]", "0"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
+        Ran(BuildAndRun(FunctionFields, fenced, "function-fields-fenced"), 0, FunctionFieldsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
         Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
@@ -3327,6 +3444,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
         Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(FunctionFieldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "function-field-rounds-fenced"), 0, ["20", "20000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -3401,6 +3519,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
         Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(FunctionFieldRounds, Budget(), "function-field-rounds"), 0, ["3000", "3000000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -3424,6 +3543,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
         Assert.Equal(1, boxes.Code);
         Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+
+        // and the rounds' buttons, all held, each with the list of 1000 items its field's environment holds: about 25 megabytes
+        var buttons = BuildAndRun(FunctionFieldRounds.Replace("mut round = 0\n", "mut all = List<Button>()\nmut round = 0\n", StringComparison.Ordinal).Replace("    total = total + b.OnClick()\n", "    total = total + b.OnClick()\n    all.Add(b)\n", StringComparison.Ordinal), Budget(), "function-field-rounds-held");
+        Assert.Equal(1, buttons.Code);
+        Assert.StartsWith("error: allocation-failed (", buttons.Error, StringComparison.Ordinal);
     }
 
     [Fact]
