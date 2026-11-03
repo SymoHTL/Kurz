@@ -1514,6 +1514,39 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(Closed.Replace("    f.Close()\n", "", StringComparison.Ordinal), "lines-closed-open", ["one", "two", "0"]);
     }
 
+    private const string ClosedInBlock = DescriptorOpen + """
+        void | IoError | InvalidUtf8 Show() {
+            File.WriteAll("lines-closed-block.txt", "one\ntwo\n".Bytes)
+            f = File.Open("lines-closed-block.txt")
+            File.Delete("lines-closed-block.txt")
+            for line in f.Lines() {
+                print(line)
+                f.Close()
+                // the file's descriptor, the program's first
+                print(Open(3))
+            } else {
+                IoError e => print(e.Code)
+            }
+        }
+
+        Show() else {
+            IoError e => print(e)
+            InvalidUtf8 u => print(u)
+        }
+
+        """;
+
+    [Fact]
+    public void A_close_in_the_block_of_a_loop_over_the_lines_releases_the_descriptor_at_once_and_the_next_pull_is_the_system_s_error_9()
+    {
+        // S5: the loop is in flight while it pulls a line and not while its block runs, so the close in the block finds no call in
+        // flight and releases the descriptor at once, and the next pull is `EBADF`, though the buffer still held the second line
+        Ran(ClosedInBlock, "lines-closed-block", ["one", "false", "9"], grants: ["raw", "native"]);
+
+        // the positive control: without the close the descriptor stays open, and the loop takes the line the buffer held
+        Ran(ClosedInBlock.Replace("        f.Close()\n", "", StringComparison.Ordinal), "lines-closed-block-open", ["one", "true", "two", "true"], grants: ["raw", "native"]);
+    }
+
     private const string Held = """
         void | IoError | InvalidUtf8 Show() {
             File.WriteAll("lines-held.txt", "one\ntwo\nthree\n".Bytes)
