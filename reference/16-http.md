@@ -319,3 +319,56 @@ h.Set("Set-Cookie", "b=2\r") else {
 print(h.Get("X-Name") ?? "none")
 print(h.GetAll("Set-Cookie"))
 ```
+
+Case: [http/http-headers-walk.kz](../corpus/http/http-headers-walk.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "example.com")
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Count` is read without a call; each name keeps its spelling, and a repeated name stays apart, in the order it came
+print(h.Count)
+for i in 0..<h.Count {
+    print(h.NameAt(i))
+    print(h.ValueAt(i))
+}
+```
+
+Case: [http/http-headers-set-order.kz](../corpus/http/http-headers-set-order.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "a")
+    headers.Add("Accept", "text/plain")
+    headers.Set("host", "b")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Set` takes out every value of the name and puts its value after every value the headers hold
+print(h.NameAt(0))
+print(h.NameAt(1))
+print(h.ValueAt(1))
+```
+
+Case: [http/http-headers-empty-name.kz](../corpus/http/http-headers-empty-name.kz)
+```kurz
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("", "x")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// an empty name is taken, as std/'s class took it; a CR or a LF alone is refused
+print(h.Get("") ?? "none")
+print(h.Count)
+```

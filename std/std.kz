@@ -5913,6 +5913,10 @@ pub class HttpHeaders {
         }
     }
 
+    // How many names and values the headers hold, each value of a repeated name counted: a read-only property (K7; section 12:
+    // the owner, 2026-11-03).
+    pub int Count => names.Count
+
     // The name at the index, in the order the headers hold them: an index outside 0 to `Count - 1` stops the program
     // with index-out-of-range, as a list's index does (W4; section 12: the owner, 2026-11-03).
     pub string NameAt(int i) => names[i]

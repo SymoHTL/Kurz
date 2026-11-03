@@ -1,0 +1,20 @@
+// expect: output
+// | Accept
+// | host
+// | b
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "a")
+    headers.Add("Accept", "text/plain")
+    headers.Set("host", "b")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Set` takes out every value of the name and puts its value after every value the headers hold
+print(h.NameAt(0))
+print(h.NameAt(1))
+print(h.ValueAt(1))
