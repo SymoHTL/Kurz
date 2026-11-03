@@ -13,8 +13,12 @@ public sealed record IntrinsicClass(string Name, string? Base, string? Feature, 
     public bool IsX86 => Name.StartsWith("X86.", StringComparison.Ordinal);
 }
 
-/// <summary>A parameter of an intrinsic, with C#'s name; an <paramref name="Immediate"/> is a constant the instruction holds, C#'s <c>[ConstantExpected]</c>.</summary>
-public sealed record IntrinsicParameter(string Name, KurzType Type, bool Immediate = false);
+/// <summary>
+/// A parameter of an intrinsic, with C#'s name; an <paramref name="Immediate"/> is a constant the instruction holds, C#'s
+/// <c>[ConstantExpected]</c>, and a <paramref name="Lane"/> is one that names a lane of the intrinsic's first vector, which a constant
+/// past its lanes cannot name (R18).
+/// </summary>
+public sealed record IntrinsicParameter(string Name, KurzType Type, bool Immediate = false, bool Lane = false);
 
 /// <summary>
 /// An intrinsic, or a lane operation of a vector (R18): the class or the vector type it is a member of, C#'s name and signature, what
@@ -123,7 +127,7 @@ public static class Intrinsics
 
     private static VectorType V128(KurzType lane) => new(lane, 128);
 
-    private static IntrinsicParameter P(string name, KurzType type, bool immediate = false) => new(name, type, immediate);
+    private static IntrinsicParameter P(string name, KurzType type, bool immediate = false, bool lane = false) => new(name, type, immediate, lane);
 
     private static string Suffix(KurzType lane) => lane switch
     {
@@ -215,7 +219,7 @@ public static class Intrinsics
         foreach (var lane in new[] { Types.Byte, Types.Int, Types.UInt, Types.Float })
         {
             var vendor = lane is PrimitiveType { Kind: Primitive.Float } ? "_mm_extract_ps" : lane is PrimitiveType { Kind: Primitive.Byte } ? "_mm_extract_epi8" : "_mm_extract_epi32";
-            all.Add(new("X86.Sse41", "Extract", [P("value", V128(lane)), P("index", Types.Byte, immediate: true)], lane, "extract", vendor));
+            all.Add(new("X86.Sse41", "Extract", [P("value", V128(lane)), P("index", Types.Byte, immediate: true, lane: true)], lane, "extract", vendor));
         }
 
         foreach (var lane in new[] { Types.Short, Types.UShort })

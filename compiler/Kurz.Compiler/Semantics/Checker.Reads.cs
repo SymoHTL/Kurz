@@ -141,12 +141,14 @@ public sealed partial class Checker
 
     /// <summary>
     /// The expressions directly inside one that the checker read as its parts, as they run with it; a lambda's body runs when the
-    /// lambda is called, what stands after <c>mut</c> is passed, not read, and a statement of an arm is read on its own.
+    /// lambda is called, what stands after <c>mut</c> is passed, not read, a statement of an arm is read on its own, and the call
+    /// <c>T.Make</c> became stands for <c>T.Make</c> (T33).
     /// </summary>
     private IEnumerable<Expression> Parts(Expression e) => e switch
     {
         ParenthesizedExpression p => [p.Inner],
         MemberAccess m => [m.Target],
+        CallExpression c when model.IsMade(c, out var construction) => construction is null ? [] : [construction],
         CallExpression c => [c.Callee, .. c.Arguments.Where(a => !a.Mut).Select(a => a.Value)],
         IndexExpression i => [i.Target, i.Index],
         UnaryExpression u => [u.Operand],
