@@ -471,6 +471,107 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         RanWithCloseInFlight(LockAtRead, "lock-at-read", ["1", "1", "5", "-1", "0", "0"], ["raw"], WithTheLockAtEveryRead);
     }
 
+    private const string LockAtFill = Armed + """
+        static mut int seen = 0
+
+        // the lock word of the handle a read of the system reads for, as that read starts, which the IR of the fact writes into `seen`;
+        // -1 where no read of the system was made since `Unseen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void Unseen() {
+            raw {
+                seen = -1
+            }
+        }
+
+        void | IoError Fills() {
+            File.WriteAll("lock-at-fill.txt", "abcdef".Bytes)
+            f = File.Open("lock-at-fill.txt")
+            File.Delete("lock-at-fill.txt")
+            mut bytes = Bytes()
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            f.Consume(6)
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            f.Close()
+        }
+
+        Fills() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_fill_of_a_buffer_that_holds_bytes_reads_nothing_and_one_of_an_empty_buffer_reads_with_the_lock_held()
+    {
+        // S24: a fill of the empty buffer reads the file's 6 bytes into it with the lock held and appends them; a second fill appends the
+        // 6 the buffer still holds with no read of the system; once they are consumed, a fill at the end of the file reads again, with
+        // the lock held, and gives 0
+        RanWithCloseInFlight(LockAtFill, "lock-at-fill", ["6", "1", "6", "-1", "0", "1"], ["raw"], WithTheLockAtEveryRead);
+    }
+
+    private const string InFlightLook = Armed + """
+        static mut int seen = 0
+
+        // the count of the bytes the fill's handle holds in its buffer as the fill leaves it, which the IR of the fact writes into `seen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void | IoError Look() {
+            File.WriteAll("in-flight-look.txt", "abcdef".Bytes)
+            open = File.Open("in-flight-look.txt")
+            mut bytes = Bytes()
+            print(open.Fill(mut bytes))
+            print(Seen())
+
+            f = File.Open("in-flight-look.txt")
+            File.Delete("in-flight-look.txt")
+            g = f
+            ArmClose(1)
+            print(f.Fill(mut bytes))
+            print(Seen())
+            print(g.Fill(mut bytes) else {
+                IoError e => -e.Code
+            })
+
+            open.Close()
+        }
+
+        Look() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_fill_in_flight_that_a_close_meets_gives_all_it_read_and_keeps_none_in_the_buffer()
+    {
+        // S24, S5: a fill of the empty buffer reads the file's 6 bytes and appends them; on a handle no `Close` marked the buffer keeps
+        // the 6, and where a `Close` marks the handle while the fill is in flight, the fill still appends its 6 and keeps none, the count
+        // it leaves 0; the copy's fill after it is `EBADF`
+        RanWithCloseInFlight(InFlightLook, "in-flight-look", ["6", "6", "6", "0", "-9"], ["raw"], WithTheCountAtLeave);
+    }
+
     private const string InFlightSockets = Armed + DescriptorOpen + """
         void | IoError Take(TcpListener l) {
             s = l.Accept()
