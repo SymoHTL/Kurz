@@ -576,6 +576,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(count + "print(Count(null))"));
         Assert.Equal([(ErrorIds.Syntax, 5)], Errors(count + "print(Count(One))"));
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "int n = Count(nothing)\nprint(n + 1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.TypeMismatch, 5)], Errors(count + "string s = Count(nothing)\nprint(s)")); // the result is an `int`
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "print(Count(Nope()))")); // a call the checker could not type
+        Assert.Equal([(ErrorIds.CannotInfer, 5)], Errors(count + "print(Count(x => x))")); // a lambda has no type of its own before the pick (F11)
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("T First<T>(List<T> xs) => xs[0]\n\nx = First(nothing)\nprint(x.Length)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("T? Opt<T>(T? x) => x\n\nprint(Opt(null))"));
         Assert.Equal([(ErrorIds.CannotInfer, 3), (ErrorIds.UnknownName, 3)], Errors("int Two<T, U>(List<T> a, U b) => 1\n\nprint(Two(5, nothing))"));
