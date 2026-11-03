@@ -349,7 +349,7 @@ and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
 `HttpError` with its `HttpKind` (W2) and the class `HttpHeaders` (W4), types every program sees (W1: the checker of a program is given
 `std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
-members without `pub` stay private to it (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
+members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
 the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
@@ -1572,7 +1572,8 @@ that sit under a rule by its id. Every one is pinned by a test.
     value of an operand `=>` splits the operand and starts no lambda, while an argument of a call
     there takes one as any argument does.
 - E4's general clause, applied to shapes no rule names: a modifier written twice (K7: class bodies
-  follow C#, which refuses it), type parameters on an `enum` or `flags` type (D12 and D13 give them
+  follow C#, which refuses it), `pub` and `internal` before one declaration (F9: an assumption of
+  the record, section 8, as C# refuses two access modifiers), type parameters on an `enum` or `flags` type (D12 and D13 give them
   a name and a body), a second `?` on a type (N1 gives one), a second `weak` (R3 and R5 write one),
   a form feed or a vertical tab outside a literal (L13 names the carriage return alone), a `//`
   inside an interpolation (L3 runs a comment to the end of its line, which L6's hole does not reach)
@@ -1676,8 +1677,8 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
 (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
-or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
-than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
+other than `pub`, `internal` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
 that has type parameters of its own (K7, section 4), each of which leaves the class and every
 value of it unread, and of a class it reads, a `static` field with an initial value that is no
 constant, which section 4 computes at the field's first read and whose open items section 14
