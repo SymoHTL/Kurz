@@ -345,7 +345,9 @@ Gate: review rule "rules for sessions".
   construct that keeps what it read past a call or a statement either takes a count or rests on a
   refusal of the checker; two that did neither reached `main` with pull request 63, a refusal
   whose walk missed an assignment in an arm reached it with pull request 64, and two in an
-  interpolation, a string's hole and one hole that was the string itself, with pull request 78
+  interpolation, a string's hole and one hole that was the string itself, with pull request 78, and a
+  key of `SortBy` that changed the list it sorted through an instance, which the methods of pull
+  request 181 made possible (the line `sortby-change-fenced` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`
