@@ -1,0 +1,6 @@
+// expect: error void-type-argument at 5
+// rules: T17
+
+fs = List<(int) => void>()
+names = Map<string, void>()
+print(fs.Count + names.Count)

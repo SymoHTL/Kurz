@@ -47,6 +47,22 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("f.Type x = f.Get(value)", "(declare f.Type x (call (. f Get) value))")]
+    [InlineData("print(Read<f.Type>(text))", "(call print (call Read<f.Type> text))")]
+    [InlineData("List<f.Type> xs = List<f.Type>()", "(declare List<f.Type> xs (call List<f.Type>))")]
+    [InlineData("a.b = 1", "(assign (. a b) (int 1))")]
+    [InlineData("print(f(a < b.c, d > (e)))", "(call print (call f (call a<b.c, d> e)))")]
+    [InlineData("print(int.Parse(s))", "(call print (call (. int Parse) s))")]
+    [InlineData("match k {\n    TypeKind.Data => print(1)\n}", "(match k [((. TypeKind Data) => (call print (int 1)))])")]
+    public void A_dotted_name_stands_as_a_type_where_a_type_stands(string program, string tree)
+    {
+        // T33: `f.Type` of a loop over `T.Fields` is a type, in a declaration and as a type argument, and so a dotted name among the type
+        // arguments of a call, as C# reads `a<b.c, d>(e)`; a path assigned, a member of a built-in type's name and a value named in an
+        // arm keep their forms
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
     [InlineData("int Add(int a, int b) =>\n    a + b", "(function int Add(int a, int b) => (+ a b))")]
     [InlineData("total = 1 +\n    2 +\n    3", "(assign-or-declare total (+ (+ (int 1) (int 2)) (int 3)))")]
     [InlineData("count = xs\n    .Where(x => x > 1)\n    .Count", "(assign-or-declare count (. (call (. xs Where) (lambda (x) (> x (int 1)))) Count))")]

@@ -1,0 +1,8 @@
+// expect: error syntax at 6
+// rules: T33
+
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make((int f) => 0)
+
+print(Zero<Point>())

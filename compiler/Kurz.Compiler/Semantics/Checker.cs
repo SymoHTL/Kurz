@@ -410,7 +410,7 @@ public sealed partial class Checker
             return false;
         }
 
-        NotSupported(line, $"reading a type in generic code, `{name}.{member}` (T33)");
+        NotSupported(line, member == "Fields" ? $"`{name}.Fields` anywhere but after `in` in a `for` loop (T33)" : $"reading a type in generic code, `{name}.{member}` (T33)");
         return true;
     }
 
@@ -504,13 +504,7 @@ public sealed partial class Checker
         var clash = IsDeclaredName(d.Name);
         if (clash)
         {
-            // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
-            // since no line of the file does
-            Report(ErrorIds.Redeclared, d.Line, preludeSeen.Contains(d.Name)
-                ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)"
-                : BuiltInTypeRules.TryGetValue(d.Name, out var rule)
-                ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
-                : $"the name `{d.Name}` is declared already (V9)");
+            Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a built-in name among them: `data List` could never be named (M9, T17)
         }
 
         if (d.Kind == TypeDeclarationKind.Enum)
@@ -576,6 +570,7 @@ public sealed partial class Checker
         model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
@@ -612,6 +607,23 @@ public sealed partial class Checker
                 enums[name] = e;
                 preludeSeen.Add(name);
             }
+        }
+    }
+
+    /// <summary>W1, V9: what <c>redeclared</c> says to a file's own declaration of a type of the prelude this file sees.</summary>
+    private string PreludeClash(string name) =>
+        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
+
+    /// <summary>
+    /// W1, V9: a type parameter named like a type of the prelude this file sees binds the name in a scope, so it is <c>redeclared</c>
+    /// at the parameter, as the file's own type so named is (the owner, 2026-11-02), and the parameter stands for the rest of the
+    /// declaration, so that its uses report nothing more (E1).
+    /// </summary>
+    private void RefusePreludeTypeParameter(TypeParameter p)
+    {
+        if (preludeSeen.Contains(p.Name))
+        {
+            Report(ErrorIds.Redeclared, p.Line, PreludeClash(p.Name));
         }
     }
 
@@ -970,6 +982,11 @@ public sealed partial class Checker
 
     private KurzType ResolveNamed(NamedType n)
     {
+        if (n.Name.Contains('.'))
+        {
+            return ResolveDotted(n); // T33: `f.Type`
+        }
+
         if (Types.ByName.TryGetValue(n.Name, out var primitive))
         {
             if (n.TypeArguments.Count > 0)
@@ -1125,15 +1142,15 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T17, T19: a type argument written in a type or a call, where `void` is not supported: C# refuses it as a type argument and Rust's
-    /// `()` takes one, and the record says neither, so it is refused here before the emitter writes a list or a copy of it.
+    /// T17: a type argument written in a type or a call, where `void` is <c>void-type-argument</c>, as C# refuses it (CS1547): no value
+    /// has the type `void`, so it is refused here before the emitter writes a list or a copy of it.
     /// </summary>
     private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
     {
         var type = Resolve(argument);
         if (Types.IsVoid(type))
         {
-            NotSupported(argument.Line, $"`void` as a type argument of {of} (T17, T19)");
+            Report(ErrorIds.VoidTypeArgument, argument.Line, $"`void` as a type argument of {of}, which no value has (T17)");
             return Types.Error;
         }
 
@@ -1168,12 +1185,13 @@ public sealed partial class Checker
         model.RecordFunction(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
         if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
+            Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
             return;
         }
@@ -1476,8 +1494,8 @@ public sealed partial class Checker
 
     // ---- scopes ----------------------------------------------------------------------------------
 
-    /// <summary>The variable a name means here, and whether it belongs to a function around the lambda being checked (F11, F15).</summary>
-    private (VariableSymbol? Variable, bool Captured) Lookup(string name)
+    /// <summary>The variable a name means here, and whether it belongs to a function around the lambda being checked (F11, F15), which the lambdas between capture unless <paramref name="capture"/> is false.</summary>
+    private (VariableSymbol? Variable, bool Captured) Lookup(string name, bool capture = true)
     {
         var f = frame;
         var scope = f.Scope;
@@ -1488,7 +1506,7 @@ public sealed partial class Checker
             {
                 if (s.Variables.TryGetValue(name, out var v))
                 {
-                    for (var g = frame; captured && g != f; g = g.Outer!)
+                    for (var g = frame; capture && captured && g != f; g = g.Outer!)
                     {
                         g.Captures.Add(v); // every lambda between the use and the function that declares the variable captures it
                     }
@@ -1522,6 +1540,16 @@ public sealed partial class Checker
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256";
+
+    /// <summary>
+    /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
+    /// a type of the prelude among them (W1), it names that type and the rule that declares it, since no line of the file does.
+    /// </summary>
+    private string Redeclared(string name) => preludeSeen.Contains(name)
+        ? PreludeClash(name)
+        : BuiltInTypeRules.TryGetValue(name, out var rule)
+        ? $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
+        : $"the name `{name}` is declared already (V9)";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
     private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };
@@ -1740,6 +1768,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.BreakOutsideLoop, b.Line, "`break` with no loop around it (C7)");
                 }
+                else if (frame.Loops[^1].Unrolled)
+                {
+                    NotSupported(b.Line, "`break` in a loop over `T.Fields`, which is unrolled (T33)");
+                }
                 else
                 {
                     frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
@@ -1750,6 +1782,10 @@ public sealed partial class Checker
                 if (frame.LoopDepth == 0)
                 {
                     Report(ErrorIds.BreakOutsideLoop, c.Line, "`continue` with no loop around it (C7)");
+                }
+                else if (frame.Loops[^1].Unrolled)
+                {
+                    NotSupported(c.Line, "`continue` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
                 else
                 {
@@ -2292,6 +2328,11 @@ public sealed partial class Checker
     /// </summary>
     private void CheckForIn(ForInStatement f)
     {
+        if (CheckFieldsLoop(f))
+        {
+            return; // T33: a loop over `T.Fields` in a copy, unrolled
+        }
+
         KurzType element;
         KurzType? value = null;
         UnionType? failures = null;
