@@ -1267,7 +1267,14 @@ public sealed partial class Checker
         while (queue.Count > 0)
         {
             var (at, mut) = queue.Dequeue();
-            foreach (var (to, field) in edges[at])
+            if (!edges.TryGetValue(at, out var fields))
+            {
+                // W1: a class of std/ that the prelude brings into the file, whose fields std/'s checker judged; it names no class of
+                // the file, so no ring of the file runs through it
+                continue;
+            }
+
+            foreach (var (to, field) in fields)
             {
                 var next = (to, mut || field.Mut);
                 if (ReferenceEquals(to, start) && next.Item2)

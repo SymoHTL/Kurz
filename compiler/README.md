@@ -1621,7 +1621,7 @@ class instance or through a `weak` reference, with the two more ends of such a p
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4), a class of `std/` the prelude names (W1) being no step of a ring of the file, since it names no class of the file and `std/`'s checker judges its own and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
