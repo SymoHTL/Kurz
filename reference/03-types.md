@@ -1499,8 +1499,12 @@ type parameter unchanged, swaps two of them, or gives one to a function that tak
 a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
 refused where it is written, whether or not a call reaches it. A generic function that reads its
 type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
-none of its calls is read for such a cycle, and a chain of more than 64 copies stays
-`not supported`. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+and a chain of more than 64 copies stays `not supported`. Of its calls, those in a loop over
+`T.Fields` are read for such a cycle on its text, and a cycle that grows there is refused at that
+call, with no copy made, so that the chain does not reach that bound; a type argument there that is
+the field's type takes no part, since the text does not give that type. A cycle that grows in an
+arm of a `match` on `T.Kind`, or that leaves the loop through a call outside it, shows only at that
+bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
 `T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
@@ -1573,6 +1577,23 @@ Swap(1, "a", 3)
 Widen(1, 3)
 Down(1, 3)
 print(Wrap(Wrap(1)).Count)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields.kz](../corpus/types/generic-growing-cycle-fields.kz)
+```kurz
+data Box<T>(T A)
+
+// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: no copy is made for `Box<int>`
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Box(x), n - 1)
+        }
+    }
+}
+
+Deep(Box(1), 3)
 print("done")
 ```
 

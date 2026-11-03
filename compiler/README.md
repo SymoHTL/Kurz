@@ -658,8 +658,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   called with (T19, T27); a call in a generic function's body whose type argument holds a type
   parameter of the function inside a form of a type other than a union, on a cycle of calls among
   generic functions that gives it back to that type parameter, is `growing-type-argument` at that
-  call, read on the text of every generic function that reads no type, called or not, and of no
-  copy (T34);
+  call, read on the text of every generic function that reads no type and on the calls in a loop
+  over `T.Fields` of one that does, called or not, and of no copy, and no copy is made of a
+  function on such a cycle (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -1711,7 +1712,7 @@ error stand, and which every file sees, so that a file's own declaration of one 
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
-larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+larger type each time makes without end, by a call outside a loop over `T.Fields` (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
