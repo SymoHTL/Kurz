@@ -852,7 +852,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   can still take before the block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1
   for SipHash-1-3, and whether an insert's probe passed the bound, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
-  key and the value, laid out as a `data` value of the three. A key's hash is taken over its
+  key and the value, laid out as a `data` value of the three, for a key whose hash reads more than one
+  word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that compares by its
+  fields), as .NET's `Dictionary` keeps each entry's hash code, and the key and the value alone for a key
+  of one word (an integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`,
+  an instance that compares by identity, hashed by its address), whose growth hashes every key
+  again, as `hashbrown`'s buckets keep no hash *(assumed: taken under the owner's "Allow, faster wins"
+  of 2026-11-01, issue 157, comment 6556450466, by the rows of item 14 there: without the hash
+  a `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
+  `data` value of two strings and by a list of 4 `int`s grew 31% to 36% slower; a program sees the layout
+  only in the bytes `allocation-failed` names for a map's block (M9), 192 for the first block of a
+  `Map<long, long>` and 320 for that of a `Map<string, long>`)*. A key's hash is taken over its
   bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
   8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
   `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
@@ -883,7 +893,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   hash's low bits give, then each group one group further on than the stride before, and ends at a group
   with a slot of 255; a key added takes the first slot of 255 or 128 in its probe. `Remove` marks its
   slot 255 where the slot's group of 8 still holds a 255, which ends every probe that reaches the group,
-  else 128, which a probe passes, as `hashbrown`'s `erase` does; `Clear` marks every slot 255. A map
+  else 128, which a probe passes, as `hashbrown`'s `erase` does, and finds the slot a second time only in
+  the copy, where the block was shared; `Clear` marks every slot 255. The search of a slot for a key
+  added, the test of a group for a slot of 255, the walk of a loop, of a map's text and of a block that
+  grows read a group's 8 control bytes as one word too, the walks taking the slots with an entry lowest
+  first by a mask of the bytes whose high bit is clear, as `hashbrown`'s `RawIterRange` does. A map
   grows to twice its slots where an entry would fill more than seven eighths of them, the slots marked
   128 counted, `hashbrown`'s load factor, and is built again at its size, without those slots, where its
   entries fill at most half of them, as `hashbrown`'s `reserve_rehash` does; a write, a `Remove` and a
