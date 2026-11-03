@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: W1
+
+data Box<HttpKind>(HttpKind V)
+
+print(Box(1).V)

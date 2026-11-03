@@ -5,7 +5,11 @@
 // rules: S9
 
 // a listener that accepts nothing: once its queue of connections that wait is full, a connection waits, and the second form of
-// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it
+// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it. The queue fills on
+// Linux's defaults: the 128 a listener asks for, within `somaxconn`, and `tcp_abort_on_overflow` at 0, which drops a connection
+// that finds the queue full where 1 would refuse it; a kernel that took every connection ends the loop at 1000 with no `TimedOut`
+// line. All of it takes less than 4 s, a margin no rule fixes, set below the 5 s of the default, so that a bound that was not
+// passed on prints `false`
 void | IoError Full() {
     listener = TcpListener.Bind("127.0.0.1:0")
     mut held = List<TcpStream>()
@@ -25,7 +29,7 @@ void | IoError Full() {
     }
 
     print(held.Count > 1)
-    print(timestamp.Now - start < 2s)
+    print(timestamp.Now - start < 4s)
 }
 
 Full() else {
