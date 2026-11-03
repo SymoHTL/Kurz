@@ -700,7 +700,7 @@ public sealed partial class Checker
     {
         if (!Visible(property))
         {
-            Report(ErrorIds.NotVisible, m.Line, $"`{property.Name}` of `{owner.Symbol.Name}` is private to its class: a property is visible outside it with `pub` (F9)");
+            Report(ErrorIds.NotVisible, m.Line, Hidden(property.Name, owner.Symbol, (property.Declaration!.Modifiers & Modifiers.Internal) != 0, "a property"));
             return Typed.Error;
         }
 
