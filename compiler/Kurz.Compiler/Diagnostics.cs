@@ -131,6 +131,7 @@ public static class ErrorIds
     public const string NakedNotAllowed = "naked-not-allowed";
     public const string NakedBody = "naked-body";
     public const string IntrinsicUnguarded = "intrinsic-unguarded";
+    public const string LaneOutOfRange = "lane-out-of-range";
     public const string NativeNotAllowed = "native-not-allowed";
     public const string NativeType = "native-type";
     public const string AsmOperand = "asm-operand";
