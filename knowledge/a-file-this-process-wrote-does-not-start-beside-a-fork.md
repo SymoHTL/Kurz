@@ -16,18 +16,29 @@ their own threads at the same time. Now and then a variant did not start:
 - the test's split of the error stream found no frame in that text, so the trace was empty.
 
 This is item 4 of #156, seen in the CI runs 41246453494 and 41325216976. Item 5, a "Text file busy"
-in a local run of `TraceTests` on 2026-10-30, has the same cause by elimination: that run recorded
-no file name, so no log shows which file was refused. Linux refuses a file with `ETXTBSY` only
-while a description of it is open for writing, and the trace tests of that day (`main` at 7b398b2)
-ran two kinds of file:
+in a local run of `TraceTests` on 2026-10-30, has the same cause by elimination. That run recorded
+no file name, so no log shows which file was refused; #156 records a test that could not start the
+executable it had built, the refusal of a start that the paragraph "Linux refuses to start a file"
+below describes. A write
+of a file that is running gets `ETXTBSY` too, but in the writer (`open(2)`): a refused write of a
+variant is an exception of the test host in `File.Copy` or `File.WriteAllBytes`, and a refused write
+of a build is a failed build, so neither is a run that did not start. A probe of 2026-11-01 on Linux
+6.8 showed both sides on a copy of `sleep`: a copy over it while it ran was refused in the writer,
+and its start while it was open for writing was refused in the start, each with errno 26. The trace
+tests of that day (`main` at 7b398b2) ran two kinds of file:
 
-- the builds, written by clang and by the linker its driver starts and waits for, while
-  `Processes.Capture` waits for clang to end before the test runs the build;
+- the builds, written by clang and by the linker its driver starts and waits for.
+  `Processes.Capture` waits for clang to end before the test runs the build, so no writer of a build
+  lives at its start, and the test host never opens a build for writing;
 - the two variants, which the test host wrote itself with `File.Copy` and `File.WriteAllBytes`.
 
-What the elimination leaves open is a writer of a build that outlives clang, of which none is known.
+The variants are therefore the only files a child forked by the test host could hold open for
+writing at their start. What the elimination leaves open is a writer of a build that outlives clang,
+of which none was known on 2026-11-01, in a reading of `TraceTests`, `Clang.cs` and `Processes.cs`
+at 7b398b2 and at 0484780.
 
-Linux refuses to run a file while any open file description of it is open for writing. .NET opens
+Linux refuses to start a file, `execve(2)` with `ETXTBSY`, while any open file description of it is
+open for writing. .NET opens
 its files with `O_CLOEXEC`, but a child that another thread forks in that time holds a copy of
 every descriptor of the process, from its fork to its exec. The host closes its own descriptor;
 the child's copy still holds the write.

@@ -377,11 +377,19 @@ public static class Command
     /// architecture (the owner, 2026-11-01: the failure is the command's own, naming clang's list), or where clang fails on the question
     /// (the owner, 2026-11-01: "clang did not answer which CPU", with what it wrote).
     /// </summary>
-    private static Func<Cpu?> CpuOf(string? name, Func<ClangSearch> find, TextWriter error) => () =>
+    private static Func<Cpu?> CpuOf(string? name, Func<ClangSearch> find, TextWriter error) => CpuOf(name, find, error, Builder.HostCpu, null);
+
+    /// <summary>
+    /// <see cref="CpuOf(string?, Func{ClangSearch}, TextWriter)"/> on a machine whose baseline is <paramref name="host"/>, for the target
+    /// <paramref name="target"/> names, the machine's where it is null; and where the CPU has a set beyond the baseline, the start check's
+    /// refusals (section 2, the owner, 2026-11-02): an x86-64 set the check cannot read, named, and on 64-bit Arm any such set, whose
+    /// check no machine here runs (`not supported`).
+    /// </summary>
+    internal static Func<Cpu?> CpuOf(string? name, Func<ClangSearch> find, TextWriter error, Cpu host, string? target) => () =>
     {
         if (name is null)
         {
-            return Builder.HostCpu;
+            return host;
         }
 
         var search = find();
@@ -391,11 +399,23 @@ public static class Command
             return null;
         }
 
-        var x86 = Builder.HostCpu.X86;
+        var x86 = host.X86;
         try
         {
-            if (clang.DescribeCpu(name, x86, out var triple) is { } cpu)
+            if (clang.DescribeCpu(name, x86, target, out var triple) is { } cpu)
             {
+                if (!x86 && cpu.Sets.Count > 0)
+                {
+                    error.Write($"error: not supported: `{name}`, a 64-bit Arm CPU with sets beyond the baseline, which no start check reads (R18)\n  help: build without --cpu\n");
+                    return null;
+                }
+
+                if (cpu.Sets.FirstOrDefault(m => !CpuSets.All.ContainsKey(m)) is { } unread)
+                {
+                    error.Write($"error: clang {clang.Version} gives the x86-64 CPU `{name}` a set the start check cannot read, `{unread}`\n  help: name a CPU without it, or none\n");
+                    return null;
+                }
+
                 return cpu;
             }
 

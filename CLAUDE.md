@@ -33,6 +33,15 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   writes it: a ledger written back another way differs on every line, and the review reads and
   bills the whole file as a change ([knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md](knowledge/a-re-serialized-ledger-is-a-whole-file-diff.md)).
   Gate: `self-tests`.
+- A self-test never starts the replay. A self-test that reaches `red_proof.replay()` starts the whole
+  replay again inside itself, without end: on 2026-11-02 a mutation of the evidence tool's
+  `--self-test` dispatch made its self-test fall through to the writing mode, which replays the
+  ledger ([knowledge/a-replay-inside-a-replay-has-no-end.md](knowledge/a-replay-inside-a-replay-has-no-end.md)).
+  `tools/red_proof.py` marks every self-test it starts with `KURZ_RED_PROOF_REPLAY`, and a replay
+  that finds the mark refuses before it copies anything. A mutation is proved against stand-ins,
+  never against a real replay. Gate: `self-tests` (the cases of the refusal and of the mark, and
+  their red proofs); `check()`, which runs the self-tests in the tree it is given and has no such
+  guard, called from a self-test on the real tree: review rule "tools".
 - `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
   builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
   dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
@@ -336,7 +345,9 @@ Gate: review rule "rules for sessions".
   construct that keeps what it read past a call or a statement either takes a count or rests on a
   refusal of the checker; two that did neither reached `main` with pull request 63, a refusal
   whose walk missed an assignment in an arm reached it with pull request 64, and two in an
-  interpolation, a string's hole and one hole that was the string itself, with pull request 78
+  interpolation, a string's hole and one hole that was the string itself, with pull request 78, and a
+  key of `SortBy` that changed the list it sorted through an instance, which the methods of pull
+  request 181 made possible (the line `sortby-change-fenced` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`
@@ -469,13 +480,13 @@ Gate: review rule "rules for sessions".
   [knowledge/a-round-that-did-not-converge-makes-main-a-round.md](knowledge/a-round-that-did-not-converge-makes-main-a-round.md)).
   The merge tool's refusal of a branch behind `main` at the cap says whether the round converged on
   every file of the head, from the head's `review` status. Where it did not, or where the status does
-  not show it, the refusal says that taking `main` costs a paid round and that the merge needs the
-  owner's choice. Gate: `self-tests` (the count, the label before
+  not show it, the refusal says that taking `main` makes the review of the new head a paid round and
+  that the merge needs the owner's choice. Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
   `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a
   branch behind `main` at the cap, `merge_pr.taking_main`); what the reading says,
-  starting no run at the cap and the rest of the check that a head replays (what `main` changed) are a `judgment step`; a
+  starting no run at the cap and the rest of the check that a head replays (what `main` changed, and whether the title and the description are as the round read them) are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.

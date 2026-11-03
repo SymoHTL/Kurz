@@ -196,8 +196,8 @@ the head that will be reviewed is a `judgment step`.
       and the title and the description are as the round read them. The status is read by the dry
       run, `py -3 tools/merge_pr.py <N> <full head sha> --dry-run` at the reviewed head: its refusal
       of the branch behind `main` says whether the round converged on every file, and where it did
-      not, or where the status does not show it, that taking `main` costs a paid round and the
-      owner chooses: a paid round, over red at the new head, or hold
+      not, or where the status does not show it, that taking `main` makes the review of the new
+      head a paid round and the owner chooses: a paid round, over red at the new head, or hold
       (`knowledge/a-round-that-did-not-converge-makes-main-a-round.md`). A push to a Ready pull request
       starts the run; on a Draft, `py -3 tools/review/review.py --pr <N> --plan` prints 0 batches
       before the dispatch. A head with a file to review ends as `cap` before any pass and needs the

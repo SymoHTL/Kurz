@@ -143,11 +143,11 @@ public sealed class ClangTests : IDisposable
         // clang builds for
         var clang = Clang.Find().Found ?? throw new InvalidOperationException("no clang of the pinned major is found");
         var baseline = clang.DescribeCpu("x86-64", x86: true, out var target)!;
-        Assert.Equal(Cpu.Baseline.Classes, baseline.Classes);
+        Assert.Equal(["X86.X86Base", "X86.Sse", "X86.Sse2"], baseline.Classes); // as clang names them, not as the compiler's own table does
         Assert.Equal("x86-64", baseline.Name);
         Assert.StartsWith("x86_64-", target, StringComparison.Ordinal);
         var v2 = clang.DescribeCpu("x86-64-v2", x86: true, out _)!;
-        Assert.Equal([.. Cpu.Baseline.Classes, "X86.Sse3", "X86.Ssse3", "X86.Sse41", "X86.Sse42", "X86.Popcnt"], v2.Classes);
+        Assert.Equal(["X86.X86Base", "X86.Sse", "X86.Sse2", "X86.Sse3", "X86.Ssse3", "X86.Sse41", "X86.Sse42", "X86.Popcnt"], v2.Classes);
         Assert.Empty(v2.Features); // the driver passes the CPU's name alone, which carries its features to LLVM
         var goldmont = clang.DescribeCpu("goldmont", x86: true, out _)!;
         Assert.Contains("X86.Sha", goldmont.Classes);

@@ -238,6 +238,110 @@ public sealed partial class Checker
         model.TryCallOf(c) is { Kind: CallKind.Function, Function: { } f } info && readers.Contains(f) ? info : null;
 
     /// <summary>
+    /// T34: a call in a generic function's body that gives a type parameter of the callee a type holding one of the caller's inside a
+    /// form of a type makes a copy for a larger type; where the type parameters lead from the callee's back to the caller's along the
+    /// calls of the generic bodies, each copy makes a larger one without end, and the call is <c>growing-type-argument</c> (section 4,
+    /// the owner, 2026-11-02, "refused at the cycle"). The walk reads the generic functions checked on their text, called or not: a
+    /// function that reads its type is read in its copies alone (T33), and none of its calls is read here.
+    /// </summary>
+    private void FindGrowingCycles()
+    {
+        var edges = new List<GrowthEdge>();
+        foreach (var (caller, c, _) in genericCalls)
+        {
+            if (caller is not { IsGeneric: true } || readers.Contains(caller)
+                || model.TryCallOf(c) is not { Kind: CallKind.Function, Function: { IsGeneric: true } callee } info)
+            {
+                continue; // a function that calls a reader with its own type parameter is a reader (T33), so no edge leads into a reader's
+            }
+
+            foreach (var to in callee.TypeParameters)
+            {
+                if (!info.Map.TryGetValue(to, out var argument))
+                {
+                    continue;
+                }
+
+                foreach (var from in caller.TypeParameters.Where(p => Types.Mentions(argument, p)))
+                {
+                    edges.Add(new GrowthEdge(from, to, Grows(argument, from), caller, callee, c, argument));
+                }
+            }
+        }
+
+        var reported = new HashSet<CallExpression>(ReferenceEqualityComparer.Instance);
+        foreach (var edge in edges.Where(e => e.Grows))
+        {
+            if (PathBack(edges, edge.To, edge.From) is { } path && reported.Add(edge.Call))
+            {
+                Report(ErrorIds.GrowingTypeArgument, edge.Call.Line, GrowthText(edge, path));
+            }
+        }
+    }
+
+    /// <summary>A type parameter of a caller that a call's type argument for one of the callee's holds, and whether it holds it inside a form of a type.</summary>
+    private sealed record GrowthEdge(
+        TypeParameterSymbol From, TypeParameterSymbol To, bool Grows, FunctionSymbol Caller, FunctionSymbol Callee, CallExpression Call, KurzType Argument);
+
+    /// <summary>
+    /// Whether a type holds the type parameter inside a form of a type, a list, a map, a data type and a function type among them, so that a copy made for it is
+    /// larger than the copy it stands in; a union holds each case once, so a case that is the type parameter itself makes no larger copy.
+    /// </summary>
+    private static bool Grows(KurzType type, TypeParameterSymbol parameter) => type switch
+    {
+        TypeParameterType => false,
+        UnionType u => u.Cases.Any(c => Grows(c, parameter)),
+        _ => Types.Mentions(type, parameter),
+    };
+
+    /// <summary>The calls that lead from one type parameter to another, the fewest first; an empty list where they are one; null where none does.</summary>
+    private static List<GrowthEdge>? PathBack(List<GrowthEdge> edges, TypeParameterSymbol start, TypeParameterSymbol goal)
+    {
+        var came = new Dictionary<TypeParameterSymbol, GrowthEdge?>(ReferenceEqualityComparer.Instance) { [start] = null };
+        var queue = new Queue<TypeParameterSymbol>([start]);
+        while (queue.Count > 0)
+        {
+            var at = queue.Dequeue();
+            if (ReferenceEquals(at, goal))
+            {
+                var path = new List<GrowthEdge>();
+                for (var e = came[at]; e is not null; e = came[e.From])
+                {
+                    path.Insert(0, e);
+                }
+
+                return path;
+            }
+
+            foreach (var e in edges.Where(e => ReferenceEquals(e.From, at) && !came.ContainsKey(e.To)))
+            {
+                came[e.To] = e;
+                queue.Enqueue(e.To);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The text of <c>growing-type-argument</c>: the call, the type argument and the type parameter it grows from, and the cycle of functions that gives it back.</summary>
+    private static string GrowthText(GrowthEdge edge, List<GrowthEdge> path)
+    {
+        var names = new List<string> { edge.Caller.Name };
+        foreach (var name in path.Select(e => e.Callee.Name).Prepend(edge.Callee.Name))
+        {
+            if (names[^1] != name)
+            {
+                names.Add(name); // a call of a function to itself on the way is no step of the cycle's text
+            }
+        }
+
+        var grows = $"with `{edge.Argument.Text}` for `{edge.To.Name}`, a type larger than its `{edge.From.Name}`";
+        return names.All(n => n == edge.Caller.Name)
+            ? $"`{edge.Caller.Name}` calls itself {grows}, so each copy makes a larger one without end (T34)"
+            : $"`{edge.Caller.Name}` calls `{edge.Callee.Name}` {grows}, and the cycle {string.Join(" to ", names.Select(n => $"`{n}`"))} gives it back to `{edge.From.Name}`, so each copy makes a larger one without end (T34)";
+    }
+
+    /// <summary>
     /// Every call of a function that reads its type from code that is checked, the top-level code, a function that reads none and a copy,
     /// calls a copy for its type arguments: made at the first such call and checked once, the calls of a copy's body before the calls
     /// that follow the call that made the copy, so that the first call in the order of the source that needs a copy makes it.

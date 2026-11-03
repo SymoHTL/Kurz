@@ -2483,7 +2483,8 @@ long CaseLatin(int c, bool upper) {
 
 // The mapping of one direction of `c`, up to three code points in one number, the first in its lowest 21 bits,
 // the second in the next 21 and the third above them, 0 for one that is not there, as Rust's
-// `conversions::to_lower` and `to_upper` give a `[char; 3]`: ASCII by its letters (`CaseAscii`), the rest of
+// `conversions::to_lower` and `to_upper` give a `[char; 3]` (`library/core/src/unicode/unicode_data.rs` on Rust's
+// master branch, read 2026-11-02): ASCII by its letters (`CaseAscii`), the rest of
 // Latin-1, U+0080 to U+00FF, by `CaseLatin`, and from U+0100 on by the levels of `table`, the form of .NET's
 // `CharUnicodeInfo.ToLower`, which reads a
 // code point's delta in one index and one block. Rust looks such a code point up by two binary searches, over
@@ -3982,7 +3983,8 @@ ulong FiveDigits(int word) => match word {
 // keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
-// entry: the hash of its key, 8 bytes, then the key and the value; a slot without an entry holds what its
+// entry: the hash of its key, 8 bytes, then the key and the value, for a key whose hash reads more than one
+// word, and the key and the value alone for a key of one word (the emitter's `KeepsHash`); a slot without an entry holds what its
 // bytes held before. A slot's control byte is 255 where the slot holds no entry and a probe ends at its
 // group: never filled since the block was made or cleared, or emptied by `MapErase` in a group that
 // holds a 255 still; 128 where its entry was removed in a group with no 255, which a probe passes; and
@@ -4187,7 +4189,9 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
 // insert moves the map onto SipHash-1-3 (`MapTripped`, `MapSwitched`), as .NET's `Dictionary` switches to a
 // randomized hash where one insert walks more than 100 entries of a chain (section 4, the owner, 2026-11-01,
 // "Switch, as .NET"; the bound, assumed there: a table filled to 7 slots of 8 passes full groups as a rule,
-// so that 100 slots would switch maps no key was made for).
+// so that 100 slots would switch maps no key was made for). A group's 8 control bytes are read as one word,
+// as the emitted code reads them, and its slots of 255 and of 128 are the bytes whose high bit is set, as
+// hashbrown's `match_empty_or_deleted` marks them.
 pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     long mask = long(MapRoom(block)) - 1
     byte* control = MapControl(block)
@@ -4198,13 +4202,9 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     mut byte* slot = null
     raw {
         while i < 0 {
-            mut long b = 0
-            while b < 8 && i < 0 {
-                if control[at + b] >= 128 {
-                    i = at + b
-                }
-
-                b = b + 1
+            ulong free = *Ptr<ulong>(control + at) & 0x8080808080808080UL
+            if free != 0 {
+                i = at + FirstFlag(free)
             }
 
             step = step + 8
@@ -4221,22 +4221,10 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
             // the slot of a removed entry: where its group has no slot of 255, the lookup of the key passed it, and
             // each group after it up to the first with a slot of 255, which ends the lookup, and the bound counts them
             mut long g = i / 8 * 8
-            mut bool open = false
-            while !open {
-                mut long c = 0
-                while c < 8 {
-                    if control[g + c] == 255 {
-                        open = true
-                    }
-
-                    c = c + 1
-                }
-
-                if !open {
-                    g = at
-                    step = step + 8
-                    at = (at + step) & mask
-                }
+            while !MapOpen(control + g) {
+                g = at
+                step = step + 8
+                at = (at + step) & mask
             }
         }
 
@@ -4251,13 +4239,27 @@ pub byte* MapEmpty(byte* block, ulong hash, long entry) {
     return slot
 }
 
-// For an entry added to a block no other value holds and that has no room left: a block with its
-// entries and its keys, the old block freed, as hashbrown's `reserve_rehash` makes one: of the same
-// slots where the entries and the one added fill no more than half of the entries it holds, so that
-// the slots of removed entries are taken again, else of twice its slots. Null with `asked` set to the
-// bytes asked for where the system refuses, and with the bytes of the grown block where its slots would
-// be more than the largest `int` counts.
-pub byte* MapGrow(byte* block, long entry, mut long asked) {
+// Whether a group of 8 control bytes at `group`, an address that is a multiple of 8, holds a slot of 255,
+// which ends a probe: the bytes whose two high bits are set, as hashbrown's generic `match_empty` marks
+// them, since 128 has its second bit clear and an entry's byte its first.
+bool MapOpen(byte* group) {
+    mut ulong word = 0
+    raw {
+        word = *Ptr<ulong>(group)
+    }
+
+    return (word & (word << 1) & 0x8080808080808080UL) != 0
+}
+
+// For an entry added to a block no other value holds and that has no room left: a block with its count
+// and its keys and no entry in a slot, which the entries of the old block go into, as hashbrown's
+// `reserve_rehash` makes one: of the same slots where the entries and the one added fill no more than
+// half of the entries it holds, so that the slots of removed entries are taken again, else of twice its
+// slots. Null with `asked` set to the bytes asked for where the system refuses, and with the bytes of the
+// grown block where its slots would be more than the largest `int` counts. A map whose slots keep their
+// entries' hashes moves them with `MapGrow`; the emitted code moves the entries of one that keeps none
+// under their keys' hashes taken again, as hashbrown does.
+pub byte* MapGrown(byte* block, long entry, mut long asked) {
     long room = long(MapRoom(block))
     mut long slots = room * 2
     if long(MapCount(block)) + 1 <= MapCapacity(room) / 2 {
@@ -4277,6 +4279,22 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     }
 
     byte* p = MapBlock(slots, entry, key0, key1, mut asked)
+    if p != null {
+        raw {
+            *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
+            *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
+        }
+    }
+
+    return p
+}
+
+// For an entry added to a block no other value holds and that has no room left, of a map whose slots keep
+// their entries' hashes: the block `MapGrown` makes, with the entries moved into it under the hashes their
+// slots keep, and the old block freed. Null as `MapGrown` gives it.
+pub byte* MapGrow(byte* block, long entry, mut long asked) {
+    long room = long(MapRoom(block))
+    byte* p = MapGrown(block, entry, mut asked)
     if p == null {
         return null
     }
@@ -4284,21 +4302,24 @@ pub byte* MapGrow(byte* block, long entry, mut long asked) {
     byte* control = MapControl(block)
     byte* from = MapSlots(block)
     raw {
-        *Ptr<int>(p + 8) = *Ptr<int>(block + 8)
-        *Ptr<int>(p + 36) = *Ptr<int>(block + 36)
-        mut long i = 0
-        while i < room {
-            if control[i] < 128 {
-                byte* old = from + i * entry
+        // the entries in the order of their slots, a group's 8 control bytes read as one word and its slots with an
+        // entry, whose bytes have the high bit clear, taken lowest first, as hashbrown's `RawIter` takes them by
+        // `match_full`; an entry's bytes moved a word at a time, since the emitted code lays out an entry from a word
+        mut long g = 0
+        while g < room {
+            mut ulong full = ~*Ptr<ulong>(control + g) & 0x8080808080808080UL
+            while full != 0 {
+                byte* old = from + (g + FirstFlag(full)) * entry
+                full = full & (full -% 1UL)
                 byte* to = MapEmpty(p, *Ptr<ulong>(old), entry)
                 mut long j = 0
                 while j < entry {
-                    to[j] = old[j]
-                    j = j + 1
+                    *Ptr<ulong>(to + j) = *Ptr<ulong>(old + j)
+                    j = j + 8
                 }
             }
 
-            i = i + 1
+            g = g + 8
         }
     }
 
@@ -4315,18 +4336,7 @@ pub void MapErase(byte* block, byte* slot, long entry) {
     mut long i = 0
     raw {
         i = (slot - MapSlots(block)) / entry
-        long group = i / 8 * 8
-        mut bool open = false
-        mut long b = 0
-        while b < 8 {
-            if control[group + b] == 255 {
-                open = true
-            }
-
-            b = b + 1
-        }
-
-        if open {
+        if MapOpen(control + i / 8 * 8) {
             control[i] = 255
             *Ptr<int>(block + 32) = *Ptr<int>(block + 32) + 1
         } else {
@@ -5163,12 +5173,20 @@ pub uint LittleEndianWord(byte* p) {
 
 // A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
 // with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
-// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
-// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
-// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
-// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+// give it, but for the terms of F and G. The two terms of each share no bit, so an or of them, their sum
+// and each added into the sum give the same number, and so does F's select below. F is the select
+// OpenSSL's x86-64 assembly writes (`md5-x86_64.pl`), `((c ^ d) & b) ^ d`, the bit of c where b's is 1
+// and the bit of d where it is 0: of the or that RFC 1321 and `op_f` write, LLVM (clang 23) makes that
+// select in 14 of the 16 steps and keeps the or in the last two. MD5 of 16 MiB hashed three times took
+// 51.76 ms so, 52.14 with the or and 53.28 with the two terms added into the sum one at a time (issue
+// 157, 2026-11-03, the best of 9). G adds each of its two terms into the sum, where RFC 1321 joins them
+// with an or and `op_g` adds them together first: with F as above, MD5 took 51.81 ms so, 56.37 with the
+// or and 56.43 in `op_g`'s form (the best of 9, each beside a copy of its build), and 56.41 with G as the
+// select `((b ^ c) & d) ^ c`. In every step LLVM's code generator adds the constant `t` after the round's
+// function, one add more on the path from b than in OpenSSL's code
+// (knowledge/the-code-generator-adds-a-sums-constant-last.md).
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
-    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    uint sum = a +% m +% t +% (((c ^ d) & b) ^ d)
     return (sum << r | sum >> (32 - r)) +% b
 }
 
@@ -5492,46 +5510,46 @@ pub byte* Md5Hash(byte* message, mut long asked) {
     return digest
 }
 
-// CRC-32/ISO-HDLC's state at `s`, 1028 bytes: the register (0) and the remainders of the 256 bytes under
-// the reflected polynomial 0xEDB88320 (4), as zlib's `crc32` reads a byte at a time; the register starts
-// at all ones, and the CRC is the register with every bit flipped.
+// CRC-32/ISO-HDLC's state at `s`, 1028 bytes: the register (0), which starts at all ones, the CRC being the
+// register with every bit flipped, and 1024 bytes that nothing reads, which keep the hasher's block at the
+// size `allocation-failed` names for it (H1). The remainders of the reflected polynomial 0xEDB88320 are the
+// emitter's table `crc32.table`, 16 rows of 256, which each call takes, as crc32fast's `CRC32_TABLE`.
 void Crc32Start(byte* s) {
     raw {
         *Ptr<uint>(s) = 0xffffffff
-        uint* table = Ptr<uint>(s + 4)
-        mut int i = 0
-        while i < 256 {
-            mut uint c = uint(i)
-            mut int k = 0
-            while k < 8 {
-                if (c & 1) != 0 {
-                    c = 0xedb88320 ^ c >> 1
-                } else {
-                    c = c >> 1
-                }
-
-                k = k + 1
-            }
-
-            table[i] = c
-            i = i + 1
-        }
     }
 }
 
-// The `n` bytes at `p` through the register of the state at `s`.
-void Crc32Feed(byte* s, byte* p, long n) {
+// The register `start` after the `n` bytes at `p`, by the table at `table` (`crc32.table`): 64 bytes at a time,
+// as 4 steps of 16, each byte by the row of its distance from the step's end and the first four with the
+// register's bytes, then each byte after the last 64 by row 0, as crc32fast's `update_fast_16` and
+// `update_slow` take them.
+uint Crc32Bytes(uint start, byte* p, long n, uint* table) {
+    mut uint c = start
     raw {
-        uint* table = Ptr<uint>(s + 4)
-        mut uint c = *Ptr<uint>(s)
         mut long i = 0
+        while n - i >= 64 {
+            long end = i + 64
+            while i < end {
+                c = table[long(p[i + 15])] ^ table[256 + long(p[i + 14])] ^ table[512 + long(p[i + 13])] ^
+                    table[768 + long(p[i + 12])] ^ table[1024 + long(p[i + 11])] ^ table[1280 + long(p[i + 10])] ^
+                    table[1536 + long(p[i + 9])] ^ table[1792 + long(p[i + 8])] ^ table[2048 + long(p[i + 7])] ^
+                    table[2304 + long(p[i + 6])] ^ table[2560 + long(p[i + 5])] ^ table[2816 + long(p[i + 4])] ^
+                    table[3072 + long((uint(p[i + 3]) ^ c >> 24) & 255)] ^
+                    table[3328 + long((uint(p[i + 2]) ^ c >> 16) & 255)] ^
+                    table[3584 + long((uint(p[i + 1]) ^ c >> 8) & 255)] ^
+                    table[3840 + long((uint(p[i]) ^ c) & 255)]
+                i = i + 16
+            }
+        }
+
         while i < n {
             c = table[long((c ^ uint(p[i])) & 255)] ^ c >> 8
             i = i + 1
         }
-
-        *Ptr<uint>(s) = c
     }
+
+    return c
 }
 
 // A new hasher of CRC-32 (H3), as `Sha256New` makes one of SHA-256.
@@ -5544,10 +5562,12 @@ pub byte* Crc32New(mut long asked) {
     return block
 }
 
-// As `Sha256Update`, for CRC-32.
-pub void Crc32Update(byte* block, byte* message) {
+// As `Sha256Update`, for CRC-32, by the emitter's table at `table`.
+pub void Crc32Update(byte* block, byte* message, uint* table) {
     if message != null {
-        Crc32Feed(block + 16, ListItems(message), long(ListCount(message)))
+        raw {
+            *Ptr<uint>(block + 16) = Crc32Bytes(*Ptr<uint>(block + 16), ListItems(message), long(ListCount(message)), table)
+        }
     }
 }
 
@@ -5563,18 +5583,17 @@ pub uint Crc32Finish(byte* block) {
     return c
 }
 
-// CRC-32 of the bytes of the list `message` (H1), made on a state of its own, which it frees; 0, with
-// `asked` set, where the system refuses.
-pub uint Crc32Hash(byte* message, mut long asked) {
-    byte* block = Crc32New(mut asked)
-    if block == null {
-        return 0
+// CRC-32 of the bytes of the list `message` (H1), by the emitter's table at `table`, its register a local, as
+// crc32fast's `hash` keeps its state: it asks the system for no block, so no refusal ends it.
+pub uint Crc32Hash(byte* message, uint* table) {
+    mut uint c = 0xffffffff
+    if message != null {
+        raw {
+            c = Crc32Bytes(c, ListItems(message), long(ListCount(message)), table)
+        }
     }
 
-    Crc32Update(block, message)
-    uint c = Crc32Finish(block)
-    Free(block, 1044)
-    return c
+    return c ^ 0xffffffff
 }
 
 // HMAC-SHA256's state at `s`, 272 bytes (RFC 2104): the key K0 (0), 64 bytes, the state of the inner
@@ -5771,8 +5790,9 @@ pub byte* HexEncode(byte* message, mut long asked) {
 // odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
 // null in `made` and `asked` set where the system refuses. `digits` is the emitter's table of the value
 // of each byte as a digit, 255 for a byte that is no digit, read as .NET's scalar `FromHexString` reads
-// its table: the two digits of a pair, one test of both, and where it fails the position of the high
-// byte where that is no digit, else of the low one.
+// its table: the two digits of a pair and one test of both. Where the test fails, the position is H7's,
+// the high byte of the pair where that is no digit, else the low one; where both are no digit, .NET's
+// scalar form names the low one.
 pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut long asked) {
     made = null
     if count % 2 != 0 {
