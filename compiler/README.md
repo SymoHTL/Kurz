@@ -655,7 +655,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type's name (D20);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
-  called with (T19, T27);
+  called with (T19, T27); a call in a generic function's body whose type argument holds a type
+  parameter of the function inside a form of a type other than a union, on a cycle of calls among
+  generic functions that gives it back to that type parameter, is `growing-type-argument` at that
+  call, read on the text of every generic function that reads no type, called or not, and of no
+  copy (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -797,22 +801,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
   `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
   of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
-  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made, so
-  that a key which changes it through an instance whose field holds it leaves its change standing and the
-  sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read while the field holds
-  another (section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment 6562795140), at one
-  count for each call. Two forms are not Rust's and measured faster on the same
-  results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
-  orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
-  scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
-  `SortTests` holds `Sort` and `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five
-  item types, `int`, `byte`, `double`, `string` and `int?`, the unstable sort of `double` items with `-0`
-  read as `0`, and `SortBy` of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an
-  enum and a `duration` key, the first 50 under the allocator that makes every freed block inaccessible
-  as well; over 65 lists of `double` items of eight shapes, runs that rise and that fall among them, of up
-  to 64,000 items and one of 1,100,000, and over lists of `decimal` items whose equal values print apart;
-  and the quicksorts of both sorts to lists McIlroy's adversary built against their pivots, which reach
-  the heapsort and the driftsort they fall back on;
+  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made,
+  so that a key which changes it through an instance whose field holds it leaves its change standing and
+  the sort of the list it read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as
+  C#", #39, comment 6562795140), as C#'s `List.Sort` does where a comparer assigns the field another
+  list (.NET 10's `List<T>.Sort`, run 2026-11-03), every key made over the items of the list as it was
+  read (X8, assumed), the list counted as changed where the field holds another one than it read,
+  whatever items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at
+  one count for each call. Two forms are not Rust's and measured faster on the same results: an item of
+  8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of
+  64 bits or fewer is compared as one integer of the key above the position. A scratch or a block of
+  pairs the system refuses ends the program with `allocation-failed` (M9); `SortTests` holds `Sort` and
+  `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five item types, `int`, `byte`,
+  `double`, `string` and `int?`, the unstable sort of `double` items with `-0` read as `0`, and `SortBy`
+  of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an enum and a `duration`
+  key, the first 50 under the allocator that makes every freed block inaccessible as well; over 65 lists
+  of `double` items of eight shapes, runs that rise and that fall among them, of up to 64,000 items and
+  one of 1,100,000, and over lists of `decimal` items whose equal values print apart; and the quicksorts
+  of both sorts to lists McIlroy's adversary built against their pivots, which reach the heapsort and
+  the driftsort they fall back on;
 - list literals (M11): `[1, 2, 3]` and `[]`, read as a call of one function `List<T> Of<T>(T a, T b, T c)`, so
   that the list type where one stands, a parameter's among them, reaches the items as a parameter's type
   reaches a call's literals and lambdas, and where none stands the items infer `T` as T27 infers it (section
@@ -978,7 +985,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
   created again and one under a file; the text of an error without a path; a `\r\n` split by the end of the buffer's read, a line
-  longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; an assignment to the file in the block of a
+  longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; a close in the block of a loop over its lines, which releases the
+  descriptor at once, as `F_GETFD` shows, and the pull after it, the system's error 9; an assignment to the file in the block of a
   loop over its lines; and the refusal for Windows, at a call and at such a loop;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
