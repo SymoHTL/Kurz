@@ -1,6 +1,6 @@
 ---
 name: the-code-generator-adds-a-sums-constant-last
-description: LLVM's code generator moves the constant of a sum to the sum's last add, whatever order the source and the optimised IR give it. Each step of MD5 (`Md5F` to `Md5I` in `std/std.kz`) adds its constant t after the round's function, which puts one add more on the path from b to the next step than in OpenSSL's assembly, whose `lea` adds the constant off that path. A probe that hid the constants from LLVM took 46.80 ms where std's form took 51.79 (issue 157, 2026-11-03), and no order of the source changes where the constant lands
+description: LLVM's code generator moves the constant of a sum to the sum's last add, whatever order the source and the optimised IR give it. In MD5 (`Md5F` to `Md5I` in `std/std.kz`) that added each step's constant t after the round's function, one add more on the path from b to the next step than in OpenSSL's assembly, whose `lea` adds the constant off that path, and no order of the source moved it (51.79 ms). A value LLVM cannot see through, passed at the call, keeps the constant off that path: with `Hint.BlackBox(t)` at each of `Md5Block`'s 64 calls MD5 took 42.55 ms against 51.78 (issue 157, 2026-11-03, the best of 15), while the same hint inside `Md5F` to `Md5I` leaves the add last
 metadata:
   type: reference
 ---
@@ -65,11 +65,27 @@ The owner was not asked.
   not in the IR: the IR adds it first. The same holds for an option of clang
   ([[a-front-end-option-of-clang-does-not-reach-ir]]). `judgment step`: no job runs a benchmark or
   reads the machine code of std.
-- Use an opaque value to keep a constant off the path. The clean way is a value the optimiser
-  cannot see through: in Kurz `Hint.BlackBox(t)` (F18), Rust's `core::hint::black_box`, which the
-  owner chose on 2026-11-03 after this probe (issue 157), and in C an empty `asm` barrier. With it
-  at each of MD5's 64 constants, MD5 took 42.60 ms where std's form took 51.78 (issue 157, the best
-  of 15). `judgment step`.
+- Use an opaque value to keep a constant off the path, and pass it at the call, not inside the
+  helper. The clean way is a value the optimiser cannot see through: in Kurz `Hint.BlackBox(t)`
+  (F18), Rust's `core::hint::black_box`, which the owner chose on 2026-11-03 after this probe
+  (issue 157), and in C an empty `asm` barrier. `Md5Block` in `std/std.kz` hands each of MD5's 64
+  constants to its step through `Hint.BlackBox` in the call. Its machine code then adds the constant
+  to a and m before the round's function, as OpenSSL's `lea` does: and, xor, add, rol and add, 5
+  operations on the path from b, against 6 before. With the same hint inside `Md5F` to `Md5I`, the
+  optimised IR adds the value read back last, after the round's function, and the machine code keeps
+  the 6 operations. `judgment step`: no job reads the machine code of std.
+- What the hint at the call gives, in one run of the bytes bench of issue 157 on 2026-11-03: each
+  program hashes 16 MiB three times, the best of 15 rounds, built with clang 23.1.4 at `-O2`. The
+  three builds print the same digests.
+
+  | Build | MD5 | SHA-256 |
+  |---|---|---|
+  | std before the change | 51.78 ms | 19.15 ms |
+  | the same build again, the noise band | 51.75 ms | 18.87 ms |
+  | `Hint.BlackBox(t)` at each of `Md5Block`'s calls | 42.55 ms | 19.14 ms |
+
+  .NET took 44.57 ms in the run of the probe above. SHA-256 shares no code with MD5, and stays
+  within the noise band.
 - Whether std may hide a constant behind a value of the program that LLVM cannot know, such as a
   word of the state or a count, is open. Its correctness rests on the program's state, and its
   speed on what LLVM happens not to see. It was not taken for #258 (above), and the owner has not
