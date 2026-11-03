@@ -314,8 +314,13 @@ call picks when more than one fits is F13. *(proposed: what "differ" is, and the
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
-folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14) (C# also takes `default` and `new S()` for a value type `S`, which the record does not
-name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, as C# takes
+`new S()` for a value type, while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
+one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
+default, and an instance of a class being no such value)* (C# also takes `default`, which the record
+does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
 
@@ -340,6 +345,22 @@ void Greet(string name, string word = Pick()) {
 }
 
 Greet("Ann")
+```
+
+Case: [functions/default-data-of-constants.kz](../corpus/functions/default-data-of-constants.kz)
+```kurz
+data Rate(int BytesPerSecond, duration Grace)
+
+data Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s))
+
+int PerSecond(Rate r = Rate(BytesPerSecond: 1, Grace: 1s)) => r.BytesPerSecond
+
+a = Limits()
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.Grace}")
+b = Limits(MaxLine: 1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.Grace}")
+print(PerSecond())
+print(PerSecond(Rate(7, 2s)))
 ```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
