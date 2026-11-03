@@ -886,14 +886,17 @@ if args.Count == 0 {
 
 ### F18 (decided, §12) `Hint.BlackBox`
 
-`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)`, as
-Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "Any value,
-as Rust's"). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`.
-Every program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
-the call, as best effort, the way Rust's does, with no promise of constant time (§12, the owner,
-2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments are refused, as
-`string.Join` refuses them, and a member of `Hint` other than `BlackBox` is `unknown-name` (V10), as
-a function `Sha256` lacks is)*
+`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)` with
+`T` inferred from the argument, as Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03,
+"`Hint.BlackBox(x)`" and "Any value, as Rust's"). An argument with no type of its own is refused as
+for any generic function: `Hint.BlackBox([])` is `cannot-infer` (M11, T27), and `Hint.BlackBox(null)`
+is `type-mismatch` (N6). A call with another count of arguments than one is `argument-mismatch`
+(D11). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`. Every
+program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and
+makes the argument before the call, as best effort, the way Rust's does, with no promise of constant
+time (§12, the owner, 2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments
+are refused with `syntax` (E4), as `string.Join` refuses them, and a member of `Hint` other than
+`BlackBox` is `unknown-name` (V10), as a function `Sha256` lacks is)*
 
 No case for what the optimiser sees: a case sees only the value the call gives back.
 
@@ -925,5 +928,29 @@ print(1)
 Case: [functions/black-box-unknown-member.kz](../corpus/functions/black-box-unknown-member.kz)
 ```kurz
 x = Hint.Opaque(1)
+print(x)
+```
+
+Case: [functions/black-box-type-arguments.kz](../corpus/functions/black-box-type-arguments.kz)
+```kurz
+x = Hint.BlackBox<int>(1)
+print(x)
+```
+
+Case: [functions/black-box-two-arguments.kz](../corpus/functions/black-box-two-arguments.kz)
+```kurz
+x = Hint.BlackBox(1, 2)
+print(x)
+```
+
+Case: [functions/black-box-empty-list.kz](../corpus/functions/black-box-empty-list.kz)
+```kurz
+x = Hint.BlackBox([])
+print(x)
+```
+
+Case: [functions/black-box-null.kz](../corpus/functions/black-box-null.kz)
+```kurz
+x = Hint.BlackBox(null)
 print(x)
 ```
