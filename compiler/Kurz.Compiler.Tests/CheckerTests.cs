@@ -4381,7 +4381,7 @@ public sealed class CheckerTests
     {
         // T34: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
         // value of its enum, in a `match`, a lambda and a hole, a copy passes its own constant on, overloads that hold a constant of one
-        // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name elsewhere (L18)
+        // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name where L18 makes it no word
         Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
             "void Twice<T, const Mode M = Mode.Plain>(T value) {\n    f = () => M\n    Say<M>(\"{value} {f()}\")\n}\n\nSay<Mode.Loud>(\"a\")\nTwice(1)\nTwice<string, Mode.Loud>(\"b\")\nTwice<bool>(true)\nprint(Color.Red)");
         Clean(Modes + "void Pick<const Mode M>() {\n    print(M)\n}\n\nvoid Pick<const Mode M>(int x) {\n    print(x)\n}\n\nPick<Mode.Plain>()\nPick<Mode.Loud>(1)");

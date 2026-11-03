@@ -862,8 +862,9 @@ public sealed class ParserTests
     [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
     public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
     {
-        // T34: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
-        // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
+        // T34: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type, as it is
+        // before `assert(` (T35) and among the words of an `asm`, and a name elsewhere, as `thread` is a word before `static` alone (L18),
+        // so a type parameter named `const` and a variable stand; the
         // call writes the constant among its type arguments; the order of a default is the checker's
         Assert.Equal(tree, Tree(program));
     }
