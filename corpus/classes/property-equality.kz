@@ -1,0 +1,20 @@
+// expect: output
+// | true
+// | false
+// | read
+// | 1
+// rules: K7
+
+class Point(int X) {
+    pub int Loud => Say()
+
+    int Say() {
+        print("read")
+        return X
+    }
+}
+
+// a property is no field: equality compares the fields alone (K4), and runs no property, which would print
+print(Point(1) == Point(1))
+print(Point(1) == Point(2))
+print(Point(1).Loud)

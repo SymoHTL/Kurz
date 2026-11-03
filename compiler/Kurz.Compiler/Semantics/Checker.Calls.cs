@@ -122,9 +122,22 @@ public sealed partial class Checker
                         return CallValue(value.Type, c);
                     }
 
-                    if (ImplicitMethods(n.Name) is { } methods)
+                    if (ImplicitMethods(n.Name) is { } methods && methods.Find(f => f.IsProperty) is { } property && !InStaticMember())
                     {
-                        return CallImplicitMethod(methods, n, c, expected); // K7: a method of `this`
+                        var read = ReadImplicitProperty(n, property);
+                        if (read.IsError)
+                        {
+                            CheckArgumentsLoosely(c);
+                            return Typed.Error;
+                        }
+
+                        model.RecordType(n, read);
+                        return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
+                    }
+
+                    if (ImplicitMethods(n.Name) is { } named)
+                    {
+                        return CallImplicitMethod(named, n, c, expected); // K7: a method of `this`
                     }
 
                     if (ImplicitField(n.Name) is { } implicitField)
@@ -1785,6 +1798,12 @@ public sealed partial class Checker
         }
 
         var (variable, captured) = Lookup(name.Name);
+        if (variable is null && ImplicitProperty(name.Name))
+        {
+            PropertyReceiver(name.Name, line, what); // K7: a property named alone, or the root of the path
+            return;
+        }
+
         if (variable is null || Types.IsError(variable.Type))
         {
             return; // reported where the receiver was read
@@ -2958,6 +2977,13 @@ public sealed partial class Checker
             }
 
             paths.Add(name.Name);
+            return;
+        }
+
+        if (variable is null && ImplicitProperty(name.Name))
+        {
+            // K7: a property named alone, or the root of a path, is a call's value and no place (the trap of a name without a variable)
+            Report(ErrorIds.MutAtCall, a.Line, $"`{name.Name}` is a property, whose value is no place: after `mut` stands a `mut` variable or a path from one (M7, K7)");
             return;
         }
 
