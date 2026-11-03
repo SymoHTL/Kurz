@@ -1,6 +1,6 @@
 ---
 name: a-limit-that-refuses-the-call-under-test-cannot-tell-two-orders-apart
-description: A test of the order in which `Reallocate` takes a kept block and the target's `Resize` (pull request 158) ran under a limit on the bytes the system gives; its first form refused `Resize` past the limit too, and a refused `Resize` sends `Reallocate` to the allocation entry, which takes the kept block, so the order that asks `Resize` first passed under it as well (caught before the push, 2026-11-01). A limit counts the call whose place in the order is under test and refuses only the calls after it
+description: A test of the order in which `Reallocate` takes a kept block and the target's `Resize` (pull request 158) ran under a limit on the bytes the system gives; its first form refused `Resize` past the limit too, and a refused `Resize` sends `Reallocate` to the allocation entry, which takes the kept block, so the order that asks `Resize` first passed under it as well (caught before the push, 2026-11-01). A limit counts the call whose place in the order is under test and refuses only what comes after both calls
 metadata:
   type: feedback
 ---
@@ -27,6 +27,9 @@ mutation was seen to pass before the push, and `Taking` was fixed then: it count
 - Before a test of the order of two calls runs under a limit or a fault, ask what each order does
   when the limit refuses each call. A refused call that falls through to the other one makes the two
   orders end in the same place, and the test passes for both.
-- Count the call whose place in the order is under test, and refuse only what comes after both.
+- Count the call whose place in the order is under test, and refuse only what comes after both
+  calls. The test holds the count to the limit: `Taking` adds up the bytes of every `Memory` and of
+  every growth by `Resize`, and the order under test keeps that sum within 24 MiB on Linux, where the
+  other order goes past it in its second round.
 - The mutation that swaps the order is run under the test and seen red, as every decision is
   (`CLAUDE.md`, "Tests: every decision is proven"); here it was the run that found the defect.
