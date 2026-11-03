@@ -1,0 +1,19 @@
+// expect: output
+// | example.com
+// | none
+// | [a=1, b=2]
+// | [c=3]
+// | gone
+// rules: W4
+
+h = HttpHeaders()
+h.Add("Host", "example.com")
+h.Add("Set-Cookie", "a=1")
+h.Add("set-cookie", "b=2")
+print(h.Get("HOST") ?? "none")
+print(h.Get("Accept") ?? "none")
+print(h.GetAll("SET-COOKIE"))
+h.Set("Set-Cookie", "c=3")
+print(h.GetAll("set-cookie"))
+h.Remove("host")
+print(h.Get("Host") ?? "gone")
