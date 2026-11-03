@@ -1245,7 +1245,11 @@ as at any construction. Passing a type argument grants its reading, whatever pac
 type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
 declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
-"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
+type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
+a generic function lists every outcome any of its copies can give, and a copy that gives one its
+function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
+2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1259,8 +1263,10 @@ the call that made the copy is the compile error `kind-not-read`, which names th
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
 error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
 that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
-the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
-same error)* A generic function that reads its type, and one that passes its type parameter to such
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
+same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
+argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
+fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
@@ -1324,6 +1330,47 @@ Case: [types/type-make.kz](../corpus/types/type-make.kz)
 data Point(int X, int Y)
 
 T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())
+```
+
+Case: [types/type-make-get.kz](../corpus/types/type-make-get.kz)
+```kurz
+data Order(string Id, int Count)
+data Label(string Name, string Tag)
+data Empty
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+T Names<T>() => T.Make(f => "{f.Name}!")
+
+T Lazy<T>() => T.Make(f => (() => f.Name)())
+
+void Twin<T>(T value) {
+    for g in T.Fields {
+        print("{g.Name}: {T.Make(f => f.Get(value))}")
+    }
+}
+
+print(Remake(Order("a1", 3)))
+print(Remake(Empty))
+print(Names<Label>())
+print(Lazy<Label>())
+Twin(Order("b2", 4))
+```
+
+Case: [types/type-make-kind-not-read.kz](../corpus/types/type-make-kind-not-read.kz)
+```kurz
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<int>())
+```
+
+Case: [types/type-make-form.kz](../corpus/types/type-make-form.kz)
+```kurz
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make((int f) => 0)
 
 print(Zero<Point>())
 ```
@@ -1437,6 +1484,96 @@ void Show<T>(T value, Invoice other) {
 }
 
 Show(Order("a1"), Invoice("b2"))
+```
+
+### T34 (decided, §4) A cycle of generic calls whose type argument grows
+
+A generic function becomes one copy of its code for each list of type arguments it is called with
+(§4). A call in a generic function's body whose type argument holds a type parameter of that
+function inside a list, as `[x]`, a `List<T>` for `T`, makes a copy for a larger type than the copy
+it stands in. Where such a call lies on a cycle of calls among generic
+functions, directly or through others, so that the type argument comes back to the type parameter
+it grew from, each copy makes a larger one without end, and the call is the compile error
+`growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a
+type parameter unchanged, swaps two of them, or gives one to a function that takes it back out of
+a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
+refused where it is written, whether or not a call reaches it. A generic function that reads its
+type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
+none of its calls is read for such a cycle, and a chain of more than 64 copies stays
+`not supported`. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+the calling function inside any other form of a type, a map, a `data` type and a function type
+among them, and not where it is a case of a union, which holds each case once, so that a
+`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
+as one of the body)*
+
+Case: [types/generic-growing-cycle.kz](../corpus/types/generic-growing-cycle.kz)
+```kurz
+void Deep<T>(T x, int n) {
+    if n > 0 {
+        Deep([x], n - 1)
+    }
+}
+
+Deep(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-through.kz](../corpus/types/generic-growing-cycle-through.kz)
+```kurz
+void Ping<T>(T x, int n) {
+    if n > 0 {
+        Pong([x], n - 1)
+    }
+}
+
+void Pong<U>(U y, int n) {
+    Ping(y, n)
+}
+
+Ping(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-no-cycle.kz](../corpus/types/generic-growing-no-cycle.kz)
+```kurz
+void Same<T>(T x, int n) {
+    if n > 0 {
+        Same(x, n - 1)
+    }
+}
+
+void Swap<A, B>(A a, B b, int n) {
+    if n > 0 {
+        Swap(b, a, n - 1)
+    }
+}
+
+void Widen<T>(T x, int n) {
+    if n > 0 {
+        T | string y = x
+        Widen(y, n - 1)
+    }
+}
+
+void Down<T>(T x, int n) {
+    if n > 0 {
+        Up([x], n - 1)
+    }
+}
+
+void Up<U>(List<U> ys, int n) {
+    Down(ys[0], n)
+}
+
+List<T> Wrap<T>(T x) => [x]
+
+Same(1, 3)
+Swap(1, "a", 3)
+Widen(1, 3)
+Down(1, 3)
+print(Wrap(Wrap(1)).Count)
+print("done")
 ```
 
 ### T18 (assumed, §4) Operators
