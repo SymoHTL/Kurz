@@ -1,0 +1,9 @@
+// expect: error constant-overflow at 5
+// rules: K20
+
+class Size {
+    pub static int Big = Half * 4
+    pub static int Half = 1073741824
+}
+
+print(Size.Big)

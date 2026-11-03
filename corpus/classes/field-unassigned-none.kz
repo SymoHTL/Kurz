@@ -1,0 +1,10 @@
+// expect: error field-unassigned at 5
+// rules: K14
+
+class Tally {
+    mut int count
+
+    pub int Count() => count
+}
+
+print(Tally().Count())

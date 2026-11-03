@@ -1,0 +1,8 @@
+// expect: error static-cycle at 5
+// rules: K20
+
+class Counter {
+    pub static int Start = Start + 1
+}
+
+print(Counter.Start)
