@@ -2198,6 +2198,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("h = HttpHeaders()"));
     }
 
+    [Fact]
+    public void A_class_of_the_file_may_hold_a_class_of_std_in_its_fields()
+    {
+        // R2 with W1: the cycle rule walks the fields of the file's classes, and a class of std/ the prelude names is no class of the
+        // file: a field that holds one, `mut` or not, in a list or a nullable type, is no ring, and the walk passes over it
+        var (diagnostics, _) = CheckSeeingStd("class Message(mut HttpHeaders Headers, List<HttpHeaders> Parts, HttpHeaders? Trailer)\n\nm = Message(HttpHeaders(), List<HttpHeaders>(), null)\nprint(m.Headers.Get(\"Host\") ?? \"none\")\n");
+        Assert.Empty(diagnostics.Items);
+
+        // the positive control: a ring of the file's own classes beside such a field is still one
+        var (ring, _) = CheckSeeingStd("class Node(mut HttpHeaders Headers, mut Node? Next)\n\nprint(Node(HttpHeaders(), null).Next == null)\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], ring.Items.Select(d => (d.Id, d.Line)));
+    }
+
     [Theory]
     [InlineData("h = HttpHeaders()\nprint(h.names)\n", "a field is visible outside it with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside it with `pub` (F9)")]
@@ -2206,6 +2219,25 @@ public sealed class CheckerTests
         // W1 with F9: the file sees the class, and a member std/ declares without `pub` stays inside it
         var error = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
         Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
+        Assert.EndsWith(end, error.Message);
+    }
+
+    [Theory]
+    [InlineData("h = HttpHeaders()\nprint(h.names.Count)\n", "a field is visible outside that folder with `pub` (F9)")]
+    [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside that folder with `pub` (F9)")]
+    [InlineData("print(1)\nprint(HttpHeaders.Most)\n", "a field is visible outside that folder with `pub` (F9)")]
+    public void An_internal_member_of_a_class_of_std_is_visible_to_std_and_to_no_file(string program, string end)
+    {
+        // F9 with W1: a member std/ marks `internal`, a field, a `static` method and a `static` field, is visible to std/'s own files, here
+        // a class beside HttpHeaders that reads the fields and calls the method, which the edited std/ checks clean (Edited holds it to no
+        // error), and to no file of a program, which is another folder (the owner, 2026-11-03)
+        var runtime = ListTests.Edited(
+            ("std/std.kz", "    mut List<string> names = List<string>()", "    internal mut List<string> names = List<string>()"),
+            ("std/std.kz", "    static bool SameName(string a, string b)", "    internal static bool SameName(string a, string b)"),
+            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100"));
+        var error = Assert.Single(CheckSeeingStd(program, runtime).Diagnostics.Items);
+        Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
+        Assert.Contains("is `internal` to the folder that declares its class", error.Message);
         Assert.EndsWith(end, error.Message);
     }
 
@@ -3360,6 +3392,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nf = () => c.count\nprint(f())"));
         var (called, _) = Check("class C {\n    () => int f = () => 1\n}\n\nc = C()\nprint(c.f())"); // R9 leaves the field's type unread
         Assert.Contains(called.Items, d => d.Id == ErrorIds.NotVisible && d.Line == 6);
+        // F9: a member marked `internal`, a field, a method, a `static` field and a `static` method, is visible to the files of its folder
+        // (the owner, 2026-11-03), so its own file reads, assigns and calls it from outside the class; before a function at the top
+        // `internal` says what no modifier says (assumed, section 8); the same members without it are the class's own, the control
+        const string folder = "class Counter {\n    internal mut int count = 0\n    internal static int Start = 5\n\n    internal void Add() {\n        count = count + 1\n    }\n\n    internal static int Twice(int n) => n * 2\n}\n\ninternal int Three() => 3\n\nc = Counter()\nc.Add()\nc.count = 4\nprint(c.count)\nprint(Counter.Start)\nprint(Counter.Twice(Three()))";
+        Clean(folder);
+        Clean("internal class Box(int Side)\n\ninternal data Pair(int A)\n\nprint(Box(2).Side)\nprint(Pair(3).A)");
+        Assert.Equal([(ErrorIds.NotVisible, 15), (ErrorIds.NotVisible, 16), (ErrorIds.NotVisible, 17), (ErrorIds.NotVisible, 18), (ErrorIds.NotVisible, 19)],
+            Errors(folder.Replace("internal ", "")));
         // K1, K14: a field of the body without `mut` is assigned by nothing, from a method or from outside, and changed by no `mut` method (M5)
         Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors("class C(int V) {\n    int a = 1\n\n    pub void Set() {\n        a = 2\n    }\n}\n\nC(1).Set()"));
         Assert.Equal([(ErrorIds.AssignImmutable, 7)], Errors("class C {\n    pub int n = 3\n}\n\nc = C()\nprint(c.n)\nc.n = 4"));
