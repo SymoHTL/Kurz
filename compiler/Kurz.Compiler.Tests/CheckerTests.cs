@@ -568,7 +568,17 @@ public sealed class CheckerTests
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Make<T>() => Make<T>()\n\nprint(Make())").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
-        Assert.Equal(notInferable + " (T27)", Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(nothing))").Diagnostics.Items.Single(d => d.Id == ErrorIds.CannotInfer).Message); // an argument with an error of its own is named by none
+        // E1 with T27: an argument with an error of its own in a nested position, the `T` of a `List<T>`, gives `T` nothing and its own error
+        // stands alone, as in a direct one; a result that does not name `T` stays, one that does reports nothing more (assumed, #156, comment
+        // 6597085653); `T` that another argument fails to give a type is still `cannot-infer`
+        var count = "int Count<T>(List<T> xs) => xs.Count\n\nint One(int a) => 1\n\n";
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "print(Count(nothing))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(count + "print(Count(null))"));
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors(count + "print(Count(One))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "int n = Count(nothing)\nprint(n + 1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("T First<T>(List<T> xs) => xs[0]\n\nx = First(nothing)\nprint(x.Length)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("T? Opt<T>(T? x) => x\n\nprint(Opt(null))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 3), (ErrorIds.UnknownName, 3)], Errors("int Two<T, U>(List<T> a, U b) => 1\n\nprint(Two(5, nothing))"));
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("T Pick<T>(T a, T b) => a\n\nprint(Pick<int, int>(1, 2))"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair<int> p = Pair(1, \"one\")\nprint(p.First)"));
