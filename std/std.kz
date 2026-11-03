@@ -6443,14 +6443,11 @@ string HttpHex(long n) {
     }
 }
 
-// The reason phrase of a status, as the IANA registry of status codes names it, hyper's `canonical_reason` naming the same codes;
-// empty for a status the registry does not name, `306` and `418` among them, which it holds as unused.
+// The reason phrase of a status, RFC 9110's, and RFC 6585's for `428`, `429`, `431` and `511`, empty for a status neither names.
 string HttpReason(int status) {
     match status {
         100 => return "Continue"
         101 => return "Switching Protocols"
-        102 => return "Processing"
-        103 => return "Early Hints"
         200 => return "OK"
         201 => return "Created"
         202 => return "Accepted"
@@ -6458,9 +6455,6 @@ string HttpReason(int status) {
         204 => return "No Content"
         205 => return "Reset Content"
         206 => return "Partial Content"
-        207 => return "Multi-Status"
-        208 => return "Already Reported"
-        226 => return "IM Used"
         300 => return "Multiple Choices"
         301 => return "Moved Permanently"
         302 => return "Found"
@@ -6489,24 +6483,16 @@ string HttpReason(int status) {
         417 => return "Expectation Failed"
         421 => return "Misdirected Request"
         422 => return "Unprocessable Content"
-        423 => return "Locked"
-        424 => return "Failed Dependency"
-        425 => return "Too Early"
         426 => return "Upgrade Required"
         428 => return "Precondition Required"
         429 => return "Too Many Requests"
         431 => return "Request Header Fields Too Large"
-        451 => return "Unavailable For Legal Reasons"
         500 => return "Internal Server Error"
         501 => return "Not Implemented"
         502 => return "Bad Gateway"
         503 => return "Service Unavailable"
         504 => return "Gateway Timeout"
         505 => return "HTTP Version Not Supported"
-        506 => return "Variant Also Negotiates"
-        507 => return "Insufficient Storage"
-        508 => return "Loop Detected"
-        510 => return "Not Extended"
         511 => return "Network Authentication Required"
         else => return ""
     }

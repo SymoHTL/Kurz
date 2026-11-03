@@ -810,3 +810,306 @@ All() else {
     IoError e => print(e)
 }
 ```
+
+### W8 (decided, §12) Writing a response
+
+A response is made by a function for each kind of body, `HttpResponse.Text(200, "hi")`,
+`HttpResponse.Bytes(200, b)`, `HttpResponse.File(200, path)` and `HttpResponse.Empty(204)`, and the
+rest is set through `response.Headers` (W4) (§12, the owner, 2026-11-01, Q1 (a)). Each sets the
+`Content-Type` ASP.NET Core's `Results` sets, `text/plain; charset=utf-8` for `Text`,
+`application/octet-stream` for `Bytes` and `File`, and none for `Empty`, which a handler replaces with
+`Set` (§12, the owner, 2026-11-03). A status outside 100 to 599 stops the program with a run-time
+error (§12, the owner, 2026-11-02, Q5). `response.Write(stream)` writes the status line, the headers
+and the `Content-Length` of the body, which a `File` takes from its size when it is written, and then
+the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
+body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date` or `Connection`,
+which the server's loop adds (§12, assumed). A `1xx`, a `204` and a `304` get no body (§12, assumed),
+and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14). A response
+`Write` cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered
+`500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
+owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
+added as its last coding where it does not end in it, and the body is chunked, a coding it names
+being announced and not applied; beside a `Content-Length` it gets no answer (§12, the owner,
+2026-11-03). A status RFC 9110 and RFC 6585 name no reason phrase for is written with an empty one
+(§12, assumed). In a build for Windows `Write` and `WriteHead` are `not supported` at the line of the
+program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
+headers written in the order they were set, the `Content-Type` first, and the `Content-Length` of
+the body after them where the handler set none; a handler's `Content-Length` contradicted when it is
+no number or another number than the body's length; no `Content-Length` for a `1xx`; a file whose
+size cannot be read answered with that `500`, `Write` giving the `IoError` of the read; a
+`Transfer-Encoding` beside a `Content-Length` giving an `IoError` of the kind `InvalidInput`, nothing
+written; and a file whose size changes while it is sent giving one of the kind `InvalidData`)*
+
+Case: [http/response-write.kz](../corpus/http/response-write.kz)
+```kurz
+// a response is written as its status line, its headers in the order they were set, the `Content-Length` of its body and the
+// body; each function that makes one sets the `Content-Type` ASP.NET Core's `Results` sets, which a handler replaces with `Set`
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Text(200, "hi"))
+    Wire(HttpResponse.Bytes(404, "ab".Bytes))
+    File.WriteAll("response-write.txt", "file body".Bytes)
+    Wire(HttpResponse.File(201, "response-write.txt"))
+    File.Delete("response-write.txt")
+    Wire(HttpResponse.Empty(202))
+    html = HttpResponse.Text(200, "<p/>")
+    html.Headers.Set("Content-Type", "text/html")
+    html.Headers.Add("X-Id", "7")
+    Wire(html)
+    Wire(HttpResponse.Empty(299))
+    print(HttpResponse.Empty(301).Status)
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
+
+Case: [http/response-head.kz](../corpus/http/response-head.kz)
+```kurz
+// `WriteHead` writes the head alone, with the `Content-Length` the body would have, the answer to a `HEAD`
+void | IoError Head(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.WriteHead(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError All() {
+    Head(HttpResponse.Text(200, "hello"))
+    File.WriteAll("response-head.txt", "file body".Bytes)
+    Head(HttpResponse.File(200, "response-head.txt"))
+    File.Delete("response-head.txt")
+}
+
+All() else {
+    IoError e => print(e)
+}
+```
+
+Case: [http/response-bodiless.kz](../corpus/http/response-bodiless.kz)
+```kurz
+// a `1xx`, a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
+// says `Content-Length: 0`
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Empty(204))
+    Wire(HttpResponse.Text(304, "dropped"))
+    Wire(HttpResponse.Empty(100))
+    Wire(HttpResponse.Empty(205))
+    coded = HttpResponse.Text(204, "dropped")
+    coded.Headers.Set("Transfer-Encoding", "gzip")
+    Wire(coded)
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
+
+Case: [http/response-unwritable.kz](../corpus/http/response-unwritable.kz)
+```kurz
+// a response the writer cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered `500` with no
+// body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
+// failure
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server) else {
+        IoError e => print(e)
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Text(205, "x"))
+    cut = HttpResponse.Text(200, "hello")
+    cut.Headers.Set("Content-Length", "4")
+    Wire(cut)
+    words = HttpResponse.Text(200, "hello")
+    words.Headers.Set("Content-Length", "five")
+    Wire(words)
+    same = HttpResponse.Text(200, "hello")
+    same.Headers.Set("Content-Length", " 5")
+    Wire(same)
+    Wire(HttpResponse.File(200, "response-unwritable.txt"))
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
+
+Case: [http/response-transfer-encoding.kz](../corpus/http/response-transfer-encoding.kz)
+```kurz
+// a `Transfer-Encoding` the handler sets is kept as it set it, `chunked` added as its last coding unless it is, and the body is
+// chunked, a coding it names being announced and not applied; beside a `Content-Length` it is a response that gets no answer
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server) else {
+        IoError e => print(e.Kind)
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    shown = text.Replace("\r\n", "|")
+    print("[{shown}]")
+}
+
+void | IoError | HttpError All() {
+    gzip = HttpResponse.Text(200, "hello")
+    gzip.Headers.Set("Transfer-Encoding", "gzip")
+    Wire(gzip)
+    empty = HttpResponse.Text(200, "")
+    empty.Headers.Set("Transfer-Encoding", "Chunked")
+    Wire(empty)
+    both = HttpResponse.Text(200, "hello")
+    both.Headers.Set("Transfer-Encoding", "chunked")
+    both.Headers.Set("Content-Length", "5")
+    Wire(both)
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
+
+Case: [http/response-large.kz](../corpus/http/response-large.kz)
+```kurz
+// a body over 64 KiB goes out whole, and a file in pieces of 64 KiB, each a chunk where the body is chunked; the wire is printed
+// with each CR LF as `|` and each run of the byte `z` as its length in brackets
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    mut shown = Bytes()
+    mut run = 0
+    for b in got {
+        if b == 122 {
+            run = run + 1
+            continue
+        }
+
+        if run > 0 {
+            shown.AddRange("[{run}]".Bytes)
+            run = 0
+        }
+
+        shown.Add(b)
+    }
+
+    if run > 0 {
+        shown.AddRange("[{run}]".Bytes)
+    }
+
+    text = string.FromUtf8(shown) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+Bytes Repeated(byte value, int count) {
+    mut b = Bytes()
+    while b.Count < count {
+        b.Add(value)
+    }
+
+    return b
+}
+
+void | IoError | HttpError All() {
+    body = Repeated(122, 70000)
+    text = string.FromUtf8(body) else {
+        InvalidUtf8 => ""
+    }
+
+    Wire(HttpResponse.Text(200, text))
+    chunked = HttpResponse.Text(200, text)
+    chunked.Headers.Set("Transfer-Encoding", "chunked")
+    Wire(chunked)
+    File.WriteAll("response-large.txt", body)
+    Wire(HttpResponse.File(200, "response-large.txt"))
+    file = HttpResponse.File(200, "response-large.txt")
+    file.Headers.Set("Transfer-Encoding", "chunked")
+    Wire(file)
+    File.Delete("response-large.txt")
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
