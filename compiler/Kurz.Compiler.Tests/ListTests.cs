@@ -3772,10 +3772,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_Insert_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
         // X11, M9: as `Add`, with the limit of the largest `int` lowered to 3 in the library's text, so that a fourth `Insert` asks for
-        // 4 times the 16 bytes of a string
-        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nxs.Insert(0, \"b\")\nxs.Insert(1, \"c\")\nxs.Insert(1, \"d\")\nprint(xs)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["[b, d, c, a]"], ""); // the positive control
+        // 4 times the 16 bytes of a string; the count printed after each of the first three shows that the fourth is the one refused
+        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nprint(xs.Count)\nxs.Insert(0, \"b\")\nprint(xs.Count)\nxs.Insert(1, \"c\")\nprint(xs.Count)\nxs.Insert(1, \"d\")\nprint(xs)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, ["1", "2", "3"], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["1", "2", "3", "[b, d, c, a]"], ""); // the positive control
     }
 
     [Fact]

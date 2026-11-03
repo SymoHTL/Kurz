@@ -859,15 +859,25 @@ xs.AddRange([2])
 print(xs)
 ```
 
+### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
+
+The position of the cut stands on the line below the error line, where the text of a `throw` stands
+(O6): `error: not-char-boundary at a.kz:5:`, then `byte 2 is inside a code point` (§12, the owner,
+2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
+*(assumed, §12)*.
+
+No case: a case pins the id and the line of the error (E3), and no case reads the lines below it.
+
 ### X11 (decided, §12) Inserting and removing an item
 
 `xs.Insert(index, item)` puts `item` at the position `index` and moves the items from there one place on,
 and `xs.RemoveAt(index)` takes the item at `index` out of the list, moves the items after it one place
 back and gives the item, as C#'s `List.Insert` and `List.RemoveAt` name them and as Rust's `Vec::insert`
-and `Vec::remove` give it; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
+and `Vec::remove` work; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
 "C# names, RemoveAt gives item"). The item `RemoveAt` gives may be dropped, as the map's `Remove` gives
 one (M9), and both take the list through a `mut` variable (M5) *(assumed, §12)*. Their parameters are
-named `index` and `item`, and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
+`int index` and `item`, as C#'s are, an index of another type widened or refused as for any `int`
+parameter (T7), and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
 
 Case: [strings/list-insert-remove-at.kz](../corpus/strings/list-insert-remove-at.kz)
 ```kurz
@@ -913,9 +923,24 @@ print(zs)
 
 An index outside the list raises `index-out-of-range`, as a list's index does (M9; §12, the same answer):
 for `Insert` an index below 0 or past `Count`, for `RemoveAt` an index below 0 or at `Count` or past it
-*(assumed, §12: below 0, as C# throws and Rust panics there)*. The index is read before the list is copied
-or grows, so that the list stays as it was, and an `Insert` past the largest `int` of items raises
-`allocation-failed`, as `Add` does (M9) *(assumed, §12)*.
+*(assumed, §12: below 0, and `Count` for `RemoveAt`, as C# throws and Rust panics there)*. The arguments
+are read in the order written, as every call reads them (F12), and the index is then checked before the list
+is copied or grows, so that an `Insert` or a `RemoveAt` outside the list leaves it, and every value that
+shares its block, as it was, and an `Insert` past the largest `int` of items raises `allocation-failed`, as
+`Add` does (M9) *(assumed, §12)*.
+
+Case: [strings/list-insert-argument-order.kz](../corpus/strings/list-insert-argument-order.kz)
+```kurz
+string Item() {
+    print("item")
+    return "b"
+}
+
+mut xs = ["a"]
+// the arguments are read in the order written, and the index is checked after them
+xs.Insert(5, Item())
+print(xs)
+```
 
 Case: [strings/list-insert-below-zero.kz](../corpus/strings/list-insert-below-zero.kz)
 ```kurz
@@ -949,7 +974,7 @@ print(xs.RemoveAt(1))
 print(xs.RemoveAt(1))
 ```
 
-On a list no `mut` variable holds, each is `mut-required`, as `Add` is (M5).
+On a list no `mut` variable holds, each is `mut-required`, as `Add` is (M5) *(assumed, §12)*.
 
 Case: [strings/list-insert-without-mut.kz](../corpus/strings/list-insert-without-mut.kz)
 ```kurz
@@ -963,12 +988,3 @@ Case: [strings/list-remove-at-without-mut.kz](../corpus/strings/list-remove-at-w
 xs = [1]
 print(xs.RemoveAt(0))
 ```
-
-### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
-
-The position of the cut stands on the line below the error line, where the text of a `throw` stands
-(O6): `error: not-char-boundary at a.kz:5:`, then `byte 2 is inside a code point` (§12, the owner,
-2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
-*(assumed, §12)*.
-
-No case: a case pins the id and the line of the error (E3), and no case reads the lines below it.

@@ -655,7 +655,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type's name (D20);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
-  called with (T19, T27);
+  called with (T19, T27); a call in a generic function's body whose type argument holds a type
+  parameter of the function inside a form of a type other than a union, on a cycle of calls among
+  generic functions that gives it back to that type parameter, is `growing-type-argument` at that
+  call, read on the text of every generic function that reads no type, called or not, and of no
+  copy (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -967,7 +971,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   under a library that ends the process where an `Add` would grow one; a read and a write in
   the wrong direction; the modes under two masks; the close-on-exec flag the system shows; a directory
   created again and one under a file; the text of an error without a path; a `\r\n` split by the end of the buffer's read, a line
-  longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; an assignment to the file in the block of a
+  longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; a close in the block of a loop over its lines, which releases the
+  descriptor at once, as `F_GETFD` shows, and the pull after it, the system's error 9; an assignment to the file in the block of a
   loop over its lines; and the refusal for Windows, at a call and at such a loop;
 - the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first

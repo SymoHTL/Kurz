@@ -446,6 +446,35 @@ long big = 5
 Show(big)
 ```
 
+A call that does not fit the one function of its name is `type-mismatch` (T1), a value of one type
+where another is required, and not `argument-mismatch`, and so is a call whose argument is a call
+with a case the parameter's union does not list (O4) *(assumed, §5: as the outcomes chapter reads
+both)*.
+
+Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
+```kurz
+data NotFound
+
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
+Report(Find(1))
+```
+
 Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)
 ```kurz
 data NotFound
