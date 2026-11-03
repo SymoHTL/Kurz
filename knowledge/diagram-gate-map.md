@@ -161,8 +161,9 @@ flowchart TD
         what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
         BrokenPipe, and on a build for Windows that does not say not supported at a call on a file.
-        IntrinsicTests and HashTests, which run SSE4.1, AES and SHA, and the build for native AVX, are red on a machine
-        without them, naming the set, and IntrinsicTests holds the start check of a build for a named CPU against
+        IntrinsicTests and HashTests, which run SSE4.1, AES and SHA, the build for native AVX and the build for
+        x86-64-v3 its sets, are red on a machine without them, naming the set, IntrinsicTests is red where
+        fewer than 20 of the start check's sets read as present or none reads as missing, and IntrinsicTests holds the start check of a build for a named CPU against
         clang's native reading of the machine it runs on: the CPU of the hosted runners is pinned by nothing
         (HAZARD issue 168).
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run

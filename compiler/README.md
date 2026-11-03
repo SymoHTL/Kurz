@@ -1300,8 +1300,9 @@ before a SHA instruction in `raw` that no test guards, is not cleaned after. `In
 of a guarded block under the fenced allocator, every intrinsic against .NET's `System.Runtime.Intrinsics`
 on the same lanes, and the SHA-1 functions, which .NET does not have, by compressing a block of SHA-1.
 Those of its tests and of `HashTests` that run an instruction fail, naming the set, on a machine without
-SSE4.1, AES or SHA, and the one built for `native` without AVX, since a path no test runs must not look
-clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
+SSE4.1, AES or SHA, the one built for `native` without AVX, the one built for `x86-64-v3` without one of
+its sets, and the start check's against the machine where fewer than 20 of its table's sets read as
+present or none reads as missing, since a path no test runs must not look clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
 A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
 tables as the function's name; a lambda made in the block is named after the function the block
