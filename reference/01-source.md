@@ -603,7 +603,8 @@ use as syntax, and `extern`, which the boundary with C uses (§2, §13, R16, R17
 a word only before `static` in R13's declaration and a name everywhere else (§3, the owner,
 2026-10-21). `const` is a word only before the type of a type parameter that holds a constant (T34),
 beside the words of an `asm`, and a name everywhere else *(assumed, §4: as `thread` is before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
-2026-10-21).
+2026-10-21). `as` is a word of a `use` line alone, after the folder it renames (F10), and a name
+everywhere else *(assumed, §13)*.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
