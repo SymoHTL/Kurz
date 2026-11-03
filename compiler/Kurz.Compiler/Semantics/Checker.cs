@@ -1458,8 +1458,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
-    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
-    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default (D11), which
+    /// <c>CheckDefaults</c> holds to a constant where the field is declared, so that this walk reads no field's default:
+    /// <c>data H(List&lt;int&gt; Xs = [1])</c> is <c>default-not-constant</c> at the field, and <c>H()</c> is a constant. The emitter
+    /// makes it as it makes any construction, from those constants, at each call that leaves the argument out.
     /// </summary>
     private bool IsConstantData(Expression value) =>
         value is CallExpression c
