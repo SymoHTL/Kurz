@@ -22,11 +22,18 @@ public sealed partial class Emitter
     // each class whose instances are released: the helper that ends one, and its work list (the owner, 2026-11-01, "Iterative, never crashes")
     private readonly List<(string Drop, string List)> released = [];
 
-    /// <summary>K1: an instance with both counts at one and each field holding the argument bound to it or its default.</summary>
+    // each class whose body's defaults are queued for their function, with its name (K7)
+    private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
+
+    /// <summary>
+    /// K1, K7: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
+    /// default, then each field of the body its default, in their order, read in the class's file through the instance being built, as
+    /// C# runs a field's initializer before the constructor's body.
+    /// </summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
     {
         var symbol = ((ClassType)info.Target!).Symbol;
-        var fields = symbol.Fields.Select(f => f.Type).ToList();
+        var fields = symbol.Fields.Where(f => f.Body is null).Select(f => f.Type).ToList();
         var arguments = Arguments(c, info, j => fields[j], _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
         var block = layout.ClassBlock(symbol);
         var p = Allocate(block);
@@ -37,7 +44,62 @@ public sealed partial class Emitter
             fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, i)}");
         }
 
+        if (fields.Count < symbol.Fields.Count)
+        {
+            fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
+        }
+
         return p;
+    }
+
+    /// <summary>
+    /// K7: the function that gives each field of a class's body its default, in their order, through the instance it takes, queued
+    /// on first use and emitted once per class, which every construction calls, as C# runs the initializers in the constructor; a
+    /// default that builds an instance of its own class, or of a class whose default builds this one, calls it again, so the build
+    /// ends and the run recurses into <c>stack-overflow</c> (the owner, 2026-11-02, against a refusal of such a default).
+    /// </summary>
+    private string ClassDefaults(ClassSymbol symbol)
+    {
+        var key = $"{classOwners[symbol].Prefix}.{symbol.Name}.{Number(symbol.Declaration.Line)}";
+        if (!instances.TryGetValue(key, out var name))
+        {
+            name = $"@\"{key}\"";
+            instances[key] = name;
+            defaultsPending.Enqueue((symbol, name));
+        }
+
+        return name;
+    }
+
+    /// <summary>The function <see cref="ClassDefaults"/> names: a trace names its frame by the class, as the construction is written.</summary>
+    private void EmitClassDefaults(ClassSymbol symbol, string name)
+    {
+        var caller = unit;
+        unit = classOwners[symbol];
+        try
+        {
+            features = NoFeatures; // one function serves every construction, so what it calls is compiled for the CPU alone (R18)
+            Begin(new IrFunction($"internal void {name}(ptr %this)", FeatureAttributes(features)), NoMap, Types.Void);
+            Trace(symbol.Name, Symbol(name), symbol.Declaration.Line);
+            var self = fn.Alloca("ptr", "this");
+            fn.Emit($"store ptr %this, ptr {self}");
+            slots[Model.FieldsThisOf(symbol)] = self;
+            for (var i = symbol.Fields.Count(f => f.Body is null); i < symbol.Fields.Count; i++)
+            {
+                var field = symbol.Fields[i];
+                var d = field.Body!.Value!;
+                var index = i;
+                At(d.Line);
+                InRegion(() => fn.Emit($"store {Ir(field.Type)} {EmitDefault(unit, d, field.Type, owned: true)}, ptr {InstanceFieldPointer(symbol, "%this", index)}"));
+            }
+
+            fn.Return(null);
+            End();
+        }
+        finally
+        {
+            unit = caller;
+        }
     }
 
     /// <summary>The default written for the field of the primary constructor in the slot, and the file of the class.</summary>
@@ -53,6 +115,11 @@ public sealed partial class Emitter
     {
         var type = symbol.Fields[index].Type;
         var value = fn.Value($"load {Ir(type)}, ptr {InstanceFieldPointer(symbol, pointer, index)}");
+        if (type is WeakRefType weak)
+        {
+            return Upgrade(value, weak); // R3: a strong `T?`, held to the end of the statement
+        }
+
         if (Counted(type))
         {
             Retain(value, type);
@@ -166,11 +233,6 @@ public sealed partial class Emitter
     /// </summary>
     private string ReleaseInstance(ClassSymbol symbol) => Helper($"release.class.{symbol.Name}", "void", ["ptr"], () =>
     {
-        if (released.Count == 0)
-        {
-            module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
-        }
-
         var list = $"@\"pending.class.{symbol.Name}\"";
         module.Global($"{list} = internal thread_local global ptr null");
         released.Add((DropInstance(symbol), list));
@@ -192,6 +254,94 @@ public sealed partial class Emitter
         fn.Block(held);
         fn.Return(null);
     });
+
+    /// <summary>
+    /// R3: one more weak count of the block a <c>weak</c> reference points at, none for <c>null</c>, as Rust's <c>Weak::clone</c>
+    /// counts: the block stays while a weak reference to it is held, for the reference's read to find its strong count.
+    /// </summary>
+    private string RetainWeak() => Helper("retain.weak", "void", ["ptr"], () =>
+    {
+        var count = fn.Label("count");
+        var none = fn.Label("none");
+        fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), none, count);
+        fn.Block(count);
+        var weak = fn.Value("getelementptr i64, ptr %a0, i64 1");
+        fn.Emit($"store i64 {fn.Value($"add i64 {fn.Value($"load i64, ptr {weak}")}, 1")}, ptr {weak}");
+        fn.Return(null);
+        fn.Block(none);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// R3: one weak count less of the block of an instance of the class, none for <c>null</c>; the last frees the block, whose
+    /// instance was ended when its last strong count went, as Rust's <c>Weak</c> drops (section 3).
+    /// </summary>
+    private string ReleaseWeak(ClassSymbol symbol) => Helper($"release.weak.{symbol.Name}", "void", ["ptr"], () =>
+    {
+        var count = fn.Label("count");
+        var none = fn.Label("none");
+        fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), none, count);
+        fn.Block(count);
+        var block = layout.ClassBlock(symbol);
+        var weakCount = fn.Value($"getelementptr {block}, ptr %a0, i32 0, i32 1");
+        var weak = fn.Value($"sub i64 {fn.Value($"load i64, ptr {weakCount}")}, 1");
+        fn.Emit($"store i64 {weak}, ptr {weakCount}");
+        var free = fn.Label("free");
+        fn.CondBranch(fn.Value($"icmp eq i64 {weak}, 0"), free, none);
+        fn.Block(free);
+        var end = fn.Value($"getelementptr {block}, ptr null, i32 1");
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");
+        fn.Return(null);
+        fn.Block(none);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// R3: the read of a <c>weak</c> place, a strong <c>T?</c> that holds its target to the end of the statement (the owner,
+    /// 2026-11-01, "A strong T?, held"): one more strong count where the target lives, and <c>null</c> where the reference is
+    /// <c>null</c> or its target's strong count is 0, as Rust's <c>Weak::upgrade</c>. A target on its class's work list is never read
+    /// here: no code of the program runs while the lists are worked off (<see cref="EmitDrain"/>).
+    /// </summary>
+    private string Upgrade(string value, WeakRefType type) => Temp(Upgraded(value), Types.Read(type));
+
+    /// <summary>R3: the strong <c>T?</c> a <c>weak</c> reference reads as (<see cref="Upgrade"/>), whose count the caller holds.</summary>
+    private string Upgraded(string value)
+    {
+        var name = Helper("upgrade.instance", "ptr", ["ptr"], () =>
+        {
+            var load = fn.Label("load");
+            var none = fn.Label("none");
+            fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), none, load);
+            fn.Block(load);
+            var strong = fn.Value("load i64, ptr %a0");
+            var live = fn.Label("live");
+            fn.CondBranch(fn.Value($"icmp eq i64 {strong}, 0"), none, live);
+            fn.Block(live);
+            fn.Emit($"store i64 {fn.Value($"add i64 {strong}, 1")}, ptr %a0");
+            fn.Return("ptr %a0");
+            fn.Block(none);
+            fn.Return("ptr null");
+        });
+        return fn.Value($"call ptr {name}(ptr {value})");
+    }
+
+    /// <summary>
+    /// R3: a <c>T</c>, a <c>T?</c> or <c>null</c> where a <c>weak T?</c> stands, with a weak count of its own. With
+    /// <paramref name="owned"/> the strong count the value came with goes back to the region, which lets go of it at the end of the
+    /// statement, so that a temporary target lives as long as R3 says, and the place holds the weak count; else the value is borrowed,
+    /// and the region lets go of the weak count, as a callee borrows its arguments for the call.
+    /// </summary>
+    private string Weaken(string value, KurzType from, WeakRefType to, bool owned)
+    {
+        if (from is NullType)
+        {
+            return "null";
+        }
+
+        fn.Emit($"call void {RetainWeak()}(ptr {value})");
+        Temp(value, owned ? from : to);
+        return value;
+    }
 
     /// <summary>
     /// The end of an instance whose last strong count was let go of: its fields let go of in their order, as Rust drops them, and then
@@ -230,6 +380,8 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitDrain()
     {
+        // declared here, once: the first class's release builds the releases of its fields' classes before it is in `released`
+        module.Global("@\"kz.releasing\" = internal thread_local global i1 false");
         fn = new IrFunction("internal void @\"kz.drain\"()");
         (regions, scopes) = ([], []);
         var progress = fn.Alloca("i1", "progress");

@@ -1,0 +1,10 @@
+// expect: output
+// | []
+// rules: O4
+
+List<T> Wide<T>(T | List<T> x) => List<T>()
+
+List<int> xs = [1, 2]
+// the list is read through the case of its shape, `List<T>`: `T` is `int`, and the result a `List<int>`
+List<int> ys = Wide(xs)
+print(ys)

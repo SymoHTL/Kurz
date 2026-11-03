@@ -344,6 +344,18 @@ Gate: review rule "rules for sessions".
   the walk counts) for the shapes those tests hold; a borrowing construct no program reaches, and a
   change the walk does not count: review rule "compiler".
 
+- **A module global the emitter declares is declared where its existence is decided once.** A
+  helper builds the helpers it calls inside its own body (`Helper` in `Emit/Emitter.Data.cs`), so a
+  global declared at its first use, on a test of state its builder changes only after that body,
+  is declared again by a builder nested in it, and clang refuses the module. The flag of a release
+  under way reached `main` so with pull request 181: declared with the first class release while
+  the list of released classes was still empty, it was declared twice for every program whose
+  first released class held a field of another class
+  ([knowledge/a-global-declared-on-first-use-is-declared-twice.md](knowledge/a-global-declared-on-first-use-is-declared-twice.md)).
+  Gate: `compiler-tests`
+  (`ListTests.The_first_class_a_program_releases_may_hold_a_field_of_another_class`) for that flag;
+  another global declared at its first use: review rule "compiler".
+
 - **The case tables are generated, never edited.** `compiler/Kurz.Compiler/Emit/CaseTables.cs` is what
   `tools/unicode_tables.py` writes from the Unicode Character Database of the version Rust's stable
   release pins, each of its three files fetched and checked by its SHA-256 (section 12 of the design
@@ -352,6 +364,19 @@ Gate: review rule "rules for sessions".
   ([knowledge/a-new-unicode-version-is-one-generator-run.md](knowledge/a-new-unicode-version-is-one-generator-run.md)).
   Gate: `unicode-tables`, which ends PARTLY, and so red, where a file cannot be fetched; that the tool's
   version is still the one Rust's stable release pins is read by nobody but a reader: HAZARD (#143).
+
+- **A check that lets a name without a variable pass reads what else the name can be.** Inside a
+  method a field of the instance stands by its name alone (K7), and no variable carries it, so a
+  check that returns on a name the lookup of variables does not find, because the name's own
+  reading reports one that is nothing, lets the field through unchecked; the emitter then finds no
+  variable for it. The `mut` argument reached `main` so with pull request 181: a field passed as
+  `mut` in its method was neither refused without `mut` nor given the field's place, and the build
+  ended in the compiler's own error, "the checker did not read the name"
+  ([knowledge/a-name-without-a-variable-may-be-a-field.md](knowledge/a-name-without-a-variable-may-be-a-field.md)).
+  Gate: `compiler-tests` (`CheckerTests.A_mut_parameter_takes_a_mut_variable_marked_mut_at_the_call`
+  for the refusals, `ListTests.A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place`
+  for the field's place) for the `mut` argument; another check that lets such a name pass: review
+  rule "compiler".
 
 ### A public repository
 

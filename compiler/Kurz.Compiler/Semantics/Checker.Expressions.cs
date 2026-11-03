@@ -54,6 +54,8 @@ public sealed partial class Checker
                 return new Typed(p, new NullConstant()); // R10: a pointer can be `null`
             case NullLiteral when expected is not null && Types.IsError(expected):
                 return Typed.Error; // the type it stands for was the error, which was reported (E1)
+            case NullLiteral when expected is WeakRefType:
+                return new Typed(Types.Null, new NullConstant()); // R3: a `weak T?` is nullable (R5)
             case NullLiteral when expected is not null && Types.NonNull(expected) is not null:
                 return new Typed(Types.Null, new NullConstant()); // N1: the value of a nullable type's case `null`, which the site makes a value of that type
             case NullLiteral n:
@@ -69,7 +71,11 @@ public sealed partial class Checker
             case MemberAccess m:
                 return CheckMember(m);
             case CallExpression c:
-                return CheckCall(c, expected, keepCases);
+                {
+                    var result = CheckCall(c, expected, keepCases);
+                    return result.Type is WeakRefType ? new Typed(Types.Read(result.Type)) : result; // R3: a `weak T?` result reads as a strong `T?`
+                }
+
             case IndexExpression i:
                 return CheckIndex(i);
             case ListLiteral l when expected is not null && Types.IsError(expected):
@@ -348,6 +354,10 @@ public sealed partial class Checker
                 {
                     Report(ErrorIds.Syntax, hole.Expression.Line, "a call with a `void` success used as a value (O10)");
                 }
+                else if (HoldsVector(t.Type))
+                {
+                    NotSupported(hole.Expression.Line, VectorText);
+                }
                 else if (!HasText(t.Type))
                 {
                     Report(ErrorIds.NoText, hole.Expression.Line, $"{Types.A(t.Type)} has no text to put into a string (A4, A7, A10)");
@@ -356,9 +366,13 @@ public sealed partial class Checker
                 {
                     // A9, A15: reported
                 }
+                else if (HoldsHttpError(t.Type))
+                {
+                    NotSupported(hole.Expression.Line, HttpErrorText);
+                }
                 else if (HoldsInstance(t.Type, []))
                 {
-                    EndChangeableNarrowing(); // N9: the text of an instance is its `Text()`, a call (A5)
+                    CallRan(); // N9: the text of an instance is its `Text()`, a call (A5)
                 }
                 else if (HoldsRaw(t.Type, []))
                 {
@@ -373,6 +387,12 @@ public sealed partial class Checker
 
         return new Typed(Types.String, text is null ? null : new StringConstant(text.ToString()));
     }
+
+    /// <summary>
+    /// W2: the text of an <c>HttpError</c>, where the checker takes it: section 12 gives it through a <c>Text()</c> in the body of the
+    /// <c>data</c> type, a body the checker does not read (D16), so <c>std/</c> declares none.
+    /// </summary>
+    private const string HttpErrorText = "the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)";
 
     /// <summary>A2 to A15: whether a value of the type has a text for <c>print</c> and an interpolation. The error type has one, so that nothing more is reported.</summary>
     private static bool HasText(KurzType type) => HasText(type, []);
@@ -392,6 +412,7 @@ public sealed partial class Checker
         UnionType u => u.Cases.All(c => HasText(c, seen)),
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         ClassType c => c.Symbol.TextMethod is not null, // A4, A5: an instance has the text its class declares, and none else
+        WeakRefType w => HasText(w.Target, seen), // A4 with R3: the text of what its read gives
         PointerType or CFunctionType => true, // its text is not read (HoldsRaw), and decides nothing here
         TypeParameterType p => seen.Any(s => s.TypeParameters.Contains(p.Symbol)), // a parameter of a data type whose fields are read: its argument is judged where the type is used
         _ => false, // a function value; a type parameter of a function, which has no limit the checker reads (A10)
@@ -425,6 +446,11 @@ public sealed partial class Checker
     private Typed CheckName(NameExpression n, KurzType? expected = null)
     {
         var (variable, _) = Lookup(n.Name);
+        if (variable is not null && passVariables.TryGetValue(variable, out var pass))
+        {
+            return FieldVariableAsValue(pass, n.Line); // T33: `f` of a loop over `T.Fields` is no value
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
@@ -436,7 +462,7 @@ public sealed partial class Checker
 
             stateRead |= readingConstant && variable.Kind == VariableKind.Static;
             RequireRawForState(variable, n.Line);
-            return Narrowed(n, new Typed(variable.Type)); // N3
+            return Narrowed(n, new Typed(Types.Read(variable.Type))); // N3; R3: a `weak` place reads as a strong `T?`
         }
 
         if (ImplicitField(n.Name) is { } implicitField)
@@ -444,10 +470,31 @@ public sealed partial class Checker
             return ReadImplicitField(n, implicitField); // K7: the field of `this`
         }
 
-        if (ImplicitMethods(n.Name) is not null)
+        if (ImplicitStaticField(n.Name) is { } staticField)
         {
+            return ReadStaticField(n, staticField); // K18: a `static` field of the class
+        }
+
+        if (InstanceFieldInStatic(n.Name, n.Line))
+        {
+            return Typed.Error; // K19
+        }
+
+        if (ImplicitMethods(n.Name) is { } methods)
+        {
+            if (InStaticMember() && !methods.Any(f => f.IsStatic))
+            {
+                InstanceMethodInStatic(n.Name, n.Line); // K19, with a call or without one
+                return Typed.Error;
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
+        }
+
+        if (OutOfReachInDefault(n.Name, n.Line))
+        {
+            return Typed.Error; // K7, V10: a member of the class hides a name outside it in a default, as in a method (C#'s CS0236)
         }
 
         if (frame.Reserved is not null && frame.Reserved.Contains(n.Name))
@@ -521,7 +568,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (UnreadIntrinsic(n.Name, n.Line) || UnreadTypeKind(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -532,13 +579,33 @@ public sealed partial class Checker
 
     private Typed CheckMember(MemberAccess m)
     {
+        if (fieldGets.TryGetValue(m, out var pass))
+        {
+            return CheckFieldGet(m, pass); // T33: what `f.Get(value)` became in a pass
+        }
+
+        if (PassMember(m) is { } member)
+        {
+            return member; // T33: `f.Name`
+        }
+
         if (m.Conditional || InChain(m.Target))
         {
             return CheckChainMember(m); // N5
         }
 
+        if (CheckIntrinsicMember(m) is { } test)
+        {
+            return test; // R18
+        }
+
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
+            if (KindOfCopy(n.Name, m.Member) is { } kind)
+            {
+                return kind; // T33: `T.Kind` in a copy, a constant
+            }
+
             if (IsUnreadName(n.Name) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 return Typed.Error;
@@ -549,10 +616,9 @@ public sealed partial class Checker
                 return EnumValue(enumSymbol, m.Member, m.Line);
             }
 
-            if (classes.ContainsKey(n.Name) && ImplicitField(n.Name) is null)
+            if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
-                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` is a class and has no member `{m.Member}` of its own: a field is read from an instance (K1, V10)");
-                return Typed.Error;
+                return ClassStaticMember(classSymbol, m); // K7, K18, K19
             }
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
@@ -665,7 +731,7 @@ public sealed partial class Checker
                     var field = d.Symbol.Field(member);
                     if (field is not null)
                     {
-                        return new Typed(SubstituteData(d, field.Type));
+                        return new Typed(Types.Read(SubstituteData(d, field.Type))); // R3
                     }
 
                     if (HasBody(d.Symbol))
@@ -786,7 +852,7 @@ public sealed partial class Checker
                 Report(ErrorIds.StringIndex, i.Line, "a string is indexed through `.Bytes` or `.Chars` (T15)");
                 return Typed.Error;
             case ListType l:
-                return new Typed(l.Element);
+                return new Typed(Types.Read(l.Element)); // R3: a `weak` item reads as a strong `T?`
             default:
                 Report(ErrorIds.TypeMismatch, i.Line, $"{Types.A(target.Type)} is not indexed (M9)");
                 return Typed.Error;
@@ -804,13 +870,21 @@ public sealed partial class Checker
         return new Typed(Types.Nullable(map.Value));
     }
 
-    /// <summary>M9: the key of an index into the map, read or written.</summary>
+    /// <summary>
+    /// M9: the key of an index into the map, read or written. Where the key's type compares by a clause, the access runs that
+    /// <c>==</c> and the key's hash, a call that ends N9's narrowing (the owner, 2026-11-02, #110, comment 6586836827).
+    /// </summary>
     private void CheckKey(Expression index, MapType map)
     {
         var key = CheckExpression(index, map.Key);
         if (!key.IsError && !Types.Assignable(key.Type, map.Key))
         {
             ReportMismatch(key.Type, map.Key, index.Line, $"{Types.A(key.Type)} where a key of `{map}`, {Types.A(map.Key)}, is required", "M9");
+        }
+
+        if (ComparesByClause(map.Key, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+        {
+            EndChangeableNarrowing(); // N9: the access runs the key's `==` and hash, a call where its class names its fields (K5)
         }
     }
 
@@ -1040,6 +1114,13 @@ public sealed partial class Checker
         if ((left.Type is PointerType || right.Type is PointerType) && PointerOperation(b, left, right) is { } pointer)
         {
             return pointer; // R10, R14
+        }
+
+        if ((left.Type is VectorType || right.Type is VectorType) && cls != OperatorClass.Logical)
+        {
+            // R18: C# gives a vector operators on its lanes, which wrap where Kurz's `+` checks (T5); no rule says which Kurz takes
+            NotSupported(b.Line, $"`{Operator(b.Operator)}` on {Types.A(left.Type is VectorType ? left.Type : right.Type)}, as C# has it, which the compiler does not build (R18)");
+            return cls == OperatorClass.Comparison ? new Typed(Types.Bool) : Typed.Error;
         }
 
         var op = Operator(b.Operator);
@@ -1395,7 +1476,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => (false, $"the equality of a class instance (K4) is not read"),
+                ClassType => HeldEquality(left.Type, [], [], []),
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1405,11 +1486,17 @@ public sealed partial class Checker
             switch (refused)
             {
                 case (true, var why):
-                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} (T18, D3, M9)");
+                    var rules = left.Type is ClassType ? "T18, K4, D3, M9" : "T18, D3, M9"; // K4: a class compares each field as its type does
+                    Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: {why} ({rules})");
                     return new Typed(Types.Bool);
                 case (false, var why):
                     NotSupported(b.Line, $"`{op}` on {Types.A(left.Type)}: {why} (D3, M9)");
                     return new Typed(Types.Bool);
+            }
+
+            if (ok && ComparesByClause(left.Type, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+            {
+                EndChangeableNarrowing(); // N9: `==` on instances of a class that names its fields is a call (K5)
             }
         }
 
@@ -1435,6 +1522,25 @@ public sealed partial class Checker
         };
         return new Typed(Types.Bool, result is null ? null : new BoolConstant(result.Value));
     }
+
+    /// <summary>
+    /// N9 with K5: whether <c>==</c> on two values of the type compares instances of a class that names its fields, which N9 counts
+    /// among the calls: the instances themselves, or instances the values hold where they compare by their fields or their items. A
+    /// data type met again is read through the arguments its fields hold (<see cref="HeldArguments"/>), so that the inner
+    /// <c>Pair&lt;K&gt;</c> of a <c>Pair&lt;Pair&lt;K&gt;&gt;</c> is read with its own argument, and the walk of a type that holds itself
+    /// with other arguments ends.
+    /// </summary>
+    private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
+    {
+        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ListType l => ComparesByClause(l.Element, seen),
+        UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
+        DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
+        DataType d => seen.Add(d.Symbol)
+            && (d.Symbol.Fields.Any(f => ComparesByClause(SubstituteData(d, f.Type), seen))
+                || dataTypes.Values.Where(x => x.Base == d.Symbol).Any(x => ComparesByClause(new DataType(x, x.TypeParameters.Select(t => (KurzType)new TypeParameterType(t)).ToList()), seen))),
+        _ => false,
+    };
 
     private static bool? Compare(TokenKind op, int comparison, bool known) => !known ? null : op switch
     {

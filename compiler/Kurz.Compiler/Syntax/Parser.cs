@@ -1034,7 +1034,26 @@ public sealed class Parser
         }
 
         var collection = ParseExpression();
-        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, ParseBlockAfter(tokens[index - 1].Line, "`for`"), second);
+        var body = ParseBlockAfter(tokens[index - 1].Line, "`for`");
+        List<MatchArm>? arms = null;
+        var elseLine = 0;
+        if (AtKeyword("else"))
+        {
+            var elseKeyword = Advance(); // S16: `for line in f.Lines() { } else { Case => ... }` handles the loop's failures as O5 handles a call's
+            elseLine = elseKeyword.Line;
+            arms = ParseArms(elseKeyword.Line, "`else`");
+        }
+        else if (At(TokenKind.Newline) && PeekPastNewlines().IsKeyword("else") && !ElseStartsAnArm())
+        {
+            // C2, E4: as after an `if`, `else` on a line of its own is `syntax` at its line; its arms still parse, so that the one error stands (E1)
+            SkipNewlines();
+            var stray = Advance();
+            ReportSyntax(stray.Line, "`else` follows the closing brace of the loop's block on the same line");
+            elseLine = stray.Line;
+            arms = ParseArms(stray.Line, "`else`");
+        }
+
+        return new ForInStatement(keyword.Line, variable.Text, variable.Line, collection, body, second, arms, elseLine);
     }
 
     private MatchStatement ParseMatchStatement()
@@ -1669,6 +1688,13 @@ public sealed class Parser
         if (token.Kind == TokenKind.Name || (token.Kind == TokenKind.Keyword && CoreWords.TypeNames.Contains(token.Text)))
         {
             Advance();
+            var name = token.Text;
+            while (token.Kind == TokenKind.Name && At(TokenKind.Dot) && Peek().Kind == TokenKind.Name)
+            {
+                Advance();
+                name += "." + Advance().Text; // T33: a dotted name, `f.Type` in a loop over `T.Fields`; which the checker binds is its own
+            }
+
             var arguments = new List<TypeSyntax>();
             if (At(TokenKind.Less))
             {
@@ -1683,7 +1709,7 @@ public sealed class Parser
                 ExpectGreater();
             }
 
-            return new NamedType(token.Line, token.Text, arguments);
+            return new NamedType(token.Line, name, arguments);
         }
 
         throw Fail("a type");
