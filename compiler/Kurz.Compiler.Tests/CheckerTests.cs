@@ -4673,10 +4673,15 @@ public sealed class CheckerTests
     [InlineData("void Count<const int M>() {\n    M = 3\n    print(M)\n}\n\nCount<2>()", "8: redeclared: `M` is a type parameter of the function around it (V9)")]
     [InlineData("void Count<const int M>(int M) {\n    print(M)\n}\n\nCount<2>(1)", "7: redeclared: `M` is a type parameter of the function around it (V9)")]
     [InlineData("void Count<const int M>(List<int> items) {\n    for M in items {\n        print(M)\n    }\n}\n\nCount<2>([1])", "8: redeclared: `M` is a type parameter of the function around it (V9)")]
+    [InlineData("void Count<const int M>() {\n    (int) => int f = M => M + 1\n    print(f(1))\n}\n\nCount<2>()", "8: redeclared: `M` is a type parameter of the function around it (V9)")]
+    [InlineData("T Fill<T, const int M>(T value) => T.Make(M => 0)\n\nprint(Fill<Point, 2>(Point(1, 2)))", "7: redeclared: `M` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>(Map<string, int> ages) {\n    for name, T in ages {\n        print(\"{name} {T}\")\n    }\n}\n\nShow<long>(Map<string, int>())", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>(int | string value) {\n    match value {\n        int T => print(T)\n        string s => print(s)\n    }\n}\n\nShow<long>(1)", "9: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Count<const int M>(int | string value) {\n    match value {\n        int M => print(M)\n        string s => print(s)\n    }\n}\n\nCount<2>(1)", "9: redeclared: `M` is a type parameter of the function around it (V9)")]
     public void A_declaration_named_like_a_type_parameter_of_its_function_is_redeclared(string program, string expected)
     {
-        // V9 with T19: a variable, a parameter, a loop's variable and a lambda's parameter cannot take the name of a type parameter of the
-        // function around them, in its body and in a copy of it, one that holds a constant among them (T35), as C# refuses it (CS0412),
+        // V9 with T19: a variable, a parameter, either variable of a loop, a binding of a `match` arm and a lambda's parameter cannot take
+        // the name of a type parameter of the function around them, in its body and in a copy of it, one that holds a constant among them (T35), as C# refuses it (CS0412),
         // so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
         Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
