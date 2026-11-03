@@ -241,13 +241,14 @@ public sealed partial class Checker
     /// <summary>
     /// K14: a read of a field before its first assignment: in a constructor's body, where a path to the read leaves it unassigned,
     /// <c>field-unassigned</c>; in a lambda there, which can run while it is, <c>not supported</c>; in a field's default, which runs
-    /// before the body of every constructor (K7), of a field a constructor's body assigns, <c>field-unassigned</c>.
+    /// before the body of every constructor (K7), of a field a constructor's body assigns, <c>not supported</c>, since no rule says what
+    /// that read is.
     /// </summary>
     private void ReadInConstruction(FieldSymbol field, int line)
     {
         if (Initializing() is { } being && field.Body is { Value: null } && CurrentClass() is { } c && AssignsInBody(c))
         {
-            Report(ErrorIds.FieldUnassigned, line, $"the default of `{being.Name}` reads `{field.Name}`, which a constructor assigns in its body, and every default runs before that body (K7, K14)");
+            NotSupported(line, $"a default of `{being.Name}` that reads `{field.Name}`, a field a constructor's body assigns after every default has run (K7, K14)");
             return;
         }
 

@@ -1911,8 +1911,9 @@ passes (K10, K14), so that such a class builds its base by the base's constructo
 question on #110, comment 6597071850, whether C#'s `: base(...)` takes a word), in a constructor of the body a use of the instance,
 `this`, a method of it or a lambda that reaches it, before every field is assigned, as Swift refuses it, `this` and a method of the
 instance in a constructor of a class with derived classes, where an override could read a field of the derived class while the
-constructor runs, `: this(...)` calls that come back to their constructor, which C# refuses (CS0768), and an assignment of a `mut`
-field that one path reaches with the field assigned and another without (K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
+constructor runs, `: this(...)` calls that come back to their constructor, which C# refuses (CS0768), an assignment of a `mut`
+field that one path reaches with the field assigned and another without (K14), and a default that reads a field a constructor's body
+assigns, where K7 runs every default before that body and no rule says what the read is (K7, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
 parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
@@ -2484,9 +2485,7 @@ round can ask about it by the rule's id.
   every path of each constructor that calls no other, read as C#'s definite assignment reads a
   `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
   is read again until what it keeps holds, a `while true` leaves by its `break`s alone, and a `throw`
-  leaves no path. A default reads such a field nowhere: every default runs before the body (K7), so
-  the read is `field-unassigned`. The base's constructor runs before the body, as C#, Java and Swift
-  run it.
+  leaves no path. The base's constructor runs before the body, as C#, Java and Swift run it.
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is

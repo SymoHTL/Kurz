@@ -3813,10 +3813,15 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.FieldUnassigned, 4), (ErrorIds.AssignImmutable, 6)], Errors("class P {\n    int x\n\n    pub P(int n) {\n        for i in 0..<n {\n            x = i\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(1).X())"));
         Assert.Equal([(ErrorIds.FieldUnassigned, 4)], Errors("class P {\n    mut int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(true).X())"));
         Assert.Equal([(ErrorIds.FieldUnassigned, 4)], Errors("class P {\n    int x\n\n    pub P(int v) {\n        if v < 0 {\n            return\n        }\n\n        x = v\n    }\n\n    pub int X() => x\n}\n\nprint(P(1).X())"));
-        // a read before the first assignment on every path is `field-unassigned` at the read, and so is a default that reads a field a
-        // constructor's body assigns, which every default runs before (K7)
+        // `continue` carries what its path assigned to the loop's head, so the next round assigns again; `break` carries it past the
+        // loop, so a `break` before the assignment leaves the field unassigned; a `match` joins its arms, so an arm without the
+        // assignment leaves it unassigned; a `continue` and a `break` that reach the assignment with the field unassigned are clean
+        Assert.Equal([(ErrorIds.FieldUnassigned, 4), (ErrorIds.AssignImmutable, 7)], Errors("class P {\n    int x\n\n    pub P(int n) {\n        for i in 0..<n {\n            if i == 2 {\n                x = 1\n                continue\n            }\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(3).X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 4)], Errors("class P {\n    int x\n\n    pub P(bool b) {\n        while true {\n            if b {\n                break\n            }\n\n            x = 1\n            break\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(true).X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 6)], Errors("enum Kind { A, B }\n\nclass Once {\n    int x\n\n    pub Once(Kind k) {\n        match k {\n            Kind.A => x = 1\n            Kind.B => print(2)\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(Once(Kind.B).X())"));
+        Clean("class P {\n    int x\n\n    pub P(bool b) {\n        while true {\n            if b {\n                continue\n            }\n\n            x = 1\n            break\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(false).X())");
+        // a read before the first assignment on every path is `field-unassigned` at the read
         Assert.Equal([(ErrorIds.FieldUnassigned, 8)], Errors("class P {\n    int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        } else {\n            print(x)\n            x = 2\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(true).X())"));
-        Assert.Equal([(ErrorIds.FieldUnassigned, 3)], Errors("class P {\n    int x\n    int y = x + 1\n\n    pub P() {\n        x = 1\n    }\n\n    pub int Y() => y\n}\n\nprint(P().Y())"));
         // a lambda there assigns no field without `mut`, as a lambda anywhere does not
         Assert.Equal([(ErrorIds.AssignImmutable, 7)], Errors("class P {\n    int x\n\n    pub P() {\n        x = 1\n        f = () => {\n            x = 2\n        }\n        f()\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
         // a constructor that calls another assigns no field without `mut`, as a method does not
@@ -3826,6 +3831,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class C(int N) {\n    pub C() { }\n}\n\nprint(C().N)"));
         Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("class C(int N) {\n    pub C() : this() { }\n\n    pub C(string s) : this(1) { }\n}\n\nprint(C().N)"));
+        // a class without a primary constructor that declares one has no empty one, as C# makes none
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 5)], Errors("class C {\n    pub C(int n) { }\n}\n\nprint(C() == C(1))"));
         // F9: a constructor without `pub` is its class's own; F12: two of one parameter types, the primary one's among them
         Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class C(int N) {\n    C() : this(0) { }\n}\n\nprint(C().N)"));
         Clean("class C(int N) {\n    C() : this(0) { }\n\n    pub static C Zero() => C()\n}\n\nprint(C.Zero().N)");
@@ -3833,6 +3840,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DuplicateFunction, 2)], Errors("class C(int N) {\n    pub C(int m) : this(m) { }\n}\n\nprint(C(1).N)"));
         // K10, K14: a class without a primary constructor builds its base with no arguments, a constructor of the base's body among them
         Clean("class A {\n    pub A() {\n        print(\"a\")\n    }\n}\n\nclass B : A {\n    pub B() {\n        print(\"b\")\n    }\n}\n\nclass C : A\n\nclass D(int N) : A()\n\nB()\nC()\nprint(D(1).N)");
+        // K11: a constructor of the base's body receives no field, so a parameter of a base field's name that the explicit form passes
+        // to it is `base-field-clash`, where the primary constructor receives it; F9: a base's constructor without `pub` is its class's
+        // own, for a class derived from it too, the implied one and the explicit form's, as C# refuses it (CS0122)
+        Assert.Equal([(ErrorIds.BaseFieldClash, 4)], Errors("class A(int X) {\n    pub A() : this(0) { }\n}\nclass B(int X) : A()\n\nprint(B(1).X)"));
+        Clean("class A(int X) {\n    pub A() : this(0) { }\n}\nclass B(int X) : A(X)\n\nprint(B(1).X)");
+        Assert.Equal([(ErrorIds.NotVisible, 4)], Errors("class A {\n    A() { }\n}\nclass B : A\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NotVisible, 4)], Errors("class A {\n    A() { }\n}\nclass B(int N) : A()\n\nprint(1)"));
     }
 
     [Theory]
@@ -3841,6 +3855,7 @@ public sealed class CheckerTests
     [InlineData("class P {\n    mut int x\n\n    pub P() {\n        f = () => x\n        x = 1\n        print(f())\n    }\n}\n\nprint(1)", "5: a lambda that reads `x` before the constructor assigns it on every path (K14, F15)")]
     [InlineData("class P {\n    mut int x\n\n    pub P() {\n        f = () => {\n            x = 1\n        }\n        x = 2\n        f()\n    }\n}\n\nprint(1)", "6: a lambda that assigns `x` before the constructor assigns it on every path (K14, F15)")]
     [InlineData("class P {\n    mut int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        }\n\n        x = 2\n    }\n}\n\nprint(1)", "9: an assignment of the `mut` field `x` that one path to it reaches with the field assigned and another without (K14)")]
+    [InlineData("class P {\n    int x\n    int y = x + 1\n\n    pub P() {\n        x = 1\n    }\n\n    pub int Y() => y\n}\n\nprint(P().Y())", "3: a default of `y` that reads `x`, a field a constructor's body assigns after every default has run (K7, K14)")]
     [InlineData("class A {\n    pub A() {\n        Go()\n    }\n\n    pub virtual void Go() {\n    }\n}\n\nclass B : A {\n    pub override void Go() {\n    }\n}\n\nprint(1)", "3: a call of the method `Go` in a constructor of `A`, a class another class derives from, where an override could read a field of the derived class while the constructor runs (K6, K14)")]
     [InlineData("class A(int N) {\n    pub A() : this(1) {\n        print(this.N)\n    }\n}\n\nclass B(int N) : A\n\nprint(1)", "3: `this` in a constructor of `A`, a class another class derives from, where an override could read a field of the derived class while the constructor runs (K6, K14)")]
     [InlineData("class P {\n    pub P() : this(1) { }\n\n    pub P(int n) : this() { }\n}\n\nprint(1)", "2: `: this(...)` calls that come back to this constructor of `P` through 2 calls, which would never end (K14)")]
@@ -3850,7 +3865,10 @@ public sealed class CheckerTests
     {
         // K14: the instance before every field is assigned (Swift's rule), `this` and a method of it in a class with derived classes,
         // `: this(...)` calls that come back to their constructor (C#'s CS0768), a `mut` field assigned where one path assigned it and
-        // another did not, and a base whose constructors all take arguments, which a constructor passes with C#'s `: base(...)`
+        // another did not, a default that reads a field a constructor's body assigns, where K7 runs every default before that body and
+        // no rule says what the read is, and a base whose constructors all take arguments, which a constructor passes with C#'s
+        // `: base(...)`; the one line is all: the helper finds no error beside it, so after the `mut` field's assignment the field counts
+        // as assigned, and no `field-unassigned` follows at the constructor (E1)
         Assert.Equal([expected], NotSupported(program));
     }
 
