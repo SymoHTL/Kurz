@@ -932,7 +932,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
   and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
   SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
-  2026-11-01, "Switch, as .NET"). A key that is an instance is hashed by its address where `==`
+  2026-11-01, "Switch, as .NET"). A lookup of a key, a read's or a write's (`FindEntry`), that passes 65 groups
+  without a slot of 255, more than 512 slots, in a block on the fast hash that no loop over a map holds (`MapWalk`
+  counts those loops in the block's bytes 44 to 47, one more where a loop starts and one less where it ends, at its
+  end, a `break` or a `return`), marks the block as on SipHash-1-3 (`MapLongLookup`), writes each entry's hash under
+  the block's keys and moves the entries within the block as hashbrown's `rehash_in_place` moves them (the emitted
+  `rehash` helper and `MapRehashInPlace`), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
+  count too"; the bound, the lookups of `m[k] = v` and `Remove` and the loop assumed there). An insert's own lookup
+  so passes the bound before its search of a free slot can, which leaves the move into a new block to the search of a
+  free slot in a block that grew. A key that is an instance is hashed by its address where `==`
   compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
   K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
