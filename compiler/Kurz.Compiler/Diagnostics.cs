@@ -141,6 +141,8 @@ public static class ErrorIds
     public const string AmbiguousCall = "ambiguous-call";
     public const string CannotInfer = "cannot-infer";
     public const string EqualByUnknown = "equal-by-unknown";
+    public const string EqualsMethod = "equals-method";
+    public const string MutableKey = "mutable-key";
     public const string BaseFieldClash = "base-field-clash";
     public const string NoText = "no-text";
     public const string BlockIndentation = "block-indentation";
@@ -148,6 +150,8 @@ public static class ErrorIds
     public const string BreakOutsideLoop = "break-outside-loop";
     public const string UnknownEscape = "unknown-escape";
     public const string StaticState = "static-state";
+    public const string StaticMismatch = "static-mismatch";
+    public const string StaticCycle = "static-cycle";
     public const string OverrideWithoutVirtual = "override-without-virtual";
     public const string HidesMember = "hides-member";
     public const string NoPrimaryConstructor = "no-primary-constructor";

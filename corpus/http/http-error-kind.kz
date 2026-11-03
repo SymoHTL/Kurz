@@ -1,0 +1,35 @@
+// expect: output
+// | 14
+// | protocol: malformed request: no request line
+// | TooLarge
+// | true
+// rules: W1, W2
+
+// the count of the bytes of a request line, or the failure of HTTP
+int | HttpError Count(string line) {
+    if line == "" {
+        return HttpError(HttpKind.Protocol, "malformed request: no request line")
+    }
+
+    return line.Bytes.Count
+}
+
+void Show(string line) {
+    match Count(line) {
+        int n => print(n)
+        HttpError e => {
+            match e.Kind {
+                HttpKind.Protocol => print("protocol: {e.Detail}")
+                HttpKind.TooLarge => print("too large: {e.Detail}")
+                HttpKind.Status => print("status: {e.Detail}")
+                HttpKind.Unsupported => print("unsupported: {e.Detail}")
+            }
+        }
+    }
+}
+
+Show("GET / HTTP/1.1")
+Show("")
+err = HttpError(HttpKind.TooLarge, "request header too large")
+print(err.Kind)
+print(err == HttpError(HttpKind.TooLarge, "request header too large"))

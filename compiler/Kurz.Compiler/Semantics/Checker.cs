@@ -58,6 +58,8 @@ public sealed partial class Checker
     private int rawDepth; // R7, R12: the `raw` blocks and `naked` bodies around the code being checked
     private bool readingConstant; // F12, R13: a default value or the initial value of state is being read, in which a read of state or of raw memory is no constant
     private bool stateRead; // R13: the value being read as a constant reads state
+    private StaticFieldSymbol? initializing; // K18, K20: the `static` field whose initial value is being read
+    private readonly List<StaticFieldSymbol> readingStatics = []; // K20: the `static` fields whose initial values are being read, each reading the next
     private List<(PointerType Pointer, int Line, string What)>? pendingPointees; // R10: the pointers the fields of data types name, judged after every field is resolved
     private readonly bool allowRaw;
     private readonly bool allowNative;
@@ -66,14 +68,24 @@ public sealed partial class Checker
     private readonly Dictionary<string, Checker> used = new(StringComparer.Ordinal); // F10: the folders the file's `use` lines brought in
     private readonly HashSet<UseStatement> uses = new(ReferenceEqualityComparer.Instance); // F10: those `use` lines
     private readonly List<FunctionSymbol> folderCalls = []; // design record, section 2: the functions of another folder the file's qualified calls picked
+    private readonly Checker? std; // W1: the standard library's checker, whose types of the prelude every file sees
+    private readonly HashSet<string> preludeSeen = new(StringComparer.Ordinal); // W1: the names of those types this file sees
 
-    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
+    private Checker(DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std)
     {
         this.diagnostics = diagnostics;
         allowRaw = grants.Contains("raw");
         allowNative = grants.Contains("native");
         this.folders = folders;
+        this.std = std;
     }
+
+    /// <summary>
+    /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, a list held in the compiler where Rust
+    /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
+    /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
+    /// </summary>
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -100,7 +112,21 @@ public sealed partial class Checker
     /// qualified call is stated by the design record's section 2 alone, where the runtime's `runtime/common/` reaches the directory of the
     /// build's target so, as the folder `sys` (the owner, 2026-10-23, "Rust's sys"); a `use` of any other name is <c>not supported</c>.
     /// </summary>
-    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders)
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders) =>
+        Check(program, diagnostics, grants, folders, null);
+
+    /// <summary>
+    /// As above, in a package granted <paramref name="grants"/>, where the file sees the types of <paramref name="std"/>, the checker of
+    /// <c>std/</c>, that <see cref="Prelude"/> names, as <c>std/</c> declares them: a value of one is of the same type in the file and in
+    /// <c>std/</c> (W1).
+    /// </summary>
+    public static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, Checker std)
+    {
+        ArgumentNullException.ThrowIfNull(std);
+        return Check(program, diagnostics, grants, new Dictionary<string, Checker>(), std);
+    }
+
+    private static Checker Check(ProgramSyntax program, DiagnosticBag diagnostics, IReadOnlyCollection<string> grants, IReadOnlyDictionary<string, Checker> folders, Checker? std)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -111,7 +137,7 @@ public sealed partial class Checker
             throw new ArgumentException($"`{unknown}` is no grant: R7 and R16 name `raw` and `native`", nameof(grants));
         }
 
-        var checker = new Checker(diagnostics, grants, folders);
+        var checker = new Checker(diagnostics, grants, folders, std);
         checker.Run(program);
         foreach (var lint in checker.lints.Values)
         {
@@ -146,6 +172,12 @@ public sealed partial class Checker
 
         /// <summary>K7: the class whose method this frame checks, with its instance as <c>this</c>; a lambda inside the method finds it through <see cref="Outer"/>.</summary>
         public ClassSymbol? Class { get; init; }
+
+        /// <summary>K7: the field of <see cref="Class"/>'s body whose default this frame checks, which reads the fields above it alone.</summary>
+        public FieldSymbol? Initializing { get; init; }
+
+        /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
+        public bool Static { get; init; }
 
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
@@ -240,6 +272,10 @@ public sealed partial class Checker
             DeclareType((TypeDeclaration)s);
         }
 
+        // W1: the types of `std/` the prelude names, as `std/` declares them, so that a value of one is of the same type in the file and in
+        // `std/`, declared before the file's own types, so that a declaration of their names is `redeclared` (V9)
+        DeclarePrelude();
+
         // F6: the functions and data types of the file are visible in the whole file, so their names are declared before
         // anything is checked, in source order, so that a name declared twice is `redeclared` at the later declaration (V9)
         foreach (var s in program.Statements)
@@ -295,7 +331,9 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
+        CheckFieldDefaults(); // K7
 
         FindReaders();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
@@ -468,7 +506,9 @@ public sealed partial class Checker
         {
             // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
             // since no line of the file does
-            Report(ErrorIds.Redeclared, d.Line, BuiltInTypeRules.TryGetValue(d.Name, out var rule)
+            Report(ErrorIds.Redeclared, d.Line, preludeSeen.Contains(d.Name)
+                ? PreludeClash(d.Name)
+                : BuiltInTypeRules.TryGetValue(d.Name, out var rule)
                 ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
                 : $"the name `{d.Name}` is declared already (V9)");
         }
@@ -536,6 +576,7 @@ public sealed partial class Checker
         model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
             if (p.Constant is not null)
             {
@@ -551,6 +592,49 @@ public sealed partial class Checker
 
         dataTypes[d.Name] = symbol;
         dataDeclared.Add(symbol);
+    }
+
+    /// <summary>
+    /// W1: each type of <see cref="Prelude"/> that <c>std/</c> declares <c>pub</c>, by the symbol <c>std/</c>'s checker made of it, which
+    /// this file reads as its own and does not resolve again; a name <c>std/</c> does not declare so stays unknown.
+    /// </summary>
+    private void DeclarePrelude()
+    {
+        if (std is null)
+        {
+            return;
+        }
+
+        foreach (var name in Prelude)
+        {
+            if (std.dataTypes.TryGetValue(name, out var data) && (data.Declaration.Modifiers & Modifiers.Pub) != 0)
+            {
+                dataTypes[name] = data;
+                preludeSeen.Add(name);
+            }
+            else if (std.enums.TryGetValue(name, out var e) && (e.Declaration.Modifiers & Modifiers.Pub) != 0)
+            {
+                enums[name] = e;
+                preludeSeen.Add(name);
+            }
+        }
+    }
+
+    /// <summary>W1, V9: what <c>redeclared</c> says to a file's own declaration of a type of the prelude this file sees.</summary>
+    private string PreludeClash(string name) =>
+        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
+
+    /// <summary>
+    /// W1, V9: a type parameter named like a type of the prelude this file sees binds the name in a scope, so it is <c>redeclared</c>
+    /// at the parameter, as the file's own type so named is (the owner, 2026-11-02), and the parameter stands for the rest of the
+    /// declaration, so that its uses report nothing more (E1).
+    /// </summary>
+    private void RefusePreludeTypeParameter(TypeParameter p)
+    {
+        if (preludeSeen.Contains(p.Name))
+        {
+            Report(ErrorIds.Redeclared, p.Line, PreludeClash(p.Name));
+        }
     }
 
     /// <summary>
@@ -874,7 +958,7 @@ public sealed partial class Checker
             case Syntax.UnionType u:
                 {
                     var cases = u.Cases.Select(Resolve).ToList();
-                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null) is { } nullable)
+                    if (cases.FirstOrDefault(c => Types.NonNull(c) is not null || c is WeakRefType) is { } nullable)
                     {
                         NotSupported(u.Line, $"a nullable case of a union, `{nullable}` (N1, D9)"); // its `null` would be one of the union's cases (O1)
                         return Types.Error;
@@ -887,12 +971,16 @@ public sealed partial class Checker
                 {
                     var parameters = f.Parameters.Select(Resolve).ToList();
                     var result = Resolve(f.Result);
+                    if (WeakUnread(f.Line, "a parameter or the result of a function type", [.. parameters, result]))
+                    {
+                        return Types.Error;
+                    }
+
                     return parameters.Any(Types.IsError) || Types.IsError(result) ? Types.Error : new FunctionType(parameters, result);
                 }
 
             case WeakType w:
-                NotSupported(w.Line, "weak (R3, R5)");
-                return Types.Error;
+                return ResolveWeak(w); // R3, R5
             case Syntax.PointerType p:
                 return PointerTo(Resolve(p.Pointee), p.Line, "a pointer"); // R10, R14
             case ExternFunctionType f:
@@ -957,6 +1045,11 @@ public sealed partial class Checker
 
             var key = ResolveTypeArgument(n.TypeArguments[0], "`Map`");
             var value = ResolveTypeArgument(n.TypeArguments[1], "`Map`");
+            if (WeakUnread(n.Line, "a key or a value of a map", key, value))
+            {
+                return Types.Error;
+            }
+
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
@@ -1020,6 +1113,11 @@ public sealed partial class Checker
             }
 
             var arguments = n.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{n.Name}`")).ToList();
+            if (WeakUnread(n.Line, "a type argument of a data type", [.. arguments]))
+            {
+                return Types.Error;
+            }
+
             return arguments.Any(Types.IsError) ? Types.Error : new DataType(data, arguments);
         }
 
@@ -1108,6 +1206,7 @@ public sealed partial class Checker
         model.RecordFunction(d, symbol);
         foreach (var p in d.TypeParameters)
         {
+            RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
         }
 
@@ -1571,6 +1670,11 @@ public sealed partial class Checker
     private void PopScope()
     {
         ReportUnused(frame.Scope);
+        if (frame.Scope.Variables.Count > 0)
+        {
+            frame.Known = Unweak(frame.Known); // N9: the end of a block that declares a variable lets go of counts, which can free a `weak` target
+        }
+
         frame.Scope = frame.Scope.Parent!;
     }
 
@@ -1681,9 +1785,10 @@ public sealed partial class Checker
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
+                    var calls = callsRun;
                     CheckCondition(i.Condition);
                     var start = frame.Known;
-                    var (whenTrue, whenFalse) = Tests(i.Condition);
+                    var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
@@ -1989,9 +2094,21 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitStaticField(a.Name) is { } staticField)
+        {
+            AssignStaticField(staticField, a.Line); // K18
+            CheckExpression(a.Value, null);
+            return;
+        }
+
+        if (variable is null && InstanceFieldInStatic(a.Name, a.Line))
+        {
+            CheckExpression(a.Value, null); // K19: no variable is declared
+            return;
+        }
+
         if (variable is not null)
         {
-            EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
             RequireRawForState(variable, a.Line);
             if (captured)
             {
@@ -2007,6 +2124,7 @@ public sealed partial class Checker
             }
 
             var value = CheckExpression(a.Value, variable.Type, keepCases: Types.KeepsCases(variable.Type));
+            EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
             if (Types.IsVoid(value.Type))
             {
                 Report(ErrorIds.Syntax, a.Line, "a call with a `void` success used as a value (O10)");
@@ -2095,8 +2213,6 @@ public sealed partial class Checker
             return;
         }
 
-        EndChangeableNarrowing(); // N9: an assignment ends what was known of a path through a `mut` field
-
         KurzType current;
         VariableSymbol? changed = null;
         if (root is NameExpression name)
@@ -2104,7 +2220,19 @@ public sealed partial class Checker
             var (variable, captured) = Lookup(name.Name);
             if (variable is null)
             {
-                CheckName(name); // reports what the name is
+                if (classes.TryGetValue(name.Name, out var owner) && ImplicitField(name.Name) is null)
+                {
+                    var member = ClassStaticMember(owner, members[0]); // K7, K19: `T.F`, a member of the class
+                    if (!member.IsError && owner.StaticField(members[0].Member) is { } staticField)
+                    {
+                        AssignStaticField(staticField, a.Line); // K18
+                    }
+                }
+                else if (!CheckName(name).IsError && ImplicitStaticField(name.Name) is { } implicitStatic) // CheckName reports what the name is
+                {
+                    AssignStaticField(implicitStatic, a.Line); // K18: a path that starts at a `static` field
+                }
+
                 CheckExpression(a.Value, null);
                 return;
             }
@@ -2198,6 +2326,7 @@ public sealed partial class Checker
         }
 
         var value = CheckExpression(a.Value, Types.IsError(current) ? Untyped(a.Value) : current, keepCases: Types.KeepsCases(current));
+        EndChangeableNarrowing(); // N9: the assignment, which runs after its value, ends what was known of a path through a `mut` field
         if (last is null || Types.IsError(current) || value.IsError)
         {
             return;
@@ -2293,7 +2422,7 @@ public sealed partial class Checker
 
                 element = t.Type switch
                 {
-                    ListType l => l.Element,
+                    ListType l => Types.Read(l.Element), // R3
                     ErrorType or VoidType => Types.Error,
                     MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                     MapType m => m.Key,

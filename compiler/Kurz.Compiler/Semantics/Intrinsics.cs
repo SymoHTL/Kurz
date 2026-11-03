@@ -187,6 +187,21 @@ public static class Intrinsics
             all.Add(new("X86.Sse2", "Shuffle", [P("value", V128(lane)), P("control", Types.Byte, immediate: true)], V128(lane), "pshufd", "_mm_shuffle_epi32"));
         }
 
+        foreach (var lane in Integers.Where(l => Types.LaneBits(l) <= 32))
+        {
+            all.Add(new("X86.Sse2", "CompareEqual", [P("left", V128(lane)), P("right", V128(lane))], V128(lane), "cmpeq", $"_mm_cmpeq_{Suffix(lane)}"));
+        }
+
+        foreach (var lane in Integers)
+        {
+            all.Add(new("X86.Sse2", "And", [P("left", V128(lane)), P("right", V128(lane))], V128(lane), "and", "_mm_and_si128"));
+        }
+
+        foreach (var lane in new[] { Types.Byte, Types.SByte })
+        {
+            all.Add(new("X86.Sse2", "MoveMask", [P("value", V128(lane))], Types.Int, "movemask", "_mm_movemask_epi8"));
+        }
+
         foreach (var lane in new[] { Types.Byte, Types.SByte })
         {
             all.Add(new("X86.Ssse3", "Shuffle", [P("value", V128(lane)), P("mask", V128(lane))], V128(lane), "pshufb", "_mm_shuffle_epi8"));
