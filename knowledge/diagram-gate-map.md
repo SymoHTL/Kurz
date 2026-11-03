@@ -129,10 +129,12 @@ flowchart TD
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
         overflow in a test build, and on a function whose first instruction starts a block, which clang refuses
         without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
-        or with it on Windows; and ListTests, red on a list's or a string's block read or written after it was
+        or with it on Windows; and ListTests, red on a mut field of the instance passed as mut in its method that the
+        callee's write does not reach, on a list's or a string's block read or written after it was
         freed, under an allocator that makes every freed block inaccessible (a borrow that outlived its source, the
         name an arm binds among the programs), on lists or strings made and dropped that outgrow a system giving
-        sixteen pieces, and on the number allocation-failed reports; and FloatingTests, red on the text of a double or a float that
+        sixteen pieces, on the number allocation-failed reports, and on a program whose first released class holds a field of
+        another class that does not build and run (the flag of a release under way declared twice); and FloatingTests, red on the text of a double or a float that
         differs from what .NET writes, or where .NET's does not read back, from the fewest digits that do, on a
         conversion into an integer type at either end of its range that keeps a value it loses or loses one it
         keeps, in a test and a release build, and on a comparison, a field's equality, a widening, a remainder,

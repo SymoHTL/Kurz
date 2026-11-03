@@ -96,6 +96,16 @@ node.Children.Add("leaf")
 print(node.Children.Count)
 ```
 
+Case: [functions/capture-calls-field-method.kz](../corpus/functions/capture-calls-field-method.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)
+```
+
 ### M6 (decided, §4) Where the `mut` marker of a method is written
 
 In front of the return type: `mut void Add(T item)`. `mut` stands in front everywhere else as
@@ -586,6 +596,22 @@ mut xs = [1]
 print([xs, Grow(mut xs)])
 ```
 
+Case: [functions/capture-passes-field-mut.kz](../corpus/functions/capture-passes-field-mut.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+fill = b.Filler()
+fill()
+print(b.Items.Count)
+```
+
 ### M8 (decided, §4) One family of collections
 
 There is one family of collections, and every value can cross between actors.
@@ -638,7 +664,7 @@ lists of items `==` does not take are `type-mismatch`. Items of a nullable type 
 two nullable values (N10) *(assumed, §4: for the nullable types beside `double?` and `float?`)*, and the
 values of `double?` and `float?` items by IEEE's `==`, as Rust's `Vec<Option<f64>>` compares. A list held
 in a `data` value under `==` compares its `double` and `float` items, and the values of its `double?` and
-`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is SipHash-1-3 under keys drawn from the system's randomness (M10), taken when a thread's first map takes its first block, at that map's first write *(assumed, §4: the
+`float?` items, as C#'s `Equals` does (D3), and so does a list in a key. A key's hash is a fast hash without keys until one insert's probe passes the bound, and from then on SipHash-1-3 under keys drawn from the system's randomness, the map moving its entries under that hash one time, as .NET's `Dictionary<string, ...>` switches to a randomized hash (M10; §4, the owner, 2026-11-01, "Switch, as .NET", which replaces "SipHash, random keys" of 2026-10-30) *(assumed, §4: the fast hash, foldhash 0.2.0's `fast::FixedState`; the bound, more than 512 slots of the groups one insert's lookup of its key passes; a switch per map; every type of key)*. The keys are taken when a thread's first map takes its first block, at that map's first write, though a map hashes with them only after a switch *(assumed, §4: the
 moment)*, from the sources Rust's standard library takes them from: on Linux from `getrandom` with `GRND_INSECURE`, or `GRND_NONBLOCK` where the kernel refuses that flag, and from `/dev/urandom` where the system refuses `getrandom` or its pool is not ready, and on Windows from `ProcessPrng`, as Rust 1.82 takes them there, which does not fail (§4, the owner, 2026-10-30, "ProcessPrng, as Rust 1.82"; `random-failed` where its library or the call is missing, on a system older than Windows 8 or Windows Server 2008 R2, the floor Microsoft's page of the call names, assumed there); on Linux, where none of them gives the bytes, where Rust panics, the program ends there with `random-failed` (§4, the owner, 2026-10-30, "End with an error, as Rust" and "Rust's full path"), whose line is `error: random-failed`, with the exit code 1 and no place and no trace, as the line of `allocation-failed` (O11) *(assumed, §4: the id, the name the question gave as an example, and the shape of its line)*. `Count` is
 the number of a map's entries, an `int`; `ContainsKey(key)` is a `bool`; `Remove(key)`, a `mut` method,
 takes the key's entry out of the map and gives its value, or `null` where there is none, of the type
@@ -1042,9 +1068,11 @@ print(k == Wrap<Wrap<int>>(Wrap<int>(5)))
 
 A map has no order a program may rely on. A `for` loop over it (C6) and its text (A6) yield the
 entries in the order of the map's storage, which can differ between runs and versions, as the
-documentation of C#'s `Dictionary` leaves its order undefined. Two runs of one program can print
-the same map differently, and do as a rule, since the hash of a map's keys takes keys drawn from the
-system's randomness, as Rust's `HashMap` takes them (§4, the owner, 2026-10-30).
+documentation of C#'s `Dictionary` leaves its order undefined. A map gives its entries in the same
+order in every run of one build until it switches to SipHash-1-3 under keys drawn from the system's
+randomness, where an insert's probe passed the bound (M9), and a switched map's order can differ
+between runs; a program still may rely on no order of a map (§4, the owner, 2026-11-01, "Switch, as
+.NET").
 
 No case: no order can be expected, so a case can show a map of one entry only, which the case of
 A6 does.
@@ -1070,13 +1098,13 @@ Where no list type stands, the items give it, as T27 infers a type parameter fro
 of a `null` that no nullable type takes (N6) *(assumed, §4: as T27 and N6 read `Pick(1, null)`)*. A
 literal of one or more literal items given to a parameter `List<T>` of a generic call gives its items to the
 literal arguments of `T` (T27), so that with `Pair<T>(T a, List<T> b)` the call `Pair(1L, [1])` makes
-`T` a `long`, and with two parameters `List<T>` the call `Pick([1], [2L])` does, as `Pick(1, 2L)` does
+`T` a `long`, and with `Both<T>(List<T> a, List<T> b)` the call `Both([1], [2L])` does, as `Pick(1, 2L)` does
 and as C# 12 infers for a collection expression and Rust for `vec![1]`; a literal with an item that is
 not a literal, `[x]`, gives `T` the type of that item, as any other argument does, and `[]` gives it
 nothing and takes the list type the other arguments give, `Pair(1L, [])` a `List<long>`, so that where no
-other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Pick([], [])` are `cannot-infer`, as
+other argument gives `T`, `Take([])` with `Take<T>(List<T> xs)` and `Both([], [])` are `cannot-infer`, as
 `x = []` is *(assumed, §4: the items read as arguments of the parameter, of which `[]` has none, "From its
-items"; one `cannot-infer` at each empty literal, so two on the line of `Pick([], [])`, each literal a
+items"; one `cannot-infer` at each empty literal, so two on the line of `Both([], [])`, each literal a
 defect of its own under E1)*.
 
 A comma after the last item is accepted, `[1, 2,]` (§4, the owner, 2026-10-30, "Accept, as C# 12
@@ -1163,7 +1191,7 @@ Case: [values/list-literal-held.kz](../corpus/values/list-literal-held.kz)
 Case: [values/list-literal-inference.kz](../corpus/values/list-literal-inference.kz)
 ```kurz
 List<T> Pair<T>(T a, List<T> b) => b
-List<T> Pick<T>(List<T> a, List<T> b) => b
+List<T> Both<T>(List<T> a, List<T> b) => b
 
 r1 = Pair(1L, [1])
 List<long> y1 = r1
@@ -1171,14 +1199,14 @@ print(y1)
 r2 = Pair(1, [2L])
 List<long> y2 = r2
 print(y2)
-r3 = Pick([1], [2L])
+r3 = Both([1], [2L])
 List<long> y3 = r3
 print(y3)
 r4 = Pair(1, [2, 3])
 List<int> y4 = r4
 print(y4)
 List<long> xs = [1]
-r5 = Pick(xs, [7])
+r5 = Both(xs, [7])
 List<long> y5 = r5
 print(y5)
 byte small = 1

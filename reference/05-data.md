@@ -158,8 +158,8 @@ print(n == n)
 
 Case: [data/union-equality-case-value.kz](../corpus/data/union-equality-case-value.kz)
 ```kurz
-// a union beside a value of one of its cases takes no `==`, a nullable one after its lift too (N10), as Rust
-// refuses `Ok(5) == 5` on a `Result<i32, String>` (D3)
+// a union beside a value of one of its cases takes no `==`, as Rust refuses `Ok(5) == 5` on a
+// `Result<i32, String>` (D3)
 int | string a = 1
 print(a == 1)
 ```
@@ -407,6 +407,40 @@ data Empty
 
 e = Empty
 print(e == Empty)
+```
+
+### D21 (decided, §4) A derived `data` type without fields of its own
+
+`data Dot : Shape` writes no fields of its own and has the fields of its base (D7): its
+constructor takes them in their order, and a value of it is made as a value of any type with
+fields (D2). Its bare name is its one value (D8) only where no base above it has a field either;
+where one has, the bare name stands for no value (D2).
+
+Case: [data/inherit-no-own-fields.kz](../corpus/data/inherit-no-own-fields.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+data Spot : Dot
+data Tag
+data Mark : Tag
+
+int Sum(Shape s) => s.A + s.B
+
+d = Dot(1, 2)
+print(d.A)
+print(d)
+print(Sum(d))
+print(Spot(4, 5))
+m = Mark
+print(m == Mark)
+```
+
+Case: [data/inherit-no-own-fields-bare.kz](../corpus/data/inherit-no-own-fields-bare.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+
+print(Dot)
 ```
 
 ### D9 (decided, §4, §5) Unions
@@ -952,6 +986,17 @@ c.Increment()
 c.Increment()
 print(c.Count)
 print(before.Count)
+```
+
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
 ```
 
 ### D17 (decided, §4) How sets of flags are combined

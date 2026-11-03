@@ -1,4 +1,5 @@
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Xunit;
 
 namespace Kurz.Compiler.Tests;
@@ -135,11 +136,130 @@ public sealed class ClangTests : IDisposable
         Assert.Equal(release, Clang.ReadVersion(answer));
 
     [Fact]
+    public void A_cpu_is_described_by_the_classes_whose_macros_clang_defines_for_it_and_the_features_its_driver_passes()
+    {
+        // section 2 and R18: x86-64 has the baseline's classes, x86-64-v2 adds SSE3 to SSE4.2 and no SHA, goldmont SHA and AES and no
+        // AVX, native this machine's, with the features the driver passes for it; a CPU clang does not know is null, with the target
+        // clang builds for
+        var clang = Clang.Find().Found ?? throw new InvalidOperationException("no clang of the pinned major is found");
+        var baseline = clang.DescribeCpu("x86-64", x86: true, out var target)!;
+        Assert.Equal(Cpu.Baseline.Classes, baseline.Classes);
+        Assert.Equal("x86-64", baseline.Name);
+        Assert.StartsWith("x86_64-", target, StringComparison.Ordinal);
+        var v2 = clang.DescribeCpu("x86-64-v2", x86: true, out _)!;
+        Assert.Equal([.. Cpu.Baseline.Classes, "X86.Sse3", "X86.Ssse3", "X86.Sse41", "X86.Sse42", "X86.Popcnt"], v2.Classes);
+        Assert.Empty(v2.Features); // the driver passes the CPU's name alone, which carries its features to LLVM
+        var goldmont = clang.DescribeCpu("goldmont", x86: true, out _)!;
+        Assert.Contains("X86.Sha", goldmont.Classes);
+        Assert.Contains("X86.Aes", goldmont.Classes);
+        Assert.DoesNotContain("X86.Avx", goldmont.Classes);
+        var native = clang.DescribeCpu("native", x86: true, out _)!;
+        var sha = (System.Runtime.Intrinsics.X86.X86Base.CpuId(7, 0).Ebx & (1 << 29)) != 0;
+        Assert.Equal(
+            (System.Runtime.Intrinsics.X86.Sse41.IsSupported, System.Runtime.Intrinsics.X86.Aes.IsSupported, sha),
+            (native.Classes.Contains("X86.Sse41"), native.Classes.Contains("X86.Aes"), native.Classes.Contains("X86.Sha")));
+        Assert.Equal(sha, native.Features.Contains("+sha")); // for `native` the driver passes the machine's features, each by its name
+        Assert.Null(clang.DescribeCpu("pentium9", x86: true, out var unknown));
+        Assert.Equal(target, unknown);
+        Assert.Null(clang.DescribeCpu("cortex-a72", x86: true, out var other)); // a CPU of another architecture, unknown for x86-64 (section 2)
+        Assert.Equal(target, other);
+    }
+
+    [Fact]
     public void This_machine_has_the_clang_of_the_pinned_major()
     {
         // the record's requirement on every machine that builds: a machine without it fails here, with the command's own lines
         var search = Clang.Find();
         Assert.True(search.Found is not null, Command.Failure(search));
         Assert.StartsWith("23.", search.Found!.Version, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment()
+    {
+        // section 2 (the owner, 2026-11-02, issue 156, comment 6580739215): the arguments `Build` gives clang, with `-S`, compile
+        // three functions of IR to assembly; in a release build the directive that aligns each function is `.p2align 6`, 64
+        // bytes, and in a test build each is the one clang writes with no option of alignment, LLVM's own for the target (16
+        // bytes on x86-64, `.prefalign 4` on ELF and `.p2align 4` on COFF). The functions are read as ELF names them
+        // (`.type f,@function`) and as COFF does (`.def f;` with `.type 32;`), with a floor of three and every label found, so
+        // that a reading that finds no function, or no label, fails
+        var clang = Clang.Find().Found;
+        Assert.True(clang is not null, "no clang");
+        var ir = Path.Combine(root, "align.ll");
+        File.WriteAllText(ir, """
+            define i64 @first(i64 %x) noinline {
+              %y = mul i64 %x, 3
+              ret i64 %y
+            }
+
+            define i64 @second(i64 %x) noinline {
+              %y = call i64 @first(i64 %x)
+              %z = add i64 %y, 1
+              ret i64 %z
+            }
+
+            define i32 @main() {
+              %r = call i64 @second(i64 2)
+              %t = trunc i64 %r to i32
+              ret i32 %t
+            }
+
+            """);
+        foreach (var release in new[] { true, false })
+        {
+            var assembly = Path.Combine(root, release ? "release.s" : "test.s");
+            var (code, _, error) = Processes.Capture(clang!.Path, [.. clang.Arguments(ir, assembly, [], release, lines: false), "-S"], null, TimeSpan.FromMinutes(1));
+            Assert.True(code == 0, error);
+            var aligned = Alignments(File.ReadAllLines(assembly));
+            Assert.True(aligned.Count >= 3, string.Join("\n", aligned));
+            if (release)
+            {
+                Assert.All(aligned, f => Assert.Matches(@"^\t\.p2align\t6(,|$)", f.Directive));
+            }
+            else
+            {
+                var plain = Path.Combine(root, "plain.s");
+                var (plainCode, _, plainError) = Processes.Capture(clang.Path, ["-O0", ir, "-o", plain, "-S"], null, TimeSpan.FromMinutes(1));
+                Assert.True(plainCode == 0, plainError);
+                var own = Alignments(File.ReadAllLines(plain));
+                Assert.All(own, f => Assert.StartsWith("\t.", f.Directive, StringComparison.Ordinal));
+                Assert.Equal(own, aligned);
+            }
+        }
+    }
+
+    /// <summary>Each function of an assembly listing, ELF's or COFF's, with the directive of alignment nearest above its label.</summary>
+    private static List<(string Name, string Directive)> Alignments(string[] lines)
+    {
+        var names = new List<string>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var elf = System.Text.RegularExpressions.Regex.Match(lines[i], @"^\t\.type\t([^,]+),@function$");
+            var coff = System.Text.RegularExpressions.Regex.Match(lines[i], @"^\t\.def\t([^;]+);");
+            if (elf.Success)
+            {
+                names.Add(elf.Groups[1].Value);
+            }
+            else if (coff.Success && lines.Skip(i + 1).Take(3).Any(l => l.StartsWith("\t.type\t32;", StringComparison.Ordinal)))
+            {
+                names.Add(coff.Groups[1].Value);
+            }
+        }
+
+        return [.. names.Select(name =>
+        {
+            var at = Array.FindIndex(lines, l => l.StartsWith(name + ":", StringComparison.Ordinal));
+            var directive = at < 0 ? "no label" : "none";
+            for (var i = at - 1; at > 0 && i >= 0 && lines[i].StartsWith("\t.", StringComparison.Ordinal); i--)
+            {
+                if (lines[i].StartsWith("\t.p2align", StringComparison.Ordinal) || lines[i].StartsWith("\t.prefalign", StringComparison.Ordinal))
+                {
+                    directive = lines[i];
+                    break;
+                }
+            }
+
+            return (name, directive);
+        })];
     }
 }
