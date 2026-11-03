@@ -6467,7 +6467,11 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
             InvalidUtf8 => return HttpBad("header not UTF-8")
         }
 
-        headers.Add(name, value)
+        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
+        headers.Add(name, value) else {
+            HttpError e => return HttpBad("control byte in a header")
+        }
+
         lineStart = lineStop + 2
     }
 
