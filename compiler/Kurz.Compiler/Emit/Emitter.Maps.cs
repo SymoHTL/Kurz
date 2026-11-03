@@ -41,8 +41,9 @@ public sealed partial class Emitter
     /// Whether a map of the key type keeps each entry's hash in its slot, the one definition every layout of an entry, every lookup
     /// and every move of an entry follows. A key whose hash reads more than one word of its own keeps it, as .NET's
     /// <c>Dictionary</c> keeps each entry's hash code, so that a growth does not hash the key again: a string's bytes, a time of 128
-    /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value. A key of one word, an integer, a <c>bool</c>, a
-    /// <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c> or a <c>float</c>, whose hash is the fast hash of the one word
+    /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that compares by them. A
+    /// key of one word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an
+    /// instance that compares by identity, whose hash is the fast hash of the one word, its address for the instance
     /// (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it again. Measured on issue 157
     /// (item 14): without the hash a <c>Map&lt;int, int&gt;</c> of 1,000,000 entries took its million <c>Remove</c>s in half the time and its
     /// walk in three quarters, while maps of 200,000 keys of a <c>data</c> value of two strings and of a list of 4 <c>int</c>s grew 36% and
@@ -51,6 +52,7 @@ public sealed partial class Emitter
     internal static bool KeepsHash(KurzType key) => key switch
     {
         PrimitiveType { Kind: Primitive.String } => true,
+        ClassType c => !c.Symbol.ComparesByIdentity, // K4: an instance that compares by identity is hashed by its address
         DataType or ListType or UnionType => true,
         _ => Lower.IrType(key) == "i128",
     };

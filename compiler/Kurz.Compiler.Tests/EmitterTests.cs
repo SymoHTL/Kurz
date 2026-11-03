@@ -269,13 +269,13 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // again; a slot of a key whose hash reads more holds its hash first, as .NET keeps an entry's hash code (issue 157, item 14,
         // under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
         const string program =
-            "enum Color { Red, Green }\ndata Pair(string A, string B)\n\nlongduration far = 100000days\n" +
+            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\n\nlongduration far = 100000days\n" +
             "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
             "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
             "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
             "mut j = Map<duration, int>()\nj[90min] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
-            "mut m = Map<float, int>()\nm[1.5f] = 1\n" +
-            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count)\n";
+            "mut m = Map<float, int>()\nm[1.5f] = 1\nmut n = Map<Cell, int>()\nn[Cell(1)] = 1\nmut o = Map<Spot, int>()\no[Spot(1, 2)] = 1\n" +
+            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count)\n";
         var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
         Assert.True(compiled is not null, "no program");
         string[] layouts =
@@ -288,11 +288,13 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "Map<double, int>\" = type { double, i32 }",
             "Map<duration, int>\" = type { i64, i32 }",
             "Map<float, int>\" = type { float, i32 }",
+            "Map<Cell, int>\" = type { ptr, i32 }",
             "Map<string, int>\" = type { i64, %kz.str, i32 }",
             "Map<Pair, int>\" = type { i64, %\"d.Pair\", i32 }",
             "Map<List<int>, int>\" = type { i64, ptr, i32 }",
             "Map<longduration, int>\" = type { i64, i128, i32 }",
             "Map<int?, int>\" = type { i64, { i8, [1 x i32] }, i32 }",
+            "Map<Spot, int>\" = type { i64, ptr, i32 }",
         ];
         Assert.All(layouts, layout => Assert.Contains($"\n%\"entry.{layout}", compiled.Ir, StringComparison.Ordinal));
     }

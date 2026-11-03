@@ -830,9 +830,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   for SipHash-1-3, and whether an insert's probe passed the bound, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
   key and the value, laid out as a `data` value of the three, for a key whose hash reads more than one
-  word (a string, a time of 128 bits, a `data` value, a list, a union), as .NET's `Dictionary` keeps
-  each entry's hash code, and the key and the value alone for a key of one word (an integer, a `bool`,
-  a `char`, an enum's value, a time of 64 bits, a `double`, a `float`), whose growth hashes every key
+  word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that compares by its
+  fields), as .NET's `Dictionary` keeps each entry's hash code, and the key and the value alone for a key
+  of one word (an integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`,
+  an instance that compares by identity, hashed by its address), whose growth hashes every key
   again, as `hashbrown`'s buckets keep no hash *(assumed: taken under the owner's "Allow, faster wins"
   of 2026-11-01, issue 157, comment 6556450466, by the rows of item 14 there: without the hash
   a `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
