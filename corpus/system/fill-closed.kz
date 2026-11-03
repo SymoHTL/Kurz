@@ -1,0 +1,28 @@
+// expect: output
+// | other (os error 9): fill-closed.txt
+// | other (os error 9): fill-closed.txt
+// rules: S24, S5
+
+// a `Close` through one holder while the buffer holds the file's bytes: a `Fill` and a `Consume` through the other holder find the mark
+// before they reach the buffer, and get the closed handle's error
+void | IoError Closed() {
+    File.WriteAll("fill-closed.txt", "abc".Bytes)
+    f = File.Open("fill-closed.txt")
+    File.Delete("fill-closed.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    match g.Fill(mut seen) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}

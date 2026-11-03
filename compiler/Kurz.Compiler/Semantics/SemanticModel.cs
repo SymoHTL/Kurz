@@ -167,6 +167,12 @@ public enum CallKind
     /// <summary>A file's or a stream's <c>Read(mut into, max)</c> (S3, S9).</summary>
     FileRead,
 
+    /// <summary>A file's or a stream's <c>Fill(mut into)</c> (S24).</summary>
+    FileFill,
+
+    /// <summary>A file's or a stream's <c>Consume(n)</c> (S24).</summary>
+    FileConsume,
+
     /// <summary>A file's or a stream's <c>Write(bytes)</c> (S4, S9).</summary>
     FileWrite,
 
