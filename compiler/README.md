@@ -938,9 +938,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   end, a `break` or a `return`), marks the block as on SipHash-1-3 (`MapLongLookup`), writes each entry's hash under
   the block's keys and moves the entries within the block as hashbrown's `rehash_in_place` moves them (the emitted
   `rehash` helper and `MapRehashInPlace`), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
-  count too"; the bound, the lookups of `m[k] = v` and `Remove` and the loop assumed there). An insert's own lookup
-  so passes the bound before its search of a free slot can, which leaves the move into a new block to the search of a
-  free slot in a block that grew. A key that is an instance is hashed by its address where `==`
+  count too"; the bound, the lookups of `m[k] = v` and `Remove` and the loop assumed there). Past the bound the
+  lookup hands the rest of its probe to a helper out of line (`far`, `noinline` and `cold`) and gives what it gives:
+  the test, the rehash and the second lookup, or the probe gone on with no bound where the block does not rehash.
+  The lookup so does not call itself and stays small enough for the optimiser to inline where it is called. An
+  insert's own lookup so passes the bound before its search of a free slot can, which leaves the move into a new
+  block to the search of a free slot in a block that grew. A key that is an instance is hashed by its address where `==`
   compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
   K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held

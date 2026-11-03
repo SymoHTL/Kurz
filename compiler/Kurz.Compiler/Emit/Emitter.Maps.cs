@@ -240,10 +240,36 @@ public sealed partial class Emitter
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
     /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 64 groups without a slot of 255, in a block on
     /// the fast hash that no loop over a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
-    /// new hash (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto SipHash-1-3 past the bound").
+    /// new hash (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto SipHash-1-3 past the bound"): past the
+    /// bound the lookup gives what <see cref="FarEntry"/> gives.
     /// </summary>
-    private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () =>
+    private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: false));
+
+    /// <summary>
+    /// The helper a lookup past the bound hands the rest of its probe to, with the map's block, <c>%a0</c>, the key, <c>%a1</c>, its
+    /// hash, <c>%a2</c>, the group the probe goes on at, <c>%a3</c>, and the stride it took last, <c>%a4</c>: where <c>MapLongLookup</c>
+    /// says the block rehashes, it rehashes it and finds the key again under its new hash; where it does not, it goes on with the probe
+    /// from that group with no bound. It is out of line and cold, and the lookup returns what it gives, so that the lookup does not call
+    /// itself, keeps neither the test nor a second hash in its body, and has no value its loop needs after a call: the lookup stays
+    /// small enough for its callers to take it in.
+    /// </summary>
+    private string FarEntry(MapType type) =>
+        Helper($"far.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64", "i64", "i64"], () => ProbeBody(type, far: true), "noinline", "cold");
+
+    /// <summary>The body of <see cref="FindEntry"/> or, where <paramref name="far"/> is set, of <see cref="FarEntry"/>.</summary>
+    private void ProbeBody(MapType type, bool far)
     {
+        if (far)
+        {
+            var rehash = fn.Label("rehash");
+            var kept = fn.Label("kept");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("MapLongLookup")}(ptr %a0)"), rehash, kept);
+            fn.Block(rehash);
+            fn.Emit($"call void {Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type))}(ptr %a0)");
+            fn.Return($"ptr {fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})")}");
+            fn.Block(kept);
+        }
+
         const string ones = "72340172838076673"; // 0x0101010101010101
         const string highs = "-9187201950435737472"; // 0x8080808080808080
         module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
@@ -255,8 +281,8 @@ public sealed partial class Emitter
         var at = fn.Alloca("i64", "group");
         var step = fn.Alloca("i64", "step");
         var marks = fn.Alloca("i64", "marks");
-        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"and i64 %a2, {mask}")}, -8")}, ptr {at}");
-        fn.Emit($"store i64 0, ptr {step}");
+        fn.Emit(far ? "store i64 %a3, ptr " + at : $"store i64 {fn.Value($"and i64 {fn.Value($"and i64 %a2, {mask}")}, -8")}, ptr {at}");
+        fn.Emit(far ? "store i64 %a4, ptr " + step : $"store i64 0, ptr {step}");
         var group = fn.Label("group");
         var check = fn.Label("marks");
         var mark = fn.Label("mark");
@@ -301,21 +327,22 @@ public sealed partial class Emitter
         fn.Block(next);
         var stepped = fn.Value($"add i64 {fn.Value($"load i64, ptr {step}")}, 8");
         fn.Emit($"store i64 {stepped}, ptr {step}");
-        var bound = fn.Label("bound");
-        var rehash = fn.Label("rehash");
-        var onward = fn.Label("onward");
-        fn.CondBranch(fn.Value($"icmp eq i64 {stepped}, 520"), bound, onward); // 65 groups without a slot of 255: past 512 slots (section 4)
-        fn.Block(bound);
-        fn.CondBranch(fn.Value($"call i1 {StdFunction("MapLongLookup")}(ptr %a0)"), rehash, onward);
-        fn.Block(rehash);
-        fn.Emit($"call void {Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type))}(ptr %a0)");
-        fn.Return($"ptr {fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})")}");
-        fn.Block(onward);
-        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}")}, ptr {at}"); // the last group followed by the first
+        var onward = fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}"); // the last group followed by the first
+        if (!far)
+        {
+            var bound = fn.Label("bound");
+            var on = fn.Label("onward");
+            fn.CondBranch(fn.Value($"icmp eq i64 {stepped}, 520"), bound, on); // 65 groups without a slot of 255: past 512 slots (section 4)
+            fn.Block(bound);
+            fn.Return($"ptr {fn.Value($"call ptr {FarEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 %a2, i64 {onward}, i64 {stepped})")}");
+            fn.Block(on);
+        }
+
+        fn.Emit($"store i64 {onward}, ptr {at}");
         fn.Branch(group);
         fn.Block(none);
         fn.Return("ptr null");
-    });
+    }
 
     /// <summary>
     /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on:

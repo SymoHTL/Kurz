@@ -423,6 +423,35 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_lookup_of_a_map_hands_its_probe_past_the_bound_to_a_helper_out_of_line()
+    {
+        // the lookup is small enough for the optimiser to inline at every read, write and `Remove`, as before the bound of a lookup:
+        // the test of the bound's rehash, the rehash, the second hash and the probe gone on past the bound stay in a helper it never
+        // inlines, whose result the lookup returns, and the lookup does not call itself
+        var ir = Compile("mut m = Map<int, int>()\nm[1] = 2\nprint(m[1] ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        string Body(string name)
+        {
+            var start = ir.IndexOf($"define internal ptr @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        }
+
+        var find = Body("find.Map<int, int>");
+        var call = find.IndexOf("call ptr @\"far.Map<int, int>\"(ptr %a0, i32 %a1, i64 %a2, i64 ", StringComparison.Ordinal);
+        Assert.True(call >= 0, "the lookup hands no probe past the bound on");
+        Assert.StartsWith("ret ptr %", find[(find.IndexOf('\n', call) + 1)..].TrimStart(), StringComparison.Ordinal);
+        Assert.DoesNotContain("call ptr @\"find.Map<int, int>\"", find, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapLongLookup", find, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapHash", find, StringComparison.Ordinal);
+        var far = Body("far.Map<int, int>");
+        Assert.Contains(" noinline cold ", far.Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("MapLongLookup", far, StringComparison.Ordinal);
+        Assert.Contains("call void @\"rehash.Map<int, int>\"(ptr %a0)", far, StringComparison.Ordinal);
+        Assert.Contains("call ptr @\"find.Map<int, int>\"(ptr %a0, i32 %a1, i64 ", far, StringComparison.Ordinal);
+        Assert.DoesNotContain("call ptr @\"far.Map<int, int>\"", far, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_construct_of_the_runtime_the_emitter_does_not_lay_out_is_the_compilers_defect_and_names_its_file()
     {
         var target = Builder.HostTarget!.Value;
