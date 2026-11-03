@@ -780,7 +780,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
   `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
   of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
-  they say, as Rust's `sort_by_cached_key`. Two forms are not Rust's and measured faster on the same
+  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made, so
+  that a key which changes it through an instance whose field holds it leaves its change standing and the
+  sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read while the field holds
+  another (section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment 6562795140), at one
+  count for each call. Two forms are not Rust's and measured faster on the same
   results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
   orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
   scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
@@ -1736,7 +1740,7 @@ round can ask about it by the rule's id.
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
   type whose result is not `void`, which F11 makes `type-mismatch` at the lambda; `Name()` on a
-  data type without fields, whose value D8 writes as the bare name; a second data type among the
+  data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
   included (`print<int>(1)`, a conversion, a function value, a list's `Add` and `Where`), where a
