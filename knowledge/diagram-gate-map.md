@@ -49,7 +49,9 @@ flowchart TD
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
         no longer turns its one named case red; fewer tools than the floor; a ledger written back in
-        another form than its one (one entry per line, two spaces in, text as it is; --format writes it). The replay runs each
+        another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
+        a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
+        (KURZ_RED_PROOF_REPLAY), refused before anything is copied. The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
@@ -127,10 +129,12 @@ flowchart TD
         conversion from an unsigned type to a signed one, red on a value above the signed maximum that raises no
         overflow in a test build, and on a function whose first instruction starts a block, which clang refuses
         without the entry block's branch, and on a function without uwtable, or without the inline stack probe on Linux
-        or with it on Windows; and ListTests, red on a list's or a string's block read or written after it was
+        or with it on Windows; and ListTests, red on a mut field of the instance passed as mut in its method that the
+        callee's write does not reach, on a list's or a string's block read or written after it was
         freed, under an allocator that makes every freed block inaccessible (a borrow that outlived its source, the
         name an arm binds among the programs), on lists or strings made and dropped that outgrow a system giving
-        sixteen pieces, and on the number allocation-failed reports; and FloatingTests, red on the text of a double or a float that
+        sixteen pieces, on the number allocation-failed reports, and on a program whose first released class holds a field of
+        another class that does not build and run (the flag of a release under way declared twice); and FloatingTests, red on the text of a double or a float that
         differs from what .NET writes, or where .NET's does not read back, from the fewest digits that do, on a
         conversion into an integer type at either end of its range that keeps a value it loses or loses one it
         keeps, in a test and a release build, and on a comparison, a field's equality, a widening, a remainder,
