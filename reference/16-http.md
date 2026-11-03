@@ -18,8 +18,9 @@ class the name is the type; inside a class that has such a member, a type's plac
 an expression finds the member first, as C# reads a simple name (`HttpError.Make()` inside a class
 with an `int HttpError` is CS1061), so that inside `class S(int HttpError)` the call
 `HttpError(HttpKind.Protocol, "x")` reads the field and is `type-mismatch`.
-The names are a list the compiler holds, each a `pub` type of `std/`, where Rust writes its list in
-`std`, as the module `std::prelude::rust_2021` that its compiler names by edition (§12: the owner,
+The names are a list the compiler holds, each a type `std/` declares or a name it reserves, where
+Rust writes its list in `std`, as the module `std::prelude::rust_2021` that its compiler names by
+edition (§12: the owner,
 2026-11-01, Q7 (b), that every file sees them, and 2026-11-02, that a file's own declaration of one
 is `redeclared` whether `std/` declares it or not, that only a declaration that binds the name in a
 scope is one, against every member so named, that a type parameter so named is one, against an
@@ -174,8 +175,10 @@ failure of the network, which stays an `IoError` (S1), neither wrapped in the ot
 It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
 text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body, since the
 compiler reads no body of a `data` type (D16) and `std/` compiles with every program, so a build says
-`not supported` to the text of an `HttpError` and of a value whose text would hold an `HttpError`'s
-text, a list, a union, a map or a `data` value that holds one among them, at the expression where
+`not supported` to the text of an `HttpError` and of a value of a type whose text can hold an
+`HttpError`'s text, a list, a union, a map or a `data` type with one among its items, its cases, its
+keys and values or its fields, whatever the value holds when the program runs, a class whose own
+`Text()` reads none being no such type, at the expression where
 `print`, a hole of an interpolated string (L6) or `string.Join` (X6) takes it (§12, the owner,
 2026-11-02, the design standing) *(assumed: the values and the expressions named, as §12 marks
 them)*, and to a call of that `Text()`, `e.Text()`, at the call, with the same words (§12, the
