@@ -233,9 +233,10 @@ and a class instance is no part of the copy: the lambda holds a reference to the
 every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
 from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
 such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
-record speaks of assigning)* A path reaches an instance where a field of an instance lies on it, the
-field it assigns or one whose list or map it writes into: `() => { b.Xs[0] = 2 }` reaches the instance
-`b`, while `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field `Item` holds an
+record speaks of assigning)* A path reaches an instance where a field of an instance lies on it, whatever the
+path does after that field, the field it assigns, one whose list or map it writes into or one whose `data`
+value it writes into: `() => { b.Xs[0] = 2 }` and `() => { b.Data.X = 1 }`, with `Data` a `mut` field of
+a `data` type, reach the instance `b`, while `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field `Item` holds an
 instance, assigns a field of the copy and is `capture-assign` *(proposed: as the sentence before)*. An instance changes through every reference (K2), so the lambda may
 change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`

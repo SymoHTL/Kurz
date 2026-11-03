@@ -3696,7 +3696,7 @@ public sealed class CheckerTests
         // K7 with F9 (the owner, 2026-11-02, #110, "allowed as written"): an override is as visible as it writes; one without `pub` is
         // private to its class, reached by a call through the base and inside the class, and `not-visible` on the derived type outside
         // it; a `prot` one is `prot`, and a `pub` override of a `prot` method is `pub`; a class derived from the one with the private
-        // override takes it as the method of that name *(assumed)*, and its own `pub` override is `pub`
+        // override takes it as the method of that name *(assumed)*, inside it as outside, and its own `pub` override is `pub`
         const string bare = "class Dog : Animal {\n    override string Sound() => \"woof\"\n    pub string Bark() => Sound()\n}\n";
         Clean(animal + bare + "\nAnimal a = Dog()\nprint(a.Sound())\nprint(Dog().Bark())");
         Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "\nprint(Dog().Sound())"));
@@ -3704,6 +3704,7 @@ public sealed class CheckerTests
         Clean("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nprint(B().Get())");
         Assert.Equal([(ErrorIds.NotVisible, 9)], Errors("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nA x = B()\nprint(x.Get())"));
         Assert.Equal([(ErrorIds.NotVisible, 12)], Errors(animal + bare + "class Puppy : Dog\n\nprint(Puppy().Sound())"));
+        Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "class Puppy : Dog {\n    pub string Call() => Sound()\n}\n\nprint(Puppy().Call())"));
         Clean(animal + bare + "class Puppy : Dog {\n    pub override string Sound() => \"yip\"\n}\n\nAnimal p = Puppy()\nprint(p.Sound())\nprint(Puppy().Sound())");
         // K13: `==` on a base reads its derived classes, a field without `==` among them as D3 reads a data type's (`type-mismatch`)
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("class A(int N)\nclass B(Map<string, int> M) : A\n\nx = A(1)\nprint(x == x)"));
@@ -3992,10 +3993,15 @@ public sealed class CheckerTests
     [InlineData("class A(int N)\nclass B(int N) : A {\n    mut int m = 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A(int N)\nclass B : A\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
     [InlineData("class A\nclass B : A()\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
-    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
+    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K17)")]
+    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
     [InlineData("class A(string Name = \"a\")\nclass B(string Name = \"b\", int L) : A\n\nprint(1)", "2: a default on `Name`, which in the short form is the field of the base `A` with the base's default (K16)")]
     [InlineData("class A(int Id)\nclass B(int X) : A equal by X\n\nprint(1)", "2: `equal by` on a class whose base `A` has fields and no clause, where K13 does not say whether the base's fields count")]
     [InlineData("class A {\n    virtual int Get() => 1\n}\n\nprint(1)", "2: `virtual` on a private method, which no derived class sees (K7, F9)")]
+    [InlineData("class A {\n    pub static virtual int F() => 1\n}\n\nprint(A.F())", "2: `virtual` on a `static` method, which has no instance to dispatch on (K7)")]
+    [InlineData("class A {\n    pub static override int F() => 1\n}\n\nprint(A.F())", "2: `override` on a `static` method, which has no instance to dispatch on (K7)")]
+    [InlineData("class A {\n    pub static virtual int F() => 1\n}\nclass B : A\n\nprint(1)", "2: a field in the body or a `static` member of `A`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A {\n    pub virtual int F() => 1\n}\nclass B : A {\n    pub static int F() => 2\n}\n\nprint(1)", "5: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A {\n    pub virtual int Get() => 1\n}\nclass B : A {\n    pub virtual override int Get() => 2\n}\n\nprint(1)", "5: `virtual` and `override` on one method (K7)")]
     [InlineData("class A {\n    prot int Get() => 1\n}\nclass B : A {\n    pub int Peek(A other) => other.Get()\n}\n\nprint(1)", "5: the `prot` method `Get` called through an `A`, which is not the calling class or derived from it (F9)")]
     [InlineData("class A\nclass B : A\n\nA x = B()\nprint(match x {\n    B b => 1\n    else => 2\n})", "6: an arm of `B`, a class derived from a case of `A`, which tests the instance's class at run time (C4, K6)")]
@@ -4008,7 +4014,7 @@ public sealed class CheckerTests
         // constant (K18), a field in the body or a `static` member of a class in a chain (K6, K7, K18), a base that is no class, a
         // second one and a cycle of bases (K6), the arguments of a base for a class without a primary constructor (K10, K14), a passed-on
         // parameter whose `mut` or, in the short form, whose default differs from the base's field (K11, K16), `equal by` over a base with
-        // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, a `prot`
+        // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, either on a `static` method, a `prot`
         // method through a reference of a base's type (K7, F9), an arm of a derived class (C4), a key type whose derived class names a `mut`
         // field in its clause (K12), a method that is `extern`, or has type parameters,
         // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
