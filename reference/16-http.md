@@ -843,7 +843,8 @@ written; and a file whose size changes while it is sent giving one of the kind `
 Case: [http/response-write.kz](../corpus/http/response-write.kz)
 ```kurz
 // a response is written as its status line, its headers in the order they were set, the `Content-Length` of its body and the
-// body; each function that makes one sets the `Content-Type` ASP.NET Core's `Results` sets, which a handler replaces with `Set`
+// body; each function that makes one sets the `Content-Type` ASP.NET Core's `Results` sets, which a handler replaces with `Set`;
+// a file's length is taken when the response is written, so that the file may be made after the response
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -864,8 +865,9 @@ void | IoError Wire(HttpResponse r) {
 void | IoError | HttpError All() {
     Wire(HttpResponse.Text(200, "hi"))
     Wire(HttpResponse.Bytes(404, "ab".Bytes))
+    file = HttpResponse.File(201, "response-write.txt")
     File.WriteAll("response-write.txt", "file body".Bytes)
-    Wire(HttpResponse.File(201, "response-write.txt"))
+    Wire(file)
     File.Delete("response-write.txt")
     Wire(HttpResponse.Empty(202))
     html = HttpResponse.Text(200, "<p/>")
