@@ -49,7 +49,9 @@ flowchart TD
         G1["self-tests: a tool self-test fails, ran no case or contradicts its exit code;
         a tool has no self-test or no recorded red proof; a recorded mutation
         no longer turns its one named case red; fewer tools than the floor; a ledger written back in
-        another form than its one (one entry per line, two spaces in, text as it is; --format writes it). The replay runs each
+        another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
+        a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
+        (KURZ_RED_PROOF_REPLAY), refused before anything is copied. The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
@@ -159,6 +161,11 @@ flowchart TD
         what the machine's kernel gives, the bound address where it holds `::1` and its error elsewhere, on a listener on IPv6's wildcard that a connection of IPv4 does not
         reach where the kernel's dual stack is on, on a write to a connection whose peer closed it that is not
         BrokenPipe, and on a build for Windows that does not say not supported at a call on a file.
+        IntrinsicTests and HashTests, which run SSE4.1, AES and SHA, the build for native AVX and the build for
+        x86-64-v3 its sets, are red on a machine without them, naming the set, IntrinsicTests is red where
+        fewer than 20 of the start check's sets read as present or none reads as missing, and IntrinsicTests holds the start check of a build for a named CPU against
+        clang's native reading of the machine it runs on: the CPU of the hosted runners is pinned by nothing
+        (HAZARD issue 168).
         Not seen: the expectation of a case the compiler does not emit, and of a case the runner lists as not run
         (HAZARD issue 1): the suite checks the front end's and the checker's errors against those headers and runs
         no program of them"]
@@ -298,11 +305,13 @@ flowchart TD
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
         a branch behind its base (at the review cap the refusal says, from the review status of the head,
         whether the round converged on every file, and where it did not or the status does not show it,
-        that taking main costs a paid round and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
+        that taking main makes the review of the new head a paid round, and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,
         a title or description the title gate refuses, an option it does not know.
+        --delete-branch gives every open pull request on a merged branch the merged pull request's base,
+        and deletes the branch only when the list read again holds none; a deletion by hand skips it: HAZARD issue 14.
         A merge by the button or gh pr merge still meets M1, but not the head pin, the auto-merge check,
         the comparison with the live rules, or the re-check of the title gate and of the answered findings
         at the moment of the merge: HAZARD issue 14"]

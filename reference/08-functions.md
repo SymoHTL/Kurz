@@ -162,9 +162,17 @@ folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives
 name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
 name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
 agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
-"Both forms", "Root path, last name"). *(assumed, §8, §13: the two ids; a type of the file's own
+"Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
+project and a line of `project.kz`, `use json` beside a folder `json`, is `ambiguous-name` at that
+line, in every file of the project, those of the folder `json` included, and with `as` too,
+`use json as j` (§8, the owner, 2026-11-02). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
-through the folder's name; a package's qualifier is the name of its line)*
+through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
+the folder's name as its qualifier in the file, the old name there being `unknown-name`; the names
+`redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
+top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
+the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
+and a path that holds `.` or `..` are `unknown-name` at the `use` line)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 
@@ -446,6 +454,35 @@ long big = 5
 Show(big)
 ```
 
+A call that does not fit the one function of its name is `type-mismatch` (T1), a value of one type
+where another is required, and not `argument-mismatch`, and so is a call whose argument is a call
+with a case the parameter's union does not list (O4) *(assumed, §5: as the outcomes chapter reads
+both)*.
+
+Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
+```kurz
+data NotFound
+
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
+Report(Find(1))
+```
+
 Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)
 ```kurz
 data NotFound
@@ -505,6 +542,37 @@ void Show(long | NotFound x) {
 int | NotFound Run() {
     Show(Find(1))
     return 0
+}
+```
+
+Case: [outcomes/keep-items-the-union-one.kz](../corpus/outcomes/keep-items-the-union-one.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(List<int> xs) {
+    print("the items")
+}
+
+void Show(List<int | NotFound> xs) {
+    print("the union")
+}
+
+int | NotFound Run() {
+    // a list literal of calls is read as such a call: the function whose item type keeps the cases fits it exactly, and wins
+    Show([Find(1)])
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
 }
 ```
 

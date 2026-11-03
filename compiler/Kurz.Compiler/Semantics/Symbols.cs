@@ -47,6 +47,12 @@ public sealed class TypeParameterSymbol(string name, int line)
     public int Line { get; } = line;
 
     public bool HasLimit { get; init; }
+
+    /// <summary>T35: the type of the constant the parameter holds, written <c>const JsonKeys K</c>; null for a type parameter, the error type where it is not read.</summary>
+    public KurzType? Constant { get; set; }
+
+    /// <summary>T35: the constant a call that leaves the parameter out gives it, <c>= Mode.Plain</c>; null where none is written or it is wrong.</summary>
+    public ConstantArgument? Default { get; set; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
@@ -112,8 +118,12 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     /// <summary>Set when the checker starts resolving the type, whatever the outcome, so that it is resolved once and a cycle of bases ends.</summary>
     public bool Resolved { get; set; }
 
-    /// <summary>Whether the declaration writes a primary constructor: <c>data Empty</c> has none and one value (D8); an empty <c>()</c> is <c>syntax</c> and counts as written.</summary>
-    public bool HasFields => Declaration.PrimaryConstructor is not null;
+    /// <summary>
+    /// Whether the type has a field, of its own or of its base (D7, D21), or writes a primary constructor: <c>data Empty</c> has none
+    /// and one value (D8), as has <c>data Leaf : Empty</c>; an empty <c>()</c> is <c>syntax</c> and counts as written. The fields are
+    /// the resolved ones, so it is read after the type is resolved.
+    /// </summary>
+    public bool HasFields => Declaration.PrimaryConstructor is not null || Fields.Count > 0;
 
     public int Line => Declaration.Line;
 
