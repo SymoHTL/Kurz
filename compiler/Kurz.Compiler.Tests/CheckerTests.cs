@@ -4279,6 +4279,47 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_cycle_of_generic_calls_whose_type_argument_grows_is_refused_at_each_call_where_it_grows()
+    {
+        // T34: where the type parameters lead back along the calls of the generic bodies, a call that gives one a larger type is refused,
+        // a written type argument, a map, a data type and a call in a lambda among them, and a call with two such type arguments one time;
+        // a cycle that keeps, swaps or takes back a type, a union's case, and a larger type outside any cycle make a finite number of copies
+        static List<string> Texts(string program) => [.. Check(program).Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}")];
+        const string Deep = "data Box<T>(T V)\n\nvoid Deep<T>(T x, int n) {{\n    if n > 0 {{\n        {0}\n    }}\n}}\n\nDeep(1, 3)";
+        Assert.Equal(["growing-type-argument 5: `Deep` calls itself with `List<T>` for `T`, a type larger than its `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(Deep, "Deep([x], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Map<string, T>(), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<() => T>(() => x, n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "f = () => Deep([x], n - 1)\n        f()")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3)], Errors("void Deep<T>(T x, int n) {\n    if n > 0 {\n        Deep([x], n - 1)\n    }\n}"));
+
+        var pingPong = "void Ping<T>(T x, int n) {{\n    if n > 0 {{\n        Pong([x], n - 1)\n    }}\n}}\n\nvoid Pong<U>(U y, int n) {{\n    Ping({0}, n)\n}}\n\nPing(1, 3)";
+        Assert.Equal(["growing-type-argument 3: `Ping` calls `Pong` with `List<T>` for `U`, a type larger than its `T`, and the cycle `Ping` to `Pong` to `Ping` gives it back to `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(pingPong, "y")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3), (ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(pingPong, "[y]")));
+        Assert.Equal(["growing-type-argument 3: `F` calls `G` with `List<A>` for `U`, a type larger than its `A`, and the cycle `F` to `G` to `F` gives it back to `A`, so each copy makes a larger one without end (T34)"],
+            Texts("void F<A>(A a, int n) {\n    if n > 0 {\n        G([a], 1, n - 1)\n    }\n}\n\nvoid G<U, V>(U u, V v, int n) {\n    if n > 0 {\n        G(v, u, n - 1)\n        F(v, n - 1)\n    }\n}\n\nF(1, 3)"));
+        Assert.Equal(["growing-type-argument 3: `Swap` calls itself with `List<A>` for `B`, a type larger than its `A`, so each copy makes a larger one without end (T34)"],
+            Texts("void Swap<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Swap(b, [a], n - 1)\n    }\n}\n\nSwap(1, \"a\", 3)"));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3)], Errors("void Two<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Two([a], [b], n - 1)\n    }\n}\n\nTwo(1, 2, 3)"));
+
+        Clean(string.Format(Deep, "Deep(x, n - 1)"));
+        Clean("void Swap<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Swap(b, a, n - 1)\n    }\n}\n\nSwap(1, \"a\", 3)");
+        Clean("void Widen<T>(T x, int n) {\n    if n > 0 {\n        T | string y = x\n        Widen(y, n - 1)\n    }\n}\n\nWiden(1, 3)");
+        Clean(string.Format(pingPong.Replace("Pong<U>(U y", "Pong<U>(List<U> y"), "y[0]"));
+        Clean("List<T> Wrap<T>(T x) => [x]\n\nList<List<T>> Twice<T>(T x) => Wrap(Wrap(x))\n\nprint(Twice(1).Count)");
+
+        // E1: a call with an error of its own takes no part in a cycle; T33: a function that passes its type parameter to one that reads its
+        // type is read in its copies alone, and its chain of copies stays bounded
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(string.Format(Deep, "Deep([nothing], n - 1)")));
+        var passing = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nvoid Outer<U>(U x, int n) {\n    Only<U>()\n    if n > 0 {\n        Outer([x], n - 1)\n    }\n}\n\nOuter(1, 3)";
+        Assert.Equal(["14: a chain of more than 64 copies of generic functions that read their type, from `Outer<int>` (T33)"], NotSupported(passing));
+        Clean("void Deep<T>() {\n    match T.Kind {\n        TypeKind.List => print(1)\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
+    }
+
+    [Fact]
     public void A_member_named_as_a_type_reading_keeps_its_meaning_on_a_name_that_is_no_type_parameter()
     {
         // T33 reads the members of a type parameter alone: an enum's own value `Kind` stays a value of the enum
