@@ -5163,12 +5163,16 @@ pub uint LittleEndianWord(byte* p) {
 
 // A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
 // with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
-// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
-// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
-// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
-// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+// give it, but for the terms of F and G. The two terms of each share no bit, so an or of them, their sum
+// and each added into the sum give the same number, and so does F's select below. F is the select
+// OpenSSL's x86-64 assembly writes (`md5-x86_64.pl`), `((c ^ d) & b) ^ d`, the bit of c where b's is 1
+// and the bit of d where it is 0: of the or that RFC 1321 and `op_f` write, LLVM (clang 23) makes that
+// select in 14 of the 16 steps and keeps the or in the last two. MD5 of 16 MiB hashed three times took
+// 51.76 ms so, 52.14 with the or and 53.28 with the two terms added into the sum one at a time (issue
+// 157, 2026-11-03, the best of 9). G adds each of its two terms into the sum, where RFC 1321 joins them
+// with an or and `op_g` adds them together first: G as the select `((b ^ c) & d) ^ c` took 56.41 ms.
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
-    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    uint sum = a +% m +% t +% (((c ^ d) & b) ^ d)
     return (sum << r | sum >> (32 - r)) +% b
 }
 

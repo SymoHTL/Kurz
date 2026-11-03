@@ -1310,8 +1310,8 @@ public sealed class CheckerTests
     public void A_list_literal_of_calls_runs_the_function_whose_item_type_keeps_the_cases()
     {
         // O4 with F13 (the owner, 2026-11-01, "The union one"): a list literal of calls is read as such a call, so the function whose item type
-        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly item by item, so a value beside
-        // the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
+        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly by the whole result of each
+        // call whose cases its item type keeps and by its own item type for the rest, so a value beside the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
         // with a widening are ambiguous (assumed, section 5)
         var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
         var show = "int Show(List<int> xs) => 1\n\nstring Show(List<int | NotFound> xs) => \"union\"\n\n";
@@ -1471,6 +1471,37 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data A(int X) : C\ndata B(int Y) : A\ndata C(int Z) : B\n\nprint(1)"));
         Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data D(int W) : A\ndata A(int X) : B\ndata B(int Y) : A\n\nprint(D(1, 2, 3).W)"));
         Assert.Equal([(ErrorIds.BaseCycle, 2), (ErrorIds.BaseCycle, 4)], Errors("data A(int X) : B\ndata B(int Y) : A\ndata C(int Z) : D\ndata D(int W) : C\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_derived_data_type_without_fields_of_its_own_has_the_fields_of_its_base()
+    {
+        // D21 (decided, §4): `data Dot : Shape` has the fields of its base (D7), through every base above it, so its bare name stands for no
+        // value (D2), `Dot(...)` binds the base's fields, a member on its name is no field of a value, and no text of D8 names it. Where no base
+        // has a field, the bare name is the one value (D8), and an argument or `()` keeps D8's errors; a type of a cycle of bases has no base
+        // and keeps its own fields
+        var shape = "data Shape(int A, int B)\ndata Dot : Shape\ndata Spot : Dot\n\n";
+        Clean(shape + "d = Dot(1, 2)\nprint(Spot(3, 4).B + d.A)");
+        var bare = Assert.Single(Check(shape + "print(Dot)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.Syntax, 5, "`Dot` is a type, and no value stands here (D2; E4)"), (bare.Id, bare.Line, bare.Message));
+        var member = Assert.Single(Check(shape + "print(Spot.A)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.UnknownName, 5, "`Spot` is a type and has no member `A` (D1, V10)"), (member.Id, member.Line, member.Message));
+        foreach (var (call, text) in new[]
+        {
+            ("Dot()", "the parameter `A` gets no argument and has no default (D11)"),
+            ("Dot(1)", "the parameter `B` gets no argument and has no default (D11)"),
+            ("Spot(1, 2, 3)", "the call passes 3 arguments to 2 parameters (D11)"),
+        })
+        {
+            var wrong = Assert.Single(Check(shape + $"print({call})").Diagnostics.Sorted);
+            Assert.Equal((ErrorIds.ArgumentMismatch, 5, text), (wrong.Id, wrong.Line, wrong.Message));
+        }
+
+        var tag = "data Tag\ndata Mark : Tag\n\n";
+        Clean(tag + "m = Mark\nprint(m == Mark)");
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(tag + "print(Mark(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(tag + "print(Mark())"));
+        Assert.Equal([(ErrorIds.BaseCycle, 2)], Errors("data A : B\ndata B : A\n\nprint(A == A)"));
     }
 
     [Fact]
