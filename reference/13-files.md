@@ -1298,7 +1298,7 @@ Show() else {
 ```
 
 `Close` gives up the bytes the buffer holds, so that a later `Lines()` or `Read` takes none of them
-and gets the error of a closed file (S5) *(proposed)*. A line longer than the buffer is read whole,
+and gets the error of a closed file (S5; §12, the owner, 2026-11-02). A line longer than the buffer is read whole,
 and one of more bytes than the largest `int` ends the process with `allocation-failed`, as a string
 past it does *(assumed, §12)*. The loop keeps the `File` its collection gave when it started: an
 assignment to the variable in the block changes the variable, not what the loop pulls *(proposed)*.
