@@ -504,7 +504,7 @@ public sealed partial class Checker
         var clash = IsDeclaredName(d.Name);
         if (clash)
         {
-            Report(ErrorIds.Redeclared, d.Line, preludeSeen.Contains(d.Name) ? PreludeClash(d.Name) : Redeclared(d.Name)); // a built-in name among them: `data List` could never be named (M9, T17)
+            Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a built-in name among them: `data List` could never be named (M9, T17)
         }
 
         if (d.Kind == TypeDeclarationKind.Enum)
@@ -1543,9 +1543,11 @@ public sealed partial class Checker
 
     /// <summary>
     /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
-    /// it names that type and the rule that declares it, since no line of the file does.
+    /// a type of the prelude among them (W1), it names that type and the rule that declares it, since no line of the file does.
     /// </summary>
-    private string Redeclared(string name) => BuiltInTypeRules.TryGetValue(name, out var rule)
+    private string Redeclared(string name) => preludeSeen.Contains(name)
+        ? PreludeClash(name)
+        : BuiltInTypeRules.TryGetValue(name, out var rule)
         ? $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
         : $"the name `{name}` is declared already (V9)";
 
