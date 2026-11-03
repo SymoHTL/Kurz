@@ -1924,7 +1924,8 @@ round can ask about it by the rule's id.
   `T` = `int` in `T | List<T>` ("Same shape first"), and a literal binds the type parameter to its own type
   where the union names no case of that type, `F(5)` in `T | string` ("Bind T = int in both"): `Infer` and
   `Unify` in `Checker.Calls.cs`. A list literal keeps the cases at a parameter whose item type names a case
-  of an item call beyond its success, and fits exactly item by item, so that of `Show(List<int>)` and
+  of an item call beyond its success, and fits exactly by the whole result of each item call whose cases
+  the item type keeps and by its own item type for every other item, so that of `Show(List<int>)` and
   `Show(List<int | NotFound>)` the call `Show([Find(1)])` runs the second ("The union one", 2026-11-01).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
