@@ -20,10 +20,11 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
     /// std/ with <c>HttpResponse.SendFileOf</c>, which sends the file at a path as the body of a head that gave it
     /// <c>length</c> bytes, as a file whose size was read before it changed.
     /// </summary>
-    private static readonly Lazy<CheckedRuntime> WithSendFile = new(() => ListTests.Edited(("std/std.kz", "    pub void | IoError Write(TcpStream stream) => Send(stream, true)", """
+    private static readonly Lazy<CheckedRuntime> WithSendFile = new(() => ListTests.Edited(("std/std.kz", "    pub void | IoError Write(TcpStream stream) {\n", """
             pub static void | IoError SendFileOf(TcpStream stream, string path, long length) => HttpSendFile(stream, HttpNoBytes(), path, length, false)
 
-            pub void | IoError Write(TcpStream stream) => Send(stream, true)
+            pub void | IoError Write(TcpStream stream) {
+
         """)));
 
     [Theory]

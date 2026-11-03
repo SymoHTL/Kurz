@@ -6022,9 +6022,14 @@ pub class HttpBody {
     mut long most = 0
     mut int sizeLine = 4096
     mut HttpError? failed = null
+    mut bool timed = false
+    mut HttpRate rate = HttpRate(240, 5s)
+    mut long waited = 0
+    mut long arrived = 0
+    mut bool timedOut = false
 
     // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
-    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits) {
+    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed) {
         b = HttpBody()
         b.stream = s
         b.remaining = length
@@ -6033,11 +6038,16 @@ pub class HttpBody {
         b.expects = expectsContinue && (isChunked || length > 0)
         b.most = limits.MaxRequestBodySize
         b.sizeLine = limits.MaxChunkSizeLine
+        b.timed = isTimed
+        b.rate = limits.MinRequestBodyDataRate
         return b
     }
 
     // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
     internal bool AwaitsContinue => expects
+
+    // Whether a read of the body ran out of its time, which the server answers `408` (F9).
+    internal bool TimedOut => timedOut
 
     // Whether a read of the body failed, so that what the stream holds after it is not known (F9).
     internal bool Failed => failed != null
@@ -6067,6 +6077,51 @@ pub class HttpBody {
 
     // Appends at most `max` bytes of the body to `into` and gives their count, 0 at the end of the body.
     pub int | IoError | HttpError Read(mut Bytes into, int max) {
+        s = stream
+        if !timed || s == null || ended || failed != null || max <= 0 {
+            return Take(mut into, max)
+        }
+
+        // the rate, as Kestrel holds `MinRequestBodyDataRate`: after the grace, the bytes that arrived over the time the reads
+        // waited, so that a read may wait until that falls under the rate, and at most the 5 seconds of a read on a socket
+        bound = HttpNanosAt(arrived, rate.BytesPerSecond)
+        mut allowed = HttpNanosOf(rate.Grace)
+        if bound > allowed {
+            allowed = bound
+        }
+
+        spare = allowed - waited
+        if spare <= 0 {
+            timedOut = true
+            return IoError(IoKind.TimedOut, 0, "")
+        }
+
+        if spare < 5_000_000_000 {
+            s.SetReadTimeout(HttpNanos(spare))
+        } else {
+            s.SetReadTimeout(5s)
+        }
+
+        start = timestamp.Now
+        n = Take(mut into, max) else {
+            IoError e => {
+                waited = waited + HttpNanosOf(timestamp.Now - start)
+                if e.Kind == IoKind.TimedOut {
+                    timedOut = true
+                }
+
+                return e
+            }
+            HttpError e => return e
+        }
+
+        waited = waited + HttpNanosOf(timestamp.Now - start)
+        arrived = arrived + n
+        return n
+    }
+
+    // `Read` with no bound of time.
+    int | IoError | HttpError Take(mut Bytes into, int max) {
         f = failed
         if f != null {
             return f
@@ -6258,18 +6313,18 @@ pub class HttpResponse {
 
     // Writes the status line, the headers and the body to `stream` (W8).
     pub void | IoError Write(TcpStream stream) {
-        Send(stream, true, "", false, false)
+        Send(stream, true, "", false, false, null)
     }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
     pub void | IoError WriteHead(TcpStream stream) {
-        Send(stream, false, "", false, false)
+        Send(stream, false, "", false, false, null)
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
     // own `500` in its place, after which the loop closes the connection (F9).
-    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain) => Send(stream, withBody, date, close, plain)
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace) => Send(stream, withBody, date, close, plain, pace)
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
@@ -6291,7 +6346,7 @@ pub class HttpResponse {
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` with a body or a
     // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
     // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
-    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain) {
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace) {
         bodiless = code < 200 || code == 204 || code == 304
         mut length = 0L
         if !bodiless && isFile {
@@ -6357,12 +6412,13 @@ pub class HttpResponse {
 
         out.AddRange("\r\n".Bytes)
         if !withBody || bodiless {
+            HttpPace(s, pace, out.Count)
             s.Write(out)
             return true
         }
 
         if isFile {
-            HttpSendFile(s, out, filePath, length, chunked)
+            HttpSendFile(s, out, filePath, length, chunked, pace)
             return true
         }
 
@@ -6373,8 +6429,10 @@ pub class HttpResponse {
         if held.Count <= 65536 {
             out.AddRange(held)
         } else {
+            HttpPace(s, pace, out.Count)
             s.Write(out)
             out = HttpNoBytes()
+            HttpPace(s, pace, held.Count)
             s.Write(held)
         }
 
@@ -6387,6 +6445,7 @@ pub class HttpResponse {
         }
 
         if out.Count > 0 {
+            HttpPace(s, pace, out.Count)
             s.Write(out)
         }
 
@@ -6407,7 +6466,10 @@ void | IoError HttpUnwritable(TcpStream s, string date) {
 
 // The head `out` and then the file at `path` of `length` bytes, in pieces of 64 KiB, each a chunk where `chunked`; a file that
 // gives fewer bytes than its length had, or more, is `InvalidData` once its head is out, and the connection is the caller's to close.
-void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked) {
+void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked) => HttpSendFile(s, out, path, length, chunked, null)
+
+// The same, each write held to `pace` where it is given (W10).
+void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked, HttpRate? pace) {
     f = File.Open(path)
     mut sent = 0L
     mut piece = out
@@ -6433,6 +6495,7 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
             piece.AddRange("\r\n".Bytes)
         }
 
+        HttpPace(s, pace, piece.Count)
         s.Write(piece)
         piece = Bytes()
     }
@@ -6447,6 +6510,7 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
     }
 
     if piece.Count > 0 {
+        HttpPace(s, pace, piece.Count)
         s.Write(piece)
     }
 }
@@ -6690,13 +6754,14 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
         }
 
         s.SetReadTimeout(5s)
-        now = HttpSecondOf(timestamp.Now)
+        begun = timestamp.Now
+        now = HttpSecondOf(begun)
         if now != second {
             second = now
             date = "Date: {HttpDate(now)}\r\n"
         }
 
-        match HttpReadRequest(s, limits) {
+        match HttpReadRequest(s, limits, begun + limits.RequestHeadersTimeout) {
             HttpRefused no => {
                 HttpRefuse(s, no.Status, date) else {
                     IoError e => return no.Error
@@ -6723,10 +6788,30 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 }
 
                 body = r.Body
+                if body.TimedOut {
+                    HttpRefuse(s, 408, date) else {
+                        IoError lost => return IoError(IoKind.TimedOut, 0, "")
+                    }
+
+                    return IoError(IoKind.TimedOut, 0, "")
+                }
+
                 if body.Failed || body.AwaitsContinue {
                     keep = false
                 } else if keep {
-                    drained = body.Drain(limits.MaxDrainSize)
+                    drained = body.Drain(limits.MaxDrainSize) else {
+                        IoError e => {
+                            if e.Kind == IoKind.TimedOut {
+                                HttpRefuse(s, 408, date) else {
+                                    IoError lost => return e
+                                }
+                            }
+
+                            return e
+                        }
+                        HttpError e => return e
+                    }
+
                     if !drained {
                         keep = false
                     }
@@ -6738,7 +6823,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 }
 
                 close = !keep && headers.Get("Connection") == null
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0)
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate)
                 if !keep || !written {
                     return
                 }
@@ -6753,6 +6838,61 @@ void | IoError HttpRefuse(TcpStream s, int status, string date) {
     if status != 0 {
         s.Write("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
     }
+}
+
+// Sets the time of the stream's next read to what is left until `deadline`, at most the 5 seconds of a read on a socket, and gives
+// `TimedOut` where nothing is left (W10).
+void | IoError HttpWaitUntil(TcpStream s, timestamp deadline) {
+    spare = deadline - timestamp.Now
+    if spare <= 0s {
+        return IoError(IoKind.TimedOut, 0, "")
+    }
+
+    if spare < 5s {
+        s.SetReadTimeout(spare)
+    } else {
+        s.SetReadTimeout(5s)
+    }
+}
+
+// Sets the time of the stream's next write to the longer of the grace of `pace` and the time `count` bytes take at its rate, as
+// Kestrel holds a response to `MinResponseDataRate` for each write; nothing where no rate is given (W10).
+void | IoError HttpPace(TcpStream s, HttpRate? pace, long count) {
+    if pace == null {
+        return
+    }
+
+    bound = HttpNanosAt(count, pace.BytesPerSecond)
+    if bound > HttpNanosOf(pace.Grace) {
+        s.SetWriteTimeout(HttpNanos(bound))
+    } else {
+        s.SetWriteTimeout(pace.Grace)
+    }
+}
+
+// The nanoseconds `count` bytes take at `perSecond` bytes a second, without passing the range of a `long` on the way.
+long HttpNanosAt(long count, int perSecond) => count / perSecond * 1_000_000_000 + count % perSecond * 1_000_000_000 / perSecond
+
+// A `duration` of `nanoseconds`, a bound the server takes in proportion to a count of bytes, which no operator gives.
+duration HttpNanos(long nanoseconds) {
+    long bits = nanoseconds
+    mut duration d = 0s
+    raw {
+        d = *Ptr<duration>(&bits)
+    }
+
+    return d
+}
+
+// The nanoseconds of `d`.
+long HttpNanosOf(duration d) {
+    duration copy = d
+    mut long n = 0
+    raw {
+        n = *Ptr<long>(&copy)
+    }
+
+    return n
 }
 
 // Whether headers say `Connection: close`, among the options of every `Connection` line, without regard to ASCII case (RFC 9110,
@@ -6872,7 +7012,14 @@ HttpRefused HttpBad(string what) => HttpRefused(400, HttpError(HttpKind.Protocol
 // (S24) line by line, each line ended by CR LF, and held to its limits as Kestrel holds it, a request line of at most
 // `MaxRequestLineSize` bytes with its CR LF and header lines of at most `MaxRequestHeadersTotalSize` bytes with theirs and the empty
 // line's, at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body.
-HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits) {
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits) => HttpReadRequest(s, limits, null)
+
+// The same, and where a `deadline` is given, as the server's loop reads: the head by the deadline, which the loop sets
+// `RequestHeadersTimeout` after the request's first byte, each read of it after the first, which takes the bytes the loop's wait
+// for that byte left in the buffer, waiting the smaller of the 5 seconds of a read on a socket and what is left, and the body held
+// to its rate (W10). Without one it reads the clock nowhere, so that a call on the socket is the first thing a build for Windows
+// says `not supported` to.
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits, timestamp? deadline) {
     mut head = Bytes()
     mut lineStart = 0
     mut firstEnd = -1
@@ -6911,7 +7058,7 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
 
                     match HttpParseHead(head, firstEnd, i - 1, limits) {
                         HttpHead h => {
-                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits))
+                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits, deadline != null))
                             r.minor = h.Minor
                             return r
                         }
@@ -6938,6 +7085,10 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
 
         if firstEnd >= 0 && head.Count - (firstEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
             return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+        }
+
+        if deadline != null {
+            HttpWaitUntil(s, deadline)
         }
     }
 

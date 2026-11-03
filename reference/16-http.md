@@ -1156,7 +1156,8 @@ Case: [http/serve-keep-alive.kz](../corpus/http/serve-keep-alive.kz)
 // a connection of HTTP/1.1 serves its requests in their order and stays open, each response with the server's `Date`, until the
 // client ends it between two requests; a connection that ends before its first request is answered with nothing; and the server
 // writes its `Date` and its `Connection` beside the handler's response without changing it, so that a response a handler gives
-// again is written as it was made
+// again is written as it was made, and a `Date` the handler set is kept; a connection whose client is idle after a request closes
+// at `KeepAliveTimeout`
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -1242,6 +1243,47 @@ same = HttpResponse.Text(200, "same")
 reused = (HttpRequest r) => same
 Exchange("GET /a HTTP/1.0\r\n\r\n", reused, HttpLimits())
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", reused, HttpLimits())
+dated = (HttpRequest r) => {
+    response = HttpResponse.Empty(204)
+    response.Headers.Set("Date", "Sun, 06 Nov 1994 08:49:37 GMT") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", dated, HttpLimits())
+Idle()
+
+// a client that sends one request and then nothing is served, and its connection closes without an answer once it has been idle
+// for `KeepAliveTimeout`
+void Idle() {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes) else {
+        IoError e => return
+    }
+
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}"), HttpLimits(KeepAliveTimeout: 100ms)) else {
+        IoError e => print(e)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+    print(Wire(client))
+}
 ```
 
 Case: [http/serve-close.kz](../corpus/http/serve-close.kz)
@@ -1713,5 +1755,150 @@ void | IoError Body(TcpStream client) {
 
 All() else {
     IoError e => print(e)
+}
+```
+
+### W10 (decided, §12) The server's bounds of time
+
+The server's loop holds a request's head to `RequestHeadersTimeout` from its first byte and its body
+to `MinRequestBodyDataRate` after that rate's grace, and a request that falls under either is answered
+`408 Request Timeout` and its connection closes, the handler's response unwritten (§12, the owner,
+2026-11-01, "Kestrel's bounds", and assumed); it holds a response to `MinResponseDataRate` after its
+grace, and under it the connection closes, since its status has gone out (§12, the owner, 2026-11-01,
+"Add Kestrel's response rate"); and an idle connection closes without an answer at `KeepAliveTimeout`
+(§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03). *(assumed, §12, not put to
+the owner: each read of a head waiting the smaller of the 5 seconds of a read on a socket and what is
+left of the head's time; the body's rate counted over the time its reads wait, as Kestrel counts it,
+a read of the handler that falls under it giving the `IoError` of the kind `TimedOut`; each write of a
+response given the longer of the grace and its length at the rate, as Kestrel gives it, for each call
+of the system the write makes; and `HttpRequest.Read` and `Write`, the raw layer, setting no time on
+the stream, so that a program's own loop holds the times it sets itself)*
+
+Case: [http/serve-timeouts.kz](../corpus/http/serve-timeouts.kz)
+```kurz
+// a head that does not arrive whole within `RequestHeadersTimeout` from its first byte, and a body whose reads fall under
+// `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection, the handler's response
+// unwritten; a response whose write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate
+// closes it, since its status has gone out
+void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(sent.Bytes) else {
+        IoError e => return
+    }
+
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => print(e.Kind)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+reading = (HttpRequest r) => {
+    text = r.Body.ReadAllText(100) else {
+        IoError e => "{e.Kind}"
+        else => "?"
+    }
+
+    print("the handler read: {text}")
+    return HttpResponse.Text(200, text)
+}
+
+hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+Stall("GET /a HTTP/1.1\r\nHost: h\r\n", hello, HttpLimits(RequestHeadersTimeout: 100ms))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+Unread()
+
+// a response of 32 MiB to a client that reads none of it, which the buffers of the connection cannot hold
+void Unread() {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes) else {
+        IoError e => return
+    }
+
+    mut piece = Bytes()
+    while piece.Count < 65536 {
+        piece.Add(122)
+    }
+
+    mut body = Bytes()
+    while body.Count < 33554432 {
+        body.AddRange(piece)
+    }
+
+    large = HttpResponse.Bytes(200, body)
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, (HttpRequest r) => large, HttpLimits(MinResponseDataRate: HttpRate(1_000_000_000, 100ms))) else {
+        IoError e => print(e.Kind)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
 }
 ```
