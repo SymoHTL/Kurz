@@ -1258,7 +1258,7 @@ type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
 members of a type parameter alone, and a variable, a parameter, a loop's variable or a lambda's parameter named like a
-type parameter of the function around it is `redeclared` (V9), as C#'s CS0412 refuses it; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
+type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s CS0412 refuses it; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
 `f.Get(value)` alone, and anywhere else is `syntax`; `f.Get` takes a value of `T` or of a type derived from it, and one of
 another type is `type-mismatch`)* A `match` on `T.Kind`
 is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
@@ -1594,7 +1594,8 @@ call that leaves it out takes; the types it holds are the integer types, `bool`,
 `enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type, and where a type stands it is
-`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
+`unknown-name` (V10); a variable, a parameter, a loop's variable or a lambda's parameter of that name in
+the function is `redeclared`, as for any type parameter (V9, T33); a value of another type or a type where the constant stands, and a constant
 where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))*
@@ -1672,6 +1673,18 @@ void Keep<const Mode M>(M value) {
 }
 
 Keep<Mode.Plain>(Mode.Plain)
+```
+
+Case: [types/const-parameter-redeclared.kz](../corpus/types/const-parameter-redeclared.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    M = Mode.Loud
+    print("{text} {M}")
+}
+
+Say<Mode.Plain>("a")
 ```
 
 Case: [types/const-parameter-not-inferred.kz](../corpus/types/const-parameter-not-inferred.kz)

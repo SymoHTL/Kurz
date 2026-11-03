@@ -1602,10 +1602,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, whose name no variable, parameter
-    /// or lambda's parameter takes, as C# refuses it (CS0412) (section 4, assumed with the build of <c>T.Make</c>).
+    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
+    /// them (T35), whose name no variable, parameter or lambda's parameter takes, as C# refuses it (CS0412) (section 4, assumed with the
+    /// build of <c>T.Make</c>).
     /// </summary>
-    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || BoundType(name) is not null;
+    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
 
     private static string TypeParameterClash(string name) => $"`{name}` is a type parameter of the function around it (V9)";
 
