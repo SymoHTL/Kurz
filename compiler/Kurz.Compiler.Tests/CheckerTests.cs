@@ -4592,4 +4592,26 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("void Show(int Match) {\n    print(Match)\n}\n\nShow(1)"));
         Assert.Empty(Errors("data Found(int Match)\n\nprint(Found(1).Match)"));
     }
+
+    [Fact]
+    public void Hint_BlackBox_gives_back_a_value_of_its_arguments_type_and_takes_no_type_arguments()
+    {
+        // F18: `T BlackBox<T>(T value)`, any value, `T` inferred from the argument (section 12, the owner, 2026-11-03, "Any value, as
+        // Rust's"); type arguments are refused, as `string.Join` refuses them (assumed); `Hint` is a name every file sees, so a file's own
+        // is `redeclared`, and a member of it other than `BlackBox` is no name (V10)
+        Assert.Equal("int", TypeOf("n = Hint.BlackBox(1)\nprint(n)", "n"));
+        Assert.Equal("byte", TypeOf("byte b = 3\nc = Hint.BlackBox(b)\nprint(c)", "c"));
+        Assert.Equal("string", TypeOf("s = Hint.BlackBox(\"a\")\nprint(s)", "s"));
+        Assert.Equal("List<int>", TypeOf("xs = Hint.BlackBox([1, 2])\nprint(xs)", "xs"));
+        Assert.Equal("int?", TypeOf("int? x = null\ny = Hint.BlackBox(x)\nprint(y)", "y"));
+        Assert.Equal("Point", TypeOf("data Point(int X, int Y)\n\np = Hint.BlackBox(Point(1, 2))\nprint(p.X)", "p"));
+        Assert.Empty(Errors("n = Hint.BlackBox(value: 1)\nprint(n)"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(Hint.BlackBox<int>(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(Hint.BlackBox(1, 2))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(Hint.BlackBox())"));
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(Hint.BlackBox([]))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(Hint.Opaque(1))"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int Hint(int x) => x\nprint(Hint(1))"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("Hint = 1\nprint(Hint)"));
+    }
 }

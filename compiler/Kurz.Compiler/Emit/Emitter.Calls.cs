@@ -62,6 +62,7 @@ public sealed partial class Emitter
             CallKind.Parse => EmitParse(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
+            CallKind.BlackBox => EmitBlackBox(c, info),
             CallKind.MapRemove => EmitMapRemove(c),
             CallKind.MapContainsKey => EmitMapContainsKey(c),
             CallKind.MapClear => EmitMapClear(c),
@@ -96,6 +97,22 @@ public sealed partial class Emitter
         var text = Text(EmitExpression(argument), TypeOf(argument), argument.Line);
         fn.Emit($"call void {RuntimeFunction("Print")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return null;
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, lowered as Rust lowers <c>black_box</c>: the value goes to a slot of its own, an empty <c>asm</c>
+    /// with a side effect takes the slot's address and clobbers memory, and the value is read back from the slot, so the optimiser must
+    /// have made the value before the call and knows nothing of it after (section 12, the owner, 2026-11-03). The value read back is the
+    /// call's, a temporary of the statement, and the argument's count passes to it.
+    /// </summary>
+    private string EmitBlackBox(CallExpression c, CallInfo info)
+    {
+        var type = Sub(info.Result);
+        var value = Owned(c.Arguments[0].Value);
+        var slot = fn.Alloca(Ir(type), "hint");
+        fn.Emit($"store {Ir(type)} {value}, ptr {slot}");
+        fn.Emit($"call void asm sideeffect \"\", \"r,~{{memory}}\"(ptr {slot}) nounwind");
+        return Temp(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
     }
 
     /// <summary>The type arguments of a call, in the terms of the function being emitted (T19, T27).</summary>
