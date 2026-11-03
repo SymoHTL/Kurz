@@ -1,0 +1,23 @@
+// expect: output
+// | 1
+// | Dot { A = 1, B = 2 }
+// | 3
+// | Spot { A = 4, B = 5 }
+// | true
+// rules: D21
+
+data Shape(int A, int B)
+data Dot : Shape
+data Spot : Dot
+data Tag
+data Mark : Tag
+
+int Sum(Shape s) => s.A + s.B
+
+d = Dot(1, 2)
+print(d.A)
+print(d)
+print(Sum(d))
+print(Spot(4, 5))
+m = Mark
+print(m == Mark)
