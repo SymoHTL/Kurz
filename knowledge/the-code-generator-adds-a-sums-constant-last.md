@@ -74,18 +74,22 @@ The owner was not asked.
   operations on the path from b, against 6 before. With the same hint inside `Md5F` to `Md5I`, the
   optimised IR adds the value read back last, after the round's function, and the machine code keeps
   the 6 operations. `judgment step`: no job reads the machine code of std.
-- What the hint at the call gives, in one run of the bytes bench of issue 157 on 2026-11-03: each
-  program hashes 16 MiB three times, the best of 15 rounds, built with clang 23.1.4 at `-O2`. The
-  three builds print the same digests.
+- What the hint at the call gives, on 2026-11-03. Each row is the least of 15 rounds of the bytes
+  bench's runner (issue 157), with the builds alternating in each round, built with clang 23.1.4 at
+  `-O2`. The bench's `hashes` program hashes a file of 16 MiB three times, changing its first byte
+  each time. A second program hashes a message of 64 bytes 200000 times and one of 1 KiB 20000
+  times, in the same way. The builds print the same digests, and for the short messages Python's
+  `hashlib` gives them too.
 
-  | Build | MD5 | SHA-256 |
-  |---|---|---|
-  | std before the change | 51.78 ms | 19.15 ms |
-  | the same build again, the noise band | 51.75 ms | 18.87 ms |
-  | `Hint.BlackBox(t)` at each of `Md5Block`'s calls | 42.55 ms | 19.14 ms |
+  | Build | MD5, 16 MiB | MD5, 64 B | MD5, 1 KiB | SHA-256, 16 MiB | SHA-256, 64 B | SHA-256, 1 KiB |
+  |---|---|---|---|---|---|---|
+  | std before the change | 51.78 ms | 27.04 ms | 22.72 ms | 19.15 ms | 13.85 ms | 8.67 ms |
+  | the same build again, the noise band | 51.75 ms | 27.01 ms | 22.72 ms | 18.87 ms | 13.85 ms | 8.37 ms |
+  | `Hint.BlackBox(t)` at each of `Md5Block`'s calls | 42.55 ms | 22.57 ms | 18.68 ms | 19.14 ms | 13.85 ms | 8.67 ms |
 
-  .NET took 44.57 ms in the run of the probe above. SHA-256 shares no code with MD5, and stays
-  within the noise band.
+  SHA-256's blocks go through `HashBlock` too, the function that MD5's steps are inlined into. The
+  slots grow its stack frame from 312 to 536 bytes, and SHA-256 stays within the noise band. .NET
+  took 44.57 ms for 16 MiB in the run of the probe above.
 - Whether std may hide a constant behind a value of the program that LLVM cannot know, such as a
   word of the state or a count, is open. Its correctness rests on the program's state, and its
   speed on what LLVM happens not to see. It was not taken for #258 (above), and the owner has not
