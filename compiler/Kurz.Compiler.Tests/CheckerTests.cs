@@ -2183,9 +2183,36 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 1)], Errors("e = HttpError(HttpKind.Protocol, \"x\")"));
     }
 
+    [Fact]
+    public void A_class_of_std_that_the_prelude_names_is_std_s_own_in_the_file()
+    {
+        // W1, W4: a class of std/ on the list is the symbol std/'s checker made, its methods the ones std/ checked
+        var runtime = StdRuntime.Value;
+        var stdHeaders = runtime.StdChecker.Model.ClassOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpHeaders"));
+        var (diagnostics, checker) = CheckSeeingStd("h = HttpHeaders()\nh.Add(\"Host\", \"a\")\nv = h.Get(\"host\")\nall = h.GetAll(\"HOST\")\nh.Set(\"Host\", \"b\")\nh.Remove(\"Host\")\nprint(v ?? \"\")\nprint(all)\n");
+        Assert.Empty(diagnostics.Items);
+        Assert.Same(stdHeaders, Assert.IsType<ClassType>(checker.TopLevelVariables["h"]).Symbol);
+        Assert.Equal(new ListType(Types.String), checker.TopLevelVariables["all"]);
+
+        // the positive control: a checker given no std/ does not see the class
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("h = HttpHeaders()"));
+    }
+
+    [Theory]
+    [InlineData("h = HttpHeaders()\nprint(h.names)\n", "a field is visible outside it with `pub` (F9)")]
+    [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside it with `pub` (F9)")]
+    public void A_member_of_a_class_of_std_without_pub_is_private_to_it(string program, string end)
+    {
+        // W1 with F9: the file sees the class, and a member std/ declares without `pub` stays inside it
+        var error = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
+        Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
+        Assert.EndsWith(end, error.Message);
+    }
+
     [Theory]
     [InlineData("pub data HttpError(", "e = HttpError(HttpKind.Protocol, \"x\")\nprint(e.Detail)\n", "print(HttpKind.Protocol)\n")]
     [InlineData("pub enum HttpKind {", "print(HttpKind.Protocol)\n", "string Detail(HttpError e) => e.Detail\n\nprint(1)\n")]
+    [InlineData("pub class HttpHeaders {", "h = HttpHeaders()\nprint(h.Get(\"a\") ?? \"\")\n", "print(HttpKind.Protocol)\n")]
     public void A_name_of_the_prelude_that_std_does_not_declare_pub_is_seen_by_no_file(string declaration, string uses, string other)
     {
         // W1 with F9: a type of std/ without `pub` is private to its folder, so the list does not bring it in; the other stays seen
@@ -2201,6 +2228,8 @@ public sealed class CheckerTests
     [InlineData("int Same<HttpError>(HttpError x) => 1", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
     [InlineData("data Box<HttpKind>(HttpKind V)", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
     [InlineData("int HttpError() => 1", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("class HttpHeaders(int N)", "`HttpHeaders` is a class of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("int Same<HttpHeaders>(HttpHeaders x) => 1", "`HttpHeaders` is a class of `std/` every file sees, declared before the file's own types (W1, V9)")]
     public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
     {
         var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
