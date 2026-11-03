@@ -1,0 +1,26 @@
+// expect: throws thrown at 14
+// | served
+// rules: W9
+
+// a handler that throws ends what runs the server, as an exception ends the actor it happens in
+void | IoError | HttpError All() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    client.ShutdownWrite()
+    HttpServer.ServeConnection(server, (HttpRequest r) => {
+        if r.Path == "/b" {
+            throw "no handler for {r.Path}"
+        }
+
+        print("served")
+        return HttpResponse.Empty(204)
+    })
+    print("after")
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}

@@ -5988,6 +5988,9 @@ pub data HttpLimits(
 // client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`, and
 // `HttpRequest.Read(stream, limits)` with others (W7).
 pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Headers, HttpBody Body) {
+    // The minor version of the request, 0 for HTTP/1.0 and 1 for HTTP/1.1, for the server's loop (F9).
+    internal mut int minor = 1
+
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
     // failure of the network, or the request the server refuses (W5).
     pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
@@ -6031,6 +6034,35 @@ pub class HttpBody {
         b.most = limits.MaxRequestBodySize
         b.sizeLine = limits.MaxChunkSizeLine
         return b
+    }
+
+    // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
+    internal bool AwaitsContinue => expects
+
+    // Whether a read of the body failed, so that what the stream holds after it is not known (F9).
+    internal bool Failed => failed != null
+
+    // Reads and drops what is left of the body, at most `bound` bytes: true where the body ended within them, so that the stream
+    // holds the connection's next request (F9).
+    internal bool | IoError | HttpError Drain(int bound) {
+        mut dropped = Bytes()
+        mut room = bound + 1
+        while room > 0 {
+            dropped.Clear()
+            mut piece = 65536
+            if room < piece {
+                piece = room
+            }
+
+            n = Read(mut dropped, piece)
+            if n == 0 {
+                return true
+            }
+
+            room = room - n
+        }
+
+        return false
     }
 
     // Appends at most `max` bytes of the body to `into` and gives their count, 0 at the end of the body.
@@ -6225,10 +6257,19 @@ pub class HttpResponse {
     pub static HttpResponse Empty(int status) => Of(status, "")
 
     // Writes the status line, the headers and the body to `stream` (W8).
-    pub void | IoError Write(TcpStream stream) => Send(stream, true)
+    pub void | IoError Write(TcpStream stream) {
+        Send(stream, true, "", false, false)
+    }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
-    pub void | IoError WriteHead(TcpStream stream) => Send(stream, false)
+    pub void | IoError WriteHead(TcpStream stream) {
+        Send(stream, false, "", false, false)
+    }
+
+    // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
+    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
+    // own `500` in its place, after which the loop closes the connection (F9).
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain) => Send(stream, withBody, date, close, plain)
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
@@ -6250,13 +6291,13 @@ pub class HttpResponse {
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` with a body or a
     // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
     // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
-    void | IoError Send(TcpStream s, bool withBody) {
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain) {
         bodiless = code < 200 || code == 204 || code == 304
         mut length = 0L
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {
                 IoError e => {
-                    HttpUnwritable(s)
+                    HttpUnwritable(s, date)
                     return e
                 }
             }
@@ -6266,19 +6307,21 @@ pub class HttpResponse {
 
         codings = headers.GetAll("Transfer-Encoding")
         lengths = headers.GetAll("Content-Length")
-        chunked = !bodiless && codings.Count > 0
+        chunked = !bodiless && !plain && codings.Count > 0
         if chunked && lengths.Count > 0 {
             return IoError(IoKind.InvalidInput, 0, "")
         }
 
         if code == 205 && length > 0 {
-            return HttpUnwritable(s)
+            HttpUnwritable(s, date)
+            return false
         }
 
         if !bodiless {
             for text in lengths {
                 if HttpLength(text) != length {
-                    return HttpUnwritable(s)
+                    HttpUnwritable(s, date)
+                    return false
                 }
             }
         }
@@ -6289,7 +6332,7 @@ pub class HttpResponse {
             name = headers.NameAt(i)
             value = headers.ValueAt(i)
             if name.ToLowerAscii() == "transfer-encoding" {
-                if bodiless {
+                if bodiless || plain {
                     continue
                 }
 
@@ -6307,13 +6350,20 @@ pub class HttpResponse {
             out.AddRange("Content-Length: {length}\r\n".Bytes)
         }
 
+        out.AddRange(date.Bytes)
+        if close {
+            out.AddRange("Connection: close\r\n".Bytes)
+        }
+
         out.AddRange("\r\n".Bytes)
         if !withBody || bodiless {
-            return s.Write(out)
+            s.Write(out)
+            return true
         }
 
         if isFile {
-            return HttpSendFile(s, out, filePath, length, chunked)
+            HttpSendFile(s, out, filePath, length, chunked)
+            return true
         }
 
         if chunked && held.Count > 0 {
@@ -6339,6 +6389,8 @@ pub class HttpResponse {
         if out.Count > 0 {
             s.Write(out)
         }
+
+        return true
     }
 }
 
@@ -6349,8 +6401,8 @@ Bytes HttpNoBytes() => Bytes()
 long | IoError HttpFileSize(string path) => File.Size(path)
 
 // What the writer answers a response that it cannot write: `500` with no body and a close (W8).
-void | IoError HttpUnwritable(TcpStream s) {
-    s.Write("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".Bytes)
+void | IoError HttpUnwritable(TcpStream s, string date) {
+    s.Write("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
 }
 
 // The head `out` and then the file at `path` of `length` bytes, in pieces of 64 KiB, each a chunk where `chunked`; a file that
@@ -6498,6 +6550,289 @@ string HttpReason(int status) {
     }
 }
 
+// The server of HTTP/1.1 (design record, section 12; W9): `Serve` accepts each connection of a listener and serves it, one at a time,
+// and `ServeConnection` serves every request of one accepted connection with the handler, in their order, and closes it, so that a
+// program can write its own loop of `Accept`, as hyper's `serve_connection` lets it.
+pub class HttpServer {
+    // Every connection of the listener served with the handler within `HttpLimits()`, until an `Accept` fails other than for one
+    // connection: a connection aborted, reset or refused before it was accepted goes on, as hyper's accept loop goes on past it.
+    pub static void | IoError Serve(TcpListener listener, (HttpRequest) => HttpResponse handler) {
+        return Serve(listener, handler, HttpLimits())
+    }
+
+    // The same, within `limits` (W7).
+    pub static void | IoError Serve(TcpListener listener, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+        HttpCheckLimits(limits)
+        while true {
+            match listener.Accept() {
+                TcpStream stream => {
+                    ServeConnection(stream, handler, limits) else {
+                        IoError e => {
+                        }
+                        HttpError e => {
+                        }
+                    }
+                }
+                IoError e => {
+                    if e.Kind != IoKind.ConnectionAborted && e.Kind != IoKind.ConnectionReset && e.Kind != IoKind.ConnectionRefused {
+                        return e
+                    }
+                }
+            }
+        }
+    }
+
+    // Every request of the connection served with the handler within `HttpLimits()`, and the connection closed: `void` where it
+    // ended between two requests, the `IoError` of the network, or the `HttpError` of a request the server refused.
+    pub static void | IoError | HttpError ServeConnection(TcpStream stream, (HttpRequest) => HttpResponse handler) {
+        return ServeConnection(stream, handler, HttpLimits())
+    }
+
+    // The same, within `limits` (W7).
+    pub static void | IoError | HttpError ServeConnection(TcpStream stream, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+        HttpCheckLimits(limits) else {
+            IoError e => {
+                stream.Close()
+                return e
+            }
+        }
+
+        HttpServeRequests(stream, handler, limits) else {
+            IoError e => {
+                stream.Close()
+                return e
+            }
+            HttpError e => {
+                stream.Close()
+                return e
+            }
+        }
+
+        stream.Close()
+    }
+}
+
+// A limit of zero or below, `InvalidInput` naming the member, as a time of zero or below is at `Connect`.
+void | IoError HttpCheckLimits(HttpLimits limits) {
+    if limits.MaxRequestLineSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestLineSize")
+    }
+
+    if limits.MaxRequestHeadersTotalSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestHeadersTotalSize")
+    }
+
+    if limits.MaxRequestHeaderCount <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestHeaderCount")
+    }
+
+    if limits.MaxRequestBodySize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestBodySize")
+    }
+
+    if limits.RequestHeadersTimeout <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "RequestHeadersTimeout")
+    }
+
+    if limits.MinRequestBodyDataRate.BytesPerSecond <= 0 || limits.MinRequestBodyDataRate.Grace <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "MinRequestBodyDataRate")
+    }
+
+    if limits.MinResponseDataRate.BytesPerSecond <= 0 || limits.MinResponseDataRate.Grace <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "MinResponseDataRate")
+    }
+
+    if limits.MaxRequestsPerConnection <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestsPerConnection")
+    }
+
+    if limits.KeepAliveTimeout <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "KeepAliveTimeout")
+    }
+
+    if limits.MaxDrainSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxDrainSize")
+    }
+
+    if limits.MaxChunkSizeLine <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxChunkSizeLine")
+    }
+}
+
+// The requests of one connection, each read, given to the handler and answered before the next is read, as hyper's dispatcher
+// serves them: the loop ends where the connection ends between two requests, where a response or a request closes it, and at a
+// request the server refuses, which it answers with its status alone.
+void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    mut served = 0
+    mut second = -1L
+    mut date = ""
+    while true {
+        // the wait for the first byte of a request, `KeepAliveTimeout` after the first, the 5 seconds of a read before it
+        if served > 0 {
+            s.SetReadTimeout(limits.KeepAliveTimeout)
+        } else {
+            s.SetReadTimeout(5s)
+        }
+
+        mut first = Bytes()
+        n = s.Fill(mut first) else {
+            IoError e => {
+                if e.Kind == IoKind.TimedOut || e.Kind == IoKind.ConnectionReset {
+                    return
+                }
+
+                return e
+            }
+        }
+
+        if n == 0 {
+            return
+        }
+
+        s.SetReadTimeout(5s)
+        now = HttpSecondOf(timestamp.Now)
+        if now != second {
+            second = now
+            date = "Date: {HttpDate(now)}\r\n"
+        }
+
+        match HttpReadRequest(s, limits) {
+            HttpRefused no => {
+                HttpRefuse(s, no.Status, date) else {
+                    IoError e => return no.Error
+                }
+
+                return no.Error
+            }
+            IoError e => {
+                if e.Kind == IoKind.TimedOut {
+                    HttpRefuse(s, 408, date) else {
+                        IoError lost => return e
+                    }
+                }
+
+                return e
+            }
+            HttpRequest r => {
+                served = served + 1
+                response = handler(r)
+                headers = response.Headers
+                mut keep = r.minor == 1 && served < limits.MaxRequestsPerConnection && response.Status != 500
+                if HttpCloses(r.Headers) || HttpCloses(headers) {
+                    keep = false
+                }
+
+                body = r.Body
+                if body.Failed || body.AwaitsContinue {
+                    keep = false
+                } else if keep {
+                    drained = body.Drain(limits.MaxDrainSize)
+                    if !drained {
+                        keep = false
+                    }
+                }
+
+                mut dated = date
+                if headers.Get("Date") != null {
+                    dated = ""
+                }
+
+                close = !keep && headers.Get("Connection") == null
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0)
+                if !keep || !written {
+                    return
+                }
+            }
+        }
+    }
+}
+
+// The status line alone that answers a request the server refuses, with an empty body, its `Date` and a close, and nothing where the
+// status is 0 (section 12, "Status line only").
+void | IoError HttpRefuse(TcpStream s, int status, string date) {
+    if status != 0 {
+        s.Write("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+    }
+}
+
+// Whether headers say `Connection: close`, among the options of every `Connection` line, without regard to ASCII case (RFC 9110,
+// section 7.6.1).
+bool HttpCloses(HttpHeaders headers) {
+    for value in headers.GetAll("Connection") {
+        for option in value.Split(",") {
+            if option.Trim().ToLowerAscii() == "close" {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+// The whole seconds of `at` since 1970-01-01, rounded down, so that the loop writes its `Date` once a second, as hyper caches it.
+long HttpSecondOf(timestamp at) {
+    timestamp copy = at
+    mut long nanoseconds = 0
+    raw {
+        nanoseconds = *Ptr<long>(&copy)
+    }
+
+    mut second = nanoseconds / 1_000_000_000
+    if nanoseconds < 0 && second * 1_000_000_000 != nanoseconds {
+        second = second - 1
+    }
+
+    return second
+}
+
+// The second `second` since 1970-01-01 as HTTP's `Date` writes it, RFC 9110's IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`
+// (section 5.6.7), the civil date of its day by the algorithm of Howard Hinnant's `civil_from_days`, which chrono's dates follow too.
+string HttpDate(long second) {
+    mut days = second / 86400
+    if second < 0 && days * 86400 != second {
+        days = days - 1
+    }
+
+    inDay = second - days * 86400
+    z = days + 719468
+    mut era = z / 146097
+    if z < 0 && era * 146097 != z {
+        era = era - 1
+    }
+
+    doe = z - era * 146097
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp = (5 * doy + 2) / 153
+    day = doy - (153 * mp + 2) / 5 + 1
+    mut month = mp + 3
+    if mp >= 10 {
+        month = mp - 9
+    }
+
+    mut year = yoe + era * 400
+    if month <= 2 {
+        year = year + 1
+    }
+
+    weekdays = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"]
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    weekday = weekdays[int((days % 7 + 7) % 7)]
+    hour = inDay / 3600
+    minute = inDay / 60 % 60
+    sec = inDay % 60
+    return "{weekday}, {HttpTwo(day)} {months[int(month) - 1]} {year} {HttpTwo(hour)}:{HttpTwo(minute)}:{HttpTwo(sec)} GMT"
+}
+
+// `n`, from 0 to 99, in two digits.
+string HttpTwo(long n) {
+    if n < 10 {
+        return "0{n}"
+    }
+
+    return "{n}"
+}
+
 // What std/'s reader refuses: the status the server answers, 0 where it answers none, beside the error a program sees (W5).
 data HttpRefused(int Status, HttpError Error)
 
@@ -6575,7 +6910,11 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
                     }
 
                     match HttpParseHead(head, firstEnd, i - 1, limits) {
-                        HttpHead h => return HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits))
+                        HttpHead h => {
+                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits))
+                            r.minor = h.Minor
+                            return r
+                        }
                         HttpRefused no => return no
                     }
                 } else {
