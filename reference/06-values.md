@@ -96,6 +96,16 @@ node.Children.Add("leaf")
 print(node.Children.Count)
 ```
 
+Case: [functions/capture-calls-field-method.kz](../corpus/functions/capture-calls-field-method.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)
+```
+
 ### M6 (decided, §4) Where the `mut` marker of a method is written
 
 In front of the return type: `mut void Add(T item)`. `mut` stands in front everywhere else as
@@ -584,6 +594,22 @@ List<int> Grow(mut List<int> list) {
 
 mut xs = [1]
 print([xs, Grow(mut xs)])
+```
+
+Case: [functions/capture-passes-field-mut.kz](../corpus/functions/capture-passes-field-mut.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+fill = b.Filler()
+fill()
+print(b.Items.Count)
 ```
 
 ### M8 (decided, §4) One family of collections

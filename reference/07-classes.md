@@ -52,6 +52,42 @@ reset()
 print(c.Count)
 ```
 
+Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+first()
+print(b.Items)
+```
+
+Case: [functions/capture-calls-field-method.kz](../corpus/functions/capture-calls-field-method.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)
+```
+
+Case: [functions/capture-passes-field-mut.kz](../corpus/functions/capture-passes-field-mut.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+fill = b.Filler()
+fill()
+print(b.Items.Count)
+```
+
 ### K3 (decided, §4) References with identity
 
 Assigning a class instance does not copy it. Both variables refer to the same instance.
@@ -168,7 +204,9 @@ method's, are the owner's too (§4, 2026-10-30, "Accept both"). `a + b` on two i
 arithmetic operator on operands it has no meaning for (the owner, 2026-10-10, confirming the reading
 proposed after the review of round 13). A `double` or `float` among the named fields compares as a field of a
 `data` value does (D3), NaN equal to NaN (the owner, 2026-10-10); under K4's content equality it
-compares the same way.
+compares the same way. A named field whose type `==` does not take, a map among them, makes `==` on
+the instances and a key of the class `type-mismatch`, at that `==` and at the line that writes the
+key type, as such a field does in a `data` value (D3, M9): no named field is skipped (§4, the owner, 2026-11-02, #110, comment 6590315607).
 
 Case: [classes/equal-by-nan.kz](../corpus/classes/equal-by-nan.kz)
 ```kurz
@@ -215,6 +253,21 @@ class User(int Id) {
 }
 
 print(User(1) == User(1))
+```
+
+Case: [null/narrowed-field-after-clause-key.kz](../corpus/null/narrowed-field-after-clause-key.kz)
+```kurz
+class Node(int V)
+class Holder(mut Node? Head)
+class K(int Id) equal by Id
+
+h = Holder(Node(1))
+k = K(1)
+mut seen = Map<K, int>()
+if h.Head != null {
+    seen[k] = 2
+    print(h.Head.V)
+}
 ```
 
 ### K6 (decided, §4) Single inheritance and interfaces

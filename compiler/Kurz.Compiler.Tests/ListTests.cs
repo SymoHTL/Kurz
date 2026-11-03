@@ -2143,7 +2143,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // written, `Add`, `Clear` and `Remove`: beside a copy taken before (M3), in a `mut` parameter, after a value that replaced the variable
     // (M4), nested, in a data type that holds itself, whose block another variable holds, with a key `Remove` reads from that block,
     // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block; and each field read by
-    // `f.Get(value)` in the passes of a loop over `T.Fields` and kept past an assignment that replaces the value (T33)
+    // `f.Get(value)` in the passes of a loop over `T.Fields` and kept past an assignment that replaces the value (T33), and each field
+    // read by `f.Get(value)` into the value `T.Make` makes, kept past a change of the value it was read from (T33)
     private const string Fields = """
         data Store(List<string> Names, Map<string, string> Etags, int Hits)
         data Shelf(Store Main, string Label)
@@ -2160,6 +2161,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             store = Store(List<string>(), Map<string, string>(), 0)
             return "after"
         }
+
+        T Remade<T>(T value) => T.Make(f => f.Get(value))
 
         void Keep<T>(mut T value, T replaced, T back) {
             for f in T.Fields {
@@ -2276,6 +2279,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         spare = keep
         Keep(mut keep, Store(List<string>(), Map<string, string>(), 8), spare)
         print(keep)
+        mut made = Store(List<string>(), Map<string, string>(), 9)
+        made.Names.Add("m")
+        made.Etags["e"] = "f"
+        twin = Remade(made)
+        made.Names.Add("n")
+        made.Etags["e"] = "g"
+        print(twin)
+        print(made)
         """;
 
     private static readonly string[] FieldsPrint =
@@ -2324,6 +2335,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[k: v]",
         "7",
         "Store { Names = [kept], Etags = [k: v], Hits = 7 }",
+        "Store { Names = [m], Etags = [e: f], Hits = 9 }", // T33: `T.Make(f => f.Get(value))` holds what it read, past the changes after it
+        "Store { Names = [m, n], Etags = [e: g], Hits = 9 }",
     ];
 
     // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
@@ -3226,6 +3239,54 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
+        // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
+        // change stands (section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that changes nothing sorts
+        const string sortByChange = """
+            class Bag(mut List<int> Items) {
+                pub int Reset(int x) {
+                    Items = [0]
+                    return x
+                }
+
+                pub int Push(int x) {
+                    Items.Add(x * 10)
+                    return x
+                }
+
+                pub void SortMe() {
+                    Items.SortBy(x => Reset(x))
+                }
+            }
+
+            class Names(mut List<string> Items) {
+                pub string Reset(string x) {
+                    Items = ["z"]
+                    return x
+                }
+            }
+
+            b = Bag([3, 1, 2])
+            b.Items.SortBy(x => b.Reset(x))
+            print(b.Items.Count)
+            print(b.Items[0])
+            c = Bag([3, 1, 2])
+            c.Items.SortBy(x => c.Push(x))
+            print(c.Items.Count)
+            print(c.Items[0])
+            print(c.Items[5])
+            d = Bag([3, 1, 2])
+            d.SortMe()
+            print(d.Items[0])
+            n = Names(["c", "a", "b"])
+            n.Items.SortBy(x => n.Reset(x))
+            print(n.Items[0])
+            e = Bag([3, 1, 2])
+            e.Items.SortBy(x => 0 - x)
+            print(e.Items[0])
+
+            """;
+        Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "3"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
@@ -3681,10 +3742,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_Insert_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
         // X11, M9: as `Add`, with the limit of the largest `int` lowered to 3 in the library's text, so that a fourth `Insert` asks for
-        // 4 times the 16 bytes of a string
-        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nxs.Insert(0, \"b\")\nxs.Insert(1, \"c\")\nxs.Insert(1, \"d\")\nprint(xs)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["[b, d, c, a]"], ""); // the positive control
+        // 4 times the 16 bytes of a string; the count printed after each of the first three shows that the fourth is the one refused
+        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nprint(xs.Count)\nxs.Insert(0, \"b\")\nprint(xs.Count)\nxs.Insert(1, \"c\")\nprint(xs.Count)\nxs.Insert(1, \"d\")\nprint(xs)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, ["1", "2", "3"], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["1", "2", "3", "[b, d, c, a]"], ""); // the positive control
     }
 
     [Fact]
