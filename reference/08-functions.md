@@ -177,7 +177,9 @@ and a class instance is no part of the copy: the lambda holds a reference to the
 every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
 from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
 such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
-record speaks of assigning)* An instance changes through every reference (K2), so the lambda may
+record speaks of assigning)* A path reaches an instance only where an instance holds the field it
+assigns or the item it writes: `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field
+`Item` holds an instance, assigns a field of the copy and is `capture-assign`. An instance changes through every reference (K2), so the lambda may
 change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
 value `d` stay `capture-assign` (§4, the owner, 2026-11-01, #110, comment 6562487754, "Both allowed", against a method call
@@ -185,7 +187,9 @@ alone and against neither). It may also write into the list or the map that a `m
 instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
 write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786), and pass a `mut` field of the
 instance as a `mut` argument, `() => Fill(mut Items)` inside a method (M7; §4, the owner, 2026-11-02, #110, comment
-6579495475). An instance that a captured `data` value holds is one the lambda may
+6579495475). A field without `mut` changes in a lambda no more than outside it: assigning it is
+`assign-immutable` (K1), and writing into what it holds, a `mut` method on it and passing it as `mut`
+by its name inside a method are `mut-required` (M5, M7, K1). An instance that a captured `data` value holds is one the lambda may
 change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
@@ -245,7 +249,17 @@ reset()
 print(c.Count)
 ```
 
-Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+Case: [functions/capture-calls-field-method.kz](../corpus/functions/capture-calls-field-method.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)
+```
+
+Case: [functions/capture-passes-field-mut.kz](../corpus/functions/capture-passes-field-mut.kz)
 ```kurz
 void Fill(mut List<int> xs) {
     xs.Add(xs.Count)
@@ -256,14 +270,19 @@ class Box(mut List<int> Items) {
 }
 
 b = Box([1, 0])
-first = () => { b.Items[0] = 2 }
-more = () => b.Items.Add(3)
-first()
-more()
-print(b.Items)
 fill = b.Filler()
 fill()
 print(b.Items.Count)
+```
+
+Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+first()
+print(b.Items)
 ```
 
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)
@@ -486,6 +505,37 @@ void Show(long | NotFound x) {
 int | NotFound Run() {
     Show(Find(1))
     return 0
+}
+```
+
+Case: [outcomes/keep-items-the-union-one.kz](../corpus/outcomes/keep-items-the-union-one.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(List<int> xs) {
+    print("the items")
+}
+
+void Show(List<int | NotFound> xs) {
+    print("the union")
+}
+
+int | NotFound Run() {
+    // a list literal of calls is read as such a call: the function whose item type keeps the cases fits it exactly, and wins
+    Show([Find(1)])
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
 }
 ```
 
