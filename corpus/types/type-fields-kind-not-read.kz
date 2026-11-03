@@ -1,0 +1,10 @@
+// expect: error kind-not-read at 10
+// rules: T33
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print(f.Name)
+    }
+}
+
+ShowFields(3)

@@ -13,11 +13,17 @@ public sealed partial class Emitter
     /// <summary>The value of a call, null for a <c>void</c> one; of a call whose result is a union and that stands for its success, the success, with every other case leaving the function (O2, O3).</summary>
     private string? EmitCall(CallExpression c)
     {
+        if (Model.IsMade(c, out var construction))
+        {
+            return construction is null ? null : EmitCall(construction); // T33: `T.Make` is the constructor's call it became; a type with no fields, its constant
+        }
+
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
         var value = info.Kind switch
         {
             CallKind.Print => EmitPrint(c),
+            CallKind.Intrinsic => EmitIntrinsic(c, info),
             CallKind.Conversion => EmitConversion(c, info.Target!),
             CallKind.Function => EmitFunctionCall(c, info),
             CallKind.CFunction => EmitCFunctionCall(c, info),
@@ -61,7 +67,8 @@ public sealed partial class Emitter
             CallKind.MapClear => EmitMapClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.FileModified or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
-                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept => EmitFileCall(c, info),
+                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+                or CallKind.TcpShutdownWrite => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
@@ -205,7 +212,7 @@ public sealed partial class Emitter
             {
                 var a = c.Arguments[i].Value;
                 var value = owned ? Owned(a) : EmitExpression(a);
-                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line);
+                values[i] = Convert(value, TypeOf(a), Sub(slotType(slot)), a.Line, owned);
             }
         }
 
@@ -227,6 +234,14 @@ public sealed partial class Emitter
                 if (argument < 0 || Unwrap(c.Arguments[argument].Value) is not NameExpression n)
                 {
                     throw Unsupported(c.Line, "a `mut` parameter given anything but a variable (M7)");
+                }
+
+                if (Model.IsImplicitField(n, out _, out var field) && field is not null)
+                {
+                    // M7, K7: a `mut` field of the instance named alone in its method, given as the field's own place
+                    var symbol = ClassOfThis(n, n.Line).Symbol;
+                    arguments.Add($"ptr {InstanceFieldPointer(symbol, This(n, n.Line), symbol.FieldIndex(field.Name))}");
+                    continue;
                 }
 
                 arguments.Add($"ptr {Place(Model.VariableOf(n), n.Line)}");
@@ -259,7 +274,7 @@ public sealed partial class Emitter
         unit = declaredIn;
         try
         {
-            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line);
+            return Convert(owned ? Owned(d) : EmitExpression(d), TypeOf(d), type, d.Line, owned);
         }
         finally
         {

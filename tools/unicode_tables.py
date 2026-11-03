@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The case tables of X3, generated from the Unicode Character Database of the version Rust's stable
-`char::UNICODE_VERSION` pins (the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"), as Rust's
-`unicode-table-generator` makes the tables of `core::unicode::conversions`.
+`char::UNICODE_VERSION` pins (the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"), from the mappings
+Rust's `unicode-table-generator` takes for the tables of `core::unicode::conversions`, in levels of deltas, as
+.NET's `CharUnicodeInfo` holds its mappings (issue 157: faster with the same results, under the owner's answer of
+2026-11-01, "Allow, faster wins").
 
   unicode_tables.py              write compiler/Kurz.Compiler/Emit/CaseTables.cs from the database's files
                                  and print every mapping that changed against the file it replaces
@@ -21,15 +23,17 @@ What the tables hold, as Rust's generator takes them:
   point itself is left out, so that SpecialCasing.txt's identity keeps the simple mapping; Final_Sigma,
   the one condition that is no language's, is the standard library's code (X3), and the mappings of a
   language are left out, as "no culture" (section 4) says;
-- the runs of the mappings to one code point, per plane, in Rust's two passes: consecutive code points
-  with one delta make a run of step 1, and lone code points two apart with one delta a run of step 2,
-  each run spanning at most 256 code points from its first to its last;
+- the levels of the mappings: the code points of the first two planes in blocks of 32, an index of one
+  byte for each block, the number of its deltas, alike blocks sharing one number, and the 32 deltas of
+  each distinct block, 16 bits each: the difference modulo 65536 between a code point and the one code
+  point it maps to, 0 where it maps to none, and 32768 where it maps to several;
 - the mappings to two or three code points, padded with zeros;
 - the ranges of Cased and Case_Ignorable from DerivedCoreProperties.txt, ASCII among them, which
   Rust's `is_cased` and `is_case_ignorable` take from the same properties.
 This tool refuses the forms its tables do not hold: a mapping that leaves its plane, a mapping past
-the first two planes, to one code point or to several, and a run that spans more than 256 code
-points. A table with fewer entries than its floor is refused, so that a file read as empty is never a
+the first two planes, to one code point or to several, a delta of 32768, and more distinct blocks than
+an index of one byte numbers; and levels that, read back, do not give the mappings they were made
+from. A table with fewer entries than its floor is refused, so that a file read as empty is never a
 table."""
 import hashlib
 import http.client
@@ -50,9 +54,16 @@ FILES = {
 }
 SOURCE = "https://www.unicode.org/Public/{version}/ucd/{name}"
 OUT = "compiler/Kurz.Compiler/Emit/CaseTables.cs"
-# the entries each table holds at the least; 17.0.0 holds 184 and 197 runs, 1 and 102 multis, 158 and 464 ranges
-FLOORS = {"LowerRuns": 150, "UpperRuns": 150, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300}
-WIDTH = {"LowerRuns": 4, "UpperRuns": 4, "LowerMultis": 4, "UpperMultis": 4, "Cased": 2, "CaseIgnorable": 2}
+# the levels: the code points of the first two planes in blocks of 32, an index of one byte per block, and the
+# deltas of each distinct block, 16 bits each; MARK is the delta of a code point that maps to several code points
+BLOCK = 32
+PLANES = 0x20000
+MARK = 0x8000
+# the entries each table holds at the least; 17.0.0 holds 69 and 82 blocks of deltas, 1 and 102 multis, 158 and 464
+# ranges
+FLOORS = {"LowerDeltas": 30, "UpperDeltas": 30, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300}
+WIDTH = {"LowerIndex": 1, "UpperIndex": 1, "LowerDeltas": BLOCK, "UpperDeltas": BLOCK, "LowerMultis": 4, "UpperMultis": 4,
+         "Cased": 2, "CaseIgnorable": 2}
 
 
 class Unread(Exception):
@@ -118,39 +129,54 @@ def mappings(unicode_data, special_casing):
 
 
 def tables(mapping):
-    """(runs, multis) of one direction: runs as (first, last, step, delta), multis as (key, a, b, c)."""
-    runs, multis = [], []
+    """(index, deltas, multis) of one direction: the code points of the first two planes in blocks of BLOCK,
+    `index` the number of each block's deltas, a block alike to one before it taking that one's number;
+    `deltas` BLOCK numbers for each distinct block, the difference modulo 65536 between a code point and the one
+    code point it maps to, 0 where it maps to none and MARK where it maps to several; and `multis` the mappings
+    to several code points as (key, a, b, c), padded with zeros. Read back and refused where it does not give the
+    mapping."""
+    multis = []
     for plane in range(17):
         keys = sorted(k for k in mapping if k >> 16 == plane)
         if keys and plane > 1:
             raise ValueError(f"plane {plane}: a mapping past the first two planes")
-        singles = []
         for key in keys:
             out = mapping[key]
             if any(c >> 16 != plane for c in out):
                 raise ValueError(f"U+{key:04X}: a mapping that leaves its plane")
-            if len(out) == 1:
-                singles.append([key, key, 1, out[0] - key])
-            else:
+            if len(out) > 1:
                 multis.append((key,) + out + (0,) * (3 - len(out)))
-        joined = []
-        for run in singles:
-            if joined and joined[-1][3] == run[3] and run[0] - joined[-1][1] == 1:
-                joined[-1][1] = run[1]
+    index, numbers, deltas = [], {}, []
+    for first in range(0, PLANES, BLOCK):
+        block = []
+        for cp in range(first, first + BLOCK):
+            out = mapping.get(cp)
+            if out is None:
+                block.append(0)
+            elif len(out) > 1:
+                block.append(MARK)
             else:
-                joined.append(run)
-        stepped = []
-        for run in joined:
-            last = stepped[-1] if stepped else None
-            if last and last[3] == run[3] and run[0] == run[1] and run[0] - last[1] == 2 and (last[0] == last[1] or last[2] == 2):
-                last[1], last[2] = run[1], 2
-            else:
-                stepped.append(run)
-        for first, end, _, _ in stepped:
-            if end - first > 255:
-                raise ValueError(f"U+{first:04X}: a run that spans more than 256 code points")
-        runs += [tuple(r) for r in stepped]
-    return runs, multis
+                delta = (out[0] - cp) % 65536
+                if delta == MARK:
+                    raise ValueError(f"U+{cp:04X}: a delta of {MARK}, the mark of a mapping to several code points")
+                block.append(delta)
+        number = numbers.setdefault(tuple(block), len(numbers))
+        if number == len(deltas) // BLOCK:
+            deltas += block
+        index.append(number)
+    if len(numbers) > 256:
+        raise ValueError(f"{len(numbers)} blocks of {BLOCK} code points, more than an index of one byte numbers")
+    several = {m[0]: tuple(c for c in m[1:] if c) for m in multis}
+    read = {}
+    for cp in range(PLANES):
+        d = deltas[index[cp // BLOCK] * BLOCK + cp % BLOCK]
+        if d == MARK:
+            read[cp] = several.get(cp)
+        elif d:
+            read[cp] = ((cp & ~0xFFFF) | ((cp + d) & 0xFFFF),)
+    if read != mapping:
+        raise ValueError("the levels do not give the mapping they were made from")
+    return index, deltas, multis
 
 
 def ranges(properties, name):
@@ -177,12 +203,14 @@ def ranges(properties, name):
 def generate(unicode_data, special_casing, properties, floors=FLOORS):
     """The arrays of the file, by name, as lists of integers."""
     lower, upper = mappings(unicode_data, special_casing)
-    lower_runs, lower_multis = tables(lower)
-    upper_runs, upper_multis = tables(upper)
+    lower_index, lower_deltas, lower_multis = tables(lower)
+    upper_index, upper_deltas, upper_multis = tables(upper)
     out = {
-        "LowerRuns": [x for r in lower_runs for x in r],
+        "LowerIndex": lower_index,
+        "LowerDeltas": lower_deltas,
         "LowerMultis": [x for m in lower_multis for x in m],
-        "UpperRuns": [x for r in upper_runs for x in r],
+        "UpperIndex": upper_index,
+        "UpperDeltas": upper_deltas,
         "UpperMultis": [x for m in upper_multis for x in m],
         "Cased": [x for r in ranges(properties, "Cased") for x in r],
         "CaseIgnorable": [x for r in ranges(properties, "Case_Ignorable") for x in r],
@@ -194,9 +222,11 @@ def generate(unicode_data, special_casing, properties, floors=FLOORS):
 
 
 SUMMARIES = {
-    "LowerRuns": "The runs of the lowercase mappings to one code point, four numbers each: the first and the last code point, the step, 1 or 2, and the delta every code point of the run takes, a code point between them that the step skips taking none.",
+    "LowerIndex": "The levels of the lowercase mappings: for each block of 32 code points of the first two planes, the number of its 32 deltas in <see cref=\"LowerDeltas\"/>.",
+    "LowerDeltas": "The deltas of the lowercase mappings, 32 for each distinct block: the difference modulo 65536 between a code point and the one code point it maps to, 0 where it maps to none, and 32768 where it maps to several, which <see cref=\"LowerMultis\"/> holds.",
+    "UpperIndex": "The levels of the uppercase mappings, as <see cref=\"LowerIndex\"/> holds the lowercase ones.",
+    "UpperDeltas": "The deltas of the uppercase mappings, as <see cref=\"LowerDeltas\"/> holds the lowercase ones.",
     "LowerMultis": "The lowercase mappings to two or three code points, four numbers each: the code point and the code points it gives, the fourth number zero where the mapping gives two.",
-    "UpperRuns": "The runs of the uppercase mappings to one code point, as <see cref=\"LowerRuns\"/> holds the lowercase ones.",
     "UpperMultis": "The uppercase mappings to two or three code points, as <see cref=\"LowerMultis\"/> holds the lowercase ones.",
     "Cased": "The ranges of the property Cased, the first and the last code point of each, in order.",
     "CaseIgnorable": "The ranges of the property Case_Ignorable, as <see cref=\"Cased\"/> holds its ranges.",
@@ -204,9 +234,9 @@ SUMMARIES = {
 
 
 def number(value, at, name):
-    """One number of an array as the file writes it: a code point in hexadecimal, a run's step and
-    delta in decimal."""
-    return str(value) if name.endswith("Runs") and at % 4 >= 2 else f"0x{value:X}"
+    """One number of an array as the file writes it: a code point in hexadecimal, a block's number and a
+    delta of the levels in decimal."""
+    return str(value) if name.endswith(("Index", "Deltas")) else f"0x{value:X}"
 
 
 def render(arrays):
@@ -217,17 +247,17 @@ def render(arrays):
         "",
         "/// <summary>",
         "/// X3: the case tables of Unicode's full mappings and of the two properties Final_Sigma reads, of the version Rust's stable",
-        "/// <c>char::UNICODE_VERSION</c> pins, in the runs Rust's <c>core::unicode::conversions</c> holds them in: the mappings of",
-        "/// every code point above ASCII, and the properties of every code point, ASCII among them.",
+        "/// <c>char::UNICODE_VERSION</c> pins, the mappings of every code point above ASCII in levels of deltas, as .NET's",
+        "/// <c>CharUnicodeInfo</c> holds its mappings, and the properties of every code point, ASCII among them.",
         "/// </summary>",
         "internal static class CaseTables",
         "{",
         "    /// <summary>The version of the Unicode Character Database the tables are generated from.</summary>",
         f"    public const string Version = \"{VERSION}\";",
     ]
-    for name in ("LowerRuns", "LowerMultis", "UpperRuns", "UpperMultis", "Cased", "CaseIgnorable"):
+    for name in ("LowerIndex", "LowerDeltas", "LowerMultis", "UpperIndex", "UpperDeltas", "UpperMultis", "Cased", "CaseIgnorable"):
         values = arrays[name]
-        per = WIDTH[name] * (4 if WIDTH[name] == 4 else 6)
+        per = {1: 32, 2: 12, 4: 16}.get(WIDTH[name], 16)
         lines += ["", "    /// <summary>"]
         words, line = SUMMARIES[name].split(), "    ///"
         for word in words:
@@ -256,11 +286,11 @@ def expand(arrays):
     versions are compared in."""
     found = {}
     for kind in ("Lower", "Upper"):
-        runs = arrays.get(f"{kind}Runs", [])
-        for at in range(0, len(runs) - 3, 4):
-            first, last, step, delta = runs[at:at + 4]
-            for cp in range(first, last + 1, step):
-                found[(kind.lower(), cp)] = (cp + delta,)
+        index, deltas = arrays.get(f"{kind}Index", []), arrays.get(f"{kind}Deltas", [])
+        for cp in range(min(PLANES, len(index) * BLOCK)):
+            at = index[cp // BLOCK] * BLOCK + cp % BLOCK
+            if at < len(deltas) and deltas[at] not in (0, MARK):
+                found[(kind.lower(), cp)] = ((cp & ~0xFFFF) | ((cp + deltas[at]) & 0xFFFF),)
         multis = arrays.get(f"{kind}Multis", [])
         for at in range(0, len(multis) - 3, 4):
             found[(kind.lower(), multis[at])] = tuple(c for c in multis[at + 1:at + 4] if c)
@@ -348,26 +378,48 @@ def self_test():
     cases.append(("mappings: an identity with no simple mapping is no mapping", 0xDF not in lower, lower))
     cases.append(("mappings: ASCII is left out", 0x41 not in lower, lower))
 
-    def runs_of(mapping):
-        return tables(mapping)[0]
+    def delta(levels, cp):
+        index, deltas, _ = levels
+        return deltas[index[cp // BLOCK] * BLOCK + cp % BLOCK]
 
-    cases.append(("tables: consecutive code points with one delta make a run of step 1",
-                  runs_of({0xC0: (0xE0,), 0xC1: (0xE1,), 0xC2: (0xE2,), 0xC4: (0xC5,)}) == [(0xC0, 0xC2, 1, 32), (0xC4, 0xC4, 1, 1)],
-                  runs_of({0xC0: (0xE0,), 0xC1: (0xE1,), 0xC2: (0xE2,), 0xC4: (0xC5,)})))
-    cases.append(("tables: lone code points two apart with one delta make a run of step 2",
-                  runs_of({0x100: (0x101,), 0x102: (0x103,), 0x104: (0x105,)}) == [(0x100, 0x104, 2, 1)],
-                  runs_of({0x100: (0x101,), 0x102: (0x103,), 0x104: (0x105,)})))
-    cases.append(("tables: a run of step 1 does not take a code point two after it",
-                  runs_of({0xC0: (0xC1,), 0xC1: (0xC2,), 0xC3: (0xC4,)}) == [(0xC0, 0xC1, 1, 1), (0xC3, 0xC3, 1, 1)],
-                  runs_of({0xC0: (0xC1,), 0xC1: (0xC2,), 0xC3: (0xC4,)})))
-    cases.append(("tables: a mapping to two code points is a multi, padded with a zero",
-                  tables({0x130: (0x69, 0x307)}) == ([], [(0x130, 0x69, 0x307, 0)]), tables({0x130: (0x69, 0x307)})))
+    def brief(out):
+        return out if isinstance(out, Exception) else f"{len(set(out[0]))} numbers in the index, {len(out[1]) // BLOCK} blocks, multis {out[2]}"
+
+    out = got(lambda: tables({0xC0: (0xE0,), 0x100: (0x101,), 0x1E9E: (0xDF,)}))
+    cases.append(("tables: a code point's delta is the difference to the one code point it maps to, modulo 65536",
+                  not isinstance(out, Exception) and [delta(out, cp) for cp in (0xC0, 0x100, 0x1E9E, 0xC1, 0x41)] == [32, 1, 0xDF - 0x1E9E + 65536, 0, 0],
+                  brief(out)))
+    out = got(lambda: tables({0x100: (0x101,), 0x120: (0x121,), 0x140: (0x142,)}))
+    cases.append(("tables: blocks alike share one number, and every block without a mapping is block 0",
+                  not isinstance(out, Exception) and out[0][0x100 // BLOCK] == out[0][0x120 // BLOCK] == 1 and out[0][0x140 // BLOCK] == 2
+                  and set(out[0]) == {0, 1, 2} and len(out[1]) == 3 * BLOCK, brief(out)))
+    out = got(lambda: tables({0x130: (0x69, 0x307)}))
+    cases.append(("tables: a mapping to two code points is marked and held among the multis, padded with a zero",
+                  not isinstance(out, Exception) and delta(out, 0x130) == MARK and out[2] == [(0x130, 0x69, 0x307, 0)], brief(out)))
+    out = got(lambda: tables({0x100: (0x100 + MARK,)}))
+    cases.append(("tables: a delta of 32768, the mark of a mapping to several code points, is refused",
+                  isinstance(out, ValueError) and "mark" in str(out), brief(out)))
     out = got(lambda: tables({0xFFFF: (0x10000,)}))
-    cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError), out))
-    out = got(lambda: tables({cp: (cp + 1,) for cp in range(0x1000, 0x1000 + 257)}))
-    cases.append(("tables: a run that spans more than 256 code points is refused", isinstance(out, ValueError), out))
-    out = got(lambda: runs_of({cp: (cp + 1,) for cp in range(0x1000, 0x1000 + 256)}))
-    cases.append(("tables: a run that spans 256 code points is one run", out == [(0x1000, 0x10FF, 1, 1)], out))
+    cases.append(("tables: a mapping that leaves its plane is refused", isinstance(out, ValueError) and "leaves its plane" in str(out), brief(out)))
+
+    global PLANES
+    planes, PLANES = PLANES, 0x100  # levels of the first 256 code points alone, which do not reach U+0150
+    try:
+        out = got(lambda: tables({0x150: (0x151,)}))
+    finally:
+        PLANES = planes
+    cases.append(("tables: levels that do not give the mapping they were made from are refused",
+                  isinstance(out, ValueError) and "do not give" in str(out), brief(out)))
+
+    def blocks(count):  # count blocks that differ, each from the one before by the delta of its first code point
+        return {0x1000 + BLOCK * k: (0x1000 + BLOCK * k + k + 1,) for k in range(count)}
+
+    out = got(lambda: tables(blocks(256)))
+    cases.append(("tables: more than 256 distinct blocks, block 0 among them, are refused",
+                  isinstance(out, ValueError) and "one byte" in str(out), brief(out)))
+    out = got(lambda: tables(blocks(255)))
+    cases.append(("tables: 256 distinct blocks are numbered in one byte",
+                  not isinstance(out, Exception) and max(out[0]) == 255 and len(out[1]) == 256 * BLOCK, brief(out)))
     out = got(lambda: tables({0x20000: (0x20001,)}))
     cases.append(("tables: a mapping to one code point past the first two planes is refused",
                   isinstance(out, ValueError) and "first two planes" in str(out), out))
@@ -380,11 +432,18 @@ def self_test():
                   ranges(props, "Cased")))
     out = got(lambda: generate(data, special, props))
     cases.append(("generate: a table below its floor is refused", isinstance(out, ValueError) and "floor" in str(out), out))
-    arrays = generate(data, special, props, floors={})
-    cases.append(("render and parse: the written file reads back as the arrays", parse(render(arrays)) == arrays, parse(render(arrays))))
-    changed = dict(arrays, LowerRuns=[0xC0, 0xC0, 1, 33] + arrays["LowerRuns"][4:])
-    said = changes(arrays, changed)
-    cases.append(("changes: a changed mapping is named with both values", said == ["lower U+00C0: U+00E0 -> U+00E1"], said))
+    # a refusal of the tables, as a mutation of a case above makes, fails the two cases below and prints every case
+    arrays = got(lambda: generate(data, special, props, floors={}))
+    if isinstance(arrays, Exception):
+        cases.append(("render and parse: the written file reads back as the arrays", False, arrays))
+        cases.append(("changes: a changed mapping is named with both values", False, arrays))
+    else:
+        cases.append(("render and parse: the written file reads back as the arrays", parse(render(arrays)) == arrays, parse(render(arrays))))
+        deltas = list(arrays["LowerDeltas"])
+        deltas[arrays["LowerIndex"][0xC0 // BLOCK] * BLOCK + 0xC0 % BLOCK] = 33
+        changed = dict(arrays, LowerDeltas=deltas)
+        said = changes(arrays, changed)
+        cases.append(("changes: a changed mapping is named with both values", said == ["lower U+00C0: U+00E0 -> U+00E1"], said))
 
     with kit.scratch("kurz-ucd-") as cache:
         body = b"0041;A;Lu;0;L;;;;;N;;;;0061;\n"
@@ -439,41 +498,44 @@ def self_test():
         out = got(lambda: fetch("UnicodeData.txt", digest=other_digest, opener=lambda url, timeout: Answer(other), cache=cache))
         cases.append(("fetch: a kept file that cannot be read is fetched again", out == other.decode(), out))
 
-        texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
-        os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
-        import contextlib
-        import io
+        if isinstance(arrays, Exception):
+            cases.append(("main: the runs of main over the tables of the cases above", False, arrays))
+        else:
+            texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
+            os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
+            import contextlib
+            import io
 
-        def run(argv, fetcher=lambda name: texts[name]):
-            printed = io.StringIO()
-            with contextlib.redirect_stdout(printed):
-                code = main(argv, root=cache, fetcher=fetcher, floors={})
-            return code, printed.getvalue()
+            def run(argv, fetcher=lambda name: texts[name]):
+                printed = io.StringIO()
+                with contextlib.redirect_stdout(printed):
+                    code = main(argv, root=cache, fetcher=fetcher, floors={})
+                return code, printed.getvalue()
 
-        code, said = run([])
-        written = kit.read(os.path.join(cache, OUT))
-        cases.append(("main: writes the file where there was none", code == 0 and parse(written) == arrays and "there was none" in said, (code, said)))
-        code, said = run(["--check"])
-        cases.append(("main --check: the file the database gives passes", code == 0, (code, said)))
-        with open(os.path.join(cache, OUT), "w", encoding="utf-8") as f:
-            f.write(render(changed))
-        code, said = run(["--check"])
-        cases.append(("main --check: a file that differs fails, naming the mapping", code == 1 and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
-        code, said = run([])
-        written = kit.read(os.path.join(cache, OUT))
-        cases.append(("main: writes the file again and names every change", code == 0 and parse(written) == arrays and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
+            code, said = run([])
+            written = kit.read(os.path.join(cache, OUT))
+            cases.append(("main: writes the file where there was none", code == 0 and parse(written) == arrays and "there was none" in said, (code, said)))
+            code, said = run(["--check"])
+            cases.append(("main --check: the file the database gives passes", code == 0, (code, said)))
+            with open(os.path.join(cache, OUT), "w", encoding="utf-8") as f:
+                f.write(render(changed))
+            code, said = run(["--check"])
+            cases.append(("main --check: a file that differs fails, naming the mapping", code == 1 and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
+            code, said = run([])
+            written = kit.read(os.path.join(cache, OUT))
+            cases.append(("main: writes the file again and names every change", code == 0 and parse(written) == arrays and "lower U+00C0: U+00E1 -> U+00E0" in said, (code, said)))
 
-        def unread(name):
-            raise Unread(f"{name}: could not be fetched")
+            def unread(name):
+                raise Unread(f"{name}: could not be fetched")
 
-        code, said = run(["--check"], fetcher=unread)
-        cases.append(("main --check: an unfetched file is PARTLY, never a pass", code == kit.PARTLY, (code, said)))
+            code, said = run(["--check"], fetcher=unread)
+            cases.append(("main --check: an unfetched file is PARTLY, never a pass", code == kit.PARTLY, (code, said)))
 
-        def wrong(name):
-            raise ValueError(f"{name}: SHA-256 0, where 1 is pinned: refused")
+            def wrong(name):
+                raise ValueError(f"{name}: SHA-256 0, where 1 is pinned: refused")
 
-        code, said = run(["--check"], fetcher=wrong)
-        cases.append(("main --check: a refused file fails", code == 1, (code, said)))
+            code, said = run(["--check"], fetcher=wrong)
+            cases.append(("main --check: a refused file fails", code == 1, (code, said)))
     return kit.report(cases)
 
 

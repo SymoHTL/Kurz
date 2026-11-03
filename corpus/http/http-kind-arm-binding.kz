@@ -1,0 +1,9 @@
+// expect: error redeclared at 7
+// rules: W1
+
+int | string v = 3
+
+match v {
+    int HttpKind => print(HttpKind)
+    string s => print(s)
+}

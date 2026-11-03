@@ -173,14 +173,29 @@ public enum CallKind
     /// <summary>A file's, a listener's or a stream's <c>Close()</c> (S5, S9).</summary>
     FileClose,
 
+    /// <summary>A file's <c>Lines()</c>, the collection of a <c>for</c> loop (S16).</summary>
+    FileLines,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 
-    /// <summary><c>TcpStream.Connect(address)</c> (S9).</summary>
+    /// <summary><c>TcpStream.Connect(address)</c>, or its second form <c>TcpStream.Connect(address, timeout)</c>, of two slots (S9).</summary>
     TcpConnect,
 
     /// <summary>A listener's <c>Accept()</c> (S9).</summary>
     TcpAccept,
+
+    /// <summary>A stream's <c>SetReadTimeout(timeout)</c> (S9).</summary>
+    TcpSetReadTimeout,
+
+    /// <summary>A stream's <c>SetWriteTimeout(timeout)</c> (S9).</summary>
+    TcpSetWriteTimeout,
+
+    /// <summary>A listener's <c>SetAcceptTimeout(timeout)</c> (S9).</summary>
+    TcpSetAcceptTimeout,
+
+    /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
+    TcpShutdownWrite,
 
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
@@ -217,6 +232,9 @@ public enum CallKind
 
     /// <summary><c>FixedTime.Equal(a, b)</c> (H4).</summary>
     FixedTimeEqual,
+
+    /// <summary>An intrinsic of a class under <c>X86</c> or <c>Arm</c>, or a lane operation of a vector (R18); <see cref="CallInfo.Intrinsic"/> is the one picked, and <see cref="CallInfo.Target"/> the vector a lane operation is called on.</summary>
+    Intrinsic,
 }
 
 /// <summary>
@@ -234,7 +252,11 @@ public sealed record CallInfo(
     IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map,
     IReadOnlyList<int> Binding,
     int SlotCount,
-    KurzType Result);
+    KurzType Result)
+{
+    /// <summary>The intrinsic or lane operation a call of <see cref="CallKind.Intrinsic"/> calls (R18).</summary>
+    public Intrinsic? Intrinsic { get; init; }
+}
 
 /// <summary>A lambda as the checker read it: its parameters, the variables of the functions around it that it reads (F11, F15) and its type.</summary>
 public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadOnlyList<VariableSymbol> Captures, FunctionType Type);
@@ -257,6 +279,12 @@ public sealed class SemanticModel
     private readonly Dictionary<NameExpression, FunctionSymbol> functionNames = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, VariableSymbol> declarations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<CallExpression, CallInfo> calls = new(ReferenceEqualityComparer.Instance);
+    private readonly List<FunctionSymbol> copies = [];
+    private readonly Dictionary<FunctionSymbol, List<FunctionSymbol>> copiesOf = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, MatchArm> kindArms = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ForInStatement, IReadOnlyList<Block>> passes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, CallExpression?> made = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<AssignOrDeclare, VariableSymbol> assignments = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
@@ -266,8 +294,12 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ClassSymbol, VariableSymbol> buildReceivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
@@ -312,6 +344,31 @@ public sealed class SemanticModel
 
     public CallInfo CallOf(CallExpression call) => calls.TryGetValue(call, out var c) ? c : throw Missing("call", call.Line);
 
+    /// <summary>The call's record, null where the checker kept none.</summary>
+    internal CallInfo? TryCallOf(CallExpression call) => calls.GetValueOrDefault(call);
+
+    /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
+    public IReadOnlyList<FunctionSymbol> Copies => copies;
+
+    /// <summary>T33: whether a function is checked in its copies alone, since it reads its type or passes its type parameter to a function that does: a code generator reads its copies and never its own body.</summary>
+    public bool ReadsItsType(FunctionSymbol function) => readers.Contains(function);
+
+    /// <summary>T33: the copies made of a function that reads its type, in the order they were made; none where no call made one.</summary>
+    public IReadOnlyList<FunctionSymbol> CopiesOf(FunctionSymbol original) => copiesOf.TryGetValue(original, out var made) ? made : [];
+
+    /// <summary>T33: the one arm a <c>match</c> on <c>T.Kind</c> in a copy reads, by the match's subject; null for any other <c>match</c>.</summary>
+    public MatchArm? KindArmOf(Expression subject) => kindArms.GetValueOrDefault(subject);
+
+    /// <summary>T33: the passes of a loop over <c>T.Fields</c> in a copy, a copy of its body for each field in order, which a code generator reads in place of the loop; null for any other loop.</summary>
+    public IReadOnlyList<Block>? PassesOf(ForInStatement loop) => passes.GetValueOrDefault(loop);
+
+    /// <summary>
+    /// T33: whether the call is a <c>T.Make(f => ...)</c> in a copy, and the call of the type's primary constructor it became, with one
+    /// argument for each field in order, which a code generator reads in place of it; null as that call where the type has no fields,
+    /// whose value is the constant the call's type holds.
+    /// </summary>
+    public bool IsMade(CallExpression call, out CallExpression? construction) => made.TryGetValue(call, out construction);
+
     /// <summary>Whether the checker read the call.</summary>
     public bool HasCall(CallExpression call) => calls.ContainsKey(call);
 
@@ -348,6 +405,36 @@ public sealed class SemanticModel
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
 
+    /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
+    public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);
+
+    internal void RecordStaticField(Expression read, StaticFieldSymbol field) => staticFields[read] = field;
+    /// <summary>Every test of a class's <c>IsSupported</c> the checker read, with its class (R18).</summary>
+    public IEnumerable<(MemberAccess Access, IntrinsicClass Class)> SupportTests => supportTests.Select(p => (p.Key, p.Value));
+
+    /// <summary>R18: the class whose <c>IsSupported</c> the member reads, <c>X86.Sse41.IsSupported</c>, or null for any other member.</summary>
+    public IntrinsicClass? SupportTestOf(MemberAccess access) => supportTests.TryGetValue(access, out var c) ? c : null;
+
+    /// <summary>
+    /// R18: the classes whose tests the flow of the code knows true where the statement, or the right side of <c>&amp;&amp;</c> or
+    /// <c>||</c>, starts, as N3's flow knows a variable not null there; none where nothing is known or the node is no such place.
+    /// </summary>
+    public IReadOnlyList<IntrinsicClass> GuardsAt(Node node) => guards.TryGetValue(node, out var g) ? g : [];
+
+    internal void RecordSupportTest(MemberAccess access, IntrinsicClass c) => supportTests[access] = c;
+
+    internal void RecordGuards(Node node, IReadOnlyList<IntrinsicClass> classes)
+    {
+        if (classes.Count == 0)
+        {
+            guards.Remove(node);
+        }
+        else
+        {
+            guards[node] = classes;
+        }
+    }
+
     internal void RecordArguments(VariableSymbol arguments) => Arguments = arguments;
 
     internal void RecordArgumentsRead(int line)
@@ -367,6 +454,25 @@ public sealed class SemanticModel
     internal void RecordDeclaration(object node, VariableSymbol variable) => declarations[node] = variable;
 
     internal void RecordCall(CallExpression call, CallInfo info) => calls[call] = info;
+
+    internal void RecordCopy(FunctionSymbol original, FunctionSymbol copy)
+    {
+        copies.Add(copy);
+        if (!copiesOf.TryGetValue(original, out var made))
+        {
+            copiesOf[original] = made = [];
+        }
+
+        made.Add(copy);
+    }
+
+    internal void RecordReader(FunctionSymbol function) => readers.Add(function);
+
+    internal void RecordKindArm(Expression subject, MatchArm arm) => kindArms[subject] = arm;
+
+    internal void RecordPasses(ForInStatement loop, IReadOnlyList<Block> blocks) => passes[loop] = blocks;
+
+    internal void RecordMade(CallExpression call, CallExpression? construction) => made[call] = construction;
 
     internal void RecordAssignment(AssignOrDeclare assignment, VariableSymbol variable) => assignments[assignment] = variable;
 
@@ -393,6 +499,9 @@ public sealed class SemanticModel
     /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
     public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
 
+    /// <summary>K7: the instance being built, through which the defaults of a class's body fields read the fields above them.</summary>
+    public VariableSymbol FieldsThisOf(ClassSymbol symbol) => buildReceivers.TryGetValue(symbol, out var v) ? v : throw Missing($"the instance the defaults of `{symbol.Name}` read", symbol.Line);
+
     /// <summary>
     /// Inside a method, a name that means a field of its instance (K7): a read, a <see cref="NameExpression"/>, or an assignment, an
     /// <see cref="AssignOrDeclare"/>, with the variable <c>this</c> it goes through; a <see cref="ThisExpression"/> is <c>this</c> itself.
@@ -408,6 +517,8 @@ public sealed class SemanticModel
     internal void RecordClass(TypeDeclaration declaration, ClassSymbol symbol) => classes[declaration] = symbol;
 
     internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
+
+    internal void RecordFieldsThis(ClassSymbol symbol, VariableSymbol thisVariable) => buildReceivers[symbol] = thisVariable;
 
     internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 

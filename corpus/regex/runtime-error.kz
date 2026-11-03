@@ -1,0 +1,24 @@
+// expect: output
+// | syntax at 1
+// | unsupported at 3
+// | too big at 0
+// | \d+
+// | Syntax
+// rules: G3
+
+void Try(string pattern) {
+    match Regex.New(pattern) {
+        Regex re => print(re)
+        RegexError e => print(e)
+    }
+}
+
+Try("a)")
+Try(r"(a)\1")
+Try(r"(?:\w{1000}){1000}")
+Try(r"\d+")
+word = "a)"
+match Regex.New("{word}+") {
+    Regex re => print(re)
+    RegexError e => print(e.Kind)
+}

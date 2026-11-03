@@ -1,0 +1,5 @@
+// expect: error redeclared at 5
+// rules: R18
+
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+data Vector128(int X)
