@@ -376,8 +376,8 @@ through a second form that takes the time, `TcpStream.Connect(address, timeout)`
 setting `Connect` reads before it creates the socket and against the 5 seconds alone), where Rust's
 takes one address and looks nothing up, and this form is read as taking the name the first form takes,
 looking it up and trying its addresses in turn, as the first form's `address` reads above (§12, the
-owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker at
-the end of this rule's paragraph. A call whose time runs out
+owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker on
+the one bound of `TcpStream.Connect` below. A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
 the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as

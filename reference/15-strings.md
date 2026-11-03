@@ -788,8 +788,8 @@ back and gives the item, as C#'s `List.Insert` and `List.RemoveAt` name them and
 and `Vec::remove` work; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
 "C# names, RemoveAt gives item"). The item `RemoveAt` gives may be dropped, as the map's `Remove` gives
 one (M9), and both take the list through a `mut` variable (M5) *(assumed, §12)*. Their parameters are
-`int index` and `item`, as C#'s are, an index of another type refused as for any `int` parameter
-(T7), and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
+`int index` and `item`, as C#'s are, an index of another type widened or refused as for any `int`
+parameter (T7), and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
 
 Case: [strings/list-insert-remove-at.kz](../corpus/strings/list-insert-remove-at.kz)
 ```kurz
