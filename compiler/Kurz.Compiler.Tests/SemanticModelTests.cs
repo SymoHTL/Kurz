@@ -111,6 +111,30 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_walk_reads_the_constructor_s_call_T_Make_became()
+    {
+        // T33: a code generator reads the call of the primary constructor in place of `T.Make`, with an argument of its own for each
+        // field, typed as that field, never the lambda; a type with no fields gives its value, with no call
+        var (tree, model) = Clean("data Mixed(int A, long B, string C)\ndata Empty\n\nT Value<T>() => match T.Kind {\n    TypeKind.String => \"s\"\n    else => 0\n}\n\nT Zero<T>() => T.Make(f => Value<f.Type>())\n\nprint(Zero<Mixed>())\nprint(Zero<Empty>())");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Value<int>", "Value<long>", "Value<string>", "Zero<Mixed>", "Zero<Empty>"], walk.Copies);
+        Assert.Equal(2, walk.Made);
+        var made = model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Zero"))).Select(copy =>
+        {
+            var calls = new List<CallExpression>();
+            Nodes.Collect(copy.Declaration!, calls);
+            Assert.True(model.IsMade(Assert.Single(calls, c => c.Callee is MemberAccess { Member: "Make" }), out var construction));
+            return construction;
+        }).ToList();
+        var arguments = made[0]!.Arguments.Select(a => a.Value).ToList();
+        Assert.Equal(["int", "long", "string"], arguments.Select(a => model.TypeOf(a).Type.Text));
+        Assert.Equal(3, arguments.Distinct(ReferenceEqualityComparer.Instance).Count());
+        Assert.Null(made[1]);
+    }
+
+    [Fact]
     public void The_walk_reads_each_pass_of_a_loop_over_the_fields_of_a_copy_s_type()
     {
         // T33: a code generator reads a pass for each field in place of the loop's own collection and body, `f.Name` as a constant, and
@@ -488,6 +512,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         /// <summary>T33: the copies the walk read in place of the body of a function that reads its type, by name.</summary>
         public List<string> Copies { get; } = [];
 
+        public int Made { get; private set; }
+
         /// <summary>T33: the arms the walk read of the matches on <c>T.Kind</c>, one of each in each copy.</summary>
         public int KindArms { get; private set; }
 
@@ -780,6 +806,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // R18: `X86.Sse41.IsSupported`, a test of the CPU a code generator reads whole
                 case MemberAccess m:
                     Expression(m.Target);
+                    break;
+                case CallExpression c when model.IsMade(c, out var construction):
+                    Made++; // T33: a code generator reads the call of the constructor `T.Make` became, never its lambda
+                    if (construction is not null)
+                    {
+                        Expression(construction);
+                    }
+
                     break;
                 case CallExpression c:
                     Call(c);
