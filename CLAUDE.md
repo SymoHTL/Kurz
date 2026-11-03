@@ -389,6 +389,16 @@ Gate: review rule "rules for sessions".
   for the field's place) for the `mut` argument; another check that lets such a name pass: review
   rule "compiler".
 
+- **A walk over the classes of a file reads a class of `std/` that is not in its tables.** A class
+  of `std/` that the prelude names (W1) reaches a file as the symbol `std/`'s checker made, so a
+  table that holds the file's own classes, filled from `classDeclared`, has no entry for it. The
+  cycle rule's walk reached `main` so with pull request 276. It looked up every class a field
+  reached, and a class of the program with a field of `HttpHeaders` stopped the checker with
+  `KeyNotFoundException`
+  ([knowledge/a-class-of-std-is-no-class-of-the-file.md](knowledge/a-class-of-std-is-no-class-of-the-file.md)).
+  Gate: `compiler-tests` (`CheckerTests.A_class_of_the_file_may_hold_a_class_of_std_in_its_fields`)
+  for the cycle rule; another walk keyed by the file's classes: review rule "compiler".
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
