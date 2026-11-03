@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -600,6 +600,20 @@ public sealed partial class Checker
         if (std is null)
         {
             return;
+        }
+
+        // W1, S1: the types every file sees without a declaration are one set of symbols across std/ and the file, so that the
+        // `IoError` a function of std/ gives, `HttpRequest.Read`'s among them, is the file's `IoError`
+        foreach (var t in BuiltInTypes.Statements.OfType<TypeDeclaration>())
+        {
+            if (std.dataTypes.TryGetValue(t.Name, out var builtIn))
+            {
+                dataTypes[t.Name] = builtIn;
+            }
+            else if (std.enums.TryGetValue(t.Name, out var builtInEnum))
+            {
+                enums[t.Name] = builtInEnum;
+            }
         }
 
         foreach (var name in Prelude)

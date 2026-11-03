@@ -5924,3 +5924,570 @@ pub class HttpHeaders {
         return c
     }
 }
+
+// A lowest rate of data, in bytes a second after a grace, as Kestrel's `MinDataRate` holds both (design record, section 12: the
+// owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
+pub data HttpRate(int BytesPerSecond, duration Grace)
+
+// The limits of a request, with Kestrel's names, types and defaults (design record, section 12: the owner, 2026-10-31, "HttpLimits
+// data", and 2026-11-03, Kestrel's member names and types, the four fixed numbers made members), a type every file sees (W1, W5).
+// The bounds of time are held and read by nothing yet: they wait for the monotonic clock (section 12).
+pub data HttpLimits(
+    int MaxRequestLineSize = 8kb,
+    int MaxRequestHeadersTotalSize = 32kb,
+    int MaxRequestHeaderCount = 100,
+    long MaxRequestBodySize = 30_000_000,
+    duration RequestHeadersTimeout = 30s,
+    HttpRate MinRequestBodyDataRate = HttpRate(240, 5s),
+    HttpRate MinResponseDataRate = HttpRate(240, 5s),
+    int MaxRequestsPerConnection = 100,
+    duration KeepAliveTimeout = 5s,
+    int MaxDrainSize = 64kb,
+    int MaxChunkSizeLine = 4096)
+
+// A request a server reads from a stream: its method, its target split at the first `?`, its headers and its body, each as the
+// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`.
+pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Headers, HttpBody Body) {
+    // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
+    // failure of the network, or the request the server refuses (W5).
+    pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
+        match HttpReadRequest(stream, HttpLimits()) {
+            HttpRequest r => return r
+            IoError e => return e
+            HttpRefused no => return no.Error
+        }
+    }
+}
+
+// The body of a request, read from its stream as the client sends it: `Read` appends at most `max` bytes and gives 0 at the end,
+// `ReadAll` the whole body up to a bound (design record, section 12; W6). The first read that needs a byte from a client that
+// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it. A failure of HTTP stays: every read after it
+// gives it again.
+pub class HttpBody {
+    mut TcpStream? stream = null
+    mut long remaining = 0
+    mut bool chunked = false
+    mut bool atChunkEnd = false
+    mut bool ended = true
+    mut bool expects = false
+    mut long taken = 0
+    mut long most = 0
+    mut int sizeLine = 4096
+    mut HttpError? failed = null
+
+    // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
+    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits) {
+        b = HttpBody()
+        b.stream = s
+        b.remaining = length
+        b.chunked = isChunked
+        b.ended = !isChunked && length == 0
+        b.expects = expectsContinue && (isChunked || length > 0)
+        b.most = limits.MaxRequestBodySize
+        b.sizeLine = limits.MaxChunkSizeLine
+        return b
+    }
+
+    // Appends at most `max` bytes of the body to `into` and gives their count, 0 at the end of the body.
+    pub int | IoError | HttpError Read(mut Bytes into, int max) {
+        f = failed
+        if f != null {
+            return f
+        }
+
+        s = stream
+        if s == null || ended || max <= 0 {
+            return 0
+        }
+
+        if expects {
+            expects = false
+            s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+        }
+
+        if chunked && remaining == 0 {
+            NextChunk(s) else {
+                HttpError e => {
+                    failed = e
+                    return e
+                }
+            }
+
+            if ended {
+                return 0
+            }
+        }
+
+        mut want = max
+        if remaining < want {
+            want = int(remaining)
+        }
+
+        n = s.Read(mut into, want)
+        if n == 0 {
+            e = HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+            failed = e
+            return e
+        }
+
+        remaining = remaining - n
+        if remaining == 0 {
+            if chunked {
+                atChunkEnd = true
+            } else {
+                ended = true
+            }
+        }
+
+        return n
+    }
+
+    // The whole body, or `request body over limit` where it holds more than `max` bytes.
+    pub Bytes | IoError | HttpError ReadAll(int max) {
+        if !chunked && remaining > max {
+            return HttpError(HttpKind.TooLarge, "request body over limit")
+        }
+
+        mut all = Bytes()
+        while true {
+            mut piece = 65536
+            if max - all.Count + 1 < piece {
+                piece = max - all.Count + 1
+            }
+
+            n = Read(mut all, piece)
+            if n == 0 {
+                return all
+            }
+
+            if all.Count > max {
+                return HttpError(HttpKind.TooLarge, "request body over limit")
+            }
+        }
+
+        return all
+    }
+
+    // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
+    // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
+    bool | IoError | HttpError NextChunk(TcpStream s) {
+        if atChunkEnd {
+            end = HttpLine(s, 2)
+            if end.Count != 0 {
+                return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+            }
+
+            atChunkEnd = false
+        }
+
+        line = HttpLine(s, sizeLine) else {
+            HttpError e => return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+        }
+
+        mut size = 0L
+        mut digits = 0
+        for i in 0..<line.Count {
+            c = line[i]
+            mut d = -1
+            if c >= 48 && c <= 57 {
+                d = c - 48
+            } else if c >= 97 && c <= 102 {
+                d = c - 87
+            } else if c >= 65 && c <= 70 {
+                d = c - 55
+            } else if c == 59 || c == 32 || c == 9 {
+                break
+            } else {
+                return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+            }
+
+            if size > (most - taken - d) / 16 {
+                return HttpError(HttpKind.TooLarge, "request body over limit")
+            }
+
+            size = size * 16 + d
+            digits = digits + 1
+        }
+
+        if digits == 0 {
+            return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+        }
+
+        taken = taken + size
+        remaining = size
+        if size == 0 {
+            while true {
+                trailer = HttpLine(s, sizeLine)
+                if trailer.Count == 0 {
+                    ended = true
+                    return true
+                }
+            }
+        }
+
+        return true
+    }
+}
+
+// What std/'s reader refuses: the status the server answers, 0 where it answers none, beside the error a program sees (W5).
+data HttpRefused(int Status, HttpError Error)
+
+// The next line of the stream without its CR LF, of at most `most` bytes with them, taken through the stream's buffer (S24).
+Bytes | IoError | HttpError HttpLine(TcpStream s, int most) {
+    mut line = Bytes()
+    while true {
+        start = line.Count
+        n = s.Fill(mut line)
+        if n == 0 {
+            return HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+        }
+
+        for i in start..<line.Count {
+            if line[i] == 10 {
+                s.Consume(i + 1 - start)
+                if i == 0 || line[i - 1] != 13 || i + 1 > most {
+                    return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+                }
+
+                return line[0..<i - 1]
+            }
+        }
+
+        s.Consume(n)
+        if line.Count >= most {
+            return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+        }
+    }
+
+    return line
+}
+
+HttpRefused HttpBad(string what) => HttpRefused(400, HttpError(HttpKind.Protocol, "malformed request: {what}"))
+
+// The request of a stream with these limits, the entry of the server's loop (W5): the head is taken through the stream's buffer
+// (S24) line by line, each line ended by CR LF, and held to its limits as Kestrel holds it, a request line of at most
+// `MaxRequestLineSize` bytes with its CR LF and header lines of at most `MaxRequestHeadersTotalSize` bytes with theirs and the empty
+// line's, at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body.
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits) {
+    mut head = Bytes()
+    mut lineStart = 0
+    mut firstEnd = -1
+    mut count = 0
+    while true {
+        start = head.Count
+        n = s.Fill(mut head)
+        if n == 0 {
+            if start == 0 {
+                return HttpRefused(0, HttpError(HttpKind.Protocol, "malformed request: no request line"))
+            }
+
+            return HttpBad("incomplete")
+        }
+
+        mut i = start
+        while i < head.Count {
+            if head[i] == 10 {
+                if i == 0 || head[i - 1] != 13 {
+                    s.Consume(i + 1 - start)
+                    return HttpBad("line not ended by CR LF")
+                }
+
+                if firstEnd < 0 {
+                    if i + 1 > limits.MaxRequestLineSize {
+                        s.Consume(i + 1 - start)
+                        return HttpRefused(414, HttpError(HttpKind.TooLarge, "request line too long"))
+                    }
+
+                    firstEnd = i - 1
+                } else if i - 1 == lineStart {
+                    s.Consume(i + 1 - start)
+                    if i + 1 - (firstEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+                        return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+                    }
+
+                    match HttpParseHead(head, firstEnd, i - 1, limits) {
+                        HttpHead h => return HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits))
+                        HttpRefused no => return no
+                    }
+                } else {
+                    count = count + 1
+                    if count > limits.MaxRequestHeaderCount {
+                        s.Consume(i + 1 - start)
+                        return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+                    }
+                }
+
+                lineStart = i + 1
+            }
+
+            i = i + 1
+        }
+
+        s.Consume(n)
+        if firstEnd < 0 && head.Count >= limits.MaxRequestLineSize {
+            return HttpRefused(414, HttpError(HttpKind.TooLarge, "request line too long"))
+        }
+
+        if firstEnd >= 0 && head.Count - (firstEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+            return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+        }
+    }
+
+    return HttpBad("incomplete")
+}
+
+// What a head says of its request, for its body and the server's loop.
+data HttpHead(string Method, string Path, string Query, HttpHeaders Headers, int Minor, long Length, bool Chunked, bool Continue)
+
+// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2).
+bool HttpTokenByte(byte c) {
+    if c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 {
+        return true
+    }
+
+    return c == 33 || c >= 35 && c <= 39 || c == 42 || c == 43 || c == 45 || c == 46 || c == 94 || c == 95 || c == 96 || c == 124 || c == 126
+}
+
+// Whether a `Host` is a host and an optional port, a name of the bytes RFC 3986 allows in one or an address between brackets.
+bool HttpHostValid(string host) {
+    b = host.Bytes
+    mut at = 0
+    if b.Count > 0 && b[0] == 91 {
+        at = 1
+        while at < b.Count && b[at] != 93 {
+            c = b[at]
+            if !(c >= 48 && c <= 58 || c >= 97 && c <= 102 || c >= 65 && c <= 70 || c == 46) {
+                return false
+            }
+
+            at = at + 1
+        }
+
+        if at == b.Count {
+            return false
+        }
+
+        at = at + 1
+    } else {
+        while at < b.Count && b[at] != 58 {
+            c = b[at]
+            if !(c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 45 || c == 46 || c == 95 || c == 126 || c == 37 || c == 33 || c == 36 || c >= 38 && c <= 44 || c == 59 || c == 61) {
+                return false
+            }
+
+            at = at + 1
+        }
+    }
+
+    if at == b.Count {
+        return true
+    }
+
+    if b[at] != 58 {
+        return false
+    }
+
+    for p in at + 1..<b.Count {
+        if b[p] < 48 || b[p] > 57 {
+            return false
+        }
+    }
+
+    return true
+}
+
+// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5).
+HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimits limits) {
+    if head[0] == 32 {
+        return HttpBad("empty method")
+    }
+
+    mut at = 0
+    while at < lineEnd && head[at] != 32 {
+        if !HttpTokenByte(head[at]) {
+            return HttpBad("bad request line")
+        }
+
+        at = at + 1
+    }
+
+    if at == lineEnd {
+        return HttpBad("bad request line")
+    }
+
+    method = string.FromUtf8(head[0..<at]) else {
+        InvalidUtf8 => ""
+    }
+
+    targetStart = at + 1
+    at = targetStart
+    while at < lineEnd && head[at] != 32 {
+        if head[at] < 33 || head[at] == 127 {
+            return HttpBad("bad request line")
+        }
+
+        at = at + 1
+    }
+
+    if at == targetStart || at == lineEnd {
+        return HttpBad("bad request line")
+    }
+
+    target = string.FromUtf8(head[targetStart..<at]) else {
+        InvalidUtf8 => return HttpBad("target not UTF-8")
+    }
+
+    v = head[at + 1..<lineEnd]
+    if v.Count != 8 || v[0] != 72 || v[1] != 84 || v[2] != 84 || v[3] != 80 || v[4] != 47 || v[6] != 46 || v[5] < 48 || v[5] > 57 || v[7] < 48 || v[7] > 57 {
+        return HttpBad("bad request line")
+    }
+
+    if v[5] != 49 || v[7] > 49 {
+        return HttpRefused(505, HttpError(HttpKind.Unsupported, "unsupported HTTP version"))
+    }
+
+    minor = v[7] - 48
+    if method == "CONNECT" {
+        return HttpBad("CONNECT")
+    }
+
+    mut path = target
+    mut query = ""
+    question = target.IndexOf("?")
+    if question != null {
+        path = target.Substring(0, question)
+        query = target.Substring(question + 1, target.Bytes.Count - question - 1)
+    }
+
+    headers = HttpHeaders()
+    mut lineStart = lineEnd + 2
+    while lineStart < end {
+        mut lineStop = lineStart
+        while head[lineStop] != 13 {
+            lineStop = lineStop + 1
+        }
+
+        if head[lineStart] == 32 || head[lineStart] == 9 {
+            return HttpBad("folded header")
+        }
+
+        mut colon = lineStart
+        while colon < lineStop && head[colon] != 58 {
+            if head[colon] == 32 || head[colon] == 9 {
+                return HttpBad("space before a header's colon")
+            }
+
+            if !HttpTokenByte(head[colon]) {
+                return HttpBad("bad header name")
+            }
+
+            colon = colon + 1
+        }
+
+        if colon == lineStop {
+            return HttpBad("header without a colon")
+        }
+
+        if colon == lineStart {
+            return HttpBad("bad header name")
+        }
+
+        mut valueStart = colon + 1
+        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
+            valueStart = valueStart + 1
+        }
+
+        mut valueEnd = lineStop
+        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
+            valueEnd = valueEnd - 1
+        }
+
+        for p in valueStart..<valueEnd {
+            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
+                return HttpBad("control byte in a header")
+            }
+        }
+
+        name = string.FromUtf8(head[lineStart..<colon]) else {
+            InvalidUtf8 => ""
+        }
+
+        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
+            InvalidUtf8 => return HttpBad("header not UTF-8")
+        }
+
+        headers.Add(name, value)
+        lineStart = lineStop + 2
+    }
+
+    hosts = headers.GetAll("Host")
+    if hosts.Count > 1 {
+        return HttpBad("two Host headers")
+    }
+
+    if hosts.Count == 0 && minor == 1 {
+        return HttpBad("no Host")
+    }
+
+    if hosts.Count == 1 && !HttpHostValid(hosts[0]) {
+        return HttpBad("bad Host")
+    }
+
+    lengths = headers.GetAll("Content-Length")
+    mut length = -1L
+    mut over = false
+    for text in lengths {
+        mut n = 0L
+        if text.Bytes.Count == 0 {
+            return HttpBad("bad Content-Length")
+        }
+
+        for c in text.Bytes {
+            if c < 48 || c > 57 {
+                return HttpBad("bad Content-Length")
+            }
+
+            if n > (limits.MaxRequestBodySize - (c - 48)) / 10 {
+                over = true
+            } else {
+                n = n * 10 + (c - 48)
+            }
+        }
+
+        if length >= 0 && n != length {
+            return HttpBad("bad Content-Length")
+        }
+
+        length = n
+    }
+
+    codings = headers.GetAll("Transfer-Encoding")
+    if codings.Count > 0 && lengths.Count > 0 {
+        return HttpBad("Content-Length beside Transfer-Encoding")
+    }
+
+    if codings.Count > 1 || codings.Count == 1 && codings[0].ToLowerAscii() != "chunked" {
+        return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported transfer encoding"))
+    }
+
+    if over {
+        return HttpRefused(413, HttpError(HttpKind.TooLarge, "request body over limit"))
+    }
+
+    mut expects = false
+    expect = headers.Get("Expect")
+    if expect != null {
+        if expect.ToLowerAscii() != "100-continue" {
+            return HttpRefused(417, HttpError(HttpKind.Unsupported, "unsupported expectation"))
+        }
+
+        expects = minor == 1
+    }
+
+    mut sized = length
+    if sized < 0 {
+        sized = 0
+    }
+
+    return HttpHead(method, path, query, headers, minor, sized, codings.Count == 1, expects)
+}
