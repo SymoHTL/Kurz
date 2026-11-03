@@ -702,8 +702,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
   strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
-  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
-  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
+  K8, K15), else by their addresses where a field is `mut` or `weak` (K4), and else field by field as a
+  `data` value compares (K4, D3), in a
   function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -1713,7 +1714,8 @@ round can ask about it by the rule's id.
   has none; in a class that compares by identity or by its clause such a field is not compared, and is no
   error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
   `data` value, a union or an instance compared by content, compares that instance by its clause too, and
-  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  so ends a narrowing as N9's call, as `==` on the instance itself does (the owner, 2026-11-02, #110, comment 6586836827:
+  such an `==` is a call everywhere). A field named twice in
   one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
@@ -2092,9 +2094,11 @@ round can ask about it by the rule's id.
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
   reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
   field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
-  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
-  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
-  6573114335).
+  variable holds, itself or through `data` fields, `xs[0] = 2`, keeps the narrowing of a path with no
+  `weak` reference in it and ends it for one with a `weak` reference, while one into what a field of
+  an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment 6573114335). A read
+  or a write of a map's entry whose key type compares by an `equal by` clause, `m[k]` and `m[k] = 2`,
+  ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.
