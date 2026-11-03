@@ -654,7 +654,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type, `Order.Source`, where a pass made the copy; `T.Make(f => ...)` in a copy that binds a
   `data` type becomes one call of its primary constructor, with an argument for each field in order,
   each a copy of the lambda's body read as a pass of such a loop reads its body, and checked and
-  emitted as that call, a type with no fields giving its value;
+  emitted as that call, a type with no fields giving its value; a variable, a parameter, a loop's
+  variable or a lambda's parameter named like a type parameter of the function around it is
+  `redeclared` (V9), so that `T.Kind`, `T.Fields` and `T.Make` read the type a copy binds;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a

@@ -4382,8 +4382,8 @@ public sealed class CheckerTests
         // T33: an argument for each field in order, each the lambda's body checked with that field's type, `f.Name`, `f.Type` and
         // `f.Get(value)` read in it as in a pass of a loop over `T.Fields`; a generic type's own type arguments, a type with no fields,
         // a copy made in a pass for the field's type, and an outcome in an argument that leaves the function as from any call (O2); a
-        // variable named as the type parameter is a variable, and its `Make` a method; a name the lambda's body reads counts as read in a
-        // copy of a type with no fields, as in a loop over no fields, so that `unused-variable` does not depend on the copies (V5)
+        // name the lambda's body reads counts as read in a copy of a type with no fields, as in a loop over no fields, so that
+        // `unused-variable` does not depend on the copies (V5)
         Clean(Shapes + "T Zero<T>() => match T.Kind {\n    TypeKind.Data => T.Make(f => Zero<f.Type>())\n    TypeKind.Int => 0\n    TypeKind.Long => 0L\n    TypeKind.String => \"none\"\n}\n\n" +
             "T Copy<T>(T value) => T.Make(f => f.Get(value))\n\nint | NotFound Find(string key) => match key {\n    \"X\" => 1\n    else => NotFound\n}\n\n" +
             "T | NotFound Load<T>() => T.Make(f => Find(f.Name))\n\nT Blank<T>() => T.Make(f => 0)\n\nT Boxed<T>() => T.Make(f => 0)\n\n" +
@@ -4391,7 +4391,31 @@ public sealed class CheckerTests
         Clean(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => n)\n}\n\nprint(Blank<Empty>())"); // the body is made for no field, and `n` counts as read
         Clean(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => n)\n}\n\nprint(Blank<Point>())"); // the positive control: read in each argument
         Assert.Equal([(ErrorIds.UnusedVariable, 8)], Errors(Shapes + "T Blank<T>() {\n    n = 5\n    return T.Make(f => 0)\n}\n\nprint(Blank<Empty>())")); // a name the body does not read
-        Clean(Shapes + "class Maker {\n    pub int Make((int) => int f) => f(1)\n}\n\nT Odd<T>() {\n    if true {\n        T = Maker()\n        print(T.Make(f => f + 1))\n    }\n\n    return T.Make(f => 0)\n}\n\nprint(Odd<Point>())");
+    }
+
+    [Theory]
+    [InlineData("class Maker {\n    pub int Make((int) => int f) => f(1)\n}\n\nT Odd<T>() {\n    if true {\n        T = Maker()\n        print(T.Make(f => f + 1))\n    }\n\n    return T.Make(f => 0)\n}\n\nprint(Odd<Point>())", "13: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("T Odd<T>() {\n    Maker T = Maker()\n    return T.Make(f => 0)\n}\n\nclass Maker {\n    pub int Make((int) => int f) => f(1)\n}\n\nprint(Odd<Point>())", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>() {\n    T = 1\n    print(T)\n}\n\nShow<long>()", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>(int T) {\n    print(T)\n}\n\nShow<long>(2)", "7: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>(List<int> items) {\n    for T in items {\n        print(T)\n    }\n}\n\nShow<long>([2])", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>() {\n    (int) => int f = T => T + 1\n    print(f(1))\n}\n\nShow<long>()", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("T Copy<T>(T value) => T.Make(T => 0)\n\nprint(Copy(Point(1, 2)))", "7: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Each<T>(T value) {\n    for f in T.Fields {\n        T = 1\n        print(\"{T} {f.Get(value)}\")\n    }\n}\n\nEach(Point(1, 2))", "9: redeclared: `T` is a type parameter of the function around it (V9)")]
+    public void A_declaration_named_like_a_type_parameter_of_its_function_is_redeclared(string program, string expected)
+    {
+        // V9 with T19: a variable, a parameter, a loop's variable and a lambda's parameter cannot take the name of a type parameter of the
+        // function around them, in its body and in a copy of it, as C# refuses it (CS0412), so `T.Make`, `T.Fields` and `T.Kind` always
+        // read the type a copy binds; the declaration is the one error (E1)
+        Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Fact]
+    public void A_name_of_a_type_parameter_is_free_outside_its_function()
+    {
+        // V9 with T19: the positive control of the test above; a type parameter's name is taken in its own function alone, so a
+        // top-level variable, a variable of another function and a parameter of a function without type parameters may hold it
+        Clean(Shapes + "T Same<T>(T value) => value\n\nvoid Show() {\n    T = 1\n    print(T)\n}\n\nvoid Echo(int T) {\n    print(T)\n}\n\nShow()\nEcho(2)\nK = 3\nprint(Same(K))");
     }
 
     [Theory]

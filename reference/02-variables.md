@@ -124,7 +124,9 @@ print(x)
 `int x = 5` is a declaration, and so is every other form that declares (V2, V4): `mut x = 5`
 and `mut int x = 5`. When a variable named `x` is already visible, each of them is the compile
 error `redeclared`; none of them assigns, and none hides the outer variable. *(the two `mut`
-forms are a proposed reading of V8, whose argument covers only `x = 5`)*
+forms are a proposed reading of V8, whose argument covers only `x = 5`)* A declaration whose name
+is a type parameter of the function around it is `redeclared` too, so that `T.Kind`, `T.Fields` and
+`T.Make` read the type a copy binds (T33) *(assumed, §4: as C# refuses such a name, CS0412)*.
 
 Case: [variables/redeclared.kz](../corpus/variables/redeclared.kz)
 ```kurz
