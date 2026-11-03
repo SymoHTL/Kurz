@@ -20,7 +20,9 @@ Measured in one run of three sides, release builds (`kurz build --release`, `-O2
 the best of five each at a load average of 7.1 before and 7.8 after: MD5 of the same 16 MiB hashed
 three times took 53.46 ms with the two terms added into the sum one at a time, 56.50 ms with them
 joined first as `op_f` and `op_g` write them, and 52.61 ms in Rust (pull request 159's
-description). The comment on `Md5F` in `std/std.kz` holds the form and the reason for it.
+description). The comment on `Md5F` in `std/std.kz` held the form and the reason for it until pull
+request 258, which took F as OpenSSL's select, `((c ^ d) & b) ^ d`, and gives there the measured time
+of each form of F and G instead.
 
 ## What to do
 
@@ -30,4 +32,5 @@ description). The comment on `Md5F` in `std/std.kz` holds the form and the reaso
   at a time.
 - Measure the two forms side by side, as above; no test tells them apart, since both give the same
   number.
-- The reason goes beside the code, as the comment on `Md5F` does, and this entry names it.
+- The reason goes beside the code, as the comment on `Md5F` gives the measured time of each form of
+  F and G, and this entry names it.
