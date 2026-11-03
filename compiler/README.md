@@ -1101,7 +1101,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
-  as the order, then words on the runtime's own path, where Rust's `<` of `str` calls the C library's `memcmp`,
+  as the order, then words on the runtime's own path (Rust's `<` of `str` calls the C library's `memcmp`),
   reading no byte past the end of either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the
   counts, the first bytes and up to 16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more,
   which the emitter marks `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
