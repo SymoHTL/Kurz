@@ -194,3 +194,16 @@ Case: [http/http-error-text-call.kz](../corpus/http/http-error-text-call.kz)
 e = HttpError(HttpKind.Protocol, "malformed response: no status line")
 print(e.Text())
 ```
+
+### W3 (decided, §12) A server's request sent to another actor moves with its body
+
+A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
+connection's socket: the handler keeps neither, the connection waits for the handler's response, and
+a body left unread is drained when the response is written, as Rust moves a
+`hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02, issue 110, comment
+6573113786, against refusing a server's request that has a body as not sendable) *(assumed, §12:
+that the send is written with `move`, as the send of a mutable class instance is)*. A request a
+client builds is sent as any value is (§12).
+
+No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
+build, so that the move is not built either.
