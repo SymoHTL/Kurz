@@ -1845,12 +1845,12 @@ round can ask about it by the rule's id.
   none. The id stays T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) *(assumed, #156, comment 6597085653: as a misfit is the call's one error, a default the
-  pipeline took)*. The call's result is read as a direct position reads it: one that does not name the
-  type parameter stays, so `Count(nothing)` is an `int`, and one that does reports nothing more
-  *(assumed: the pass's default was a result that is unknown, and this reading was taken since a
-  direct position already gives it)*. A type parameter that another argument fails to give a type is
-  still `cannot-infer`.
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940: as a misfit is the call's one error). The
+  call's result is read as a direct position reads it: one that does not name the type parameter
+  stays, so `Count(nothing)` is an `int`, and one that does reports nothing more (the owner,
+  2026-11-03, #156, comment 6600034940; the pass's default was a result that is unknown, and this
+  reading was taken since a direct position already gives it). A type parameter that another
+  argument fails to give a type is still `cannot-infer`.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
