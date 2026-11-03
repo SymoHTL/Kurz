@@ -1376,15 +1376,25 @@ public sealed partial class Checker
             return;
         }
 
-        if (t.Constant is null)
+        if (t.Constant is null && !IsConstantData(value))
         {
-            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields, or literals that T6 folds (F12)");
+            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields or of constant arguments, or literals that T6 folds (F12)");
         }
         else if (!Types.Assignable(t.Type, type))
         {
             ReportMismatch(t.Type, type, value.Line, $"the default is {Types.A(t.Type)} where {Types.A(type)} is required");
         }
     }
+
+    /// <summary>
+    /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
+    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// </summary>
+    private bool IsConstantData(Expression value) =>
+        value is CallExpression c
+        && model.TryCallOf(c) is { Kind: CallKind.DataNew }
+        && c.Arguments.All(a => model.TypeOf(a.Value).Constant is not null || IsConstantData(a.Value));
 
     private void CheckFunctionBody(FunctionSymbol f)
     {
