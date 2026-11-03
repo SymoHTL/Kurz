@@ -780,7 +780,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
   `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
   of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
-  they say, as Rust's `sort_by_cached_key`. Two forms are not Rust's and measured faster on the same
+  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made, so
+  that a key which changes it through an instance whose field holds it leaves its change standing and the
+  sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read while the field holds
+  another (section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment 6562795140), at one
+  count for each call. Two forms are not Rust's and measured faster on the same
   results: an item of 8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<`
   orders as an integer of 64 bits or fewer is compared as one integer of the key above the position. A
   scratch or a block of pairs the system refuses ends the program with `allocation-failed` (M9);
@@ -1536,7 +1540,7 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K15 and K18 to K20, for a class with its primary constructor or none,
+M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
@@ -1680,7 +1684,7 @@ type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
-lists the rule ids whose cases the checker may say `not supported` to, and two cases by name that
+lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the
 checker reads in full is held to its header whatever it cites.
 
@@ -1736,7 +1740,7 @@ round can ask about it by the rule's id.
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
   type whose result is not `void`, which F11 makes `type-mismatch` at the lambda; `Name()` on a
-  data type without fields, whose value D8 writes as the bare name; a second data type among the
+  data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
   included (`print<int>(1)`, a conversion, a function value, a list's `Add` and `Where`), where a
