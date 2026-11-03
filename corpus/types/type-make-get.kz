@@ -1,0 +1,30 @@
+// expect: output
+// | Order { Id = a1, Count = 3 }
+// | Empty
+// | Label { Name = Name!, Tag = Tag! }
+// | Label { Name = Name, Tag = Tag }
+// | Id: Order { Id = b2, Count = 4 }
+// | Count: Order { Id = b2, Count = 4 }
+// rules: T33
+
+data Order(string Id, int Count)
+data Label(string Name, string Tag)
+data Empty
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+T Names<T>() => T.Make(f => "{f.Name}!")
+
+T Lazy<T>() => T.Make(f => (() => f.Name)())
+
+void Twin<T>(T value) {
+    for g in T.Fields {
+        print("{g.Name}: {T.Make(f => f.Get(value))}")
+    }
+}
+
+print(Remake(Order("a1", 3)))
+print(Remake(Empty))
+print(Names<Label>())
+print(Lazy<Label>())
+Twin(Order("b2", 4))
