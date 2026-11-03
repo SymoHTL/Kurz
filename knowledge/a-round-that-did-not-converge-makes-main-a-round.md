@@ -1,13 +1,13 @@
 ---
 name: a-round-that-did-not-converge-makes-main-a-round
-description: Postmortem of 2026-11-01 - pull request 181's one review round (7c696f8) completed with "NOT converged on 1 files" of its 23. After the walk at the cap, main was merged in (3523ce1) with two pull requests that shared none of its files, yet the cache, which stores only the files of a batch that converged, did not answer that file. The run ended as cap before any pass (run 41339738542), and the owner had to choose between a merge over red, a paid round and hold, and chose the round. A pull request at its cap whose round did not converge on a file cannot take main for free, and the merge tool's refusal of a branch behind main at the cap says which case it is, from the head's review status, failing closed
+description: Postmortem of 2026-11-01 - pull request 181's round at the cap (7c696f8) completed with "NOT converged on 1 files" of its 23. After the walk at the cap, main was merged in (3523ce1) with two pull requests that shared none of its files, yet the cache, which stores only the files of a batch that converged, did not answer that file. The run ended as cap before any pass (run 41339738542), and the owner had to choose between a merge over red, a paid round and hold, and chose the round. A pull request at its cap whose round did not converge on a file cannot take main for free, and the merge tool's refusal of a branch behind main at the cap says which case it is, from the head's review status, failing closed
 metadata:
   type: feedback
 ---
 
 ## What happened
 
-Pull request 181 had its one review round in CI on its head 7c696f8. The run completed and posted
+Pull request 181 had its round at the cap in CI on its head 7c696f8. The run completed and posted
 `review` at `success`, with the description "review completed, NOT converged on 1 files: 56 new
 findings (2 high, 24 medium, 30 low), 8 batches, 28 passes, $7.50". One batch had stopped at the
 pass cap.
@@ -43,13 +43,15 @@ of three cases:
 
 - The round converged on every file. Then a merge of `main` replays from the cache, as no round,
   where `main` changed none of the pull request's files and none of the reviewer's code and rules,
-  and the title and the description are as the round read them. Otherwise it is a paid round. The
-  tool does not read what `main` changed.
-- The round did not converge on N files. Taking `main` costs a paid round, and the merge needs the
-  owner's choice: a paid round, over red at the new head, or hold. The status gives the count. The
-  files are named in the review's note "Automated review did not converge".
-- Whether the round converged is not known: there is no status from the poster, or the status is
-  pending or an error, or its description is in neither form. The refusal says what it says for a
+  and the title and the description are as the round read them. Otherwise taking `main` makes the
+  review of the new head a paid round, and the merge needs the owner's choice: a paid round, over
+  red at the new head, or hold. The tool does not read what `main` changed.
+- The round did not converge on N files. Taking `main` makes the review of the new head a paid
+  round, and the merge needs the owner's choice: a paid round, over red at the new head, or hold.
+  The status gives the count. The files are named in the review's note "Automated review did not
+  converge".
+- Whether the round converged is not known: there is no status from the poster, or its state is
+  anything but `success`, or its description is in neither form. The refusal says what it says for a
   round that did not converge, and it names the state it read. A run at the cap that ended as `cap`
   on the reviewed head puts its `error` in the place of the round's status, so this case covers
   that head too.
@@ -70,7 +72,9 @@ Below the cap the refusal is unchanged. The tool merges no branch behind `main` 
   description and not the state alone.
 
 Gate: `self-tests` (the merge tool's cases "taking main": below the cap, did not converge and
-converged, each over a status the forge sent; not known, over the converged one edited; and the
-reviewer's own words; and the case "run: at
+converged, each over a status the forge sent; not known, over the error the run at the cap posted
+on 3523ce1 and, for the states the forge sent on none of these heads, pending and a success in
+neither form, the converged one edited; and the reviewer's own words; and the case "run: at
 the cap a branch behind main is refused ...", which reads the refusal as the tool prints it). What
-`main` changed is a `judgment step`.
+`main` changed, and whether the title and the description are as the round read them, are a
+`judgment step`.
