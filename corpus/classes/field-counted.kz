@@ -1,0 +1,19 @@
+// expect: output
+// | bag of ann: 2, first ann
+// rules: K7
+
+class Bag(string Name) {
+    mut List<string> items = [Name]
+    string title = "bag of {Name}"
+    string first = Name
+
+    pub void Add(string x) {
+        items.Add(x)
+    }
+
+    pub string Text() => "{title}: {items.Count}, first {first}"
+}
+
+b = Bag("ann")
+b.Add("pen")
+print(b)

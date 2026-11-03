@@ -954,6 +954,17 @@ print(c.Count)
 print(before.Count)
 ```
 
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
+```
+
 ### D17 (decided, §4) How sets of flags are combined
 
 Sets of flags (D13) are combined with the bit operators, as in C# (T22). `a | b` holds the names

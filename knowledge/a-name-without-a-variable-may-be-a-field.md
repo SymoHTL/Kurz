@@ -20,8 +20,10 @@ the same call in `class C(mut int N)`, where M7 lets the call stand (2026-11-02)
 of the suite passed a field as `mut`.
 
 Since the fix, `MutArgument` reads a name without a variable as a field of the instance before it
-lets it pass: a field without `mut` is `mut-required`, the same field twice is `mut-at-call`, one
-inside a lambda is `capture-assign` (F11), and the emitter gives the call the field's own place.
+lets it pass: a field without `mut` is `mut-required`, the same field twice is `mut-at-call`, and
+the emitter gives the call the field's own place. Inside a lambda the field is passed as well, through
+the reference to the instance the lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment
+6579495475); until that answer it was `capture-assign`.
 The assignment (`CheckAssignOrDeclare`) and a `mut` method's receiver already read the field, and
 refuse one without `mut`. The shape to look for is an early return on a name the lookup of
 variables does not find, on the ground that another reading reports it: that reading may find the
