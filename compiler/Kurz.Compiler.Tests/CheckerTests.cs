@@ -829,6 +829,26 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("void F(int n = \"a\") {\n    print(n)\n}\n\nF()"));
     }
 
+    [Fact]
+    public void A_data_value_of_constant_arguments_is_a_constant_default()
+    {
+        // F12 (the owner, 2026-11-03): a data value made by its name whose arguments are constants, nested and named ones among them
+        Clean("data Rate(int BytesPerSecond, duration Grace)\n\ndata Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s), Rate Other = Rate(Grace: 1s, BytesPerSecond: 2))\n\nint PerSecond(Rate r = Rate(1, 1s)) => r.BytesPerSecond\n\nprint(Limits().BodyRate.BytesPerSecond)\nprint(PerSecond())");
+        Clean("data Rate(int BytesPerSecond, duration Grace)\n\ndata Pair(Rate First, Rate Second)\n\nint Sum(Pair p = Pair(Rate(1, 1s), Rate(2, 2s))) => p.First.BytesPerSecond + p.Second.BytesPerSecond\n\nprint(Sum())");
+
+        // an argument that is no constant, and an instance of a class, are no constant: the positive controls of the walk
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint One() => 1\n\nint PerSecond(Rate r = Rate(One(), 1s)) => r.BytesPerSecond\n\nprint(PerSecond())"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\ndata Pair(Rate First, Rate Second)\n\nint Sum(Pair p = Pair(Rate(1, 1s), Rate(One(), 2s))) => p.First.BytesPerSecond\n\nint One() => 1\n\nprint(Sum())"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class Counter(int Count)\n\nint Read(Counter c = Counter(1)) => c.Count\n\nprint(Read())"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("class Counter(int Count)\n\ndata Holder(Counter C)\n\nint Read(Holder h = Holder(Counter(1))) => h.C.Count\n\nprint(Read())"));
+
+        // the owner's own refusal, a variable among the arguments: the parameter before it is no constant
+        Assert.Contains((ErrorIds.DefaultNotConstant, 3), Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
+
+        // a generic data type, whose construction is a data value as any other
+        Clean("data Box<T>(T Value)\n\nint Get(Box<int> b = Box(1)) => b.Value\n\nprint(Get())");
+    }
+
     [Theory]
     [InlineData("mut count = 0\n\nint Next() => count + 1\n\ncount = Next()\nprint(count)", ErrorIds.UnknownName, 3)]
     [InlineData("mut count = 0\n\nvoid Reset() {\n    count = 0\n}\n\nReset()\nprint(count)", ErrorIds.Redeclared, 4)]
