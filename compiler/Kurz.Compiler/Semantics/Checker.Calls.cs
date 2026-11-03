@@ -2136,9 +2136,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly, item by item as an argument does:
-    /// an item call by its whole result where the item type keeps its cases and by its success where it unwraps it, any other item by the
-    /// literal's own item type (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly: an item call by its whole result
+    /// where the item type keeps its cases, and every other item, a call the item type unwraps among them, by the literal's own item type, as
+    /// the exact fit of a list literal without such a call reads it (assumed, section 5: the defaults of the product pass of 2026-11-01 and the
+    /// readings the review of the change left).
     /// </summary>
     private static bool ItemsExact(Pre pre, KurzType type)
     {
