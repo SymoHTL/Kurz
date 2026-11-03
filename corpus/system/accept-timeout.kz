@@ -1,0 +1,32 @@
+// expect: output
+// | TimedOut 11
+// | true
+// | 1
+// rules: S9
+
+// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time; the listener stays open,
+// and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
+// and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
+// default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the
+// default, `FileTests` reads back by `getsockopt`
+void | IoError Wait() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    listener.SetAcceptTimeout(50ms)
+    start = timestamp.Now
+    match listener.Accept() {
+        TcpStream => print("accepted")
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    elapsed = timestamp.Now - start
+    print(elapsed >= 40ms && elapsed < 4s)
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("x".Bytes)
+    mut buffer = Bytes()
+    print(server.Read(mut buffer, 1))
+}
+
+Wait() else {
+    IoError e => print(e)
+}

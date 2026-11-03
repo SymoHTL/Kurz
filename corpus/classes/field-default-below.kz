@@ -1,0 +1,11 @@
+// expect: error unknown-name at 5
+// rules: K7
+
+class Box(int Side) {
+    int area = Side * depth
+    int depth = 2
+
+    pub int Area() => area
+}
+
+print(Box(3).Area())

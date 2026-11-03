@@ -1,0 +1,13 @@
+// expect: error break-outside-loop at 9
+// rules: S16
+
+// an arm of the `else` stands after the loop: its `break` belongs to a loop around the loop, and there is none
+void | IoError Run(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => break
+    }
+}
+
+print(1)

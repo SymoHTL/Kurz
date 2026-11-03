@@ -1,0 +1,33 @@
+// expect: output
+// | other (os error 9): lines-created.txt
+// | other (os error 9): lines-closed.txt
+// rules: S16
+
+// a file created to write, and a closed one, give the system's error for a descriptor that is not open to read
+void | IoError Pull(File f) {
+    for line in f.Lines() {
+        print(line)
+    } else {
+        InvalidUtf8 => print("not UTF-8")
+    }
+}
+
+void | IoError Show() {
+    created = File.Create("lines-created.txt")
+    File.Delete("lines-created.txt")
+    Pull(created) else {
+        IoError e => print(e)
+    }
+
+    File.WriteAll("lines-closed.txt", "a\n".Bytes)
+    closed = File.Open("lines-closed.txt")
+    File.Delete("lines-closed.txt")
+    closed.Close()
+    Pull(closed) else {
+        IoError e => print(e)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+}

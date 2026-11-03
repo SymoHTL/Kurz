@@ -17,6 +17,9 @@ internal sealed class LoopExits
     public List<ImmutableHashSet<NullPath>> Breaks { get; } = [];
 
     public List<ImmutableHashSet<NullPath>> Continues { get; } = [];
+
+    /// <summary>T33: a loop over <c>T.Fields</c>, unrolled into a pass for each field, whose <c>break</c> and <c>continue</c> are <c>not supported</c>.</summary>
+    public bool Unrolled { get; init; }
 }
 
 /// <summary>
@@ -133,6 +136,9 @@ public sealed partial class Checker
                     return (lt.Intersect(kept.Union(rt)), kept.Union(rf));
                 }
 
+            case MemberAccess when ClassTested(condition) is { } tested:
+                return (tested, none); // R18: a test of a class's `IsSupported` guards where it is true, as a test of `null` narrows
+
             case BinaryExpression { Operator: TokenKind.EqualEqual or TokenKind.NotEqual } b when Unwrap(b.Left) is NullLiteral != Unwrap(b.Right) is NullLiteral:
                 {
                     var paths = NonNullPaths(Unwrap(b.Left) is NullLiteral ? b.Right : b.Left);
@@ -210,6 +216,7 @@ public sealed partial class Checker
         var before = frame.Known;
         var (whenTrue, whenFalse) = Tests(b.Left);
         frame.Known = before.Union(b.Operator == TokenKind.AmpersandAmpersand ? whenTrue : whenFalse);
+        RecordGuards(b.Right); // R18: the right side runs where the left showed what it shows
         var right = CheckExpression(b.Right, Types.Bool);
         afterRight[b] = frame.Known;
         frame.Known = before.Intersect(frame.Known);
@@ -301,9 +308,10 @@ public sealed partial class Checker
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             if (condition is not null)
             {
+                var calls = callsRun;
                 CheckCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
-                (whenTrue, whenFalse) = Tests(condition);
+                (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
 
             var exits = new LoopExits();
@@ -449,7 +457,7 @@ public sealed partial class Checker
     /// <summary>
     /// N5: <c>xs?[i]</c> is null where <c>xs</c> is and its item at <c>i</c> otherwise, and the rest of the chain is skipped with it, as
     /// C#'s <c>?[]</c> (section 4, the owner, 2026-10-30, "Add, as C#"): the type of the item made nullable, or the item's own where it is
-    /// nullable. The index runs only where the list is not null, so only what held before it is known after. On a value that is not
+    /// nullable, and of a <c>weak</c> item its read, a strong <c>T?</c> (R3). The index runs only where the list is not null, so only what held before it is known after. On a value that is not
     /// nullable it is <c>type-mismatch</c>, as <c>?.</c> is (section 4, an assumption there), with a part in it as well; a part,
     /// <c>xs?[a..b]</c>, on a nullable list is <c>not supported</c> (section 4 names the item), and so is <c>m?[key]</c> on a nullable map.
     /// </summary>
@@ -521,7 +529,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        chainMembers[i] = list.Element;
-        return new Typed(Types.Nullable(list.Element));
+        var item = Types.Read(list.Element); // R3: a `weak` item reads as a strong `T?`, as `xs[i]` reads it
+        chainMembers[i] = item;
+        return new Typed(Types.Nullable(item));
     }
 }

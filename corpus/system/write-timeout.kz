@@ -1,0 +1,37 @@
+// expect: output
+// | TimedOut 11
+// | true
+// rules: S9
+
+// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`.
+// All of it takes less than 4 s, a margin no rule fixes, for the buffers the kernel sizes and the one wait of 50 ms, set below the 5 s
+// of the default, so that a setter that set nothing, whose last write would wait the default, prints `false`
+void | IoError Stall() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetWriteTimeout(50ms)
+    piece = "0123456789abcdef".Bytes
+    mut chunk = Bytes()
+    while chunk.Count < 65536 {
+        chunk.AddRange(piece)
+    }
+
+    start = timestamp.Now
+    mut writing = true
+    while writing {
+        client.Write(chunk) else {
+            IoError e => {
+                print("{e.Kind} {e.Code}")
+                writing = false
+            }
+        }
+    }
+
+    print(timestamp.Now - start < 4s)
+    server.Close()
+}
+
+Stall() else {
+    IoError e => print(e)
+}

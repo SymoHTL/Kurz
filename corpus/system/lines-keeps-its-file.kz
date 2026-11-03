@@ -1,0 +1,29 @@
+// expect: output
+// | a1
+// | a2
+// | b1
+// rules: S16
+
+void | IoError | InvalidUtf8 Show() {
+    File.WriteAll("lines-keeps-a.txt", "a1\na2\n".Bytes)
+    File.WriteAll("lines-keeps-b.txt", "b1\n".Bytes)
+    mut f = File.Open("lines-keeps-a.txt")
+    g = File.Open("lines-keeps-b.txt")
+    File.Delete("lines-keeps-a.txt")
+    File.Delete("lines-keeps-b.txt")
+    // the loop keeps the `File` it started with: the assignment changes the variable, not what the loop pulls
+    for line in f.Lines() {
+        print(line)
+        f = g
+    }
+
+    // after the loop the variable holds the other file
+    for line in f.Lines() {
+        print(line)
+    }
+}
+
+Show() else {
+    IoError e => print(e)
+    InvalidUtf8 u => print(u)
+}

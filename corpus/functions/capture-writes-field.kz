@@ -1,0 +1,10 @@
+// expect: output
+// | [2, 0]
+// rules: F11, K2
+
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+first()
+print(b.Items)

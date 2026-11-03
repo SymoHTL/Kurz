@@ -1,0 +1,37 @@
+// expect: output
+// | InvalidInput 0
+// | InvalidInput 0
+// | InvalidInput 0
+// | InvalidInput 0
+// rules: S9
+
+// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; and `null` is taken,
+// which `FileTests` reads back as no bound by `getsockopt`
+void | IoError Refused() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.SetReadTimeout(0s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetWriteTimeout(-1ms) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    listener.SetAcceptTimeout(0s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match TcpStream.Connect("127.0.0.1:{listener.Port}", 0s) {
+        TcpStream => print("connected")
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.SetReadTimeout(null)
+    server.Close()
+}
+
+Refused() else {
+    IoError e => print(e)
+}
