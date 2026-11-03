@@ -608,8 +608,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   digit after it counted and holding the range after the rounding (X7); and `Hex.Decode(s)`, the bytes of
   a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
   first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7), the digits read two at a time
-  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's `FromHexString`
-  reads them. A piece of `Split`, a trimmed
+  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's scalar
+  `FromHexString` reads them. A piece of `Split`, a trimmed
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
@@ -761,8 +761,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
   each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
-  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
-  where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
+  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` appends in the block's room, or
+  grows the block, where only the list and the argument hold it, as Rust's `extend_from_within`, else
+  copies it, and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
   a block another value holds first (X9, M3); `Insert(index, item)` and `RemoveAt(index)` (X11), which
   read the index before the list is copied or grows and raise `index-out-of-range` outside it, `Insert`
@@ -1717,7 +1718,8 @@ round can ask about it by the rule's id.
   and `Insert` among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
-  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13), each form's
+  line naming that argument.
 - K4 with K5, K12 and N9: a class that compares by content and holds a field of a type `==` does not take,
   a map among them, makes `==` on its instances, and a key of it, `type-mismatch`, as a `data` value that
   holds one does (D3, M9), since K4 compares each field by the equality Kurz gives its type and that type
@@ -1791,6 +1793,11 @@ round can ask about it by the rule's id.
   has are `cannot-infer`; a type a nested position fixes (`List<T>` of a `List<User>`) is the one
   the direct arguments meet, each of them that type or one derived from it. T27 names the base for
   classes; the checker reads it for data types.
+- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where its
+  parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
+  `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
+  arguments give their type parameters types that differ, or no argument stands in a position, it names
+  none. The id stays T27's: no argument stands in the type parameter's position.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -1808,7 +1815,17 @@ round can ask about it by the rule's id.
 - E1 with V9: a function named as a built-in (`int File() => 1`) is `redeclared`, and a call of it
   reports nothing more, its arguments checked, as a read of a variable named so does; where a data
   type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
-  `Bytes` is it, the call keeps that one's reading and its errors.
+  `Bytes` is it, the call keeps that one's reading and its errors, and so does the bare name: after
+  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a type every
+  file sees has the name, the text of the function's declaration names that type and the rule that
+  declares it, as a type's declaration of the name does.
+- E1 with O2 and O9: a call whose argument does not fit its parameter reports that misfit alone, and no
+  case of its result is passed on beside it, at the top level or in a function. That holds for a list
+  literal, a literal that its own type reads and the parameter's does not (`300` for a `byte`), a `null`
+  and a function's name, which the parameter types (M11, L17, N6, F11), as it holds for a variable of
+  another type. An argument with an error of its own fits every parameter (E1), so the call passes its
+  cases on, an item of a list literal among them; so does a lambda whose parameter is written with
+  another type than the one the call passes, which the lambda's own check reports (F11).
 - S13 with V9: `args = value` among the top-level statements is `redeclared`, with a text that cites
   S13 and V9. It is one reading of the question S13 and section 14 of the record hold open, where V8's
   reading is `assign-immutable`, and no corpus case stands on it.
@@ -1924,7 +1941,8 @@ round can ask about it by the rule's id.
   `T` = `int` in `T | List<T>` ("Same shape first"), and a literal binds the type parameter to its own type
   where the union names no case of that type, `F(5)` in `T | string` ("Bind T = int in both"): `Infer` and
   `Unify` in `Checker.Calls.cs`. A list literal keeps the cases at a parameter whose item type names a case
-  of an item call beyond its success, and fits exactly item by item, so that of `Show(List<int>)` and
+  of an item call beyond its success, and fits exactly by the whole result of each item call whose cases
+  the item type keeps and by its own item type for every other item, so that of `Show(List<int>)` and
   `Show(List<int | NotFound>)` the call `Show([Find(1)])` runs the second ("The union one", 2026-11-01).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
