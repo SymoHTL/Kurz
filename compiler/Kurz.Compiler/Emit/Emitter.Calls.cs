@@ -103,7 +103,7 @@ public sealed partial class Emitter
     /// F18: <c>Hint.BlackBox(value)</c>, lowered as Rust lowers <c>black_box</c>: the value goes to a slot of its own, an empty <c>asm</c>
     /// with a side effect takes the slot's address and clobbers memory, and the value is read back from the slot, so the optimiser must
     /// have made the value before the call and knows nothing of it after (section 12, the owner, 2026-11-03). The value read back is the
-    /// call's, a temporary of the statement, and the argument's count passes to it.
+    /// call's, which holds the argument's count, and the call's expression makes it a temporary of the statement, as of every call.
     /// </summary>
     private string EmitBlackBox(CallExpression c, CallInfo info)
     {
@@ -112,7 +112,7 @@ public sealed partial class Emitter
         var slot = fn.Alloca(Ir(type), "hint");
         fn.Emit($"store {Ir(type)} {value}, ptr {slot}");
         fn.Emit($"call void asm sideeffect \"\", \"r,~{{memory}}\"(ptr {slot}) nounwind");
-        return Temp(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
+        return fn.Value($"load {Ir(type)}, ptr {slot}");
     }
 
     /// <summary>The type arguments of a call, in the terms of the function being emitted (T19, T27).</summary>

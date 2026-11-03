@@ -103,8 +103,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // F18, lowered as rustc lowers Rust's `black_box` (section 12, the owner, 2026-11-03, "The defaults of the round stand"): the value
         // goes to a slot, an empty `asm sideeffect` takes the slot's address and clobbers memory, and the value is read back. In the IR
         // clang optimises as a release build is optimised, 7340032 is stored to a slot, the asm takes that slot, a load reads it after
-        // the asm, and the sum is nowhere a constant, while the same program without the hint folds it (the positive control); both
-        // builds print the sum
+        // the asm and the sum adds 1 to what it read, so the sum is nowhere a constant; the same program without the hint folds the
+        // sum, and its text, into the digits it writes, so that 7340032 is nowhere in its IR (the positive control); both builds print
+        // the sum
         const string hinted = "n = Hint.BlackBox(7340032)\nprint(n + 1)\n";
         const string plain = "n = 7340032\nprint(n + 1)\n";
         string Optimised(string text, string name)
@@ -129,10 +130,12 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         var ir = Optimised(hinted, "hint-black-box");
         Assert.Matches(
-            new Regex("""store i32 7340032, ptr (%[\w.]+).*call void asm sideeffect "", "r,~\{memory\}"\(ptr (nonnull )?\1\).*load i32, ptr \1""", RegexOptions.Singleline),
+            new Regex("""store i32 7340032, ptr (%[\w.]+).*call void asm sideeffect "", "r,~\{memory\}"\(ptr (nonnull )?\1\).*(%[\w.]+) = load i32, ptr \1\b.*= add (nsw )?i32 \3, 1\b""", RegexOptions.Singleline),
             ir);
         Assert.DoesNotContain("7340033", ir, StringComparison.Ordinal);
-        Assert.Contains("7340033", Optimised(plain, "hint-black-box-control"), StringComparison.Ordinal);
+        var control = Optimised(plain, "hint-black-box-control");
+        Assert.DoesNotContain("7340032", control, StringComparison.Ordinal);
+        Assert.DoesNotContain("asm sideeffect \"\", \"r,~{memory}\"", control, StringComparison.Ordinal);
     }
 
     [Fact]
