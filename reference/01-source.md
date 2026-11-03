@@ -604,7 +604,8 @@ a word only before `static` in R13's declaration and a name everywhere else (§3
 2026-10-21). `const` is a word only before the type of a type parameter that holds a constant (T35),
 beside the words of an `asm`, and a name everywhere else *(assumed, §4: as `thread` is before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
 2026-10-21). `as` is a word of a `use` line alone, after the folder it renames (F10), and a name
-everywhere else *(assumed, §13)*.
+everywhere else *(assumed, §13)*. `internal`, which F9 uses as syntax for a member visible to its
+folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# reserves it)*.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
