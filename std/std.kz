@@ -5966,7 +5966,7 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 }
 
 // The body of a request, read from its stream as the client sends it: `Read` appends at most `max` bytes and gives 0 at the end,
-// `ReadAll` the whole body up to a bound (design record, section 12; W6). The first read that needs a byte from a client that
+// `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
 // expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it. A failure of HTTP stays: every read after it
 // gives it again.
 pub class HttpBody {
@@ -6076,6 +6076,12 @@ pub class HttpBody {
 
     // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
     // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
+    // The whole body as text, or `InvalidUtf8` where it is no UTF-8, as `string.FromUtf8` gives it.
+    pub string | IoError | HttpError | InvalidUtf8 ReadAllText(int max) {
+        all = ReadAll(max)
+        return string.FromUtf8(all)
+    }
+
     bool | IoError | HttpError NextChunk(TcpStream s) {
         if atChunkEnd {
             end = HttpLine(s, 2)

@@ -6,6 +6,8 @@
 // | GET /none: 0 []
 // | 2 2 1 0 0
 // | TooLarge: request body over limit
+// | hi
+// | not UTF-8
 // rules: W6
 
 // the body of a request is read from its stream as the client sends it: a declared length, chunks with their extensions and
@@ -52,6 +54,21 @@ void | IoError | HttpError All() {
         Bytes b => print(b.Count)
         IoError e => print(e)
         HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+
+    // the whole body as text, and a body that is no UTF-8
+    client.Write("POST /text HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\nhi".Bytes)
+    mut bad = "POST /bad HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\n".Bytes
+    bad.Add(255)
+    client.Write(bad)
+    for i in 0..<2 {
+        r = HttpRequest.Read(server)
+        match r.Body.ReadAllText(10) {
+            string t => print(t)
+            IoError e => print(e)
+            HttpError e => print("{e.Kind}: {e.Detail}")
+            InvalidUtf8 => print("not UTF-8")
+        }
     }
 }
 
