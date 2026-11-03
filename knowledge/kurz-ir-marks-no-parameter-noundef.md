@@ -53,7 +53,10 @@ real clang; the command has no option that keeps it.
 So the gap came from G's form, and F's or is the faster of these two forms of F. A third form, the
 select OpenSSL's x86-64 assembly writes, `((c ^ d) & b) ^ d`, is faster than the or: 51.76 ms against
 52.14 ms for MD5 of 16 MiB hashed three times, the best of 9, and 51.77 against 52.09 ms in a run of
-the two alone, the best of 15 (issue 157, 2026-11-03, comment 6594121046). std writes F so, and the
+the two alone, the best of 15 (issue 157, 2026-11-03, comment 6594121046). In that run each of the two
+ran beside a byte-identical copy of its binary: the or took 52.09 and 52.10 ms, the select 51.77 and
+51.78 ms, so the gap of 0.3 ms is about 20 times the spread between two copies of one binary. std
+writes F so, and the
 comment on `Md5F` gives the numbers. Of the or, LLVM (clang 23) makes the select in 14 of F's 16
 steps and keeps the or, with a `not`, in the last two (the same comment). Why the other forms cost
 what they do is not shown; `noundef` is not it, since the machine code does not change with it.
