@@ -14,5 +14,5 @@ void G<T, U>(T | U | NotFound x) {
     print("g")
 }
 
-// two type parameters in one union: neither is inferred, and the call writes them
+// two type parameters in one union: neither is inferred, so the call is `cannot-infer` unless it writes them
 G(Find(1))

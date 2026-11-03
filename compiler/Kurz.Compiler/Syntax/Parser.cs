@@ -1366,6 +1366,18 @@ public sealed class Parser
         suppressNewlines++;
         do
         {
+            if (Current is { Kind: TokenKind.Name, Text: "const" } && Peek().Kind is TokenKind.Name or TokenKind.Keyword)
+            {
+                // T35: `const` before a type parameter's type is the word of a parameter that holds a constant, and a name elsewhere,
+                // as `thread` is a word before `static` alone (L18); its default is a value as a unary operator reads one, before `,` or `>`
+                var line = Advance().Line;
+                var constant = ParseCoreType();
+                var named = ExpectName("a type parameter");
+                var value = Match(TokenKind.Assign) ? ParseUnary() : null;
+                result.Add(new TypeParameter(line, named.Text, null, constant, value));
+                continue;
+            }
+
             var name = ExpectName("a type parameter");
             TypeSyntax? limit = null;
             if (Match(TokenKind.Colon))
@@ -1782,6 +1794,15 @@ public sealed class Parser
         or TokenKind.IntegerLiteral or TokenKind.RealLiteral or TokenKind.UnitLiteral or TokenKind.StringLiteral or TokenKind.CharLiteral
         or TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.Star or TokenKind.Ampersand;
 
+    /// <summary>
+    /// T35: a literal among a call's type arguments: an integer, with a `-` before it as Rust takes `f::&lt;-1&gt;()`, `true`, `false`
+    /// or a <c>char</c>; read as a unary expression, which stops before the `,` or the `>` after it.
+    /// </summary>
+    private bool AtConstantTypeArgument() =>
+        Current.Kind is TokenKind.IntegerLiteral or TokenKind.CharLiteral
+        || Current.IsKeyword("true") || Current.IsKeyword("false")
+        || (Current.Kind == TokenKind.Minus && Peek().Kind == TokenKind.IntegerLiteral);
+
     private Expression ParseUnary()
     {
         // T18: `-` and `!`, T22: `~`, prefix operators that bind tighter than every binary operator, as in C#
@@ -1855,10 +1876,12 @@ public sealed class Parser
             }
 
             // T19: a call names its type arguments, `First<int>(xs)` and `xs.Map<int>(f)` alike. How they are told from comparisons is
-            // a reading (README; a question for a design round): the list is kept when `(` follows the `>`, so `f(a < b, c > (d))` is
-            // the call `a<b, c>(d)` and `a < b, c > d` is two comparisons, and after a name when a member and its `(` follow the `>`,
-            // R15's `List<T>.FromRaw(p, n)`, the one form the reference gives a generic name that is not called; C# (T17: generics as
-            // in C#) also keeps it before `)`, `]`, `,`, `?` and a few more, where this front end reads a comparison
+            // a reading (README): the list is kept when `(` follows the `>`, so `f(a < b, c > (d))` is the call `a<b, c>(d)` and
+            // `a < b, c > d` is two comparisons, and after a name when a member and its `(` follow the `>`, R15's
+            // `List<T>.FromRaw(p, n)`, the one form the reference gives a generic name that is not called; C# (T17: generics as in C#)
+            // also keeps it before `)`, `]`, `,`, `?` and a few more, where this front end reads a comparison. T35: a literal stands in
+            // the list where `(` follows it, `Buffer<64>()`, as Rust reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))`
+            // is the call `a<64, c>(d)` too
             if (At(TokenKind.Less) && expression is NameExpression or MemberAccess)
             {
                 List<TypeSyntax>? typeArguments = null;
@@ -1871,12 +1894,12 @@ public sealed class Parser
                         var list = new List<TypeSyntax>();
                         do
                         {
-                            list.Add(ParseType());
+                            list.Add(AtConstantTypeArgument() ? new ConstantTypeArgument(Current.Line, ParseUnary()) : ParseType());
                         }
                         while (Match(TokenKind.Comma));
                         suppressNewlines--;
                         ExpectGreater();
-                        if (expression is NameExpression && At(TokenKind.Dot) && Peek().Kind is TokenKind.Name or TokenKind.Keyword && Peek(2).Kind == TokenKind.LeftParen)
+                        if (expression is NameExpression && !list.Any(t => t is ConstantTypeArgument) && At(TokenKind.Dot) && Peek().Kind is TokenKind.Name or TokenKind.Keyword && Peek(2).Kind == TokenKind.LeftParen)
                         {
                             dot = Advance();
                             member = Advance();

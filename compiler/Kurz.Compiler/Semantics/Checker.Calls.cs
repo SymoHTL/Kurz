@@ -66,8 +66,8 @@ public sealed partial class Checker
 
         public bool CannotInfer { get; set; }
 
-        /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a call's, or a list literal's (M11).</summary>
-        public string CannotInferText { get; init; } = "the type arguments are neither written nor inferable from the arguments (T27)";
+        /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a list literal's (M11); null for a call's, whose message <see cref="GivesNothing"/> completes (T27).</summary>
+        public string? CannotInferText { get; init; }
 
         /// <summary>The first argument whose own type does not fit its parameter, with the parameter's type after substitution.</summary>
         public (int Argument, KurzType Parameter)? Misfit { get; set; }
@@ -1888,8 +1888,9 @@ public sealed partial class Checker
     /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
-        // once: an error in one is one diagnostic, whatever the number of overloads (E1)
-        var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
+        // once: an error in one is one diagnostic, whatever the number of overloads (E1); where a type parameter holds a constant, the
+        // type argument is its value (T35)
+        var typeArguments = c.TypeArguments.Select((t, i) => TypeArgument(candidates, t, i, c.Line)).ToList();
         if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
         {
             function = null;
@@ -1901,16 +1902,18 @@ public sealed partial class Checker
         {
             var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
             var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
+            var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
-                if (typeArguments.Count != f.TypeParameters.Count)
+                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => p.Default is null))
                 {
                     candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
                     candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    candidate.Map = f.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
+                    // T35: a type parameter the call leaves out takes its default
+                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -1920,6 +1923,95 @@ public sealed partial class Checker
         var typed = Record(c, kind, Call(list, c, expected, out var picked), picked);
         function = typed.IsError ? null : picked?.Function;
         return typed;
+    }
+
+    /// <summary>
+    /// T35: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
+    /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
+    /// overload is picked.
+    /// </summary>
+    private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
+    {
+        var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
+        var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
+        if (kinds.Count > 1)
+        {
+            NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T35, F12)");
+            return Types.Error;
+        }
+
+        return there.FirstOrDefault(p => p.Constant is { } c && !Types.IsError(c)) is { } holds
+            ? ResolveConstantArgument(argument, holds)
+            : ResolveTypeArgument(argument, $"`{candidates.FirstOrDefault()?.Name}`");
+    }
+
+    /// <summary>
+    /// T35: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
+    /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
+    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
+    /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// </summary>
+    private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
+    {
+        var of = holds.Constant!;
+        if (argument is ConstantTypeArgument literal)
+        {
+            var t = CheckExpression(literal.Value, of);
+            if (t.IsError || Types.IsError(of))
+            {
+                return Types.Error;
+            }
+
+            if (!Types.Assignable(t.Type, of) || t.Constant is null)
+            {
+                ReportMismatch(t.Type, of, literal.Line, $"`{holds.Name}` takes a constant of `{of.Text}`, not {Types.A(t.Type)}", "T35");
+                return Types.Error;
+            }
+
+            return new ConstantArgument(of, t.Constant);
+        }
+
+        if (argument is NamedType { TypeArguments.Count: 0 } n)
+        {
+            if (BoundConstant(n.Name) is { } bound)
+            {
+                if (bound.Of.Equals(of))
+                {
+                    return bound;
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
+                return Types.Error;
+            }
+
+            var dot = n.Name.LastIndexOf('.');
+            if (dot > 0 && enums.TryGetValue(n.Name[..dot], out var named))
+            {
+                var value = n.Name[(dot + 1)..];
+                var index = named.Values.IndexOf(value);
+                if (index < 0)
+                {
+                    Report(ErrorIds.UnknownName, n.Line, $"`{named.Name}` has no value `{value}` (D12, V10)");
+                    return Types.Error;
+                }
+
+                if (of is EnumType ofEnum && ReferenceEquals(named, ofEnum.Symbol))
+                {
+                    return new ConstantArgument(of, new EnumConstant(index));
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
+                return Types.Error;
+            }
+        }
+
+        var type = Resolve(argument); // a name that is no type has its own error (E1)
+        if (!Types.IsError(type))
+        {
+            Report(ErrorIds.TypeMismatch, argument.Line, $"the type `{type.Text}` stands where `{holds.Name}` takes a value of `{of.Text}` (T35, T1)");
+        }
+
+        return Types.Error;
     }
 
     /// <summary>Binds the arguments to each candidate, picks one (F13) and checks the arguments against it.</summary>
@@ -2076,7 +2168,11 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        Commit(picked, pres);
+        if (!Commit(picked, pres))
+        {
+            return Typed.Error; // E1: an argument that does not fit is the call's one error, as where it fits no parameter by its own type, so no case of the call's result is passed on
+        }
+
         var result = Types.Substitute(picked.Result, picked.Map);
         return new Typed(result);
     }
@@ -2132,9 +2228,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly, item by item as an argument does:
-    /// an item call by its whole result where the item type keeps its cases and by its success where it unwraps it, any other item by the
-    /// literal's own item type (assumed, section 5: the defaults of the product pass of 2026-11-01).
+    /// F13 with O4 (the owner, 2026-11-01, "The union one"): whether a list literal fits a list type exactly: an item call by its whole result
+    /// where the item type keeps its cases, and every other item, a call the item type unwraps among them, by the literal's own item type, as
+    /// the exact fit of a list literal without such a call reads it (assumed, section 5: the defaults of the product pass of 2026-11-01 and the
+    /// readings the review of the change left).
     /// </summary>
     private static bool ItemsExact(Pre pre, KurzType type)
     {
@@ -2325,6 +2422,12 @@ public sealed partial class Checker
         {
             if (map.ContainsKey(p))
             {
+                continue;
+            }
+
+            if (p.Default is { } constant)
+            {
+                map[p] = constant; // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default
                 continue;
             }
 
@@ -2605,7 +2708,7 @@ public sealed partial class Checker
 
         if (bound.CannotInfer)
         {
-            Report(ErrorIds.CannotInfer, c.Line, bound.CannotInferText);
+            Report(ErrorIds.CannotInfer, c.Line, bound.CannotInferText ?? $"the type arguments are neither written nor inferable from the arguments{GivesNothing(bound, pres)} (T27)");
             return;
         }
 
@@ -2666,7 +2769,7 @@ public sealed partial class Checker
 
         if (candidate.CannotInfer)
         {
-            return "its type arguments are neither written nor inferable from the arguments (T27)";
+            return $"its type arguments are neither written nor inferable from the arguments{GivesNothing(candidate, pres)} (T27)";
         }
 
         var (index, parameter) = candidate.Misfit!.Value;
@@ -2692,9 +2795,38 @@ public sealed partial class Checker
         return $"argument {index + 1} is {Types.A(own)}{(pre.LiteralOnly ? ", the literal's own type for the pick (F14)," : "")} where {Types.A(parameter)} is required: {why} ({Types.MismatchRule(own, parameter)})";
     }
 
-    /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7).</summary>
-    private void Commit(Candidate candidate, List<Pre> pres)
+    /// <summary>
+    /// T27: the clause of a <c>cannot-infer</c> that names the first argument whose type has no part where a type parameter of its
+    /// parameter stands, so that it gives that type parameter nothing, a <c>5</c> where a <c>List&lt;T&gt;</c> is required; empty where
+    /// every argument gives its type parameters a type, and the types differ or no argument stands in a position.
+    /// </summary>
+    private static string GivesNothing(Candidate candidate, List<Pre> pres)
     {
+        for (var i = 0; i < pres.Count; i++)
+        {
+            var pre = pres[i];
+            if (pre.Lambda is not null || pre.Typed.IsError)
+            {
+                continue; // a lambda has no type of its own before the pick (F11), and an argument the checker could not type gives nothing and fits (E1)
+            }
+
+            var slot = candidate.Slots[candidate.Binding[i]].Type;
+            var own = ArgumentType(candidate, pres, i);
+            var found = new Dictionary<TypeParameterSymbol, KurzType>();
+            Unify(slot, own, found);
+            if (candidate.TypeParameters.FirstOrDefault(p => Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
+            {
+                return $": argument {i + 1} is {Types.A(own)} where {Types.A(slot)} is required, and gives `{nothing.Name}` nothing";
+            }
+        }
+
+        return "";
+    }
+
+    /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>
+    private bool Commit(Candidate candidate, List<Pre> pres)
+    {
+        var fits = true;
         var mutPaths = new List<string>();
         for (var i = 0; i < pres.Count; i++)
         {
@@ -2724,6 +2856,8 @@ public sealed partial class Checker
                 {
                     ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
                 }
+
+                fits &= !typed.IsError; // a `null` or a function's name has no type of its own: the error of its reading under the parameter's type is its misfit (N6, F11)
             }
             else if (pre.ListLiteral && pre.Typed.IsError && Types.IsError(type))
             {
@@ -2738,6 +2872,11 @@ public sealed partial class Checker
                 if (!typed.IsError && !Types.IsError(type) && !Types.Assignable(typed.Type, type))
                 {
                     ReportMismatch(typed.Type, type, a.Line, $"{Types.A(typed.Type)} where {Types.A(type)} is required");
+                    fits = false;
+                }
+                else if (typed.IsError && !pre.Typed.IsError)
+                {
+                    fits = false; // a literal its own type reads and the parameter's does not, `300` for a `byte`, which its reading reported (L17)
                 }
             }
             else
@@ -2766,6 +2905,8 @@ public sealed partial class Checker
                 MutArgument(a, mutPaths);
             }
         }
+
+        return fits;
     }
 
     /// <summary>M7, M9: whether the path after <c>mut</c> starts at an element of a list, which the checker does not read.</summary>
