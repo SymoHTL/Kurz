@@ -6180,6 +6180,338 @@ pub class HttpBody {
     }
 }
 
+// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, or none (design
+// record, section 12; W8). The functions that make one hold the status to 100 to 599, stopping the program otherwise, as an index
+// out of range does, since a status is a literal in code, and set the `Content-Type` ASP.NET Core's `Results` sets, which the
+// headers can replace. `Write` writes the response, and `WriteHead` its head alone, for a `HEAD`; neither adds `Date` or
+// `Connection`, which the server's loop adds where the handler set none.
+pub class HttpResponse {
+    mut int code = 200
+    mut HttpHeaders headers = HttpHeaders()
+    mut bool isFile = false
+    mut Bytes held = HttpNoBytes()
+    mut string filePath = ""
+
+    // The status, from 100 to 599.
+    pub int Status => code
+
+    // The headers, which a handler changes with `Add`, `Set` and `Remove` (W4).
+    pub HttpHeaders Headers => headers
+
+    // A response whose body is `text` in UTF-8, as `text/plain; charset=utf-8`.
+    pub static HttpResponse Text(int status, string text) {
+        r = Of(status, "text/plain; charset=utf-8")
+        r.held = text.Bytes
+        return r
+    }
+
+    // A response whose body is `bytes`, as `application/octet-stream`.
+    pub static HttpResponse Bytes(int status, Bytes bytes) {
+        r = Of(status, "application/octet-stream")
+        r.held = bytes
+        return r
+    }
+
+    // A response whose body is the file at `path`, as `application/octet-stream`, its length taken and its bytes read when the
+    // response is written.
+    pub static HttpResponse File(int status, string path) {
+        r = Of(status, "application/octet-stream")
+        r.isFile = true
+        r.filePath = path
+        return r
+    }
+
+    // A response with no body and no `Content-Type`.
+    pub static HttpResponse Empty(int status) => Of(status, "")
+
+    // Writes the status line, the headers and the body to `stream` (W8).
+    pub void | IoError Write(TcpStream stream) => Send(stream, true)
+
+    // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
+    pub void | IoError WriteHead(TcpStream stream) => Send(stream, false)
+
+    // A response of `status` with its `Content-Type`, none where `type` is empty.
+    static HttpResponse Of(int status, string type) {
+        if status < 100 || status > 599 {
+            throw "status {status} is outside 100 to 599"
+        }
+
+        r = HttpResponse()
+        r.code = status
+        if type != "" {
+            r.headers.Add("Content-Type", type) else {
+                HttpError e => return r
+            }
+        }
+
+        return r
+    }
+
+    // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` with a body or a
+    // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
+    // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
+    void | IoError Send(TcpStream s, bool withBody) {
+        bodiless = code < 200 || code == 204 || code == 304
+        mut length = 0L
+        if !bodiless && isFile {
+            length = HttpFileSize(filePath) else {
+                IoError e => {
+                    HttpUnwritable(s)
+                    return e
+                }
+            }
+        } else if !bodiless {
+            length = held.Count
+        }
+
+        codings = headers.GetAll("Transfer-Encoding")
+        lengths = headers.GetAll("Content-Length")
+        chunked = !bodiless && codings.Count > 0
+        if chunked && lengths.Count > 0 {
+            return IoError(IoKind.InvalidInput, 0, "")
+        }
+
+        if code == 205 && length > 0 {
+            return HttpUnwritable(s)
+        }
+
+        if !bodiless {
+            for text in lengths {
+                if HttpLength(text) != length {
+                    return HttpUnwritable(s)
+                }
+            }
+        }
+
+        mut out = "HTTP/1.1 {code} {HttpReason(code)}\r\n".Bytes
+        mut codingsLeft = codings.Count
+        for i in 0..<headers.Count {
+            name = headers.NameAt(i)
+            value = headers.ValueAt(i)
+            if name.ToLowerAscii() == "transfer-encoding" {
+                if bodiless {
+                    continue
+                }
+
+                codingsLeft = codingsLeft - 1
+                if codingsLeft == 0 && !HttpEndsInChunked(value) {
+                    out.AddRange("{name}: {value}, chunked\r\n".Bytes)
+                    continue
+                }
+            }
+
+            out.AddRange("{name}: {value}\r\n".Bytes)
+        }
+
+        if !bodiless && !chunked && lengths.Count == 0 {
+            out.AddRange("Content-Length: {length}\r\n".Bytes)
+        }
+
+        out.AddRange("\r\n".Bytes)
+        if !withBody || bodiless {
+            return s.Write(out)
+        }
+
+        if isFile {
+            return HttpSendFile(s, out, filePath, length, chunked)
+        }
+
+        if chunked && held.Count > 0 {
+            out.AddRange("{HttpHex(held.Count)}\r\n".Bytes)
+        }
+
+        if held.Count <= 65536 {
+            out.AddRange(held)
+        } else {
+            s.Write(out)
+            out = HttpNoBytes()
+            s.Write(held)
+        }
+
+        if chunked {
+            if held.Count > 0 {
+                out.AddRange("\r\n".Bytes)
+            }
+
+            out.AddRange("0\r\n\r\n".Bytes)
+        }
+
+        if out.Count > 0 {
+            s.Write(out)
+        }
+    }
+}
+
+// An empty `Bytes`, for a place inside `HttpResponse`, where the name `Bytes` in an expression is the function that makes a response.
+Bytes HttpNoBytes() => Bytes()
+
+// The length of the file at `path`, for `HttpResponse`, where the name `File` in an expression is the function that makes a response.
+long | IoError HttpFileSize(string path) => File.Size(path)
+
+// What the writer answers a response that it cannot write: `500` with no body and a close (W8).
+void | IoError HttpUnwritable(TcpStream s) {
+    s.Write("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".Bytes)
+}
+
+// The head `out` and then the file at `path` of `length` bytes, in pieces of 64 KiB, each a chunk where `chunked`; a file that
+// gives fewer bytes than its length had, or more, is `InvalidData` once its head is out, and the connection is the caller's to close.
+void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked) {
+    f = File.Open(path)
+    mut sent = 0L
+    mut piece = out
+    while true {
+        mut read = Bytes()
+        n = f.Read(mut read, 65536)
+        if n == 0 {
+            break
+        }
+
+        sent = sent + n
+        if sent > length {
+            f.Close()
+            return IoError(IoKind.InvalidData, 0, path)
+        }
+
+        if chunked {
+            piece.AddRange("{HttpHex(n)}\r\n".Bytes)
+        }
+
+        piece.AddRange(read)
+        if chunked {
+            piece.AddRange("\r\n".Bytes)
+        }
+
+        s.Write(piece)
+        piece = Bytes()
+    }
+
+    f.Close()
+    if sent != length {
+        return IoError(IoKind.InvalidData, 0, path)
+    }
+
+    if chunked {
+        piece.AddRange("0\r\n\r\n".Bytes)
+    }
+
+    if piece.Count > 0 {
+        s.Write(piece)
+    }
+}
+
+// The number a `Content-Length` of a handler's holds, or -1 where it holds anything but digits.
+long HttpLength(string text) {
+    b = text.Trim().Bytes
+    if b.Count == 0 {
+        return -1
+    }
+
+    mut n = 0L
+    for c in b {
+        if c < 48 || c > 57 || n > 100_000_000_000_000_000 {
+            return -1
+        }
+
+        n = n * 10 + (c - 48)
+    }
+
+    return n
+}
+
+// Whether a `Transfer-Encoding`'s last coding is `chunked`.
+bool HttpEndsInChunked(string value) {
+    codings = value.Split(",")
+    return codings[codings.Count - 1].Trim().ToLowerAscii() == "chunked"
+}
+
+// A size of a chunk in hexadecimal, as RFC 9112, section 7.1, writes it.
+string HttpHex(long n) {
+    if n == 0 {
+        return "0"
+    }
+
+    digits = "0123456789abcdef".Bytes
+    mut out = Bytes()
+    mut rest = n
+    while rest > 0 {
+        out.Insert(0, digits[int(rest % 16)])
+        rest = rest / 16
+    }
+
+    return string.FromUtf8(out) else {
+        InvalidUtf8 => "0"
+    }
+}
+
+// The reason phrase of a status, as the IANA registry of status codes names it, hyper's `canonical_reason` naming the same codes;
+// empty for a status the registry does not name, `306` and `418` among them, which it holds as unused.
+string HttpReason(int status) {
+    match status {
+        100 => return "Continue"
+        101 => return "Switching Protocols"
+        102 => return "Processing"
+        103 => return "Early Hints"
+        200 => return "OK"
+        201 => return "Created"
+        202 => return "Accepted"
+        203 => return "Non-Authoritative Information"
+        204 => return "No Content"
+        205 => return "Reset Content"
+        206 => return "Partial Content"
+        207 => return "Multi-Status"
+        208 => return "Already Reported"
+        226 => return "IM Used"
+        300 => return "Multiple Choices"
+        301 => return "Moved Permanently"
+        302 => return "Found"
+        303 => return "See Other"
+        304 => return "Not Modified"
+        305 => return "Use Proxy"
+        307 => return "Temporary Redirect"
+        308 => return "Permanent Redirect"
+        400 => return "Bad Request"
+        401 => return "Unauthorized"
+        402 => return "Payment Required"
+        403 => return "Forbidden"
+        404 => return "Not Found"
+        405 => return "Method Not Allowed"
+        406 => return "Not Acceptable"
+        407 => return "Proxy Authentication Required"
+        408 => return "Request Timeout"
+        409 => return "Conflict"
+        410 => return "Gone"
+        411 => return "Length Required"
+        412 => return "Precondition Failed"
+        413 => return "Content Too Large"
+        414 => return "URI Too Long"
+        415 => return "Unsupported Media Type"
+        416 => return "Range Not Satisfiable"
+        417 => return "Expectation Failed"
+        421 => return "Misdirected Request"
+        422 => return "Unprocessable Content"
+        423 => return "Locked"
+        424 => return "Failed Dependency"
+        425 => return "Too Early"
+        426 => return "Upgrade Required"
+        428 => return "Precondition Required"
+        429 => return "Too Many Requests"
+        431 => return "Request Header Fields Too Large"
+        451 => return "Unavailable For Legal Reasons"
+        500 => return "Internal Server Error"
+        501 => return "Not Implemented"
+        502 => return "Bad Gateway"
+        503 => return "Service Unavailable"
+        504 => return "Gateway Timeout"
+        505 => return "HTTP Version Not Supported"
+        506 => return "Variant Also Negotiates"
+        507 => return "Insufficient Storage"
+        508 => return "Loop Detected"
+        510 => return "Not Extended"
+        511 => return "Network Authentication Required"
+        else => return ""
+    }
+}
+
 // What std/'s reader refuses: the status the server answers, 0 where it answers none, beside the error a program sees (W5).
 data HttpRefused(int Status, HttpError Error)
 

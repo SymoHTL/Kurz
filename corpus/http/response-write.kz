@@ -1,0 +1,48 @@
+// expect: output
+// | HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 2||hi
+// | HTTP/1.1 404 Not Found|Content-Type: application/octet-stream|Content-Length: 2||ab
+// | HTTP/1.1 201 Created|Content-Type: application/octet-stream|Content-Length: 9||file body
+// | HTTP/1.1 202 Accepted|Content-Length: 0||
+// | HTTP/1.1 200 OK|Content-Type: text/html|X-Id: 7|Content-Length: 4||<p/>
+// | HTTP/1.1 299 |Content-Length: 0||
+// | 301
+// rules: W8
+
+// a response is written as its status line, its headers in the order they were set, the `Content-Length` of its body and the
+// body; each function that makes one sets the `Content-Type` ASP.NET Core's `Results` sets, which a handler replaces with `Set`
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Text(200, "hi"))
+    Wire(HttpResponse.Bytes(404, "ab".Bytes))
+    File.WriteAll("response-write.txt", "file body".Bytes)
+    Wire(HttpResponse.File(201, "response-write.txt"))
+    File.Delete("response-write.txt")
+    Wire(HttpResponse.Empty(202))
+    html = HttpResponse.Text(200, "<p/>")
+    html.Headers.Set("Content-Type", "text/html")
+    html.Headers.Add("X-Id", "7")
+    Wire(html)
+    Wire(HttpResponse.Empty(299))
+    print(HttpResponse.Empty(301).Status)
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}

@@ -110,7 +110,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 374 : 428;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 374 : 433;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -126,6 +126,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/consume-past.kz", "system/consume-negative.kz", "system/fill-closed.kz",
         "http/request-read.kz", "http/request-refused.kz", "http/request-refused-unsupported.kz", "http/request-body.kz",
         "http/request-body-errors.kz", "http/request-continue.kz", "http/request-limits.kz",
+        "http/response-write.kz", "http/response-head.kz", "http/response-bodiless.kz", "http/response-unwritable.kz",
+        "http/response-transfer-encoding.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
