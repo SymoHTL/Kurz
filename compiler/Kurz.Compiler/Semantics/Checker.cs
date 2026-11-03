@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -586,8 +586,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// W1: each type of <see cref="Prelude"/> that <c>std/</c> declares <c>pub</c>, by the symbol <c>std/</c>'s checker made of it, which
-    /// this file reads as its own and does not resolve again; a name <c>std/</c> does not declare so stays unknown.
+    /// W1: each type of <see cref="Prelude"/> that <c>std/</c> declares <c>pub</c>, a <c>data</c> type, an enum or a class, by the symbol
+    /// <c>std/</c>'s checker made of it, which this file reads as its own and does not resolve again, so that a class's methods are the
+    /// ones <c>std/</c> checked and a member without <c>pub</c> stays private to it (F9); a name <c>std/</c> does not declare so stays
+    /// unknown.
     /// </summary>
     private void DeclarePrelude()
     {
@@ -608,12 +610,18 @@ public sealed partial class Checker
                 enums[name] = e;
                 preludeSeen.Add(name);
             }
+            else if (std.classes.TryGetValue(name, out var c) && (c.Declaration.Modifiers & Modifiers.Pub) != 0)
+            {
+                classes[name] = c;
+                unsupportedBases[name] = "a class a data type names (chapter 7)"; // D6, as DeclareClass says of the file's own class
+                preludeSeen.Add(name);
+            }
         }
     }
 
     /// <summary>W1, V9: what <c>redeclared</c> says to a file's own declaration of a type of the prelude this file sees.</summary>
     private string PreludeClash(string name) =>
-        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
+        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : classes.ContainsKey(name) ? "a class" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
 
     /// <summary>
     /// W1, V9: a type parameter named like a type of the prelude this file sees binds the name in a scope, so it is <c>redeclared</c>
