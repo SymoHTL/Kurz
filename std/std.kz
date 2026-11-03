@@ -3983,8 +3983,8 @@ ulong FiveDigits(int word) => match word {
 // keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
-// entry: the hash of its key, 8 bytes, then the key and the value, for a key whose hash reads more than one
-// word, and the key and the value alone for a key of one word (the emitter's `KeepsHash`); a slot without an entry holds what its
+// entry: the hash of its key, 8 bytes, then the key and the value, for a key of a kind the emitter's
+// `KeepsHash` names, and the key and the value alone for the others; a slot without an entry holds what its
 // bytes held before. A slot's control byte is 255 where the slot holds no entry and a probe ends at its
 // group: never filled since the block was made or cleared, or emptied by `MapErase` in a group that
 // holds a 255 still; 128 where its entry was removed in a group with no 255, which a probe passes; and
