@@ -1495,7 +1495,8 @@ constant makes a copy of the function of its own (T19), and the function's code 
 parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
-`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
+`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
+`assert(` (T35) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type, and where a type stands it is
 `unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
