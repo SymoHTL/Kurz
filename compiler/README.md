@@ -979,7 +979,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
   holds its state, of a fixed count for each type (104 bytes for SHA-256, 88 for MD5, 1028 for CRC-32's register and
-  table, 272 for HMAC's key and two states), counted and freed as a list is; `Update` and `Finish` take the block in
+  the 1024 bytes after it that nothing reads, which keep the count the block had while it held the table *(assumed:
+  the bytes `allocation-failed` names for these blocks (M9) stay as they were)*, 272 for HMAC's key and two states),
+  counted and freed as a list is; `Crc32.Hash` keeps CRC-32's register in a local, as crc32fast's `hash` does, and asks
+  for no block. CRC-32 reads a table of 16 rows of 256
+  remainders, a constant of a program that hashes one, as crc32fast's `CRC32_TABLE`, and takes 64 bytes at a time as
+  4 steps of 16, each byte by the row of its distance from the step's end, then the bytes after the last 64 one at a
+  time, as crc32fast's `update_fast_16` and `update_slow` do: 16 MiB hashed 10 times took 25.08 ms so, against
+  250.19 ms a byte at a time, which built the table in every call, and 24.58 ms in crc32fast's software path; 409,600
+  `Crc32.Hash` of 64 bytes took 3.99 ms with the register in a local, against 4.98 ms with a block for it and 4.80 ms in
+  crc32fast's software path.
+  `HashTests` holds the table against the remainders a bit at a time, in a program that hashes one and in no other,
+  the bytes `allocation-failed` names for the block of `Crc32.New()`, a `Crc32.Hash` that runs where the allocator
+  refuses every block, and a CRC hasher copied
+  between two `Update`s, each going on with its own bytes; `Update` and `Finish` take the block in
   the hasher's place, a `mut` variable or a path of fields from one (M5), copy it where another value holds it, as a
   list is copied before a write (M3), and store the block back. `Finish` gives a new block of the digest, or the
   CRC, and starts the state over. `Hex.Encode` gives a string that holds a block of `std/` (below), or the empty
