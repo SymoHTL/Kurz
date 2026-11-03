@@ -854,6 +854,55 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("void Say<const Mode M>(string text) {\n}", "(function void Say<const Mode M>(string text) {})")]
+    [InlineData("void Twice<T, const Mode M = Mode.Plain>(T value) {\n}", "(function void Twice<T, const Mode M = (. Mode Plain)>(T value) {})")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>() {\n}", "(function void Late<const Mode M = (. Mode Plain), T>() {})")]
+    [InlineData("void Bare<const>() {\n}", "(function void Bare<const>() {})")]
+    [InlineData("const = 1", "(assign-or-declare const (int 1))")]
+    [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
+    public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
+    {
+        // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
+        // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
+        // call writes the constant among its type arguments; the order of a default is the checker's
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("b = Buffer<64>()", "(assign-or-declare b (call Buffer<(int 64)>))")]
+    [InlineData("x = Pick<T, true>(y)", "(assign-or-declare x (call Pick<T, true> y))")]
+    [InlineData("m = Mark<'x'>()", "(assign-or-declare m (call Mark<(char 120)>))")]
+    [InlineData("n = Shift<-1>()", "(assign-or-declare n (call Shift<(- (int 1))>))")]
+    [InlineData("f(a < 64, c > (d))", "(call f (call a<(int 64), c> d))")]
+    [InlineData("f((a < 64), c > (d))", "(call f (paren (< a (int 64))), (> c (paren d)))")]
+    [InlineData("print(a < 64, c > d)", "(call print (< a (int 64)), (> c d))")]
+    [InlineData("f(a < 64.5, c > (d))", "(call f (< a (real 64.5)), (> c (paren d)))")]
+    [InlineData("f(a < \"s\", c > (d))", "(call f (< a (string \"s\")), (> c (paren d)))")]
+    public void A_literal_stands_among_a_calls_type_arguments_where_its_parenthesis_follows(string program, string tree)
+    {
+        // T35: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
+        // reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call `a<64, c>(d)` and the comparisons take
+        // parentheses; a list not followed by `(` stays two comparisons, and a real or a string literal is no constant a type parameter
+        // holds, so it keeps the comparisons
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void A_literal_among_type_arguments_before_a_member_is_no_list()
+    {
+        // T35 with R15: a literal stands in the list only where `(` follows it; `List<64>.FromRaw(p, 0)` is a comparison whose right
+        // operand is missing, `syntax` (E4), where `List<long>.FromRaw(p, 0)` names the member of a generic type
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("ys = List<64>.FromRaw(p, 0)").Distinct());
+    }
+
+    [Fact]
+    public void A_type_parameter_that_holds_a_constant_has_a_name()
+    {
+        // T35: `const Mode` with no name is no type parameter
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Say<const Mode>() {\n}").Distinct());
+    }
+
+    [Theory]
     [InlineData("data User(int Id, string Name)", "(data User(int Id, string Name))")]
     [InlineData("data Admin(int Level) : User", "(data Admin(int Level) : User)")]
     [InlineData("data Empty", "(data Empty)")]
