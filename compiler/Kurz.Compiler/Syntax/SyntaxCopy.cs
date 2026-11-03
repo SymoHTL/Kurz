@@ -19,6 +19,9 @@ public static class SyntaxCopy
     /// </summary>
     public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite) => (Block)new Copier(null, rewrite).Statement(b);
 
+    /// <summary>As the block's copy above, of an expression: T33, an argument of the call <c>T.Make(f => ...)</c> becomes, its lambda's body for one field.</summary>
+    public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite) => new Copier(null, rewrite).Expression(e);
+
     /// <summary>
     /// Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them, and
     /// <paramref name="statements"/> every statement of its body and of its lambdas' bodies.

@@ -1245,7 +1245,11 @@ as at any construction. Passing a type argument grants its reading, whatever pac
 type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
 declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
-"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
+type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
+a generic function lists every outcome any of its copies can give, and a copy that gives one its
+function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
+2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1259,8 +1263,10 @@ the call that made the copy is the compile error `kind-not-read`, which names th
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
 error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
 that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
-the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
-same error)* A generic function that reads its type, and one that passes its type parameter to such
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
+same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
+argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
+fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
@@ -1324,6 +1330,47 @@ Case: [types/type-make.kz](../corpus/types/type-make.kz)
 data Point(int X, int Y)
 
 T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())
+```
+
+Case: [types/type-make-get.kz](../corpus/types/type-make-get.kz)
+```kurz
+data Order(string Id, int Count)
+data Label(string Name, string Tag)
+data Empty
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+T Names<T>() => T.Make(f => "{f.Name}!")
+
+T Lazy<T>() => T.Make(f => (() => f.Name)())
+
+void Twin<T>(T value) {
+    for g in T.Fields {
+        print("{g.Name}: {T.Make(f => f.Get(value))}")
+    }
+}
+
+print(Remake(Order("a1", 3)))
+print(Remake(Empty))
+print(Names<Label>())
+print(Lazy<Label>())
+Twin(Order("b2", 4))
+```
+
+Case: [types/type-make-kind-not-read.kz](../corpus/types/type-make-kind-not-read.kz)
+```kurz
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<int>())
+```
+
+Case: [types/type-make-form.kz](../corpus/types/type-make-form.kz)
+```kurz
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make((int f) => 0)
 
 print(Zero<Point>())
 ```
