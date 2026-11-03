@@ -1,13 +1,23 @@
 // expect: output
+// | computing A
 // | 4
 // | 3
 // rules: K20
 
-int Compute() => 3
+int Compute() {
+    print("computing A")
+    return 3
+}
+
+int Never() {
+    print("computing C")
+    return 0
+}
 
 class Table {
     pub static int A = Compute()
     pub static int B = A + 1
+    pub static int C = Never()
 }
 
 print(Table.B)
