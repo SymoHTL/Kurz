@@ -2483,7 +2483,8 @@ long CaseLatin(int c, bool upper) {
 
 // The mapping of one direction of `c`, up to three code points in one number, the first in its lowest 21 bits,
 // the second in the next 21 and the third above them, 0 for one that is not there, as Rust's
-// `conversions::to_lower` and `to_upper` give a `[char; 3]`: ASCII by its letters (`CaseAscii`), the rest of
+// `conversions::to_lower` and `to_upper` give a `[char; 3]` (`library/core/src/unicode/unicode_data.rs` on Rust's
+// master branch, read 2026-11-02): ASCII by its letters (`CaseAscii`), the rest of
 // Latin-1, U+0080 to U+00FF, by `CaseLatin`, and from U+0100 on by the levels of `table`, the form of .NET's
 // `CharUnicodeInfo.ToLower`, which reads a
 // code point's delta in one index and one block. Rust looks such a code point up by two binary searches, over
