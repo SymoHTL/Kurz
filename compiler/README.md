@@ -608,8 +608,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   digit after it counted and holding the range after the rounding (X7); and `Hex.Decode(s)`, the bytes of
   a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
   first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7), the digits read two at a time
-  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's `FromHexString`
-  reads them. A piece of `Split`, a trimmed
+  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's scalar
+  `FromHexString` reads them. A piece of `Split`, a trimmed
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
@@ -761,8 +761,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
   each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
-  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
-  where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
+  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` appends in the block's room, or
+  grows the block, where only the list and the argument hold it, as Rust's `extend_from_within`, else
+  copies it, and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
   a block another value holds first (X9, M3); `Insert(index, item)` and `RemoveAt(index)` (X11), which
   read the index before the list is copied or grows and raise `index-out-of-range` outside it, `Insert`
