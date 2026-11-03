@@ -862,7 +862,7 @@ public sealed class ParserTests
     [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
     public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
     {
-        // T34: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
+        // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
         // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
         // call writes the constant among its type arguments; the order of a default is the checker's
         Assert.Equal(tree, Tree(program));
@@ -880,7 +880,7 @@ public sealed class ParserTests
     [InlineData("f(a < \"s\", c > (d))", "(call f (< a (string \"s\")), (> c (paren d)))")]
     public void A_literal_stands_among_a_calls_type_arguments_where_its_parenthesis_follows(string program, string tree)
     {
-        // T34: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
+        // T35: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
         // reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call `a<64, c>(d)` and the comparisons take
         // parentheses; a list not followed by `(` stays two comparisons, and a real or a string literal is no constant a type parameter
         // holds, so it keeps the comparisons
@@ -890,7 +890,7 @@ public sealed class ParserTests
     [Fact]
     public void A_literal_among_type_arguments_before_a_member_is_no_list()
     {
-        // T34 with R15: a literal stands in the list only where `(` follows it; `List<64>.FromRaw(p, 0)` is a comparison whose right
+        // T35 with R15: a literal stands in the list only where `(` follows it; `List<64>.FromRaw(p, 0)` is a comparison whose right
         // operand is missing, `syntax` (E4), where `List<long>.FromRaw(p, 0)` names the member of a generic type
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("ys = List<64>.FromRaw(p, 0)").Distinct());
     }
@@ -898,7 +898,7 @@ public sealed class ParserTests
     [Fact]
     public void A_type_parameter_that_holds_a_constant_has_a_name()
     {
-        // T34: `const Mode` with no name is no type parameter
+        // T35: `const Mode` with no name is no type parameter
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Say<const Mode>() {\n}").Distinct());
     }
 

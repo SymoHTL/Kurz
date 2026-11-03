@@ -1889,7 +1889,7 @@ public sealed partial class Checker
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
         // once: an error in one is one diagnostic, whatever the number of overloads (E1); where a type parameter holds a constant, the
-        // type argument is its value (T34)
+        // type argument is its value (T35)
         var typeArguments = c.TypeArguments.Select((t, i) => TypeArgument(candidates, t, i, c.Line)).ToList();
         if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
         {
@@ -1912,7 +1912,7 @@ public sealed partial class Checker
                 }
                 else
                 {
-                    // T34: a type parameter the call leaves out takes its default
+                    // T35: a type parameter the call leaves out takes its default
                     candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
@@ -1926,7 +1926,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T34: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
+    /// T35: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
     /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
     /// overload is picked.
     /// </summary>
@@ -1936,7 +1936,7 @@ public sealed partial class Checker
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
         if (kinds.Count > 1)
         {
-            NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T34, F12)");
+            NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T35, F12)");
             return Types.Error;
         }
 
@@ -1946,7 +1946,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T34: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
+    /// T35: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
     /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
     /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
     /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
@@ -1964,7 +1964,7 @@ public sealed partial class Checker
 
             if (!Types.Assignable(t.Type, of) || t.Constant is null)
             {
-                ReportMismatch(t.Type, of, literal.Line, $"`{holds.Name}` takes a constant of `{of.Text}`, not {Types.A(t.Type)}", "T34");
+                ReportMismatch(t.Type, of, literal.Line, $"`{holds.Name}` takes a constant of `{of.Text}`, not {Types.A(t.Type)}", "T35");
                 return Types.Error;
             }
 
@@ -1980,7 +1980,7 @@ public sealed partial class Checker
                     return bound;
                 }
 
-                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T34, T1)");
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
                 return Types.Error;
             }
 
@@ -2000,7 +2000,7 @@ public sealed partial class Checker
                     return new ConstantArgument(of, new EnumConstant(index));
                 }
 
-                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T34, T1)");
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
                 return Types.Error;
             }
         }
@@ -2008,7 +2008,7 @@ public sealed partial class Checker
         var type = Resolve(argument); // a name that is no type has its own error (E1)
         if (!Types.IsError(type))
         {
-            Report(ErrorIds.TypeMismatch, argument.Line, $"the type `{type.Text}` stands where `{holds.Name}` takes a value of `{of.Text}` (T34, T1)");
+            Report(ErrorIds.TypeMismatch, argument.Line, $"the type `{type.Text}` stands where `{holds.Name}` takes a value of `{of.Text}` (T35, T1)");
         }
 
         return Types.Error;
@@ -2422,7 +2422,7 @@ public sealed partial class Checker
 
             if (p.Default is { } constant)
             {
-                map[p] = constant; // T34: no argument fixes a constant, so a call that writes no type arguments gives it its default
+                map[p] = constant; // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default
                 continue;
             }
 

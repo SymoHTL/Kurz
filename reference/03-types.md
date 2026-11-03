@@ -1486,7 +1486,7 @@ void Show<T>(T value, Invoice other) {
 Show(Order("a1"), Invoice("b2"))
 ```
 
-### T34 (decided, §4) A type parameter that holds a constant
+### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
 type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call

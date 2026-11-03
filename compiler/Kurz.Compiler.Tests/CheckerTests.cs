@@ -4372,14 +4372,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnusedVariable, 4)], Errors(program.Replace("print(label)", "print(1)")));
     }
 
-    // ---- constant type parameters (T34) -----------------------------------------------------------
+    // ---- constant type parameters (T35) -----------------------------------------------------------
 
     private const string Modes = "enum Mode { Plain, Loud }\nenum Color { Red }\n\n";
 
     [Fact]
     public void A_type_parameter_that_holds_a_constant_of_an_enum_is_read_in_each_copy()
     {
-        // T34: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
+        // T35: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
         // value of its enum, in a `match`, a lambda and a hole, a copy passes its own constant on, overloads that hold a constant of one
         // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name elsewhere (L18)
         Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
@@ -4392,7 +4392,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_type_parameter_that_holds_a_constant_of_an_integer_type_bool_or_char_takes_a_literal()
     {
-        // T34: a call writes the constant as a literal among its type arguments, an integer with its `-`, `true` or a `char` (the owner,
+        // T35: a call writes the constant as a literal among its type arguments, an integer with its `-`, `true` or a `char` (the owner,
         // 2026-11-02), a default is a literal too, the body reads the parameter as a constant of its type, and a copy passes its own
         // constant on by name
         Clean("int Scaled<const int N>(int x) => x * N\nbool Flag<const bool B>() => B\nchar Mark<const char C>() => C\n\n" +
@@ -4404,30 +4404,30 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("void Bad<const Mode M = Color.Red>() {\n}", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
-    [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T34)")]
-    [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T34, T1)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<int>()", "7: type-mismatch: the type `int` stands where `M` takes a value of `Mode` (T34, T1)")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
+    [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T35, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<int>()", "7: type-mismatch: the type `int` stands where `M` takes a value of `Mode` (T35, T1)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Nope>()", "7: unknown-name: `Mode` has no value `Nope` (D12, V10)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay()", "7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, int>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Two<T, const Mode M>(T x) {\n}\n\nTwo<int>(1)", "7: syntax: `Two` takes 2 type arguments (T19; E4 for another count)")]
-    [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T34, T1)")]
-    [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T34, T1)")]
-    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
+    [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T35, T1)")]
+    [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T35, T1)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
     [InlineData("void Say<const Mode M>() {\n    int x = M\n    print(x)\n}\n\nSay<Mode.Plain>()", "5: type-mismatch: a `Mode` where an `int` is required (T1)")]
-    [InlineData("int Scaled<const int N>(int x) => x * N\n\nprint(Scaled<true>(2))", "6: type-mismatch: `N` takes a constant of `int`, not a `bool` (T34, T1)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<1>()", "7: type-mismatch: `M` takes a constant of `Mode`, not an `int` (T34, T1)")]
-    [InlineData("void Count<const int N>() {\n}\n\nCount<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where `N` takes one of `int` (T34, T1)")]
-    [InlineData("void Count<const int N>() {\n}\n\nCount<int>()", "7: type-mismatch: the type `int` stands where `N` takes a value of `int` (T34, T1)")]
-    [InlineData("T First<T>(List<T> items) => items[0]\n\nprint(First<64>(List<int>()))", "6: type-mismatch: a literal stands where a type is required, among a call's type arguments (T34, T1)")]
-    [InlineData("void Inner<const int N>() {\n}\n\nvoid Outer<const long L>() {\n    Inner<L>()\n}\n\nOuter<1>()", "8: type-mismatch: `L` holds a value of `long`, where `N` takes one of `int` (T34, T1)")]
+    [InlineData("int Scaled<const int N>(int x) => x * N\n\nprint(Scaled<true>(2))", "6: type-mismatch: `N` takes a constant of `int`, not a `bool` (T35, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<1>()", "7: type-mismatch: `M` takes a constant of `Mode`, not an `int` (T35, T1)")]
+    [InlineData("void Count<const int N>() {\n}\n\nCount<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where `N` takes one of `int` (T35, T1)")]
+    [InlineData("void Count<const int N>() {\n}\n\nCount<int>()", "7: type-mismatch: the type `int` stands where `N` takes a value of `int` (T35, T1)")]
+    [InlineData("T First<T>(List<T> items) => items[0]\n\nprint(First<64>(List<int>()))", "6: type-mismatch: a literal stands where a type is required, among a call's type arguments (T35, T1)")]
+    [InlineData("void Inner<const int N>() {\n}\n\nvoid Outer<const long L>() {\n    Inner<L>()\n}\n\nOuter<1>()", "8: type-mismatch: `L` holds a value of `long`, where `N` takes one of `int` (T35, T1)")]
     [InlineData("void Small<const byte B>() {\n}\n\nSmall<300>()", "7: constant-overflow: 300 does not fit a `byte` (L10, T6)")]
     [InlineData("void Count<const uint N>() {\n}\n\nCount<-1>()", "7: constant-overflow: -1 does not fit a `uint` (L10, T6)")]
     [InlineData("bool f(bool x, bool y) => x && y\n\na = 1\nc = 2\nd = 3\nprint(f(a < 64, c > (d)))", "7: unused-variable: `c` is never read (V5)|9: argument-mismatch: the parameter `y` gets no argument and has no default (D11)|9: type-mismatch: an `int` is no function and cannot be called (F11)")]
     public void A_constant_type_argument_is_held_to_the_parameter_it_lands_on(string program, string expected)
     {
-        // T34 with T1: a value of another enum or another type, a literal of another type, a type, and a constant or a literal where a
+        // T35 with T1: a value of another enum or another type, a literal of another type, a type, and a constant or a literal where a
         // type stands are type-mismatch, as a value of another type for a parameter is, and a literal that does not fit the parameter's
         // integer type is its overflow (T6); the parameter's name is no type (V10); a call that writes no constant and leaves out one
         // with no default fixes nothing (T27), and a default before a parameter with none is syntax, as Rust and C# refuse it; the
@@ -4436,15 +4436,15 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("void Name<const string S>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `string`, where an integer type, `bool`, `char` or an `enum` is read (T34)")]
-    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `double`, where an integer type, `bool`, `char` or an `enum` is read (T34)")]
-    [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T34)")]
-    [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T34, F12)")]
-    [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T34, F12)")]
-    [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T34, F12)")]
+    [InlineData("void Name<const string S>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `string`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
+    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `double`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
+    [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T35)")]
+    [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T35, F12)")]
+    [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T35, F12)")]
+    [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T35, F12)")]
     public void A_constant_type_parameter_of_another_type_or_of_a_data_type_is_not_supported(string program, string expected)
     {
-        // T34: the record lists the integer types, `bool`, `char` and an `enum` as the types a constant has, a `data` type's copies are
+        // T35: the record lists the integer types, `bool`, `char` and an `enum` as the types a constant has, a `data` type's copies are
         // no part of the build, and a call's type argument is read before an overload is picked (F12), so a parameter of another type,
         // and overloads that hold a type and a constant at one place, or constants of two types, are not read
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));

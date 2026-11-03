@@ -580,7 +580,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
             if (p.Constant is not null)
             {
-                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T34)");
+                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T35)");
             }
         }
 
@@ -986,8 +986,8 @@ public sealed partial class Checker
             case ExternFunctionType f:
                 return ResolveCFunctionType(f); // R17
             case ConstantTypeArgument c:
-                // T34: a literal stands among a call's type arguments where the type parameter holds a constant, and is no type
-                Report(ErrorIds.TypeMismatch, c.Line, "a literal stands where a type is required, among a call's type arguments (T34, T1)");
+                // T35: a literal stands among a call's type arguments where the type parameter holds a constant, and is no type
+                Report(ErrorIds.TypeMismatch, c.Line, "a literal stands where a type is required, among a call's type arguments (T35, T1)");
                 return Types.Error;
             default:
                 throw new InvalidOperationException(type.GetType().Name);
@@ -1088,8 +1088,8 @@ public sealed partial class Checker
         var parameter = TypeParameter(n.Name);
         if ((parameter?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
         {
-            // T34: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
-            Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T34)");
+            // T35: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
+            Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T35)");
             return Types.Error;
         }
 
@@ -1244,10 +1244,10 @@ public sealed partial class Checker
             }
         }
 
-        // T34: a type parameter with a default comes after every one without, as Rust orders them, so that a call leaves out the last
+        // T35: a type parameter with a default comes after every one without, as Rust orders them, so that a call leaves out the last
         if (d.TypeParameters.SkipWhile(p => p.Default is null).FirstOrDefault(p => p.Default is null) is { } after)
         {
-            Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T34)");
+            Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T35)");
         }
 
         var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
@@ -1267,7 +1267,7 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T34: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
+    /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. The record's list holds no other type, and a
     /// function with a parameter of one is not read (E1).
     /// </summary>
@@ -1279,12 +1279,12 @@ public sealed partial class Checker
             return type;
         }
 
-        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an integer type, `bool`, `char` or an `enum` is read (T34)");
+        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an integer type, `bool`, `char` or an `enum` is read (T35)");
         modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
         return Types.Error;
     }
 
-    /// <summary>T34: the types a type parameter's constant can have, as the record lists them.</summary>
+    /// <summary>T35: the types a type parameter's constant can have, as the record lists them.</summary>
     private static bool HoldsConstant(KurzType type) => Types.IsInteger(type) || type is EnumType || type == Types.Bool || type == Types.Char;
 
     private void ResolveTypes(FunctionSymbol symbol, FunctionDeclaration d)
@@ -1393,7 +1393,7 @@ public sealed partial class Checker
             {
                 if (p.Default is not null && parameter.Constant is { } of && !Types.IsError(of))
                 {
-                    // T34: a value of the parameter's enum, a constant as F12 has a parameter's default
+                    // T35: a value of the parameter's enum, a constant as F12 has a parameter's default
                     Unread(f, () => parameter.Default = CheckDefault(p.Default, of, p.Line) is { } value ? new ConstantArgument(of, value) : null);
                 }
             }

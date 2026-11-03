@@ -1,5 +1,5 @@
 // expect: error cannot-infer at 10
-// rules: T34
+// rules: T35
 
 enum Mode { Plain, Loud }
 

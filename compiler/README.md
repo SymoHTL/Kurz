@@ -661,7 +661,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
   `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
   the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
-  in which the parameter's name is a constant of its type and a call passes it on by that name (T34);
+  in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1439,7 +1439,7 @@ that sit under a rule by its id. Every one is pinned by a test.
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
-  `syntax`, a comparison without its right operand. A literal among the type arguments, which T34 keeps where `(` follows
+  `syntax`, a comparison without its right operand. A literal among the type arguments, which T35 keeps where `(` follows
   the list (the owner, 2026-11-02), so that `f(a < 64, c > (d))` is the call `a<64, c>(d)`, ends the list before a member
   and its `(`: `List<64>.FromRaw(p, 0)` is `syntax`. T17 says generic types are written as in C# and
   states no such rule.
@@ -1649,14 +1649,14 @@ error stand, and which every file sees, so that a file's own declaration of one 
 `Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
-such a loop and an `enum`'s value, which is `type-mismatch` there (T34), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
+such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
-which is read before the overload is picked (T34, F12); and `use` (F10) of any folder but the runtime's `sys`;
+which is read before the overload is picked (T35, F12); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

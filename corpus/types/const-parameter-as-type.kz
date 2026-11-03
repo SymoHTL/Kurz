@@ -1,5 +1,5 @@
 // expect: error unknown-name at 6
-// rules: T34
+// rules: T35
 
 enum Mode { Plain, Loud }
 

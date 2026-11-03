@@ -83,7 +83,7 @@ public sealed partial class Checker
     /// <summary>The type a copy binds to the name of one of its function's type parameters, in the copy's body and its lambdas.</summary>
     private KurzType? BoundType(string name) => Binding(name) is { } bound and not ConstantArgument ? bound : null;
 
-    /// <summary>T34: the constant a copy binds to the name of a type parameter that holds one.</summary>
+    /// <summary>T35: the constant a copy binds to the name of a type parameter that holds one.</summary>
     private ConstantArgument? BoundConstant(string name) => Binding(name) as ConstantArgument;
 
     private KurzType? Binding(string name)
@@ -144,7 +144,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// The generic functions whose own text reads their type: a member of <see cref="IsTypeMember"/> on the name of one of their type
-    /// parameters, or a type parameter that holds a constant (T34), which each copy binds to its value.
+    /// parameters, or a type parameter that holds a constant (T35), which each copy binds to its value.
     /// </summary>
     private void FindReaders()
     {
@@ -156,7 +156,7 @@ public sealed partial class Checker
             }
 
             var names = f.TypeParameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            var reads = f.TypeParameters.Any(p => p.Constant is { } c && !Types.IsError(c)); // T34: its body reads the constant a copy binds
+            var reads = f.TypeParameters.Any(p => p.Constant is { } c && !Types.IsError(c)); // T35: its body reads the constant a copy binds
             SyntaxCopy.Walk(d, e => reads |= e is MemberAccess { Target: NameExpression n, Member: var m } && names.Contains(n.Name) && IsTypeMember(m));
             if (reads)
             {
@@ -559,7 +559,7 @@ public sealed partial class Checker
 
     /// <summary>
     /// <c>f.Type</c> as a type in a pass, the field's type; a value of an enum where a type stands, <c>Say&lt;Mode.Loud&gt;</c> of a
-    /// <c>Say&lt;T&gt;</c>, is <c>type-mismatch</c> (T34, T1); any other dotted name as a type is <c>not supported</c>.
+    /// <c>Say&lt;T&gt;</c>, is <c>type-mismatch</c> (T35, T1); any other dotted name as a type is <c>not supported</c>.
     /// </summary>
     private KurzType ResolveDotted(NamedType n)
     {
@@ -572,7 +572,7 @@ public sealed partial class Checker
         var last = n.Name.LastIndexOf('.');
         if (n.TypeArguments.Count == 0 && enums.TryGetValue(n.Name[..last], out var named) && named.Values.Contains(n.Name[(last + 1)..]))
         {
-            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where a type stands (T34, T1)");
+            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where a type stands (T35, T1)");
             return Types.Error;
         }
 

@@ -1,6 +1,6 @@
 // expect: output
 // | true
-// rules: T34
+// rules: T35
 
 bool Both(bool x, bool y) => x && y
 

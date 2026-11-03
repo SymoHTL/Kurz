@@ -1,5 +1,5 @@
 // expect: error type-mismatch at 11
-// rules: T34
+// rules: T35
 
 enum Mode { Plain, Loud }
 enum Color { Red }

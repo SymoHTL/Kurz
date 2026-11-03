@@ -30,7 +30,7 @@ public sealed record WeakType(int Line, TypeSyntax Inner) : TypeSyntax(Line);
 public sealed record VoidType(int Line) : TypeSyntax(Line);
 
 /// <summary>
-/// T34: a literal among a call's type arguments, the constant a type parameter that holds one takes: <c>Buffer&lt;64&gt;()</c>,
+/// T35: a literal among a call's type arguments, the constant a type parameter that holds one takes: <c>Buffer&lt;64&gt;()</c>,
 /// <c>Pick&lt;T, true&gt;(x)</c>, an integer with its <c>-</c>, a <c>bool</c> or a <c>char</c>.
 /// </summary>
 public sealed record ConstantTypeArgument(int Line, Expression Value) : TypeSyntax(Line);
@@ -258,7 +258,7 @@ public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name
 
 /// <summary>
 /// A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>; or one that holds a constant of a type, with its default
-/// (T34): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
+/// (T35): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
 /// </summary>
 public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, TypeSyntax? Constant = null, Expression? Default = null);
 
