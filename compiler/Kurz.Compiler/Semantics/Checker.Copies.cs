@@ -236,7 +236,7 @@ public sealed partial class Checker
     private void FindGrowingCycles()
     {
         var edges = new List<GrowthEdge>();
-        foreach (var (caller, c) in genericCalls)
+        foreach (var (caller, c, _) in genericCalls)
         {
             if (caller is not { IsGeneric: true } || readers.Contains(caller)
                 || model.TryCallOf(c) is not { Kind: CallKind.Function, Function: { IsGeneric: true } callee } info)
