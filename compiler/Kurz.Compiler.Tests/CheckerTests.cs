@@ -3238,10 +3238,8 @@ public sealed class CheckerTests
     public void A_constant_lane_of_extract_past_the_lanes_of_its_vector_is_lane_out_of_range_at_its_line()
     {
         // section 13, the owner, 2026-11-02 (#39): refused at its line, as Rust's constant assertion refuses it, with an id of its own;
-        // a constant that does not fit the parameter stays `constant-overflow`
-        var (diagnostics, _) = Check(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 4))\n}"));
-        var d = Assert.Single(diagnostics.Items);
-        Assert.Equal((ErrorIds.LaneOutOfRange, 4, "lane 4 of `X86.Sse41.Extract` lies past the 4 lanes of a `Vector128<int>` (R18)"), (d.Id, d.Line, d.Message));
+        // a constant that does not fit the parameter stays `constant-overflow`; the test pins the id and the line, never the text (section 8)
+        Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 4))\n}")));
         Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(b, 16))\n}")));
         Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 255))\n}")));
         Clean(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 3))\n    print(X86.Sse41.Extract(b, 15))\n}")); // the last lanes, the positive control
