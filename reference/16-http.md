@@ -209,7 +209,11 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 `HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
 list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
 ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*.
+product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
+map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
+`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
+names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
