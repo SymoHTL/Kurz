@@ -5848,7 +5848,7 @@ pub data HttpError(HttpKind Kind, string Detail)
 // The headers of a request or a response, an ordered list of names and values (design record, section 12:
 // the owner, 2026-10-31, "Ordered list type"), as hyper's `HeaderMap` and ASP.NET Core's
 // `IHeaderDictionary` keep them: a name compares without regard to ASCII case and stays as it was spelled,
-// and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came (W1, W3).
+// and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came (W1, W4).
 pub class HttpHeaders {
     mut List<string> names = List<string>()
     mut List<string> values = List<string>()
