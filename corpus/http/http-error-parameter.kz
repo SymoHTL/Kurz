@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: W1
+
+int Twice(int HttpError) => HttpError * 2
+
+print(Twice(2))

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Text;
 using Xunit;
@@ -9,16 +10,24 @@ namespace Kurz.Compiler.Tests;
 /// The decisions on the searches of a string and of a list (X1, X9) that no corpus case pins: 3000 strings and needles of two to four
 /// letters, one of them of two bytes, which the program and this class generate alike, give the positions, the containment, the start
 /// and the end that .NET's searches of their UTF-8 bytes give, through a string's members, through a list of bytes' <c>IndexOf</c> of a
-/// run, which the standard library's two-way search answers as it answers a string's, and through a list of <c>int</c>'s, which is
-/// compared item by item; and the same under the allocator that makes every block it frees inaccessible. Needles of up to 12 bytes
-/// reach both cases of the two-way search, a needle whose part before its cut repeats at its period and one whose does not, each in at
-/// least 100 searches, and at least 100 stand twice in their string. A search of one byte, which reads two words at a time as Rust's
+/// run, which the standard library's <c>Find</c> answers as it answers a string's, and through a list of <c>int</c>'s, which is
+/// compared item by item; and the same under the allocator that makes every block it frees inaccessible, and through the standard
+/// library whose test of SSE2 is <c>false</c>, which takes the two-way search for every needle of more than one byte (R18). Needles of
+/// up to 12 bytes reach both cases of the two-way search, a needle whose part before its cut repeats at its period and one whose does
+/// not, each in at least 100 searches, and at least 100 stand twice in their string. Needles of 2 to 35 bytes in strings of up to 220
+/// bytes take each part of the search of SSE2, <c>PairFind</c>, and the two-way search, and give .NET's first position, with the bytes
+/// of a match standing past the end of a list of bytes whose search must not read them; and a list of items of 2, 4 and 8 bytes gives
+/// .NET's <c>IndexOf</c>, through the search of SSE2 and through the loop after it. A search of one byte, which reads two words at a time as Rust's
 /// <c>memchr</c> does, finds it at every place of lists of 0 to 40 bytes and from each of the 8 places in a word a search can start at,
-/// takes the first of two places within one word, and reads no byte past the count of a list or a string.
+/// takes the first of two places within one word, and reads no byte past the count of a list or a string. Built for a 64-bit Arm
+/// machine, whose test of SSE2 is <c>false</c>, <c>Find</c> calls no <c>PairFind</c> and the searches of a list hold no vector.
 /// </summary>
 public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     private const int Count = 3000;
+
+    /// <summary>The standard library whose test of SSE2 is <c>false</c>, so that every search takes the path a target without SSE2 takes (R18).</summary>
+    internal static Kurz.Compiler.Build.CheckedRuntime Plain() => ListTests.Edited(("std/std.kz", "X86.Sse2.IsSupported", "false"));
 
     private const string Program = """
         string Make(int length, ulong start, int letters) {
@@ -176,7 +185,7 @@ public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(twoWay - found >= 300, $"only {twoWay - found} needles of two bytes or more are missed");
         Assert.True(twice >= 100, $"only {twice} needles stand twice");
         Assert.True(repeating >= 100 && twoWay - repeating >= 100, $"{repeating} of {twoWay} needles repeat before their cut");
-        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced"), (Plain(), "-plain") })
         {
             var compilation = Builder.Compile(SourceText.FromString("program.kz", Program), [], runtime, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
@@ -448,6 +457,451 @@ public sealed class SearchTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "search-first-and-count" + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected, output);
+        }
+    }
+
+    private const string Pairs = """
+        string Make(int length, ulong start, int letters) {
+            mut ulong state = start
+            mut b = Bytes()
+            mut made = 0
+            while made < length {
+                state = state *% 6364136223846793005UL +% 1442695040888963407UL
+                b.Add(byte(97UL + (state >> 33) % ulong(letters)))
+                made = made + 1
+            }
+
+            return string.FromUtf8(b) else {
+                InvalidUtf8 => ""
+            }
+        }
+
+        mut ulong seed = 777UL
+        mut n = 0
+        while n < 6000 {
+            seed = seed *% 2862933555777941757UL +% 3037000493UL
+            int letters = 2 + int((seed >> 10) % 3UL)
+            int m = 2 + int((seed >> 20) % 34UL)
+            int kind = int((seed >> 50) % 4UL)
+            mut hay = Make(int((seed >> 40) % 220UL), seed, letters)
+            mut pin = Make(m, seed ^ 99UL, letters)
+            mut after = ""
+            if kind == 1 && m <= hay.Bytes.Count {
+                at = int((seed >> 30) % ulong(hay.Bytes.Count - m + 1))
+                pin = hay.Substring(at, m)
+            } else if kind == 2 {
+                pin = "a{Make(m - 5, seed ^ 7UL, letters)}aaaa"
+            } else if kind == 3 {
+                cut = 1 + int((seed >> 30) % ulong(m - 1))
+                hay = "{hay}{pin.Substring(0, cut)}"
+                after = pin.Substring(cut, m - cut)
+            }
+
+            mut room = Bytes()
+            room.AddRange(hay.Bytes)
+            room.AddRange(after.Bytes)
+            room.AddRange(pin.Bytes)
+            room.Clear()
+            room.AddRange(hay.Bytes)
+            print("{hay.IndexOf(pin) ?? -1} {hay.Contains(pin)} {room.IndexOf(pin.Bytes) ?? -1}")
+            n = n + 1
+        }
+
+        mut size = 2
+        while size <= 35 {
+            pin = Make(size, ulong(size), 4)
+            head = pin.Substring(0, size - 1)
+            mut zs = ""
+            mut k = 0
+            while k <= 200 {
+                hay = "{zs}{head}"
+                mut room = Bytes()
+                room.AddRange(hay.Bytes)
+                room.AddRange(pin.Substring(size - 1, 1).Bytes)
+                room.Clear()
+                room.AddRange(hay.Bytes)
+                print("{room.IndexOf(pin.Bytes) ?? -1} {room.IndexOf(head.Bytes) ?? -1}")
+                zs = "{zs}z"
+                k = k + 1
+            }
+
+            size = size + 1
+        }
+
+        size = 2
+        while size <= 16 {
+            mut sep = "a"
+            while sep.Bytes.Count < size - 1 {
+                sep = "{sep}b"
+            }
+
+            sep = "{sep}a"
+            mut cs = ""
+            while cs.Bytes.Count <= 20 {
+                mut j = 0
+                while j <= 2 {
+                    mut tail = ""
+                    while tail.Bytes.Count < j {
+                        tail = "{tail}c"
+                    }
+
+                    text = "x{sep}{sep.Substring(1, size - 1)}{cs}{sep}{tail}"
+                    print(text.Split(sep).Count)
+                    j = j + 1
+                }
+
+                cs = "{cs}c"
+            }
+
+            size = size + 1
+        }
+
+        """;
+
+    /// <summary>The string <see cref="Pairs"/>'s <c>Make</c> makes: <paramref name="length"/> of the first <paramref name="letters"/> small letters, each picked by a step of the same generator, and none for a length below 0.</summary>
+    private static string MakeLetters(int length, ulong start, int letters)
+    {
+        var state = start;
+        var text = new StringBuilder();
+        for (var k = 0; k < length; k++)
+        {
+            state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+            text.Append((char)('a' + (int)((state >> 33) % (ulong)letters)));
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// Where <c>PairFind</c> finds the first match of the needle, as its loops step: in a step of four vectors, in a step of one, in the
+    /// vector that ends at the last byte, or in the walk of a string too short for a vector; or the two-way search, for a needle of more
+    /// than 32 bytes and for one whose last four bytes are all its first; with the count of positions before the match, or before the end,
+    /// whose two compared bytes are the needle's and whose other bytes are not, which the search checks and passes.
+    /// </summary>
+    private static (string Part, int Passed) PairPart(byte[] hay, byte[] pin)
+    {
+        var (n, m) = (hay.Length, pin.Length);
+        var second = 1;
+        if (m > 2)
+        {
+            var low = Math.Max(m - 4, 0);
+            second = m - 1;
+            while (second >= low && pin[second] == pin[0])
+            {
+                second--;
+            }
+
+            if (second < low)
+            {
+                return ("two-way", 0);
+            }
+        }
+
+        if (m > 32)
+        {
+            return ("two-way", 0);
+        }
+
+        var at = hay.AsSpan().IndexOf(pin);
+        var end = at < 0 ? n - m + 1 : at;
+        var passed = 0;
+        for (var i = 0; i < end; i++)
+        {
+            passed += hay[i] == pin[0] && hay[i + second] == pin[second] ? 1 : 0;
+        }
+
+        if (n < 16 + m - 1)
+        {
+            return ("short", passed);
+        }
+
+        var (four, one) = (0, 0);
+        while (four + m - 1 + 64 < n)
+        {
+            four += 64;
+        }
+
+        one = four;
+        while (one + m - 1 + 16 < n)
+        {
+            one += 16;
+        }
+
+        return (at < 0 ? "none" : at < four ? "four" : at < one ? "one" : "last", passed);
+    }
+
+    [Fact]
+    public void A_needle_of_2_to_35_bytes_is_found_where_dotnet_finds_it_through_every_part_of_the_search_of_sse2_and_the_two_way_search()
+    {
+        var seed = 777UL;
+        var expected = new List<string>();
+        var parts = new Dictionary<string, int>();
+        var (passed, twice, past) = (0, 0, 0);
+        for (var n = 0; n < 6000; n++)
+        {
+            seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
+            var letters = 2 + (int)((seed >> 10) % 3UL);
+            var m = 2 + (int)((seed >> 20) % 34UL);
+            var kind = (int)((seed >> 50) % 4UL);
+            var hay = MakeLetters((int)((seed >> 40) % 220UL), seed, letters);
+            var pin = MakeLetters(m, seed ^ 99UL, letters);
+            var after = "";
+            if (kind == 1 && m <= hay.Length)
+            {
+                pin = hay.Substring((int)((seed >> 30) % (ulong)(hay.Length - m + 1)), m);
+            }
+            else if (kind == 2)
+            {
+                pin = $"a{MakeLetters(m - 5, seed ^ 7UL, letters)}aaaa";
+            }
+            else if (kind == 3)
+            {
+                var cut = 1 + (int)((seed >> 30) % (ulong)(m - 1));
+                hay += pin[..cut];
+                after = pin[cut..];
+            }
+
+            var (h, p) = (Encoding.ASCII.GetBytes(hay), Encoding.ASCII.GetBytes(pin));
+            var at = h.AsSpan().IndexOf(p);
+            expected.Add($"{at} {Text(at >= 0)} {at}");
+            if (h.Length >= p.Length)
+            {
+                var (part, count) = PairPart(h, p);
+                parts[part] = parts.GetValueOrDefault(part) + 1;
+                passed += count > 0 ? 1 : 0;
+                twice += at >= 0 && at != h.AsSpan().LastIndexOf(p) ? 1 : 0;
+                past += kind == 3 && at < 0 && (hay + after).Contains(pin, StringComparison.Ordinal) ? 1 : 0;
+            }
+        }
+
+        // every count of bytes before a needle's first bytes, its last past the end of the list, behind blocks that hold no position the
+        // vectors would check, for every step's end; then a split, whose search after a separator starts where the byte before it is the
+        // separator's last, and a needle that began there would be found before the start
+        for (var size = 2; size <= 35; size++)
+        {
+            for (var k = 0; k <= 200; k++)
+            {
+                expected.Add($"-1 {k}");
+            }
+        }
+
+        for (var size = 2; size <= 16; size++)
+        {
+            var sep = $"a{new string('b', size - 2)}a";
+            for (var k = 0; k <= 20; k++)
+            {
+                for (var j = 0; j <= 2; j++)
+                {
+                    var text = $"x{sep}{sep[1..]}{new string('c', k)}{sep}{new string('c', j)}";
+                    expected.Add($"{text.Split(sep).Length}");
+                }
+            }
+        }
+
+        // the floors: every part of the search finds a first match often, the short walk and the step of four miss often, the two-way
+        // search is taken often, positions whose two compared bytes are the needle's are passed in many searches, many needles stand
+        // twice, and many stand where the bytes after the end of the list would complete them
+        Assert.True(
+            parts.GetValueOrDefault("four") >= 300 && parts.GetValueOrDefault("one") >= 200 && parts.GetValueOrDefault("last") >= 100
+                && parts.GetValueOrDefault("short") >= 200 && parts.GetValueOrDefault("none") >= 300 && parts.GetValueOrDefault("two-way") >= 300,
+            string.Join(", ", parts.Select(p => $"{p.Key} {p.Value}")));
+        Assert.True(passed >= 300, $"only {passed} searches pass a position whose two compared bytes are the needle's");
+        Assert.True(twice >= 100, $"only {twice} needles stand twice");
+        Assert.True(past >= 300, $"only {past} needles stand past the end of the list");
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced"), (Plain(), "-plain") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", Pairs), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "pairs" + suffix));
+            Assert.Equal((suffix, 0, ""), (suffix, code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>The item types whose <c>IndexOf</c> takes a search of their width, each with its values as Kurz and as C# write them; a list holds all but the last, which only the item looked for can be.</summary>
+    private static readonly (string Type, int Width, string[] Kurz, object[] Values)[] Widths =
+    [
+        ("short", 2, ["short(0)", "short(1)", "short(-1)", "short(256)", "short(32767)", "short(-32768)", "short(255)"], [(short)0, (short)1, (short)-1, (short)256, short.MaxValue, short.MinValue, (short)255]),
+        ("ushort", 2, ["ushort(0)", "ushort(1)", "ushort(65535)", "ushort(256)", "ushort(65280)"], [(ushort)0, (ushort)1, ushort.MaxValue, (ushort)256, (ushort)65280]),
+        ("int", 4, ["0", "1", "-1", "65536", "2147483647", "-2147483647 - 1", "65537"], [0, 1, -1, 65536, int.MaxValue, int.MinValue, 65537]),
+        ("uint", 4, ["uint(0)", "uint(1)", "uint(4294967295)", "uint(65536)", "uint(65537)"], [0u, 1u, uint.MaxValue, 65536u, 65537u]),
+        ("char", 4, ["'a'", "'b'", "'ä'", "'€'", "'😀'"], [(int)'a', (int)'b', (int)'ä', (int)'€', char.ConvertToUtf32("😀", 0)]),
+        ("long", 8, ["0L", "1L", "-1L", "4294967296L", "-4294967296L", "4294967297L", "30064771073L"], [0L, 1L, -1L, 4294967296L, -4294967296L, 4294967297L, 30064771073L]),
+        ("ulong", 8, ["0UL", "1UL", "18446744073709551615UL", "4294967296UL", "4294967297UL"], [0UL, 1UL, ulong.MaxValue, 4294967296UL, 4294967297UL]),
+    ];
+
+    [Fact]
+    public void A_list_of_items_of_2_4_and_8_bytes_gives_the_first_position_dotnet_gives_through_its_vectors_and_the_loop_after_them()
+    {
+        // 1200 lists of each type, of 0 to 79 items, each holding the item looked for in place of nothing past its count; the item
+        // stands at a picked place, in a third of them among the last three, or in a fifth of the rest nowhere, and sometimes again after it; the other items are the type's other values, so that the
+        // last `long`, with the low half of 1, and 4294967297, with that of 1, stand in lists that 1 is looked for in, and an 8-byte item
+        // equal in one half alone is found nowhere
+        var program = new StringBuilder();
+        foreach (var (type, _, kurz, _) in Widths)
+        {
+            program.Append($$"""
+                int In{{type}}(int count, ulong start, int wanted, int at, int again) {
+                    values = [{{string.Join(", ", kurz)}}]
+                    mut xs = List<{{type}}>()
+                    for k in 0..<count + 40 {
+                        xs.Add(values[wanted])
+                    }
+
+                    xs.Clear()
+                    mut ulong state = start
+                    for k in 0..<count {
+                        state = state *% 6364136223846793005UL +% 1442695040888963407UL
+                        mut int pick = int((state >> 33) % ulong(values.Count - 1))
+                        if pick >= wanted {
+                            pick = pick + 1
+                        }
+
+                        if k == at || k == again {
+                            pick = wanted
+                        }
+
+                        xs.Add(values[pick])
+                    }
+
+                    return xs.IndexOf(values[wanted]) ?? -1
+                }
+
+
+                """);
+        }
+
+        program.Append("""
+            mut ulong seed = 4242UL
+            for n in 0..<1200 {
+                seed = seed *% 2862933555777941757UL +% 3037000493UL
+                count = int((seed >> 40) % 80UL)
+                mut at = int((seed >> 30) % ulong(count + 1 + count / 4))
+                near = int((seed >> 35) % 3UL)
+                if (seed >> 55) % 3UL == 0UL && near < count {
+                    at = count - 1 - near
+                }
+
+                again = at + 1 + int((seed >> 45) % 7UL)
+
+            """);
+        foreach (var (type, _, kurz, _) in Widths)
+        {
+            program.Append($"    print(In{type}(count, seed, int((seed >> 20) % {kurz.Length}UL), at, again))\n");
+        }
+
+        program.Append("}\n");
+        var expected = new List<string>();
+        var parts = new Dictionary<(int Width, string Part), int>();
+        var halves = 0;
+        var seed = 4242UL;
+        for (var n = 0; n < 1200; n++)
+        {
+            seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
+            var count = (int)((seed >> 40) % 80UL);
+            var at = (int)((seed >> 30) % (ulong)(count + 1 + (count / 4)));
+            var near = (int)((seed >> 35) % 3UL);
+            if ((seed >> 55) % 3UL == 0UL && near < count)
+            {
+                at = count - 1 - near;
+            }
+
+            var again = at + 1 + (int)((seed >> 45) % 7UL);
+            foreach (var (_, width, kurz, values) in Widths)
+            {
+                var wanted = (int)((seed >> 20) % (ulong)kurz.Length);
+                var state = seed;
+                var items = new List<object>();
+                for (var k = 0; k < count; k++)
+                {
+                    state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+                    var pick = (int)((state >> 33) % (ulong)(values.Length - 1));
+                    pick += pick >= wanted ? 1 : 0;
+                    items.Add(values[k == at || k == again ? wanted : pick]);
+                }
+
+                var found = items.IndexOf(values[wanted]);
+                expected.Add(found.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                var four = count / (64 / width) * (64 / width);
+                var one = four + ((count - four) / (16 / width) * (16 / width));
+                var part = count < 64 / width ? "few" : found < 0 ? "none" : found < four ? "four" : found < one ? "one" : "loop";
+                parts[(width, part)] = parts.GetValueOrDefault((width, part)) + 1;
+                if (width == 8)
+                {
+                    var low = Convert.ToUInt64(values[wanted] is long l ? unchecked((ulong)l) : values[wanted]) & 0xFFFFFFFF;
+                    halves += items.Take(found < 0 ? count : found).Any(i => (Convert.ToUInt64(i is long x ? unchecked((ulong)x) : i) & 0xFFFFFFFF) == low) ? 1 : 0;
+                }
+            }
+        }
+
+        // the floors: for each width, lists shorter than a step of four vectors, which the emitted loop searches, and in longer ones
+        // items found in a step of four vectors, of one vector and in the loop after them, and items in no list; and lists of 8-byte
+        // items holding, before the item looked for or where it is in none, one equal to it in its low half
+        foreach (var width in new[] { 2, 4, 8 })
+        {
+            foreach (var part in new[] { "few", "four", "one", "loop", "none" })
+            {
+                Assert.True(parts.GetValueOrDefault((width, part)) >= 50, $"only {parts.GetValueOrDefault((width, part))} items of {width} bytes in the part {part}");
+            }
+        }
+
+        Assert.True(halves >= 100, $"only {halves} lists of 8-byte items hold an item equal to the one looked for in its low half");
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced"), (Plain(), "-plain") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+
+            // each type's `IndexOf` calls the search of its width, for a list of at least the items of a step of four vectors
+            var ir = compilation.Program.Ir;
+            Assert.Equal(2, Regex.Count(ir, @"call i64 @""?std\.FindShort\."));
+            Assert.Equal(3, Regex.Count(ir, @"call i64 @""?std\.FindInt\."));
+            Assert.Equal(2, Regex.Count(ir, @"call i64 @""?std\.FindLong\."));
+            Assert.Equal(
+                [8, 8, 16, 16, 16, 32, 32],
+                Regex.Matches(ir, @"icmp slt i32 %[\w.]+, (\d+)[^\n]*\n\s*br i1 %[\w.]+, label %few\.").Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)).Order());
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "items" + suffix));
+            Assert.Equal((suffix, 0, ""), (suffix, code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    [Fact]
+    public void On_a_target_without_sse2_find_takes_the_two_way_search_and_a_list_search_holds_no_vector()
+    {
+        // a search of a string and a list of each type whose `IndexOf` takes a search of its width, built for x86-64, where each
+        // guard's test of SSE2 is true, and for a 64-bit Arm machine, where it is false and the code it guards is left out (R18)
+        const string text = """
+            s = "a needle in a haystack of bytes, a needle"
+            print(s.Contains("haystack"))
+            shorts = [short(1), short(2)]
+            print(shorts.IndexOf(short(2)) ?? -1)
+            ushorts = [ushort(1), ushort(2)]
+            print(ushorts.IndexOf(ushort(2)) ?? -1)
+            ints = [1, 2]
+            print(ints.IndexOf(2) ?? -1)
+            uints = [uint(1), uint(2)]
+            print(uints.IndexOf(uint(2)) ?? -1)
+            chars = ['a', 'b']
+            print(chars.IndexOf('b') ?? -1)
+            longs = [1L, 2L]
+            print(longs.IndexOf(2L) ?? -1)
+            ulongs = [1UL, 2UL]
+            print(ulongs.IndexOf(2UL) ?? -1)
+
+            """;
+        foreach (var (cpu, sse2) in new[] { ((Kurz.Compiler.Emit.Cpu?)null, true), (Kurz.Compiler.Emit.Cpu.ArmBaseline, false) })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true, cpu: cpu is null ? null : () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            Assert.Matches(@"call i64 @""?std\.TwoWay\.", ir);
+            Assert.Equal(sse2, Regex.IsMatch(ir, @"call i64 @""?std\.PairFind\."));
+            foreach (var search in new[] { "FindShort", "FindInt", "FindLong" })
+            {
+                var body = Regex.Match(ir, $@"^define [^\n]*@""?std\.{search}\.[^\n]*\n(.*?)\n}}", RegexOptions.Multiline | RegexOptions.Singleline);
+                Assert.True(body.Success, $"no {search} in the IR");
+                Assert.Equal((search, sse2), (search, Regex.IsMatch(body.Groups[1].Value, @"<\d+ x i\d+>")));
+            }
         }
     }
 }
