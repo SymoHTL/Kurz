@@ -1429,7 +1429,7 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported.</summary>
+    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported or is a <c>data</c> value of constants, which no type parameter holds (T35).</summary>
     private Constant? CheckDefault(Expression value, KurzType type, int parameterLine)
     {
         var reading = readingConstant;
@@ -1441,9 +1441,9 @@ public sealed partial class Checker
             return null;
         }
 
-        if (t.Constant is null)
+        if (t.Constant is null && !IsConstantData(value))
         {
-            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields, or literals that T6 folds (F12)");
+            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields or of constant arguments, or literals that T6 folds (F12)");
             return null;
         }
 
@@ -1455,6 +1455,16 @@ public sealed partial class Checker
 
         return t.Constant;
     }
+
+    /// <summary>
+    /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
+    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// </summary>
+    private bool IsConstantData(Expression value) =>
+        value is CallExpression c
+        && model.TryCallOf(c) is { Kind: CallKind.DataNew }
+        && c.Arguments.All(a => model.TypeOf(a.Value).Constant is not null || IsConstantData(a.Value));
 
     private void CheckFunctionBody(FunctionSymbol f)
     {
