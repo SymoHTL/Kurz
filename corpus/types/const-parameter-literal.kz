@@ -6,7 +6,7 @@
 // | -3
 // | 5
 // | 7
-// rules: T34
+// rules: T35
 
 int Scaled<const int N>(int x) => x * N
 bool Flag<const bool B>() => B

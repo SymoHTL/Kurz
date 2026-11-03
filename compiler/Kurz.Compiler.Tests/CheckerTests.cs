@@ -4372,14 +4372,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnusedVariable, 4)], Errors(program.Replace("print(label)", "print(1)")));
     }
 
-    // ---- constant type parameters (T34) -----------------------------------------------------------
+    // ---- constant type parameters (T35) -----------------------------------------------------------
 
     private const string Modes = "enum Mode { Plain, Loud }\nenum Color { Red }\n\n";
 
     [Fact]
     public void A_type_parameter_that_holds_a_constant_of_an_enum_is_read_in_each_copy()
     {
-        // T34: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
+        // T35: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
         // value of its enum, in a `match`, a lambda and a hole, a copy passes its own constant on, overloads that hold a constant of one
         // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name where L18 makes it no word
         Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
@@ -4392,7 +4392,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_type_parameter_that_holds_a_constant_of_an_integer_type_bool_or_char_takes_a_literal()
     {
-        // T34: a call writes the constant as a literal among its type arguments, an integer with its `-`, `true` or a `char` (the owner,
+        // T35: a call writes the constant as a literal among its type arguments, an integer with its `-`, `true` or a `char` (the owner,
         // 2026-11-02), a default is a literal too, the body reads the parameter as a constant of its type, and a copy passes its own
         // constant on by name
         Clean("int Scaled<const int N>(int x) => x * N\nbool Flag<const bool B>() => B\nchar Mark<const char C>() => C\n\n" +
@@ -4404,30 +4404,30 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("void Bad<const Mode M = Color.Red>() {\n}", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
-    [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T34)")]
-    [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T34, T1)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<int>()", "7: type-mismatch: the type `int` stands where `M` takes a value of `Mode` (T34, T1)")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
+    [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T35, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<int>()", "7: type-mismatch: the type `int` stands where `M` takes a value of `Mode` (T35, T1)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Nope>()", "7: unknown-name: `Mode` has no value `Nope` (D12, V10)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay()", "7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, int>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Two<T, const Mode M>(T x) {\n}\n\nTwo<int>(1)", "7: syntax: `Two` takes 2 type arguments (T19; E4 for another count)")]
-    [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T34, T1)")]
-    [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T34, T1)")]
-    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T34)")]
+    [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T35, T1)")]
+    [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T35, T1)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
     [InlineData("void Say<const Mode M>() {\n    int x = M\n    print(x)\n}\n\nSay<Mode.Plain>()", "5: type-mismatch: a `Mode` where an `int` is required (T1)")]
-    [InlineData("int Scaled<const int N>(int x) => x * N\n\nprint(Scaled<true>(2))", "6: type-mismatch: `N` takes a constant of `int`, not a `bool` (T34, T1)")]
-    [InlineData("void Say<const Mode M>() {\n}\n\nSay<1>()", "7: type-mismatch: `M` takes a constant of `Mode`, not an `int` (T34, T1)")]
-    [InlineData("void Count<const int N>() {\n}\n\nCount<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where `N` takes one of `int` (T34, T1)")]
-    [InlineData("void Count<const int N>() {\n}\n\nCount<int>()", "7: type-mismatch: the type `int` stands where `N` takes a value of `int` (T34, T1)")]
-    [InlineData("T First<T>(List<T> items) => items[0]\n\nprint(First<64>(List<int>()))", "6: type-mismatch: a literal stands where a type is required, among a call's type arguments (T34, T1)")]
-    [InlineData("void Inner<const int N>() {\n}\n\nvoid Outer<const long L>() {\n    Inner<L>()\n}\n\nOuter<1>()", "8: type-mismatch: `L` holds a value of `long`, where `N` takes one of `int` (T34, T1)")]
+    [InlineData("int Scaled<const int N>(int x) => x * N\n\nprint(Scaled<true>(2))", "6: type-mismatch: `N` takes a constant of `int`, not a `bool` (T35, T1)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<1>()", "7: type-mismatch: `M` takes a constant of `Mode`, not an `int` (T35, T1)")]
+    [InlineData("void Count<const int N>() {\n}\n\nCount<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where `N` takes one of `int` (T35, T1)")]
+    [InlineData("void Count<const int N>() {\n}\n\nCount<int>()", "7: type-mismatch: the type `int` stands where `N` takes a value of `int` (T35, T1)")]
+    [InlineData("T First<T>(List<T> items) => items[0]\n\nprint(First<64>(List<int>()))", "6: type-mismatch: a literal stands where a type is required, among a call's type arguments (T35, T1)")]
+    [InlineData("void Inner<const int N>() {\n}\n\nvoid Outer<const long L>() {\n    Inner<L>()\n}\n\nOuter<1>()", "8: type-mismatch: `L` holds a value of `long`, where `N` takes one of `int` (T35, T1)")]
     [InlineData("void Small<const byte B>() {\n}\n\nSmall<300>()", "7: constant-overflow: 300 does not fit a `byte` (L10, T6)")]
     [InlineData("void Count<const uint N>() {\n}\n\nCount<-1>()", "7: constant-overflow: -1 does not fit a `uint` (L10, T6)")]
     [InlineData("bool f(bool x, bool y) => x && y\n\na = 1\nc = 2\nd = 3\nprint(f(a < 64, c > (d)))", "7: unused-variable: `c` is never read (V5)|9: argument-mismatch: the parameter `y` gets no argument and has no default (D11)|9: type-mismatch: an `int` is no function and cannot be called (F11)")]
     public void A_constant_type_argument_is_held_to_the_parameter_it_lands_on(string program, string expected)
     {
-        // T34 with T1: a value of another enum or another type, a literal of another type, a type, and a constant or a literal where a
+        // T35 with T1: a value of another enum or another type, a literal of another type, a type, and a constant or a literal where a
         // type stands are type-mismatch, as a value of another type for a parameter is, and a literal that does not fit the parameter's
         // integer type is its overflow (T6); the parameter's name is no type (V10); a call that writes no constant and leaves out one
         // with no default fixes nothing (T27), and a default before a parameter with none is syntax, as Rust and C# refuse it; the
@@ -4436,26 +4436,26 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("void Name<const string S>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `string`, where an integer type, `bool`, `char` or an `enum` is read (T34)")]
-    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `double`, where an integer type, `bool`, `char` or an `enum` is read (T34)")]
-    [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T34)")]
-    [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T34, F12)")]
-    [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T34, F12)")]
-    [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T34, F12)")]
+    [InlineData("void Name<const string S>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `string`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
+    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `double`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
+    [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T35)")]
+    [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T35, F12)")]
+    [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T35, F12)")]
+    [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T35, F12)")]
     public void A_constant_type_parameter_of_another_type_or_of_a_data_type_is_not_supported(string program, string expected)
     {
-        // T34: the record lists the integer types, `bool`, `char` and an `enum` as the types a constant has, a `data` type's copies are
+        // T35: the record lists the integer types, `bool`, `char` and an `enum` as the types a constant has, a `data` type's copies are
         // no part of the build, and a call's type argument is read before an overload is picked (F12), so a parameter of another type,
         // and overloads that hold a type and a constant at one place, or constants of two types, are not read
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
     }
 
-    // ---- const assert (T35) -----------------------------------------------------------------------
+    // ---- const assert (T36) -----------------------------------------------------------------------
 
     [Fact]
     public void A_const_assert_that_holds_is_clean()
     {
-        // T35: a copy's `T.Kind`, its constant type argument and `f.Name` of a pass are known in each copy, and literals and operators
+        // T36: a copy's `T.Kind`, its constant type argument and `f.Name` of a pass are known in each copy, and literals and operators
         // outside one; a generic function that no call reaches is checked in no copy; `assert` is a name elsewhere (L18)
         Clean(Modes + "data Point(int X, int Y)\n\nvoid Names<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n    for f in T.Fields {\n" +
             "        const assert(f.Name != \"Id\", \"{f.Name}\")\n    }\n}\n\nvoid Say<const Mode M>() {\n    const assert(M == Mode.Plain, \"{M}\")\n}\n\n" +
@@ -4463,25 +4463,25 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T} is no data type\")\n}\n\nNeed(1)", "8: const-assert-failed: `Need<int>`: int is no data type (the `const assert` in `Need`, T35)")]
-    [InlineData("void Say<const Mode M>() {\n    const assert(M == Mode.Plain, \"not {M}\")\n}\n\nSay<Mode.Plain>()\nSay<Mode.Loud>()", "9: const-assert-failed: `Say<Mode.Loud>`: not Loud (the `const assert` in `Say`, T35)")]
-    [InlineData("void Buffer<const int N>() {\n    const assert(N > 0 && N <= 4096, \"a buffer of {N} items\")\n}\n\nBuffer<64>()\nBuffer<0>()", "9: const-assert-failed: `Buffer<0>`: a buffer of 0 items (the `const assert` in `Buffer`, T35)")]
-    [InlineData("void Mark<const char C, const bool B>() {\n    const assert(B || C != 'x', \"{C} {B}\")\n}\n\nMark<'y', false>()\nMark<'x', true>()\nMark<'x', false>()", "10: const-assert-failed: `Mark<'x', false>`: x false (the `const assert` in `Mark`, T35)")]
-    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n}\n\nvoid Outer<T>(T value) {\n    Need(value)\n}\n\nOuter(1)", "12: const-assert-failed: `Outer<int>`: int (the `const assert` in `Need`, T35)")]
-    [InlineData("data Bad(int Id)\n\nvoid NoId<T>(T value) {\n    for f in T.Fields {\n        const assert(f.Name != \"Id\", \"{T}.{f.Name}\")\n    }\n}\n\nNoId(Bad(1))", "12: const-assert-failed: `NoId<Bad>`: Bad.Id (the `const assert` in `NoId`, T35)")]
-    [InlineData("void Later<T>(T value) {\n    check = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    check()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T35)")]
-    [InlineData("const assert(1 + 1 == 3, \"{1 + 1} {'x'} {true} {\"s\"} {Mode.Loud}\")", "4: const-assert-failed: 2 x true s Loud (T35)")]
-    [InlineData("void Plain() {\n    const assert(false, \"plain\")\n}", "5: const-assert-failed: plain (T35)")]
-    [InlineData("n = 2\nconst assert(n > 1, \"{n}\")", "5: const-assert-failed: the value of `n` is not known while the program compiles, in a condition of a `const assert` (T35)|5: const-assert-failed: the value of `n` is not known while the program compiles, in a hole of the text of a `const assert` (T35)")]
-    [InlineData("void Need<T>(T value) {\n    const assert(value == value, \"x\")\n}\n\nNeed(1)", "5: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T35)")]
-    [InlineData("data Point(int X)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        const assert(true, \"{f.Get(value)}\")\n        const assert(f.Get(value) > 0, \"x\")\n    }\n}\n\nShow(Point(1))", "8: const-assert-failed: the value of `value` is not known while the program compiles, in a hole of the text of a `const assert` (T35)|9: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T35)")]
+    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T} is no data type\")\n}\n\nNeed(1)", "8: const-assert-failed: `Need<int>`: int is no data type (the `const assert` in `Need`, T36)")]
+    [InlineData("void Say<const Mode M>() {\n    const assert(M == Mode.Plain, \"not {M}\")\n}\n\nSay<Mode.Plain>()\nSay<Mode.Loud>()", "9: const-assert-failed: `Say<Mode.Loud>`: not Loud (the `const assert` in `Say`, T36)")]
+    [InlineData("void Buffer<const int N>() {\n    const assert(N > 0 && N <= 4096, \"a buffer of {N} items\")\n}\n\nBuffer<64>()\nBuffer<0>()", "9: const-assert-failed: `Buffer<0>`: a buffer of 0 items (the `const assert` in `Buffer`, T36)")]
+    [InlineData("void Mark<const char C, const bool B>() {\n    const assert(B || C != 'x', \"{C} {B}\")\n}\n\nMark<'y', false>()\nMark<'x', true>()\nMark<'x', false>()", "10: const-assert-failed: `Mark<'x', false>`: x false (the `const assert` in `Mark`, T36)")]
+    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n}\n\nvoid Outer<T>(T value) {\n    Need(value)\n}\n\nOuter(1)", "12: const-assert-failed: `Outer<int>`: int (the `const assert` in `Need`, T36)")]
+    [InlineData("data Bad(int Id)\n\nvoid NoId<T>(T value) {\n    for f in T.Fields {\n        const assert(f.Name != \"Id\", \"{T}.{f.Name}\")\n    }\n}\n\nNoId(Bad(1))", "12: const-assert-failed: `NoId<Bad>`: Bad.Id (the `const assert` in `NoId`, T36)")]
+    [InlineData("void Later<T>(T value) {\n    check = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    check()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T36)")]
+    [InlineData("const assert(1 + 1 == 3, \"{1 + 1} {'x'} {true} {\"s\"} {Mode.Loud}\")", "4: const-assert-failed: 2 x true s Loud (T36)")]
+    [InlineData("void Plain() {\n    const assert(false, \"plain\")\n}", "5: const-assert-failed: plain (T36)")]
+    [InlineData("n = 2\nconst assert(n > 1, \"{n}\")", "5: const-assert-failed: the value of `n` is not known while the program compiles, in a condition of a `const assert` (T36)|5: const-assert-failed: the value of `n` is not known while the program compiles, in a hole of the text of a `const assert` (T36)")]
+    [InlineData("void Need<T>(T value) {\n    const assert(value == value, \"x\")\n}\n\nNeed(1)", "5: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T36)")]
+    [InlineData("data Point(int X)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        const assert(true, \"{f.Get(value)}\")\n        const assert(f.Get(value) > 0, \"x\")\n    }\n}\n\nShow(Point(1))", "8: const-assert-failed: the value of `value` is not known while the program compiles, in a hole of the text of a `const assert` (T36)|9: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T36)")]
     [InlineData("const assert(1, \"one\")", "4: type-mismatch: a condition is a `bool`, not an `int` (C3)")]
     [InlineData("const assert(nope > 1, \"{nope > 1}\")\nconst assert(false, \"{nope}\")", "4: unknown-name: no `nope` is visible here (V10)|4: unknown-name: no `nope` is visible here (V10)|5: unknown-name: no `nope` is visible here (V10)")]
     [InlineData("x = nope\nconst assert(x, \"a\")\nconst assert(true, \"{x}\")", "4: unknown-name: no `nope` is visible here (V10)")]
-    [InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "7: const-assert-failed: the value of `T` is not known while the program compiles, in a hole of the text of a `const assert` (T35)")]
+    [InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "7: const-assert-failed: the value of `T` is not known while the program compiles, in a hole of the text of a `const assert` (T36)")]
     public void A_const_assert_stops_the_build_where_its_condition_is_false(string program, string expected)
     {
-        // T35: a false one in a copy stops the build at the call that made the outermost copy, naming it and the function that holds
+        // T36: a false one in a copy stops the build at the call that made the outermost copy, naming it and the function that holds
         // the `const assert`, with the text, its holes filled: a type parameter with the copy's type, a constant with its text (A2, A4);
         // outside a copy, at the statement, in a function no call reaches too; a variable or a parameter is not known while the program
         // compiles (Rust's E0435), a variable of a type parameter's name among them, and `f.Get(value)` in a pass reads `value`, in the
@@ -4491,21 +4491,21 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData("bool Check() => true\n\nconst assert(Check(), \"x\")", "6: a call in a `const assert`, which the build does not evaluate while the program compiles (T35)")]
-    [InlineData("const assert([1, 2] == [1, 2], \"x\")", "4: a condition of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T35)")]
-    [InlineData("const assert(true, \"{1.5}\")", "4: a hole of the text of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T35)")]
+    [InlineData("bool Check() => true\n\nconst assert(Check(), \"x\")", "6: a call in a `const assert`, which the build does not evaluate while the program compiles (T36)")]
+    [InlineData("const assert([1, 2] == [1, 2], \"x\")", "4: a condition of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T36)")]
+    [InlineData("const assert(true, \"{1.5}\")", "4: a hole of the text of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T36)")]
     public void A_const_assert_beyond_what_the_build_evaluates_is_not_supported(string program, string expected)
     {
-        // T35: the build evaluates no call while the program compiles, and of the other values those the checker folds alone
+        // T36: the build evaluates no call while the program compiles, and of the other values those the checker folds alone
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
     }
 
     [Fact]
     public void What_a_const_assert_with_a_call_names_counts_as_read()
     {
-        // T35 with V5: a name in a `const assert` that the build does not evaluate is read, as in a branch that never runs (E1)
+        // T36 with V5: a name in a `const assert` that the build does not evaluate is read, as in a branch that never runs (E1)
         var program = Modes + "bool Check(int x) => true\n\nn = 1\nconst assert(Check(n), \"x\")";
-        Assert.Equal(["7: a call in a `const assert`, which the build does not evaluate while the program compiles (T35)"], NotSupported(program));
+        Assert.Equal(["7: a call in a `const assert`, which the build does not evaluate while the program compiles (T36)"], NotSupported(program));
         Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
     }
 

@@ -575,7 +575,7 @@ public sealed class Parser
         {
             if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen)
             {
-                return ParseConstAssert(); // T35: a statement of its own; `const` and `assert` are names everywhere else (L18)
+                return ParseConstAssert(); // T36: a statement of its own; `const` and `assert` are names everywhere else (L18)
             }
 
             if (Peek().Kind == TokenKind.Assign)
@@ -773,7 +773,7 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// T35: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
+    /// T36: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
     /// *(assumed, §4: as Rust's <c>assert!</c> takes its message as a literal)*.
     /// </summary>
     private ConstAssertStatement ParseConstAssert()
@@ -1392,7 +1392,7 @@ public sealed class Parser
         {
             if (Current is { Kind: TokenKind.Name, Text: "const" } && Peek().Kind is TokenKind.Name or TokenKind.Keyword)
             {
-                // T34: `const` before a type parameter's type is the word of a parameter that holds a constant, and a name elsewhere,
+                // T35: `const` before a type parameter's type is the word of a parameter that holds a constant, and a name elsewhere,
                 // as `thread` is a word before `static` alone (L18); its default is a value as a unary operator reads one, before `,` or `>`
                 var line = Advance().Line;
                 var constant = ParseCoreType();
@@ -1819,7 +1819,7 @@ public sealed class Parser
         or TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.Star or TokenKind.Ampersand;
 
     /// <summary>
-    /// T34: a literal among a call's type arguments: an integer, with a `-` before it as Rust takes `f::&lt;-1&gt;()`, `true`, `false`
+    /// T35: a literal among a call's type arguments: an integer, with a `-` before it as Rust takes `f::&lt;-1&gt;()`, `true`, `false`
     /// or a <c>char</c>; read as a unary expression, which stops before the `,` or the `>` after it.
     /// </summary>
     private bool AtConstantTypeArgument() =>
@@ -1903,7 +1903,7 @@ public sealed class Parser
             // a reading (README): the list is kept when `(` follows the `>`, so `f(a < b, c > (d))` is the call `a<b, c>(d)` and
             // `a < b, c > d` is two comparisons, and after a name when a member and its `(` follow the `>`, R15's
             // `List<T>.FromRaw(p, n)`, the one form the reference gives a generic name that is not called; C# (T17: generics as in C#)
-            // also keeps it before `)`, `]`, `,`, `?` and a few more, where this front end reads a comparison. T34: a literal stands in
+            // also keeps it before `)`, `]`, `,`, `?` and a few more, where this front end reads a comparison. T35: a literal stands in
             // the list where `(` follows it, `Buffer<64>()`, as Rust reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))`
             // is the call `a<64, c>(d)` too
             if (At(TokenKind.Less) && expression is NameExpression or MemberAccess)

@@ -1486,7 +1486,7 @@ void Show<T>(T value, Invoice other) {
 Show(Order("a1"), Invoice("b2"))
 ```
 
-### T34 (decided, §4) A type parameter that holds a constant
+### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
 type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
@@ -1496,7 +1496,7 @@ parameter as a value known while the program compiles (§4, the owner, 2026-11-0
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
 `enum`)* *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
-`assert(` (T35) and among the words of an `asm`, and a name elsewhere (L18); a
+`assert(` (T36) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type, and where a type stands it is
 `unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
@@ -1629,11 +1629,11 @@ d = 3
 print(Both((a < 64), c > (d)))
 ```
 
-### T35 (decided, §4) `const assert`
+### T36 (decided, §4) `const assert`
 
 Generic code stops the build on a fault it finds in a type it reads with `const assert(condition,
 text)`: a condition over values known while the program compiles, a copy's reading of its type
-(T33) and its constant type arguments (T34) among them, checked in each copy. Where it is false,
+(T33) and its constant type arguments (T35) among them, checked in each copy. Where it is false,
 the build stops at the call that made the copy, with the text of the code that holds it:
 `const assert(T.Kind == TypeKind.Data, "{T} is no data type")` stops `Need(1)` with `int is no
 data type` at that call, as Rust's `const { assert!(condition, "text") }` stops a build in a copy of

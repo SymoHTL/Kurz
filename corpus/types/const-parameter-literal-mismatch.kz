@@ -1,5 +1,5 @@
 // expect: error type-mismatch at 5
-// rules: T34
+// rules: T35
 
 int Scaled<const int N>(int x) => x * N
 print(Scaled<true>(2))

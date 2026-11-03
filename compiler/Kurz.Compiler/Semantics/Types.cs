@@ -266,7 +266,7 @@ public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
 }
 
 /// <summary>
-/// T34: the constant a call gives a type parameter that holds one, of the parameter's type: a value of an <c>enum</c> by its place
+/// T35: the constant a call gives a type parameter that holds one, of the parameter's type: a value of an <c>enum</c> by its place
 /// among the enum's values, an integer, a <c>bool</c> or a <c>char</c>; it stands in a copy's list of type arguments beside the
 /// types, and is never the type of a value.
 /// </summary>

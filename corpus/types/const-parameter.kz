@@ -6,7 +6,7 @@
 // | b!
 // | Loud Loud
 // | c!
-// rules: T34
+// rules: T35
 
 enum Mode { Plain, Loud }
 

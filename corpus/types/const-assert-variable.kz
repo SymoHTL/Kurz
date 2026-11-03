@@ -1,5 +1,5 @@
 // expect: error const-assert-failed at 5
-// rules: T35
+// rules: T36
 
 n = 2
 const assert(n > 1, "n is small")

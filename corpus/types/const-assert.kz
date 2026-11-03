@@ -2,7 +2,7 @@
 // | X
 // | Y
 // | a
-// rules: T35
+// rules: T36
 
 enum Mode { Plain, Loud }
 data Point(int X, int Y)
