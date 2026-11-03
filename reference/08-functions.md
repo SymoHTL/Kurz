@@ -154,11 +154,17 @@ file.
 ### F10 (decided, §8, §13) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
-without imports. `use` brings in another folder or a package. A type it holds is visible
-unqualified, `Json.Parse<T>(text)`, and a function at the top of the folder is reached through the
-folder's name, `sys.Write(...)`; two folders a file uses that both hold a type of one name are the
-compile error `ambiguous-name` at the bare use of that name (§13, the owner, 2026-11-01, "By kind of
-name"). *(assumed, §13: the id)*
+without imports. `use` brings in another folder or a package: a folder of the project by its path
+from the folder of `project.kz`, `use a/util`, and a package by the name of its line in
+`project.kz`, `use json`. A type it holds is visible unqualified, `Json.Parse<T>(text)`, and is named
+through the folder too, `json.Json`; a function at the top of the folder is reached through the
+folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives the folder another
+name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
+name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
+agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
+"Both forms", "Root path, last name"). *(assumed, §8, §13: the two ids; a type of the file's own
+folder is the one its bare name means; every name at the top of a folder that is no type is reached
+through the folder's name; a package's qualifier is the name of its line)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 
@@ -166,11 +172,21 @@ No case: it takes several files, and a case of the corpus is a single file.
 
 The type of a function value is written with an arrow: the parameter types between brackets, `=>`,
 and the result type, as in `(int) => bool`. A lambda reads the variables around it and cannot assign
-them: assigning one is the compile error `capture-assign`. So is every change of a captured
-variable: an assignment into a path from it (M4), a `mut` method called on it or on a path from it
-(M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
-copy would be lost or, through a class instance on the path, would not be a change of the copy at
-all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
+them: assigning one is the compile error `capture-assign`. The lambda holds a copy of each (F15),
+and a class instance is no part of the copy: the lambda holds a reference to the same instance. So
+every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
+from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
+such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
+record speaks of assigning)* An instance changes through every reference (K2), so the lambda may
+change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
+or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
+value `d` stay `capture-assign` (§4, the owner, 2026-11-01, #110, comment 6562487754, "Both allowed", against a method call
+alone and against neither). It may also write into the list or the map that a `mut` field of the
+instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
+write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786), and pass a `mut` field of the
+instance as a `mut` argument, `() => Fill(mut Items)` inside a method (M7; §4, the owner, 2026-11-02, #110, comment
+6579495475). An instance that a captured `data` value holds is one the lambda may
+change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
 objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
@@ -209,6 +225,45 @@ big = xs.Where(x => {
 })
 print(big.Count)
 print(total)
+```
+
+Case: [functions/capture-changes-instance.kz](../corpus/functions/capture-changes-instance.kz)
+```kurz
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
+```
+
+Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+more = () => b.Items.Add(3)
+first()
+more()
+print(b.Items)
+fill = b.Filler()
+fill()
+print(b.Items.Count)
 ```
 
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)
@@ -609,7 +664,9 @@ A `return` with a value among the top-level statements, `return 2`, ends the pro
 its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
 0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
 return n + Exit" and "0, silently"). The value is an `int`, and a value of another type is
-`type-mismatch`. *(assumed, §12: the type)*
+`type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
+for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
+`Environment.Exit`. *(assumed, §12: the type, the low 8 bits and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 

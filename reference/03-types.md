@@ -158,6 +158,16 @@ r = Pair(1L, [x])
 print(r)
 ```
 
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
 ### T8 (decided, §4) Implicit widening
 
 A value of a narrower integer type becomes a wider one without a word when the wider type holds
@@ -1012,7 +1022,11 @@ print("b" > "b")
 
 ### T17 (decided, §4) Generics
 
-Generic types are written as in C#: `List<int>`, `Map<int, User>`.
+Generic types are written as in C#: `List<int>`, `Map<int, User>`. `void` is no type argument:
+`List<void>`, `Map<string, void>` and `Other<void>()` are the compile error `void-type-argument`
+where `void` is written, as C# refuses it (CS1547), while the result of a function type inside a
+type argument, `List<(int) => void>`, stands (§4, the owner, 2026-11-02, "refused, as CS1547").
+*(assumed, §4: the id, named for what it refuses)*
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -1021,6 +1035,13 @@ xs.Add(4)
 xs.Add(5)
 print(xs.Count)
 print(xs[1])
+```
+
+Case: [types/void-type-argument.kz](../corpus/types/void-type-argument.kz)
+```kurz
+fs = List<(int) => void>()
+names = Map<string, void>()
+print(fs.Count + names.Count)
 ```
 
 ### T19 (decided, §4) Declaring generic functions and types
@@ -1221,19 +1242,24 @@ fields in the order of their declaration, unrolled in each copy: `f.Name` is a c
 `T.Make(f => ...)` makes a value of a `data` type: it is unrolled into one call of the type's
 primary constructor, with one argument for each field in order, so that its constraints are checked
 as at any construction. Passing a type argument grants its reading, whatever package declared the
-type. The fields read are the primary constructor's (D14), never those the body declares (§4, the
-owner, 2026-11-01, "Kinds + parts", "for f in T.Fields", "T.Make(f => ...)" and "Type arg grants
-read"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
+declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
+`T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
-members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
+members of a type parameter alone; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
+`f.Get(value)` alone, and anywhere else is `syntax`; `f.Get` takes a value of `T` or of a type derived from it, and one of
+another type is `type-mismatch`)* A `match` on `T.Kind`
 is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
-error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
+error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
+that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
 same error)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
@@ -1251,6 +1277,29 @@ void ShowFields<T>(T value) {
 }
 
 ShowFields(Order("a1", 3))
+```
+
+Case: [types/type-fields-type.kz](../corpus/types/type-fields-type.kz)
+```kurz
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+string Show<T>(T value) => match T.Kind {
+    TypeKind.Data => Fields(value)
+    else => "{value}"
+}
+
+string Fields<T>(T value) {
+    mut text = ""
+    for f in T.Fields {
+        f.Type part = f.Get(value)
+        shown = Show<f.Type>(part)
+        text = "{text}{f.Name}=({shown});"
+    }
+    return text
+}
+
+print(Show(Shape("box", Point(1, 2))))
 ```
 
 Case: [types/type-kind.kz](../corpus/types/type-kind.kz)
@@ -1334,6 +1383,60 @@ void ShowKind<T>() {
 
 ShowKind<Order>()
 ShowKind<bool>()
+```
+
+Case: [types/type-kind-if-not-read.kz](../corpus/types/type-kind-if-not-read.kz)
+```kurz
+data Point(int X, int Y)
+
+void Show<T>(T value) {
+    if T.Kind == TypeKind.Data {
+        for f in T.Fields {
+            print(f.Name)
+        }
+    }
+}
+
+Show(Point(1, 2))
+Show(true)
+```
+
+Case: [types/type-fields-kind-not-read.kz](../corpus/types/type-fields-kind-not-read.kz)
+```kurz
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print(f.Name)
+    }
+}
+
+ShowFields(3)
+```
+
+Case: [types/type-fields-value.kz](../corpus/types/type-fields-value.kz)
+```kurz
+data Order(string Id)
+
+void Show<T>(T value) {
+    for f in T.Fields {
+        print(f)
+    }
+}
+
+Show(Order("a1"))
+```
+
+Case: [types/type-fields-get-mismatch.kz](../corpus/types/type-fields-get-mismatch.kz)
+```kurz
+data Order(string Id)
+data Invoice(string Id)
+
+void Show<T>(T value, Invoice other) {
+    for f in T.Fields {
+        print(f.Get(other))
+    }
+}
+
+Show(Order("a1"), Invoice("b2"))
 ```
 
 ### T34 (decided, §4) A cycle of generic calls whose type argument grows
