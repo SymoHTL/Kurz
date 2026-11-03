@@ -1588,7 +1588,7 @@ Case: [types/generic-growing-cycle-fields.kz](../corpus/types/generic-growing-cy
 ```kurz
 data Box<T>(T A)
 
-// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: no copy is made for `Box<int>`
+// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: the chain of copies stops at it, after `Deep<Box<int>>`
 void Deep<T>(T x, int n) {
     for f in T.Fields {
         if n > 0 {
