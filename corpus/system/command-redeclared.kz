@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: S17
+
+data Command(string Program)
+
+print(1)

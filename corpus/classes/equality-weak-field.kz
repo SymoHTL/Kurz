@@ -1,0 +1,13 @@
+// expect: output
+// | false
+// | true
+// rules: K4
+
+class Owner(string Name)
+class Pet(string Name, weak Owner? Keeper)
+
+o = Owner("Ann")
+a = Pet("Rex", o)
+b = Pet("Rex", o)
+print(a == b)
+print(a == a)
