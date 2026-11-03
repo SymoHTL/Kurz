@@ -105,8 +105,9 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     public void A_guarded_blocks_function_is_named_after_the_function_it_stands_in_in_the_trace_and_in_the_line_tables()
     {
         // section 13, the owner, 2026-11-02: `<function>.guarded`, in the pattern of a lambda's `main.lambda`, in the trace and in the
-        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is; `Pick`
-        // takes its value from a list, not from the command line, which the runtime of Windows does not give (S11)
+        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is, and so
+        // is a guarded block written in one, `Doubler.Twice.guarded` again; `Pick` takes its value from a list, not from the command line,
+        // which the runtime of Windows does not give (S11)
         HasTheSets();
         const string text = """
             int Pick(int n) {
@@ -132,6 +133,10 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
             class Doubler {
                 pub int Twice(int n) {
                     if X86.Sse41.IsSupported {
+                        if X86.Sha.IsSupported {
+                            return X86.Sse41.Extract(Vector128.Create(n, n, n, n), 0) * 2
+                        }
+
                         return X86.Sse41.Extract(Vector128.Create(n, n, n, n), 0) * 2
                     }
 
@@ -161,13 +166,15 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
         Assert.Equal(
             "Doubler.Twice.guarded Doubler.Twice.guarded, Pick.guarded Pick.guarded, main.guarded main.guarded, main.lambda main.lambda, main.lambda.guarded main.lambda.guarded",
             string.Join(", ", names));
+        // the block guarded by `X86.Sha` in the one of `Doubler.Twice` is a function of its own, so the name above is not the outer block's alone
+        Assert.Equal(2, Regex.Matches(ir, @"!DISubprogram\(name: ""Doubler\.Twice\.guarded"", linkageName: ""[^""]*""").Select(m => m.Value).Distinct().Count());
 
         Ran(
             Toolchain.Run(toolchain.Build(Compile(text, toolchain.Runtime).Program!, "guarded-trace-name"), null), // the trace on
             1,
             ["2", "2", "3"],
             "error: thrown at program.kz:6:\nlane 0 too big\n"
-            + (OperatingSystem.IsLinux() ? "  at Pick.guarded in program.kz:6\n  at Pick in program.kz:3\n  at main in program.kz:41\n" : string.Empty));
+            + (OperatingSystem.IsLinux() ? "  at Pick.guarded in program.kz:6\n  at Pick in program.kz:3\n  at main in program.kz:45\n" : string.Empty));
     }
 
     [Fact]

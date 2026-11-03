@@ -347,8 +347,9 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
-`HttpError` with its `HttpKind` (W2), types every program sees (W1: the checker of a program is given `std/`'s checker and takes the
-symbols it made of each `pub` type that `Checker.Prelude` names, where the built-in types every file sees, `IoError` among them, are
+`HttpError` with its `HttpKind` (W2) and the class `HttpHeaders` (W4), types every program sees (W1: the checker of a program is given
+`std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
+members without `pub` stay private to it (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
 the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
@@ -677,6 +678,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   emitted as that call, a type with no fields giving its value;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
+- a type parameter that holds a constant of an integer type, `bool`, `char` or an `enum`, `const int N` or `const Mode M`,
+  with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
+  `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
+  the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
+  in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1295,8 +1301,9 @@ before a SHA instruction in `raw` that no test guards, is not cleaned after. `In
 of a guarded block under the fenced allocator, every intrinsic against .NET's `System.Runtime.Intrinsics`
 on the same lanes, and the SHA-1 functions, which .NET does not have, by compressing a block of SHA-1.
 Those of its tests and of `HashTests` that run an instruction fail, naming the set, on a machine without
-SSE4.1, AES or SHA, and the one built for `native` without AVX, since a path no test runs must not look
-clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
+SSE4.1, AES or SHA, the one built for `native` without AVX, the one built for `x86-64-v3` without one of
+its sets, and the start check's against the machine where fewer than 20 of its table's sets read as
+present or none reads as missing, since a path no test runs must not look clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
 A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
 tables as the function's name; a lambda made in the block is named after the function the block
@@ -1517,7 +1524,9 @@ that sit under a rule by its id. Every one is pinned by a test.
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
-  `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
+  `syntax`, a comparison without its right operand. A literal among the type arguments, which T35 keeps where `(` follows
+  the list (the owner, 2026-11-02), so that `f(a < 64, c > (d))` is the call `a<64, c>(d)`, ends the list before a member
+  and its `(`: `List<64>.FromRaw(p, 0)` is `syntax`. T17 says generic types are written as in C# and
   states no such rule.
 - T17: `void` as a type argument written in a type or a call, of a generic function, a generic `data`
   type, `List` and `Map`, is `void-type-argument` where it is written, nested ones and one in a
@@ -1613,8 +1622,8 @@ the lane operations the emitter emits, `IsSupported` of every class of C#'s unde
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
-types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
-build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
+types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError` and `HttpHeaders`, which a program checked with `std/`'s
+checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an `HttpError`, and W4; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
@@ -1727,11 +1736,14 @@ error stand, and which every file sees, so that a file's own declaration of one 
 `Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
-such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
+such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
-`redeclared` (G1 to G5); and `use` (F10) of any folder but the runtime's `sys`;
+`redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
+leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
+types, at the place of a type argument a call writes,
+which is read before the overload is picked (T35, F12); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

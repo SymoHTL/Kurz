@@ -241,7 +241,11 @@ the head that will be reviewed is a `judgment step`.
    - Exit 4: the state of the merge is unknown. Look at the pull request before anything else.
    - Exit 6: the merge landed and the record of the waiver is missing: post the line the tool
      printed on the pull request.
-5. Delete the branch. The `gates` job runs again on `main`; a red run there is fixed by the next
+5. Delete the branch: `py -3 tools/merge_pr.py --delete-branch <N> --dry-run`, then the same
+   without `--dry-run`, never `git push origin --delete`; the rule in `CLAUDE.md` that names the
+   command says why. Tell the owner of each pull request it names that its base changed.
+   Gate: `self-tests`; a deletion by hand: HAZARD (#14).
+   The `gates` job runs again on `main`; a red run there is fixed by the next
    pull request, before any other merges. `judgment step`
 
 ## When something escaped
