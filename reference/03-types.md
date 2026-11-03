@@ -1498,13 +1498,17 @@ it grew from, each copy makes a larger one without end, and the call is the comp
 type parameter unchanged, swaps two of them, or gives one to a function that takes it back out of
 a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
 refused where it is written, whether or not a call reaches it. A generic function that reads its
-type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
-and a chain of more than 64 copies stays `not supported`. Of its calls, those in a loop over
-`T.Fields` are read for such a cycle on its text, and a cycle that grows there is refused at that
-call, with no copy made, so that the chain does not reach that bound; a type argument there that is
-the field's type takes no part, since the text does not give that type. A cycle that grows in an
-arm of a `match` on `T.Kind`, or that leaves the loop through a call outside it, shows only at that
-bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+type (T33) keeps its check in the copies, but for the calls this paragraph reads on its text: an
+arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copies stays
+`not supported`. Of its calls, those in a loop over `T.Fields` are read for such a cycle on its
+text, and a cycle that grows there is refused at that call. The chain of copies stops at that
+call, so that it does not reach that bound, and the copies before it report every other error of
+the function's body in the same build. A call in an arm of a `match` on `T.Kind` takes no part,
+inside such a loop as outside it, since each copy takes the one arm of its kind, and neither does
+a type argument there that is the field's type, since the text does not give that type. A cycle
+that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
+bound. *(assumed, §4: the id; a type argument that holds the field's type inside a form of a type,
+`List<f.Type>`, takes no part, as the field's type itself; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
 `T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
@@ -1595,6 +1599,48 @@ void Deep<T>(T x, int n) {
 
 Deep(Box(1), 3)
 print("done")
+```
+
+Case: [types/generic-growing-cycle-fields-arm.kz](../corpus/types/generic-growing-cycle-fields-arm.kz)
+```kurz
+data Box(int A)
+
+// a call in an arm of a `match` on `T.Kind` takes no part in the walk inside a loop over `T.Fields` too: no copy takes the `TypeKind.List` arm
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        match T.Kind {
+            TypeKind.List => Deep([x], n - 1)
+            else => print(n)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields-type.kz](../corpus/types/generic-growing-cycle-fields-type.kz)
+```kurz
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+// `Show` calls itself in its loop over `T.Fields` with the field's type, which takes no part in a cycle that grows
+string Show<T>(T value) {
+    match T.Kind {
+        TypeKind.Data => {
+            mut text = ""
+            for f in T.Fields {
+                f.Type part = f.Get(value)
+                shown = Show<f.Type>(part)
+                text = "{text}{f.Name}=({shown});"
+            }
+            return text
+        }
+        else => return "{value}"
+    }
+}
+
+print(Show(Shape("box", Point(1, 2))))
 ```
 
 ### T18 (assumed, §4) Operators
