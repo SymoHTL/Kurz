@@ -1,0 +1,53 @@
+// expect: output
+// | 0
+// | again
+// | hi
+// | BrokenPipe 32
+// | NotConnected 107
+// | Other 9
+// rules: S9
+
+// the writes of one end ended through one holder: its peer reads the end of the stream, a second call passes, and the other
+// holder still reads and has its write refused; a stream whose peer reset it, and a closed one, get the system's answer
+void | IoError Half() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    held = server
+    server.ShutdownWrite()
+    mut end = Bytes()
+    print(client.Read(mut end, 16))
+    server.ShutdownWrite()
+    print("again")
+    client.Write("hi".Bytes)
+    mut buffer = Bytes()
+    mut read = 1
+    while buffer.Count < 2 && read > 0 {
+        read = held.Read(mut buffer, 2 - buffer.Count)
+    }
+
+    print(string.FromUtf8(buffer) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+    held.Write("late".Bytes) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    // a peer that closes with a byte it never read, still in the system's queue, resets the connection
+    reset = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    accepted = listener.Accept()
+    accepted.Write("x".Bytes)
+    reset.Close()
+    accepted.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    server.Close()
+    server.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+}
+
+Half() else {
+    IoError e => print(e)
+}

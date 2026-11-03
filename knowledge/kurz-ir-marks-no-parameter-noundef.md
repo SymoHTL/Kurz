@@ -1,6 +1,6 @@
 ---
 name: kurz-ir-marks-no-parameter-noundef
-description: The IR the emitter writes marks no parameter `noundef`, where clang's IR of the same function in C marks every one; for MD5's F and G that changes no machine code (clang 23.1.4, probe of 2026-11-02), and the gap pull request 159 measured between two forms of F and G came from G's form alone, while F joined by an or is the faster form of F, the one that change had turned down. A reason given for a gap between two forms is a reading until the IR, the machine code and a measurement of each change alone show it
+description: The IR the emitter writes marks no parameter `noundef`, where clang's IR of the same function in C marks every one; for MD5's F and G that changes no machine code (clang 23.1.4, probe of 2026-11-02), and the gap pull request 159 measured between two forms of F and G came from G's form alone, while F joined by an or is faster than its two terms added one at a time, the form that change had turned down, and the select OpenSSL's assembly writes is faster than the or (issue 157, 2026-11-03). A reason given for a gap between two forms is a reading until the IR, the machine code and a measurement of each change alone show it
 metadata:
   type: reference
 ---
@@ -50,8 +50,13 @@ real clang; the command has no option that keeps it.
   F's or was the faster in 37, the two took the same time in one, and std's form was the faster in
   two.
 
-So the gap came from G's form, and F's or is the faster form of F. Why each form costs what it does
-is not shown; `noundef` is not it, since the machine code does not change with it.
+So the gap came from G's form, and F's or is the faster of these two forms of F. A third form, the
+select OpenSSL's x86-64 assembly writes, `((c ^ d) & b) ^ d`, is faster than the or: 51.76 ms against
+52.14 ms for MD5 of 16 MiB hashed three times, the best of 9, and 51.77 against 52.09 ms in a run of
+the two alone, the best of 15 (issue 157, 2026-11-03, comment 6594121046). std writes F so, and the
+comment on `Md5F` gives the numbers. Of the or, LLVM (clang 23) makes the select in 14 of F's 16
+steps and keeps the or, with a `not`, in the last two (the same comment). Why the other forms cost
+what they do is not shown; `noundef` is not it, since the machine code does not change with it.
 
 ## What to do
 

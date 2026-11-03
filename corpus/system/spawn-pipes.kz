@@ -1,0 +1,34 @@
+// expect: output
+// | true
+// | stdout piped
+// | no stderr
+// | piped
+// rules: S19
+
+void | IoError | ExitError | InvalidUtf8 Run() {
+    child = Command.New("cat").Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
+    print(child.Id > 0)
+    match child.Stdout {
+        File => print("stdout piped")
+        null => print("no stdout")
+    }
+    match child.Stderr {
+        File => print("stderr piped")
+        null => print("no stderr")
+    }
+    match child.Stdin {
+        File input => {
+            input.Write("piped".Bytes)
+            input.Close()
+        }
+        null => print("no input")
+    }
+    out = child.WaitWithOutput()
+    print(string.FromUtf8(out.Stdout))
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

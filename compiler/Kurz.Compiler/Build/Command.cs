@@ -13,14 +13,17 @@ namespace Kurz.Compiler.Build;
 /// search refused the clang it found, or found none, they write what they know before the clang, the
 /// failure on standard error in the form of the record's failures of the command (<c>error:</c>, then
 /// indented <c>note:</c> and <c>help:</c> lines), and exit with 1.
-/// <c>kurz build [--release] [--lines] file.kz [-o output]</c> builds the program for the machine that builds, the test build unless
+/// <c>kurz build [--release] [--lines] [--cpu name] file.kz [-o output]</c> builds the program for the machine that builds, the test build unless
 /// <c>--release</c> says otherwise, a release build with the line tables a test build has where <c>--lines</c> says so (the owner,
-/// 2026-10-29, "build, run and exec"), into the executable beside the source, named after it, <c>hello.exe</c> on Windows, or where
+/// 2026-10-29, "build, run and exec"), for the baseline of the machine's architecture, or for the CPU <c>--cpu</c> names as clang knows
+/// it, <c>native</c> the machine's own, which clang gets as rustc passes <c>-C target-cpu</c> and whose sets make their tests constants
+/// (section 2; R18; the owner, 2026-11-01, "--cpu on build, run and exec"; a CPU clang does not know is a failure of the command's own),
+/// into the executable beside the source, named after it, <c>hello.exe</c> on Windows, or where
 /// <c>-o</c> says, written over an executable that is there; it refuses to write over the source or a directory. A program the
 /// compiler refuses gets its lines on standard error, <c>hello.kz:3: &lt;id&gt;: &lt;text&gt;</c> or
 /// <c>hello.kz:3: not supported: &lt;text&gt;</c>, and no executable; that, and every failure of the command's own, exits with 1. The
-/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] [--lines] file.kz</c> builds the file
-/// and runs it, and <c>kurz exec [--release] [--lines] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
+/// command grants a program neither <c>raw</c> nor <c>native</c> (R7, R16). <c>kurz run [--release] [--lines] [--cpu name] file.kz</c> builds the file
+/// and runs it, and <c>kurz exec [--release] [--lines] [--cpu name] "program text"</c> builds its argument, whose lines are named <c>exec</c>, and runs
 /// it, each in a place of its own (<see cref="Place"/>), which it removes after the run, with the places a run cut short left removed at its
 /// start; the program takes the words after <c>--</c> and the command's streams (<see cref="Processes.Run"/>), and the command ends with the
 /// program's exit code. A command line it cannot read gets the usage on standard error and the exit code 1.
@@ -28,8 +31,8 @@ namespace Kurz.Compiler.Build;
 public static class Command
 {
     /// <summary>What the command prints for a command line it cannot read.</summary>
-    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] <file.kz> [-o <output>]\n"
-        + "       kurz run [--release] [--lines] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] \"<program text>\" [-- <argument>...]\n"
+    public const string Usage = "usage: kurz --version [--verbose]\n       kurz build [--release] [--lines] [--cpu <name>] <file.kz> [-o <output>]\n"
+        + "       kurz run [--release] [--lines] [--cpu <name>] <file.kz> [-- <argument>...]\n       kurz exec [--release] [--lines] [--cpu <name>] \"<program text>\" [-- <argument>...]\n"
         + "       run and exec pass the words after -- to the program\n";
 
     private const string OnThePath = " on the path";
@@ -100,6 +103,7 @@ public static class Command
     {
         var release = false;
         var lines = false;
+        string? cpu = null;
         string? sourcePath = null;
         string? outputPath = null;
         for (var i = 0; i < arguments.Count; i++)
@@ -111,6 +115,9 @@ public static class Command
                     break;
                 case "--lines" when !lines:
                     lines = true;
+                    break;
+                case "--cpu" when cpu is null && i + 1 < arguments.Count:
+                    cpu = arguments[++i];
                     break;
                 case "-o" when outputPath is null && i + 1 < arguments.Count:
                     outputPath = arguments[++i];
@@ -156,7 +163,7 @@ public static class Command
             return 1;
         }
 
-        if (Read(sourcePath, error) is not { } source || Compile(source, target, release, lines, error) is not { } program)
+        if (Read(sourcePath, error) is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error) is not { } program)
         {
             return 1;
         }
@@ -189,34 +196,8 @@ public static class Command
     {
         var release = false;
         var lines = false;
+        string? cpu = null;
         string? sourcePath = null;
-        var (own, program) = AtDashes(arguments);
-        foreach (var a in own)
-        {
-            switch (a)
-            {
-                case "--release" when !release:
-                    release = true;
-                    break;
-                case "--lines" when !lines:
-                    lines = true;
-                    break;
-                case var p when sourcePath is null && !p.StartsWith('-'):
-                    sourcePath = p;
-                    break;
-                default:
-                    return Usage1(error);
-            }
-        }
-
-        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), program, release, lines, error, find, host, places);
-    }
-
-    /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
-    private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
-    {
-        var release = false;
-        var lines = false;
         var (own, program) = AtDashes(arguments);
         for (var i = 0; i < own.Count; i++)
         {
@@ -228,8 +209,42 @@ public static class Command
                 case "--lines" when !lines:
                     lines = true;
                     break;
-                case var text when i == own.Count - 1 && text is not ("--release" or "--lines"):
-                    return BuildAndRun(() => SourceText.FromString("exec", text), program, release, lines, error, find, host, places);
+                case "--cpu" when cpu is null && i + 1 < own.Count:
+                    cpu = own[++i];
+                    break;
+                case var p when sourcePath is null && !p.StartsWith('-'):
+                    sourcePath = p;
+                    break;
+                default:
+                    return Usage1(error);
+            }
+        }
+
+        return sourcePath is null ? Usage1(error) : BuildAndRun(() => Read(sourcePath, error), program, release, lines, cpu, error, find, host, places);
+    }
+
+    /// <summary><c>exec</c>'s options, each once, before its text, which is the last argument before <c>--</c> and no option.</summary>
+    private static int Exec(List<string> arguments, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    {
+        var release = false;
+        var lines = false;
+        string? cpu = null;
+        var (own, program) = AtDashes(arguments);
+        for (var i = 0; i < own.Count; i++)
+        {
+            switch (own[i])
+            {
+                case "--release" when !release:
+                    release = true;
+                    break;
+                case "--lines" when !lines:
+                    lines = true;
+                    break;
+                case "--cpu" when cpu is null && i + 2 < own.Count:
+                    cpu = own[++i];
+                    break;
+                case var text when i == own.Count - 1 && text is not ("--release" or "--lines" or "--cpu"):
+                    return BuildAndRun(() => SourceText.FromString("exec", text), program, release, lines, cpu, error, find, host, places);
                 default:
                     return Usage1(error);
             }
@@ -250,7 +265,7 @@ public static class Command
     /// <paramref name="program"/> as its arguments; the program's exit code, or 1 where it was refused or the command failed. The
     /// places a run cut short left are removed at the start, before the build.
     /// </summary>
-    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
+    private static int BuildAndRun(Func<SourceText?> read, IReadOnlyList<string> program, bool release, bool lines, string? cpu, TextWriter error, Func<ClangSearch> find, Target? host, Func<string?> places)
     {
         if (host is not { } target)
         {
@@ -267,7 +282,7 @@ public static class Command
         }
 
         Place.RemoveLeft(root);
-        if (read() is not { } source || Compile(source, target, release, lines, error) is not { } emitted)
+        if (read() is not { } source || Compile(source, target, release, lines, CpuOf(cpu, find, error), error) is not { } emitted)
         {
             return 1;
         }
@@ -344,10 +359,10 @@ public static class Command
         return source;
     }
 
-    /// <summary>The program the compiler emits for the source, or null where it refused it, with its lines written, named by the source's name.</summary>
-    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, TextWriter error)
+    /// <summary>The program the compiler emits for the source and the CPU <paramref name="cpu"/> gives, or null where it refused it, with its lines written, named by the source's name, or where the CPU failed.</summary>
+    private static EmittedProgram? Compile(SourceText source, Target target, bool release, bool lines, Func<Cpu?> cpu, TextWriter error)
     {
-        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines);
+        var compilation = Builder.Compile(source, [], Builder.CheckRuntime(target), testBuild: !release, lines, cpu);
         foreach (var d in compilation.Diagnostics.Sorted)
         {
             error.Write(d.At(source.Name) + "\n");
@@ -355,6 +370,44 @@ public static class Command
 
         return compilation.Program;
     }
+
+    /// <summary>
+    /// The CPU <c>--cpu</c> names, as the clang found knows it, once the checker accepted the program, or the machine's baseline without
+    /// the option; null with the failure written where no clang is found, where clang knows no CPU of that name for the machine's
+    /// architecture (the owner, 2026-11-01: the failure is the command's own, naming clang's list), or where clang fails on the question
+    /// (the owner, 2026-11-01: "clang did not answer which CPU", with what it wrote).
+    /// </summary>
+    private static Func<Cpu?> CpuOf(string? name, Func<ClangSearch> find, TextWriter error) => () =>
+    {
+        if (name is null)
+        {
+            return Builder.HostCpu;
+        }
+
+        var search = find();
+        if (search.Found is not { } clang)
+        {
+            error.Write(Failure(search));
+            return null;
+        }
+
+        var x86 = Builder.HostCpu.X86;
+        try
+        {
+            if (clang.DescribeCpu(name, x86, out var triple) is { } cpu)
+            {
+                return cpu;
+            }
+
+            error.Write($"error: clang {clang.Version} knows no {(x86 ? "x86-64" : "64-bit Arm")} CPU named `{name}`\n  note: `clang --target={triple} --print-supported-cpus` lists the ones it knows\n  help: name one of those, or native\n");
+            return null;
+        }
+        catch (ToolchainException e)
+        {
+            error.Write($"error: clang did not answer which CPU `{name}` is\n  note: {e.Message.Replace("\n", "\n    ", StringComparison.Ordinal)}\n  help: check that the clang found runs\n");
+            return null;
+        }
+    };
 
     private static int Usage1(TextWriter error)
     {

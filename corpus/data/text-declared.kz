@@ -1,0 +1,12 @@
+// expect: output
+// | Ann (1)
+// | got Ann (1)
+// rules: A5, D16
+
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")

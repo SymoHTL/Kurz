@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: W1
+
+for HttpKind in [1, 2] {
+    print(HttpKind)
+}

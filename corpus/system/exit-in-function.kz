@@ -1,0 +1,13 @@
+// expect: output
+// | start
+// | stopping
+// rules: S23
+
+int Stop() {
+    print("stopping")
+    Environment.Exit(0)
+}
+
+print("start")
+code = Stop()
+print(code)

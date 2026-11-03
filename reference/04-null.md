@@ -687,14 +687,34 @@ the field cannot use it); a path with a `weak` reference anywhere in it, the ref
 2026-10-10, against narrowing such a field by the assignment as a `mut` field is, after which
 nothing strong need hold the target). The narrowing lasts only up to the
 next call and the next assignment, in the order the program runs them: a test directly followed by
-the use is fine, and a second use after a call takes a variable of its own. A call is every
+the use is fine, and a second use after a call takes a variable of its own. A path with a `weak`
+reference in it stops being narrowed at two more ends, since a count let go of there runs code the
+function does not see and can free the target: the end of a statement or of a condition in which a
+call ran, and the end of a block that declares a variable; a use after such an end takes a variable
+of its own too, so a test after a call in the same condition does not narrow the block (§4, the
+owner, 2026-11-01, "Those ends stop narrowing", against a narrowed read that checks the target and
+ends the program with an error at run time where it was freed since the test). A call is every
 expression that runs code the function does not see: a call of a function or a method, a
-constructor, an interpolation or `print` of a class instance (its `Text()`, A5), and `==` on class
-instances that name their fields (K5). A declaration is not an assignment; an assignment into any
-path is one, and one that assigns a value whose type has no `null` narrows a path with no `weak`
+constructor, an interpolation or `print` of a class instance (its `Text()`, A5), `==` on class
+instances that name their fields (K5) and on values that hold such an instance, whose `==` runs
+theirs, and a read or a write of a map's entry whose key type compares by such a clause, which runs
+that `==` and the key's hash (§4, the owner, 2026-11-02, #110, comment 6586836827: such an `==` is a call
+everywhere). A declaration is not an assignment; an assignment into any path is one, apart from the
+write this rule takes out below, and one that assigns a value whose type has no `null` narrows a path with no `weak`
 reference in it again, as this rule says above with the owner's choice of 2026-10-09, while the case
-`null/narrowed-field-after-assignment.kz` assigns a value that may be null. Reading a field,
-`.Bytes` and `.Count` on a value, and `==` on values are none of them. *(this list is proposed)*
+`null/narrowed-field-after-assignment.kz` assigns a value that may be null. One assignment is no end for
+a path with no `weak` reference in it: a write into an item of a list or an entry of a map that a
+variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k] = 2`, keeps its
+narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
+path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
+write, since that count can be the target's last; a write into what a field of an instance holds,
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). That
+write keeps the narrowing only where the map's key compares as a value or by identity: a key whose
+type compares by an `equal by` clause runs that `==` and the key's hash, a call, so `m[k] = 2` with
+`class K(int Id) equal by Id` ends the narrowing, as `m[k]` does (§4, the owner, 2026-11-02, #110, comment 6586836827).
+Reading a field, `.Bytes` and `.Count` on a value, `==` on values that hold no instance of a class
+that names its fields, and a read of a map's entry by a key that compares as a value or by identity
+are none of them. *(this list is proposed)*
 `print` is a call like any other. C# keeps such a path narrowed across the call (the .NET SDK
 10.0.204, 2026-10-08: no warning for a use after a call that sets the field to null, CS8602 for an
 unchecked use), which its analysis can afford because it only warns; here an unchecked use is an
@@ -769,6 +789,44 @@ if p.Keeper != null {
 }
 ```
 
+Case: [memory/weak-narrowed-after-call-in-condition.kz](../corpus/memory/weak-narrowed-after-call-in-condition.kz)
+```kurz
+class Owner(string Name)
+class Pet(mut weak Owner? Keeper)
+
+bool Keep(Pet pet, Owner o) {
+    pet.Keeper = o
+    return true
+}
+
+p = Pet(null)
+if Keep(p, Owner("Ann")) && p.Keeper != null {
+    print(p.Keeper.Name)
+}
+```
+
+Case: [memory/weak-narrowed-after-block-with-variable.kz](../corpus/memory/weak-narrowed-after-block-with-variable.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+void Show(Pet pet) {
+    if pet.Keeper != null {
+        if pet.Keeper.Name != "" {
+            name = pet.Keeper.Name
+            if name == "x" {
+                return
+            }
+        }
+
+        print(pet.Keeper.Name)
+    }
+}
+
+o = Owner("Ann")
+Show(Pet(o))
+```
+
 Case: [null/narrowed-field-by-assignment.kz](../corpus/null/narrowed-field-by-assignment.kz)
 ```kurz
 class Account(mut string? Email)
@@ -776,6 +834,21 @@ class Account(mut string? Email)
 mut acc = Account(null)
 acc.Email = "x"
 print(acc.Email.Bytes.Count)
+```
+
+Case: [null/narrowed-field-after-clause-key.kz](../corpus/null/narrowed-field-after-clause-key.kz)
+```kurz
+class Node(int V)
+class Holder(mut Node? Head)
+class K(int Id) equal by Id
+
+h = Holder(Node(1))
+k = K(1)
+mut seen = Map<K, int>()
+if h.Head != null {
+    seen[k] = 2
+    print(h.Head.V)
+}
 ```
 
 ### N10 (decided, §4) `==` and `!=` with a nullable value

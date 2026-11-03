@@ -53,7 +53,8 @@ carries the `Case:` line alone.
 // rules: R7
 ```
 
-A case is a single file with no `project.kz`; its `// allow:` line gives it the grants a
+A case is a single file with no `project.kz`, run with no argument and with nothing on its standard
+input; its `// allow:` line gives it the grants a
 `project.kz` would give its package (R7; §3, the owner, 2026-10-21). The line takes `raw`, `native` or
 `raw native`, in that order, and each compiler's runner of the corpus reads it; a program outside the
 corpus takes no grant from it *(assumed: as §3 marks it)*.
@@ -61,7 +62,7 @@ corpus takes no grant from it *(assumed: as §3 marks it)*.
 The ids of both kinds are listed in chapter 12. The compiler's test suite parses each file and checks the errors of its
 front end, `syntax`, `semicolon`, `reserved-word`, `braces-required`, `unknown-escape` and `block-indentation`, or the absence of any diagnostic, against the header,
 except for `data/flags-match.kz`, whose `syntax` depends on the type of the matched value (D13), whose front end the suite checks for no diagnostic, and which the checker, reading no `flags` type, holds to `not supported` and no error;
-it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header. What the other cases print, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
+it runs every case its front end reads clean through the checker, which must report exactly the errors the header expects, or, for a case whose construct it does not read, `not supported` and no error, as `compiler/README.md` says; and it builds every case that expects a run and that the compiler emits, runs it, and compares what it prints, its exit code and its error line with the header; a case that expects output must end with 0 and write nothing to standard error. What the other cases print, and an error that a part the checker does not read raises, are checked only by reading and by the review. `tools/lint_reference.py` keeps the
 reference and the corpus consistent with each other; whether an expectation is right is decided
 by reading it against the rules, and by the review.
 
@@ -81,6 +82,28 @@ the `print` passes, in every build (§6, the owner, 2026-10-23).
 No case: every case that expects output shows it, and no case can make a write of standard output
 fail, which `print-failed` needs.
 
+### A17 (decided, §12) `eprint`
+
+`eprint(value)` writes the text of the value and a line break to standard error, as `print` writes them
+to standard output, with `print`'s rules (A1): the one line feed, and the run-time error `print-failed`
+where its write fails (§12, the owner, 2026-11-01, "eprint(x)"). A file's own declaration of `eprint`, a
+function, a variable or a parameter at any level, is `redeclared` (V9), as of `Environment` (S14).
+Where a failed `eprint` raises `print-failed`, the report of that error, whose write fails too, is dropped,
+and the program ends with the code of an error that ends it.
+*(assumed, §12: the file's own `eprint`, and the report dropped)*
+
+No case for what it writes: the lines of a case's header are what the program writes to standard
+output, and a case that expects output writes nothing to standard error.
+
+Case: [values/eprint-redeclared.kz](../corpus/values/eprint-redeclared.kz)
+```kurz
+void eprint(string text) {
+    print(text)
+}
+
+print(1)
+```
+
 ### A2 (assumed, §8) The text of a value
 
 The text of an integer is its decimal digits, with a leading `-` when negative. The text of a
@@ -94,7 +117,8 @@ No case: every case that expects output shows it.
 The text of a `data` value is derived from its type, in the manner of C# records: the name of the
 type, then ` { `, then its fields in the order of their declaration, each as `Name = text` and
 with `, ` between them, then ` }`. The text of a field is the text of its value. A `data` value
-without fields (D8) has no braces: it shows its name alone, as A4 says.
+without fields (D8) has no braces: it shows its name alone, as A4 says. A `data` type that declares
+its text with `Text()` has that text instead (A5).
 
 Case: [data/print.kz](../corpus/data/print.kz)
 ```kurz
@@ -210,7 +234,8 @@ Case: [data/print-union-field.kz](../corpus/data/print-union-field.kz)
 
 A class declares its text with a method named `Text` that takes no parameters and returns a
 `string`, as `ToString()` does in C#: `pub string Text() => "counter {Count}"`. `print` and an
-interpolated string (L6) use its result as the text of the instance. The record holds, as
+interpolated string (L6) use its result as the text of the instance. A `data` type declares its text
+the same way, in its body (D16), and has it instead of A3's (§8, the owner, 2026-11-02). The record holds, as
 *(assumed)*, how the compiler keeps that cheap: it changes how the text is built and not what it
 is, so no case shows it. A `Text()` of the base class counts, one without `pub` does not (A9); an
 interface or a type parameter has a text through an interface that declares it (A10).
@@ -224,6 +249,17 @@ class Counter(mut int Count) {
 c = Counter(3)
 print(c)
 print("got {c}")
+```
+
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
 ```
 
 ### A9 (decided, §8) An inherited or a private `Text()`

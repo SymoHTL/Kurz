@@ -35,6 +35,17 @@ over the threshold.
   2026-11-01, and again on 2026-11-02 for the comment of `CaseMapped`). With both tests at the call site, as the change was merged, the program took 75 ms
   against 126 ms before the change in the run of pull request 149's description (2026-11-01, whose
   gates ran on its head 8b39cf8; the best of five at a load average of about 4.5 on 6 CPUs).
+- A function of two callers stays a call as well, so a parameter that each caller passes as a
+  constant is a value inside it. `UnicodeCase` is called by `ToLower` with `upper` false and by
+  `ToUpper` with it true: in a program that calls both, `nm` listed `std.UnicodeCase` and the walks
+  tested `upper` at every byte, and the lowering of a Cyrillic text took 122 ms, against 95 ms once
+  the walks read the direction from values set before them, the first letter it changes and the
+  code point of the final sigma (issue 157, item 6, 2026-11-01). Measure such a function in a program
+  that calls it from every caller, not in one that calls it once.
+- A value read before a loop is not always faster inside it: the loop that changes 16 bytes of ASCII
+  at a time stayed one vector of 16 bytes with `CaseAscii(b, upper)` and became 16 bytes one at a
+  time with a bound read before the loop, 5.7 against 25.7 ms on a text of ASCII alone. Count the
+  vector instructions of the function in `objdump -d` (`grep -c xmm`) before and after.
 - What stayed a call, in an executable of `kurz build --release`: `nm <executable> | grep <name>`
   lists a function the optimiser kept, and
   `objdump -d --no-show-raw-insn <executable> | grep -c "call.*<name>"` counts its calls. A function
