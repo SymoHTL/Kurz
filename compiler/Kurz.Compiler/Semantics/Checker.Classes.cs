@@ -86,8 +86,10 @@ public sealed partial class Checker
                     break; // K7: read with the class (ResolveClass)
                 case ConstructorDeclaration c:
                     return (c.Line, "a constructor declared in the body of a class (K14)");
+                case FunctionDeclaration { Property: true } f when (f.Modifiers & Modifiers.Static) != 0:
+                    return (f.Line, "a `static` property (K7, K19)"); // section 14 of the record: open
                 case FunctionDeclaration f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
-                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a method (K7, R16)");
+                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a {(f.Property ? "property" : "method")} (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
                 case FunctionDeclaration:
@@ -207,6 +209,16 @@ public sealed partial class Checker
             if (symbol.Field(name) is not null || symbol.StaticField(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+
+            for (var i = 1; i < methods.Count; i++)
+            {
+                if (methods[i].IsProperty || methods.Take(i).Any(f => f.IsProperty))
+                {
+                    // K7: a property is one member of its name, as a field is; a method of that name is no overload of it (V9)
+                    var earlier = methods.Take(i).Any(f => f.IsProperty) ? "a property" : "a method";
+                    Report(ErrorIds.Redeclared, methods[i].Line, $"`{name}` is {earlier} of `{symbol.Name}` already (V9)");
+                }
             }
 
             if (name is "Equals" or "GetHashCode")
@@ -397,7 +409,9 @@ public sealed partial class Checker
                 var d = method.Declaration!;
                 if ((d.Modifiers & Modifiers.Mut) != 0)
                 {
-                    Report(ErrorIds.Syntax, d.Line, $"a method of a class takes no `mut` marker: it assigns the `mut` fields of its instance without one (K9, M5; E4)");
+                    Report(ErrorIds.Syntax, d.Line, d.Property
+                        ? "a property takes no `mut` marker: it has no setter, and its body assigns the `mut` fields of its instance without one (K7, K9; E4)"
+                        : $"a method of a class takes no `mut` marker: it assigns the `mut` fields of its instance without one (K9, M5; E4)");
                 }
 
                 if ((d.Modifiers & Modifiers.Naked) != 0)
@@ -406,9 +420,14 @@ public sealed partial class Checker
                 }
 
                 ResolveTypes(method, d);
+                if (method.IsProperty && (Types.IsVoid(method.ReturnType) || method.ReturnType is UnionType u && Types.NonNull(u) is null))
+                {
+                    // K7: a read gives a value; a `void` success (O10) and cases beside the success (O2) are section 14's, open
+                    NotSupported(d.Line, "a property of `void` or of a type that lists cases beside its success (K7, O2, O10)");
+                }
             }
 
-            foreach (var list in symbol.Methods.Values)
+            foreach (var list in symbol.Methods.Values.Where(list => !list.Any(f => f.IsProperty))) // a property's name: `redeclared` above
             {
                 for (var i = 1; i < list.Count; i++)
                 {
@@ -574,11 +593,13 @@ public sealed partial class Checker
 
     /// <summary>K19: a method of an instance named through its class, <c>Counter.Next()</c> or <c>Counter.Next</c>.</summary>
     private void InstanceMethodThroughClass(ClassSymbol symbol, string name, int line) =>
-        Report(ErrorIds.StaticMismatch, line, $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+        Report(ErrorIds.StaticMismatch, line, Property(symbol, name) is not null
+            ? $"`{name}` is a property of an instance of `{symbol.Name}`, not of the class: read it from an instance (K7, K19)"
+            : $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
 
     /// <summary>K19: a method of an instance named alone, with a call or without one, in a <c>static</c> member, which has no instance.</summary>
     private void InstanceMethodInStatic(string name, int line) =>
-        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a {(Property(CurrentClass()!, name) is not null ? "property" : "method")} of an instance of `{CurrentClass()!.Name}` (K7, K19)");
 
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
@@ -665,6 +686,44 @@ public sealed partial class Checker
         model.RecordImplicitField(t, ThisVariable(), null);
         return new Typed(new ClassType(CurrentClass()!));
     }
+
+    /// <summary>K7: the read-only property of the class of that name; null where the name is none.</summary>
+    private static FunctionSymbol? Property(ClassSymbol symbol, string name) =>
+        symbol.Methods.TryGetValue(name, out var list) ? list.Find(f => f.IsProperty) : null;
+
+    /// <summary>
+    /// K7: <c>h.Count</c>, a read of a property, the call of its method that takes no arguments (section 4: the owner, 2026-11-03), recorded
+    /// as that call with the read as its callee; its body runs at every read, so no test of an earlier read narrows it (N9). A property
+    /// without <c>pub</c> read from outside its class is <c>not-visible</c> (F9).
+    /// </summary>
+    private Typed ReadProperty(MemberAccess m, ClassType owner, FunctionSymbol property)
+    {
+        if (!Visible(property))
+        {
+            Report(ErrorIds.NotVisible, m.Line, $"`{property.Name}` of `{owner.Symbol.Name}` is private to its class: a property is visible outside it with `pub` (F9)");
+            return Typed.Error;
+        }
+
+        var call = new CallExpression(m.Line, m, [], []);
+        var typed = ResolveCall([property], call, null, out _, CallKind.Method);
+        CallRan(); // N9: the body can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
+        model.RecordPropertyRead(m, call);
+        return typed;
+    }
+
+    /// <summary>K7: <c>Count</c>, a property of the class read by its name inside a method, the property of <c>this</c>, read as <see cref="ReadProperty"/> reads it.</summary>
+    private Typed ReadImplicitProperty(NameExpression n, FunctionSymbol property)
+    {
+        var call = new CallExpression(n.Line, n, [], []);
+        var typed = CallImplicitMethod([property], n, call, null);
+        CallRan(); // N9, as ReadProperty
+        model.RecordPropertyRead(n, call);
+        return typed;
+    }
+
+    /// <summary>K7: an assignment of a property, which has no setter.</summary>
+    private void AssignProperty(ClassSymbol owner, string name, int line) =>
+        Report(ErrorIds.AssignImmutable, line, $"`{name}` is a property of `{owner.Name}`, which has no setter (K7)");
 
     /// <summary>K7: a read of a field by its name inside a method, the field of <c>this</c>.</summary>
     private Typed ReadImplicitField(NameExpression n, FieldSymbol field)
@@ -838,6 +897,12 @@ public sealed partial class Checker
             return FieldVisible(field, type.Symbol, line) ? new Typed(Types.Read(field.Type)) : Typed.Error; // R3: a `weak` field reads as a strong `T?`
         }
 
+        if (Property(type.Symbol, member) is not null)
+        {
+            NotSupported(line, "a property read where the checker reads a field alone (K7)");
+            return Typed.Error;
+        }
+
         if (type.Symbol.Methods.ContainsKey(member))
         {
             NotSupported(line, "a method as a value, named without a call (K7, F11)");
@@ -873,6 +938,19 @@ public sealed partial class Checker
     /// <summary>K7, F13: a call of a method on an instance, <c>c.Add(1)</c>, the one of its name whose parameters fit; a private one from outside its class is <c>not-visible</c> (F9).</summary>
     private Typed CallMethod(ClassType type, MemberAccess m, CallExpression c, KurzType? expected)
     {
+        if (Property(type.Symbol, m.Member) is { } property)
+        {
+            var read = ReadProperty(m, type, property);
+            if (read.IsError)
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            model.RecordType(m, read);
+            return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
+        }
+
         if (!type.Symbol.Methods.TryGetValue(m.Member, out var methods))
         {
             if (type.Symbol.Field(m.Member) is { } field)
@@ -1030,7 +1108,15 @@ public sealed partial class Checker
             return;
         }
 
-        if (owner.Symbol.Field(last.Member) is not { } field)
+        var field = owner.Symbol.Field(last.Member);
+        if (field is null && Property(owner.Symbol, last.Member) is not null)
+        {
+            AssignProperty(owner.Symbol, last.Member, a.Line);
+            CheckExpression(a.Value, Untyped(a.Value));
+            return;
+        }
+
+        if (field is null)
         {
             ClassMember(owner, last.Member, last.Line);
             CheckExpression(a.Value, Untyped(a.Value));
@@ -1104,6 +1190,11 @@ public sealed partial class Checker
         var owner = (ClassType)PathType(members[^1].Target)!;
         if (owner.Symbol.Field(members[^1].Member) is not { } field)
         {
+            if (Property(owner.Symbol, members[^1].Member) is not null)
+            {
+                PropertyReceiver(members[^1].Member, line, what); // K7: read without an error, so reported here
+            }
+
             return true; // reported where the receiver was read
         }
 
@@ -1128,6 +1219,13 @@ public sealed partial class Checker
         MutReceiverThroughInstance(index.Target, fields, a.Line, what);
         return true;
     }
+
+    /// <summary>K7: inside a method, whether a name without a variable and without a field is a property of the class.</summary>
+    private bool ImplicitProperty(string name) => ImplicitField(name) is null && ImplicitMethods(name)?.Find(f => f.IsProperty) is not null;
+
+    /// <summary>K7, M5: a change of the value a property gives, which is a call's value: no place holds it, so no change reaches it.</summary>
+    private void PropertyReceiver(string name, int line, string what) =>
+        Report(ErrorIds.MutRequired, line, $"{what}, and `{name}` is a property, whose value no change reaches: only a value reachable through a `mut` variable changes (M5, K7)");
 
     private bool MutField(FieldSymbol field, int line, string what)
     {

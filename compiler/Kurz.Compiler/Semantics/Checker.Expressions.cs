@@ -495,6 +495,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (methods.Find(f => f.IsProperty) is { } property)
+            {
+                return ReadImplicitProperty(n, property); // K7: the property of `this`
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -654,6 +659,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
+        {
+            return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
+        }
+
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
     }
 

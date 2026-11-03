@@ -3788,6 +3788,177 @@ public sealed class CheckerTests
         Assert.Equal([expected], NotSupported(program));
     }
 
+    // ---- properties (K7: section 4, the owner, 2026-11-03) -----------------------------------------------------------
+
+    // K7: a class with a read-only property in nine lines and a blank one, so that the program after it starts at line 11
+    private const string PropertyBag = "class Bag {\n    mut List<int> items = []\n\n    pub int Count => items.Count\n\n    pub void Add(int x) {\n        items.Add(x)\n    }\n}\n\n";
+
+    [Fact]
+    public void A_property_is_read_without_a_call_and_gives_its_type()
+    {
+        // K7 (section 4: the owner, 2026-11-03): `b.Count` runs the property's expression and gives its type, through an instance and
+        // through `this`
+        Assert.Equal("int", TypeOf(PropertyBag + "b = Bag()\nn = b.Count\nprint(n)\n", "n"));
+        Clean("class C {\n    pub int One => 1\n\n    pub int Two() => this.One + 1\n}\n\nprint(C().Two())\n");
+
+        // the positive control: a method of the same shape is no property, and named without its call it is a method as a value
+        Assert.Equal(["5: a method as a value, named without a call (K7, F11)"], NotSupported("class C {\n    pub int One() => 1\n}\n\nn = C().One\nprint(n)\n"));
+    }
+
+    [Theory]
+    [InlineData("b = Bag()\nb.Count = 3\nprint(b.Count)\n", 12)]
+    [InlineData("b = Bag()\nb.Add(1)\nprint(b.Count)\n", 0)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        this.Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
+    public void A_property_has_no_setter(string program, int line)
+    {
+        // K7: a property is read-only, through an instance, through `this` and by its name inside its class: `assign-immutable` (the
+        // product pass's question 1, at its default); the second row is the positive control, a change of the field the property reads
+        List<(string Id, int Line)> expected = line == 0 ? [] : [(ErrorIds.AssignImmutable, line)];
+        Assert.Equal(expected, Errors(program.StartsWith("class", StringComparison.Ordinal) ? program : PropertyBag + program));
+    }
+
+    [Theory]
+    [InlineData("b = Bag()\nprint(b.Count())\n", 12)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub int Twice() => Count() * 2\n}\n\nprint(C().Twice())\n", 4)]
+    public void A_property_called_calls_the_value_it_gives(string program, int line)
+    {
+        // K7, F11: `b.Count()` calls the `int` the property gives, as a field's value is called (the product pass's question 2, at its
+        // default)
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program.StartsWith("class", StringComparison.Ordinal) ? program : PropertyBag + program));
+
+        // the positive control: the value of a property of a function type is called, through an instance and by the name alone
+        Clean("class C(int N) {\n    pub (int) => int Adder => (int x) => x + N\n\n    pub int Three() => Adder(2)\n}\n\nprint(C(1).Adder(2))\nprint(C(1).Three())\n");
+    }
+
+    [Fact]
+    public void A_property_without_pub_is_private_to_its_class()
+    {
+        // F9 with K7: a property without `pub` is read inside its class alone; outside it is `not-visible`
+        var program = "class C {\n    int Hidden => 1\n\n    pub int Shown() => Hidden + 1\n}\n\n";
+        Assert.Equal([(ErrorIds.NotVisible, 7)], Errors(program + "print(C().Hidden)\n"));
+
+        // the positive control: the read inside the class, by its name
+        Clean(program + "print(C().Shown())\n");
+    }
+
+    [Theory]
+    [InlineData("class C {\n    int Count = 2\n    pub int Count => 1\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C(int Count) {\n    pub int Count => 1\n}\n\nprint(1)\n", 2)]
+    [InlineData("class C {\n    pub int Count => 1\n    pub int Count(int x) => x\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C {\n    pub int Count(int x) => x\n    pub int Count => 1\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C {\n    pub int Count => 1\n    pub int Count => 2\n}\n\nprint(1)\n", 3)]
+    public void A_property_and_a_member_of_its_name_are_redeclared(string program, int line)
+    {
+        // K7, V9: a property is the one member of its name, as a field is; a method of that name is no overload of it, and two
+        // properties of one name are `redeclared`, not `duplicate-function`
+        Assert.Equal([(ErrorIds.Redeclared, line)], Errors(program));
+
+        // the positive control: names that differ in their case are two members
+        Clean("class C {\n    int count = 2\n\n    pub int Count => count\n}\n\nprint(C().Count)\n");
+    }
+
+    [Fact]
+    public void A_property_is_read_by_its_name_in_a_method_and_not_in_a_field_default()
+    {
+        // K7: inside its class a property stands by its name in a method and in another property, as a field does (the product pass's
+        // question 4, at its default)
+        Clean("class C {\n    pub int One => 1\n    pub int Two => One + One\n\n    pub int Three() => Two + One\n}\n\nprint(C().Three())\n");
+
+        // in a field's default it is a member of the instance, `unknown-name` as a method of the instance is there (C#'s CS0236)
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C {\n    pub int One => 1\n    int two = One + 1\n\n    pub int Two() => two\n}\n\nprint(C().Two())\n"));
+    }
+
+    [Fact]
+    public void A_test_of_a_property_narrows_no_read_of_it()
+    {
+        // N9 with K7: a read of a property is a call, so a test of one read narrows no other (the product pass's readings)
+        var program = "class C(string? N) {\n    pub string? Name => N\n}\n\nc = C(\"a\")\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(program + "if c.Name != null {\n    print(c.Name.Bytes.Count)\n}\n"));
+
+        // the positive control: the same test of the field narrows its read (N3)
+        Clean(program + "if c.N != null {\n    print(c.N.Bytes.Count)\n}\n");
+    }
+
+    [Fact]
+    public void A_read_of_a_property_ends_what_a_test_showed_of_a_mut_field()
+    {
+        // N9 with K7: a read of a property is a call, whose body can assign a `mut` field through another reference (K2), so it ends
+        // what a test showed of a path through one, by the property's name inside its class (line 13) and through an instance (line 21);
+        // each read stands alone in a statement, since a call around it, `print(Drop)`, would end the narrowing by itself
+        var program = "class C {\n    pub mut string? F = \"a\"\n    pub int Drop => Clear()\n\n    int Clear() {\n        F = null\n        return 0\n    }\n\n    pub void Show() {\n        if F != null {\n            n = Drop\n            print(F.Bytes.Count + n)\n        }\n    }\n}\n\nc = C()\nif c.F != null {\n    m = c.Drop\n    print(c.F.Bytes.Count + m)\n}\nc.Show()\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 21)], Errors(program));
+
+        // the positive control: without the reads the tests hold
+        Clean(program.Replace("n = Drop", "n = 1").Replace("m = c.Drop", "m = 2"));
+    }
+
+    [Theory]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nprint(C.Count)\n", 5)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub static int Twice() => Count * 2\n}\n\nprint(C.Twice())\n", 4)]
+    public void A_property_is_a_member_of_an_instance(string program, int line)
+    {
+        // K7, K19: a property belongs to an instance, so it is read neither through the class's name nor by its name alone in a
+        // `static` member, which has no instance: `static-mismatch`
+        Assert.Equal([(ErrorIds.StaticMismatch, line)], Errors(program));
+
+        // the positive control: the read through an instance
+        Clean("class C {\n    pub int Count => 1\n}\n\nprint(C().Count)\n");
+    }
+
+    [Theory]
+    [InlineData("    pub void Run() {\n        Bump(mut Count)\n    }\n", ErrorIds.MutAtCall)]
+    [InlineData("    pub void Run() {\n        Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
+    [InlineData("    pub void Run() {\n        this.Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
+    public void A_property_is_no_place_a_change_reaches(string method, string id)
+    {
+        // K7, M5, M7: the value of a property is a call's, so it is neither passed as `mut` nor changed by a `mut` method, by the name
+        // alone or through `this`; the rows are the trap of a name without a variable, which the emitter would find no place for
+        var program = "void Bump(mut int n) {\n    n = n + 1\n}\n\nclass C {\n    mut List<int> items = []\n    mut int count = 0\n\n    pub List<int> Items => items\n    pub int Count => count\n\n" + method + "}\n\nC().Run()\n";
+        Assert.Equal([(id, 13)], Errors(program));
+
+        // the positive control: the fields themselves are changed
+        Clean(program.Replace("mut Count", "mut count").Replace("Items.Add", "items.Add"));
+    }
+
+    [Fact]
+    public void A_property_named_Text_gives_an_instance_no_text()
+    {
+        // A5: an instance's text is its class's method `Text()`, and a property of that name is no such method
+        Assert.Equal([(ErrorIds.NoText, 5)], Errors("class C {\n    pub string Text => \"c\"\n}\n\nprint(C())\n"));
+
+        // the positive control: the method gives it
+        Clean("class C {\n    pub string Text() => \"c\"\n}\n\nprint(C())\n");
+    }
+
+    [Fact]
+    public void A_property_takes_no_mut_marker()
+    {
+        // K7, K9: a property has no setter, and its body assigns the `mut` fields of its instance without a marker, as a method's does
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub mut int Count => 1\n}\n\nprint(C().Count)\n"));
+    }
+
+    [Theory]
+    [InlineData("class C {\n    pub static int Count => 1\n}\n\nprint(1)\n", "2: a `static` property (K7, K19)")]
+    [InlineData("class C {\n    pub virtual int Count => 1\n}\n\nprint(1)\n", "2: the modifier `virtual` of a property (K7, R16)")]
+    [InlineData("class C {\n    pub override int Count => 1\n}\n\nprint(1)\n", "2: the modifier `override` of a property (K7, R16)")]
+    [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property (K7, R16)")]
+    [InlineData("class C {\n    pub extern \"C\" int Count => 1\n}\n\nprint(1)\n", "2: the modifier `extern` of a property (K7, R16)")]
+    [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "1: an interface (K6, K10)")]
+    [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: the body of a data type (D16)")]
+    [InlineData("class C {\n    pub void Say => print(1)\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
+    [InlineData("class C {\n    pub int | IoError Count => 1\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nC? Find() => null\n\nprint(Find()?.Count ?? 0)\n", "7: a property read after `?.` (K7, N5)")]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nc = C()\np = &c.Count\nprint(1)\n", "6: a property read where the checker reads a field alone (K7)")]
+    public void A_property_the_checker_does_not_read_is_not_supported(string program, string expected)
+    {
+        // K7: a `static`, `virtual` or `override` property, one in an interface or in the body of a `data` type, and one of `void` or of
+        // a type that lists cases are open (section 14, the product pass's questions 6 and 7, at their defaults), and `prot` and `extern`
+        // are no modifiers a property takes here, as for a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
+        // this checker does not take for a property; an interface and a `data` type's body are not supported whatever they hold
+        Assert.Equal([expected], NotSupported(program));
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
