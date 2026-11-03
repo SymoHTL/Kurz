@@ -11,7 +11,10 @@ case of the unmutated self-test, or names one that is already red; a mutation th
 that case red (the gate went soft, or the proof went stale); an entry for a tool that does not
 exist; fewer than FLOOR tools; a ledger that is not written as `--format` writes it (one entry per
 line, two spaces in, text as it is), since a ledger written back another way differs on every
-line, and the review reads and bills the whole file as a change.
+line, and the review reads and bills the whole file as a change; a replay started inside a
+self-test that a replay runs, which every self-test it starts is marked for (NESTED in its
+environment), refused before anything is copied: a mutation of a tool's `--self-test` dispatch
+made its self-test reach this replay, which ran the mutated self-test again, without end.
 
 An entry: {"tool": path of the tool, "file": the file to break (default: the tool), "anchor": text
 that occurs exactly once, "replacement": what it becomes, "expect": the name of the case that must
@@ -33,6 +36,10 @@ LEDGER = "tools/red_proofs.json"
 MAIN = re.compile(r"""__name__\s*==\s*["']__main__["']""")
 SELF_TEST = re.compile(r"""["']--self-test["']""")
 SUMMARY = re.compile(r"^(\d+) cases, (\d+) failed$", re.M)
+NESTED = "KURZ_RED_PROOF_REPLAY"  # set in every self-test a replay starts; a replay that finds it set starts nothing
+INSIDE = (f"a replay is already running above this process ({NESTED} is set in its environment), so no second replay was "
+          f"started and nothing was copied: a self-test that reaches red_proof.replay() would start the whole replay again "
+          f"inside itself, without end; where no replay is running, the variable is left over from one: unset it")
 
 
 def tools_in(root):
@@ -60,7 +67,7 @@ def self_test_of(root, tool):
         os.makedirs(scratch, exist_ok=True)
         p = subprocess.run([sys.executable, os.path.join(root, tool), "--self-test"], cwd=root, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=600,
-                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch})
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch, NESTED: "1"})
     except (OSError, subprocess.TimeoutExpired) as e:
         return 99, f"{type(e).__name__}: {e}"
     return p.returncode, p.stdout + p.stderr
@@ -192,7 +199,11 @@ def copy_of_tree(into):
 
 def replay():
     """check() on a scratch copy of the repository, which is removed afterwards, whatever check() ended
-    in; a removal that fails is said with the path, never raised (kit.scratch)."""
+    in; a removal that fails is said with the path, never raised (kit.scratch). Inside a self-test that
+    a replay runs (NESTED set) it is refused first thing, before any copy, so that a self-test which reaches
+    it cannot start the replay again inside itself."""
+    if os.environ.get(NESTED):
+        return [INSIDE], {}
     with kit.scratch("red-proof-") as tmp:
         return check(copy_of_tree(tmp))
 
@@ -333,12 +344,31 @@ def cases_in(base):
     g = globals()
     saved = g["check"], g["copy_of_tree"]
     g["check"], g["copy_of_tree"] = noting_check, small_copy
+    inside = os.environ.pop(NESTED, None)  # inside a replay this self-test is marked itself: each case below sets the mark it needs
     try:
         replayed = replay()
+        os.environ[NESTED] = "1"  # a stand-in replay above this one: a copy and a check recorded now would be its second level
+        nested = replay()
     finally:
         g["check"], g["copy_of_tree"] = saved
+        os.environ.pop(NESTED, None)
+        if inside is not None:
+            os.environ[NESTED] = inside
     cases.append(("a replay removes the copy it checked",
                   replayed == ([], {}) and len(seen) == 1 and bool(seen[0]) and not os.path.exists(os.path.dirname(seen[0])), seen))
+    cases.append(("a replay inside a self-test that a replay runs is refused before it copies or checks anything, and says why",
+                  nested == ([INSIDE], {}) and len(seen) == 1 and NESTED in INSIDE, (nested, seen)))
+    # the mark reaches every self-test a replay starts, so a replay that such a self-test starts is refused
+    marked = toy.replace("import sys\n", "import os, sys\n").replace("add(1, 1) == 2", f'os.environ.get({NESTED!r}) == "1"')
+    assert marked != toy
+    root = tree({"toy.py": marked}, [])
+    inside = os.environ.pop(NESTED, None)  # the mark the toy reads is the one self_test_of sets, not one inherited from a replay above
+    try:
+        code, out = self_test_of(root, "tools/toy.py")
+    finally:
+        if inside is not None:
+            os.environ[NESTED] = inside
+    cases.append(("every self-test a replay runs is marked, so a replay it starts is refused", code == 0 and "ok   adds" in out, (code, out)))
     errors, _ = check(tree({"toy.py": toy}, [proof]))
     cases.append(("one tool is below the real floor", any("floor is" in e for e in errors), errors))
     here = tools_in(kit.ROOT)

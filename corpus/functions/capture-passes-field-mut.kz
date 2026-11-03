@@ -1,0 +1,16 @@
+// expect: output
+// | 3
+// rules: F11, K2, M7
+
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+fill = b.Filler()
+fill()
+print(b.Items.Count)

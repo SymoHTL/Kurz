@@ -142,7 +142,8 @@ def context_states(contexts, check_runs, statuses, told=None):
 # <summary>" when every batch converged, "review completed, NOT converged on <N> files: <summary>" when one stopped at
 # the pass cap. The cache stores only the files of a batch that converged, so it answers no file of the second kind.
 ROUND_TOLD = re.compile(r"review completed(?:, NOT converged on (\d+) files)?: ")
-OWNERS_CHOICE = "costs a paid round, and the merge needs the owner's choice: a paid round, over red at the new head, or hold"
+OWNERS_CHOICE = ("makes the review of the new head a paid round, and the merge needs the owner's choice: a paid round, "
+                 "over red at the new head, or hold")
 
 
 def taking_main(rounds, post, base):
@@ -157,7 +158,7 @@ def taking_main(rounds, post, base):
     if read and read.group(1) is None:
         return (f"the round at the cap converged on every file of this head: a merge of {base} replays from the cache, "
                 f"as no round, where {base} changed none of the pull request's files and none of the reviewer's code and rules "
-                f"and the title and the description are as the round read them, and is a paid round otherwise "
+                f"and the title and the description are as the round read them; otherwise taking {base} {OWNERS_CHOICE} "
                 f"(knowledge/a-review-the-cache-answers-is-no-round.md)")
     if read:
         return (f"the round at the cap did not converge on {read.group(1)} files of this head, which its note "
@@ -638,31 +639,37 @@ def self_test():
     case("decide: a branch behind its base is refused", verdict(behind=2)[0] == "refuse")
 
     # what taking main costs at the review cap, from the review status of the head: the real one of the round of pull
-    # request 181, which did not converge on one file, and the real one of pull request 22, which converged, edited
-    # into the statuses whose round is not known
-    unconverged, converged = load("statuses-not-converged.json"), load("statuses.json")
-    told, told_too = {}, {}
+    # request 181, which did not converge on one file, the real one of pull request 22, which converged, and the real
+    # error of the run that ended as `cap` on 181's merge of main, 3523ce1; the states the forge sent on none of them,
+    # pending and a success in neither form, are the converged one edited
+    unconverged, converged, capped_head = load("statuses-not-converged.json"), load("statuses.json"), load("statuses-cap-error.json")
+    told, told_too, told_error = {}, {}, {}
     context_states(R, [], unconverged, told)
     context_states(R, [], converged, told_too)
+    # the list of 3523ce1 carries the paid round's success above the error, so the error is taken out of it alone
+    context_states(R, [], [s for s in capped_head if s.get("context") == "review" and s.get("state") == "error"], told_error)
     old = verdict(behind=2)[1]
     case("taking main: below the cap a branch behind its base is told to update it, as before",
          taking_main(kit.ROUND_CAP - 1, told.get("review"), "main") is None and old == ["the branch is 2 commits behind main: update it and let the checks run"], old)
     got = taking_main(kit.ROUND_CAP, told.get("review"), "main")
     refused = verdict(behind=2, costs=got)[1]
-    case("taking main: the real status of a round that did not converge on one file says that taking main costs a paid round and the owner's choice",
+    case("taking main: the real status of a round that did not converge on one file says that taking main makes the review of the new head a paid round and needs the owner's choice",
          len(unconverged) >= 1 and "did not converge on 1 files" in (got or "") and (got or "").endswith(f"taking main {OWNERS_CHOICE}")
          and refused == [f"the branch is 2 commits behind main: {got}"], (got, refused))
     got = taking_main(kit.ROUND_CAP, told_too.get("review"), "main")
-    case("taking main: the real status of a round that converged names the conditions of a replay and the entry, and no cost or choice",
+    replays, otherwise = "replays from the cache, as no round, where main changed none", f"; otherwise taking main {OWNERS_CHOICE} ("
+    case("taking main: the real status of a round that converged names the conditions of a replay and the entry, and the owner's choice where they do not hold",
          len(converged) >= 1 and "converged on every file" in (got or "") and "a-review-the-cache-answers-is-no-round.md" in (got or "")
-         and OWNERS_CHOICE not in (got or ""), got)
+         and replays in (got or "") and otherwise in (got or "") and (got or "").index(replays) < (got or "").index(otherwise)
+         and "free" not in (got or ""), got)
     done = (told_too.get("review") or {"context": "review", "state": "success", "description": "review completed: x"})
-    unknown = {"no status": None, "error": dict(done, state="error"), "pending": dict(done, state="pending"),
+    unknown = {"no status": None, "error": told_error.get("review"), "pending": dict(done, state="pending"),
                "success": dict(done, description="review did not complete: cap: 1 review rounds reached, the cap is 1")}
     got = {name: taking_main(kit.ROUND_CAP, post, "main") for name, post in unknown.items()}
     case("taking main: a head not known to have converged is told what a round that did not converge is told, with the state read",
-         all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}") and ("no review status" if name == "no status" else f"review is {name}") in text
-             for name, text in got.items()), got)
+         unknown["error"] is not None and "review did not complete: cap: " in (got["error"] or "")
+         and all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}") and ("no review status" if name == "no status" else f"review is {name}") in text
+                 for name, text in got.items()), got)
     writer = "f\"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}\""
     rendered = [f"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: s" for capped in ([], ["a", "b"])]
     case("taking main: the reviewer writes the description this tool reads, in both forms",
