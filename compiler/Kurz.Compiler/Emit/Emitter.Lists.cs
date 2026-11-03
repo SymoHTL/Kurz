@@ -834,7 +834,9 @@ public sealed partial class Emitter
     /// The most bytes an <c>AddRange</c> copies with the C library's <c>memcpy</c>, as Rust's <c>extend_from_slice</c> copies them;
     /// more are copied by the library's <c>ListAppend</c>, whose loop the optimiser widens. glibc's <c>memcpy</c> turns to
     /// <c>rep movsb</c> from 2112 bytes on a processor with fast short <c>rep movsb</c>, which measured slower than that loop for
-    /// appends of 3072 and 4000 bytes to a list that kept its room, 5.49 against 4.83 ms and 5.87 against 5.03 (#157).
+    /// appends of 3072 and 4000 bytes to a list that kept its room, 5.49 against 4.83 ms and 5.87 against 5.03 (#157). The bound
+    /// was measured against glibc 2.39's <c>memcpy</c> on Linux; the <c>memcpy</c> of the C runtime a Windows build calls was not
+    /// measured.
     /// </summary>
     private const int SmallCopy = 2048;
 

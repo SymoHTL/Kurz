@@ -2483,7 +2483,8 @@ long CaseLatin(int c, bool upper) {
 
 // The mapping of one direction of `c`, up to three code points in one number, the first in its lowest 21 bits,
 // the second in the next 21 and the third above them, 0 for one that is not there, as Rust's
-// `conversions::to_lower` and `to_upper` give a `[char; 3]`: ASCII by its letters (`CaseAscii`), the rest of
+// `conversions::to_lower` and `to_upper` give a `[char; 3]` (`library/core/src/unicode/unicode_data.rs` on Rust's
+// master branch, read 2026-11-02): ASCII by its letters (`CaseAscii`), the rest of
 // Latin-1, U+0080 to U+00FF, by `CaseLatin`, and from U+0100 on by the levels of `table`, the form of .NET's
 // `CharUnicodeInfo.ToLower`, which reads a
 // code point's delta in one index and one block. Rust looks such a code point up by two binary searches, over
@@ -5163,12 +5164,20 @@ pub uint LittleEndianWord(byte* p) {
 
 // A step of each of MD5's four rounds (RFC 1321, 3.4) on a, b, c and d in the order the step gives them,
 // with its word `m`, its constant `t` and its shift `r`: the new value of a, as `md-5`'s `op_f` to `op_i`
-// give it. F and G add their two terms one at a time where RFC 1321 joins them with an or: the same
-// number, since the two share no bit, and the form LLVM makes of `op_f` and `op_g` where it knows that a
-// parameter holds no undefined bits (`noundef`), which the IR of Kurz does not say; with the or written
-// here, LLVM keeps an or of the two terms in the sum, one step longer on the path from b to the next step.
+// give it, but for the terms of F and G. The two terms of each share no bit, so an or of them, their sum
+// and each added into the sum give the same number, and so does F's select below. F is the select
+// OpenSSL's x86-64 assembly writes (`md5-x86_64.pl`), `((c ^ d) & b) ^ d`, the bit of c where b's is 1
+// and the bit of d where it is 0: of the or that RFC 1321 and `op_f` write, LLVM (clang 23) makes that
+// select in 14 of the 16 steps and keeps the or in the last two. MD5 of 16 MiB hashed three times took
+// 51.76 ms so, 52.14 with the or and 53.28 with the two terms added into the sum one at a time (issue
+// 157, 2026-11-03, the best of 9). G adds each of its two terms into the sum, where RFC 1321 joins them
+// with an or and `op_g` adds them together first: with F as above, MD5 took 51.81 ms so, 56.37 with the
+// or and 56.43 in `op_g`'s form (the best of 9, each beside a copy of its build), and 56.41 with G as the
+// select `((b ^ c) & d) ^ c`. In every step LLVM's code generator adds the constant `t` after the round's
+// function, one add more on the path from b than in OpenSSL's code
+// (knowledge/the-code-generator-adds-a-sums-constant-last.md).
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
-    uint sum = a +% m +% t +% (b & c) +% (~b & d)
+    uint sum = a +% m +% t +% (((c ^ d) & b) ^ d)
     return (sum << r | sum >> (32 - r)) +% b
 }
 
@@ -5772,8 +5781,9 @@ pub byte* HexEncode(byte* message, mut long asked) {
 // odd, read before the digits, and else the position of the first byte that is no digit; and -1 with
 // null in `made` and `asked` set where the system refuses. `digits` is the emitter's table of the value
 // of each byte as a digit, 255 for a byte that is no digit, read as .NET's scalar `FromHexString` reads
-// its table: the two digits of a pair, one test of both, and where it fails the position of the high
-// byte where that is no digit, else of the low one.
+// its table: the two digits of a pair and one test of both. Where the test fails, the position is H7's,
+// the high byte of the pair where that is no digit, else the low one; where both are no digit, .NET's
+// scalar form names the low one.
 pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut long asked) {
     made = null
     if count % 2 != 0 {

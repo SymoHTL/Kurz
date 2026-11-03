@@ -210,8 +210,8 @@ the program was accepted the command asks the clang found about the CPU: the mac
 it, `-E -dM` of an empty C file, name the classes it has (`__SSE4_1__` for `X86.Sse41`, `__SHA__` for
 `X86.Sha`), and the features its driver passes for it, `-###`, are kept for the functions compiled for
 more classes (below). For a CPU named by its name the driver passes none, the name carrying them to
-LLVM; for `native` it passes the machine's. An executable built so runs on a CPU that has what the
-name names, which nothing checks when it starts (section 2). The question's two failures are the
+LLVM; for `native` it passes the machine's. An executable built for a CPU with sets beyond the baseline checks
+them when it starts, before the program's first statement (R18, below). The question's failures are the
 command's own, the first in the owner's words, with clang's release and the target it builds for
 (the owner, 2026-11-01, #39), the second where clang fails on the question otherwise (the owner,
 2026-11-01):
@@ -224,6 +224,16 @@ command's own, the first in the owner's words, with clang's release and the targ
       note: /usr/bin/clang-23 exited with 1 and wrote:
         <what clang wrote>
       help: check that the clang found runs
+
+and two the start check adds (section 13, the owner, 2026-11-02, #39, the words this directory's),
+for a set clang gives the CPU that the start check's table does not read, which no CPU of clang 23
+has, and for a CPU beyond the baseline on a 64-bit Arm machine, where no check is built:
+
+    error: clang 23.1.4 gives the x86-64 CPU `later` a set the start check cannot read, `__AVX512NEXT__`
+      help: name a CPU without it, or none
+
+    error: not supported: `neoverse-v2`, a 64-bit Arm CPU with sets beyond the baseline, which no start check reads (R18)
+      help: build without --cpu
 
 `kurz run [--release] [--lines] [--cpu name] file.kz` builds the file as `build` does and runs it, and
 `kurz exec [--release] [--lines] [--cpu name] "program text"` builds its argument and runs it, the argument's lines named
@@ -310,9 +320,15 @@ ask about it.
   ([a .NET open takes a lock that does not wait](../knowledge/a-dotnet-open-takes-a-lock-that-does-not-wait.md)).
   Pinned by `PlaceTests`.
 - The classes of a CPU are those whose macro clang defines for it, and the classes under `Arm` are
-  none, since the compiler builds the intrinsics of x86-64 alone (R18). On a 64-bit Arm machine the
-  failure names a `64-bit Arm` CPU and clang gets `-mcpu`, which no test runs: the suites run on
-  x86-64. Pinned on x86-64 by `ClangTests.A_cpu_is_described_by_the_classes_whose_macros_clang_defines_for_it_and_the_features_its_driver_passes`.
+  none, since the compiler builds the intrinsics of x86-64 alone (R18). Its sets beyond the baseline
+  are the macros of a set clang defines for it and not for `x86-64`, and on a 64-bit Arm machine the
+  lines of its `__ARM_` macros that the baseline's lack. On a 64-bit Arm machine the failure names a
+  `64-bit Arm` CPU, clang gets `-mcpu`, and its driver's refusal of a CPU it does not know in the run
+  that shows its target is read as that failure. Pinned on x86-64 by
+  `ClangTests.A_cpu_is_described_by_the_classes_whose_macros_clang_defines_for_it_and_the_features_its_driver_passes`,
+  and for a 64-bit Arm target, through clang's `--target`, by
+  `CommandTests.For_a_64_bit_arm_machine_a_cpu_clang_does_not_know_is_unknown_and_one_with_sets_beyond_the_baseline_is_not_supported`;
+  no test runs on an Arm machine.
 - The program runs in the caller's directory, and the command waits for it however long it runs.
   Pinned by `CommandTests.The_program_takes_the_commands_input_output_and_error_the_words_given_and_the_callers_directory`
   and, on Linux, by the endless program of
@@ -608,8 +624,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   digit after it counted and holding the range after the rounding (X7); and `Hex.Decode(s)`, the bytes of
   a new list the standard library's `HexDecode` makes, or the case `HexError` at the length where it is odd, read
   first, or at the first byte that is no digit, as the `hex` crate's `decode` (H7), the digits read two at a time
-  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's `FromHexString`
-  reads them. A piece of `Split`, a trimmed
+  through a table of 256 bytes the emitter writes into the program once, `hex.digits`, as .NET's scalar
+  `FromHexString` reads them. A piece of `Split`, a trimmed
   string and a cut of `Substring` is the string itself, held once more
   (M3), where it keeps every byte; the empty string where it keeps none; its bytes in place where the string
   is a literal, whose bytes are never freed; else a copy, the standard library's `StringOf`; and a `Replace`
@@ -761,8 +777,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `FindInt` and `FindLong`, 16 bytes at a time where the CPU has SSE2 (R18), and a run of other items at
   each position in turn, as Rust's `windows`; `AddRange(collection)`, which
   reads its argument first and holds it with a count of its own while the list makes room for all of its
-  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` copies the block, or grows it
-  where only the list and the argument hold it, as Rust's `extend_from_within`, and appends
+  items at once, as Rust's `extend_from_slice`, so that `xs.AddRange(xs)` appends in the block's room, or
+  grows the block, where only the list and the argument hold it, as Rust's `extend_from_within`, else
+  copies it, and appends
   the items as they were (section 12, assumed); `Reverse()`, which swaps the items in place and copies
   a block another value holds first (X9, M3); `Insert(index, item)` and `RemoveAt(index)` (X11), which
   read the index before the list is copied or grows and raise `index-out-of-range` outside it, `Insert`
@@ -1225,7 +1242,8 @@ as LLVM's instruction or intrinsic for C#'s (`Shuffle` of `X86.Sse2` a `shufflev
 lanes of 1, 2 and 4 bytes, an `icmp eq` whose lanes are widened to all ones, `And` an `and`, and
 `MoveMask` of bytes the top bits of the lanes as an `i16`, which LLVM turns into `pmovmskb`, each held
 to .NET's result by `IntrinsicTests`), an immediate as the
-instruction reads it (`Extract` its low bits, `AlignRight` zeros past 31 bytes). A test of a class's
+instruction reads it (`AlignRight` zeros from 32 bytes on), while a lane of `Extract` past the lanes is
+`lane-out-of-range` at its line. A test of a class's
 `IsSupported` is a constant where the CPU of the build answers it: `true` for a class the CPU has,
 `X86.Sse2` on every x86-64 CPU and more with `--cpu`, `false` for a class under `Arm`. Otherwise it
 reads the CPU's word, a global that the program's `main` fills once, before the runtime starts and
@@ -1260,9 +1278,35 @@ on the same lanes, and the SHA-1 functions, which .NET does not have, by compres
 Those of its tests and of `HashTests` that run an instruction fail, naming the set, on a machine without
 SSE4.1, AES or SHA, and the one built for `native` without AVX, since a path no test runs must not look
 clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
-A trace names a guarded block's function by its symbol without the numbers, `main.guarded`, and a
-copy by its whole symbol, `Next.1.for.X86.Sse41`, since its numbers do not end it: the names the
-emitter gives, which the record leaves open (section 14).
+A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
+(section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
+tables as the function's name; a lambda made in the block is named after the function the block
+stands in, `main.lambda`, as its symbol is. A trace names a copy by its whole symbol,
+`Next.1.for.X86.Sse41`, since its numbers do not end it: the name the emitter gives, which the record
+leaves open (section 14).
+
+A build for a CPU with sets beyond the baseline checks them at its start (section 13, the owner,
+2026-11-02): `main`, the read of the CPU and the read of the run setting are compiled for x86-64's
+baseline (`"target-cpu"="x86-64"`), so that nothing compiled for the CPU runs before the check, and
+`main` calls the read before the runtime starts. The read takes each set of `CpuSets.Table`, written
+from LLVM's `sys::getHostCPUFeatures` of the pinned release, as LLVM reads the machine for `native`:
+the bits of `cpuid`'s leaves, each register taken as 0 where the CPU has no such leaf, the version of
+AVX10 from leaf 0x24, and for the sets of AVX, AVX-512, AMX and APX the state XCR0 says the system
+saves, read by `xgetbv` only where the CPU says the system turned it on (OSXSAVE). Where a set is
+missing, or the run setting turned it off, it writes `error: cpu-lacks-set (<the CPU option>: <the
+sets>)`, those the CPU lacks first, then a group for each variable that turned sets off, `avx2 turned
+off by KURZ_INTRINSICS_AVX2`, apart by `; ` (the owner, 2026-11-02, #39), on standard error, through `write` and `_exit` on Linux and `WriteFile` and `ExitProcess` on
+Windows, and ends with 1. The same read takes the run setting, each variable once, through `getenv`
+on Linux and `GetEnvironmentVariableA` on Windows: `KURZ_INTRINSICS=0` clears the bits of every class
+from the CPU's word, and `KURZ_INTRINSICS_<SET>=0` the class's, which the test of every class derived
+from it holds too (the names, and that only `0` acts, are assumed in section 13 and R18). `IntrinsicTests` pins the check against LLVM's own reading of the machine the suites
+run on, clang's `native`, for every row of the table at once, that every x86-64 CPU clang 23 knows
+has only sets the table reads, the lines of the run setting, and the word it turns off. On a CPU of
+the test's own, whose `cpuid` and `xgetbv` are functions the test writes into the IR, it pins what that
+machine cannot show: a leaf past the CPU's top and a subleaf past leaf 7's last read as 0, the state
+XCR0 says the system saves, `xgetbv` run only under OSXSAVE, an alternative bit and AVX10's version. A
+row whose bits give LLVM's answer on that machine and not on another is held by its reading of LLVM
+alone.
 
 ### What the emitter does not emit
 
@@ -1589,7 +1633,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
-`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`,
+`naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
@@ -1653,7 +1697,9 @@ that holds one, which no rule gives, where A4 gives every other value a text der
 type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
 `string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
 not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
-among them, a function of a built class and a lane operation it does not build, an immediate that is
+among them, while `Arm.AdvSimd`'s `Add`, which the checker's table holds, is read on every target and
+compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a test of it is
+`not supported`, as an intrinsic of a class under `X86` is there), a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
@@ -1720,7 +1766,8 @@ round can ask about it by the rule's id.
   and `Insert` among them (M7). A map that
   holds a value without a text is `no-text` (A7), and so is a `string.Join` of a list whose items have none
   (X6, A7); a `string.Join` of an argument that is no list fits neither of its forms, a `string` or a `char`
-  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13).
+  separator, since neither reads the item type from it (T27), and is `argument-mismatch` (F13), each form's
+  line naming that argument.
 - K4 with K5, K12 and N9: a class that compares by content and holds a field of a type `==` does not take,
   a map among them, makes `==` on its instances, and a key of it, `type-mismatch`, as a `data` value that
   holds one does (D3, M9), since K4 compares each field by the equality Kurz gives its type and that type
@@ -1794,6 +1841,11 @@ round can ask about it by the rule's id.
   has are `cannot-infer`; a type a nested position fixes (`List<T>` of a `List<User>`) is the one
   the direct arguments meet, each of them that type or one derived from it. T27 names the base for
   classes; the checker reads it for data types.
+- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where its
+  parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
+  `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
+  arguments give their type parameters types that differ, or no argument stands in a position, it names
+  none. The id stays T27's: no argument stands in the type parameter's position.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -1811,7 +1863,17 @@ round can ask about it by the rule's id.
 - E1 with V9: a function named as a built-in (`int File() => 1`) is `redeclared`, and a call of it
   reports nothing more, its arguments checked, as a read of a variable named so does; where a data
   type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
-  `Bytes` is it, the call keeps that one's reading and its errors.
+  `Bytes` is it, the call keeps that one's reading and its errors, and so does the bare name: after
+  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a type every
+  file sees has the name, the text of the function's declaration names that type and the rule that
+  declares it, as a type's declaration of the name does.
+- E1 with O2 and O9: a call whose argument does not fit its parameter reports that misfit alone, and no
+  case of its result is passed on beside it, at the top level or in a function. That holds for a list
+  literal, a literal that its own type reads and the parameter's does not (`300` for a `byte`), a `null`
+  and a function's name, which the parameter types (M11, L17, N6, F11), as it holds for a variable of
+  another type. An argument with an error of its own fits every parameter (E1), so the call passes its
+  cases on, an item of a list literal among them; so does a lambda whose parameter is written with
+  another type than the one the call passes, which the lambda's own check reports (F11).
 - S13 with V9: `args = value` among the top-level statements is `redeclared`, with a text that cites
   S13 and V9. It is one reading of the question S13 and section 14 of the record hold open, where V8's
   reading is `assign-immutable`, and no corpus case stands on it.
@@ -1927,7 +1989,8 @@ round can ask about it by the rule's id.
   `T` = `int` in `T | List<T>` ("Same shape first"), and a literal binds the type parameter to its own type
   where the union names no case of that type, `F(5)` in `T | string` ("Bind T = int in both"): `Infer` and
   `Unify` in `Checker.Calls.cs`. A list literal keeps the cases at a parameter whose item type names a case
-  of an item call beyond its success, and fits exactly item by item, so that of `Show(List<int>)` and
+  of an item call beyond its success, and fits exactly by the whole result of each item call whose cases
+  the item type keeps and by its own item type for every other item, so that of `Show(List<int>)` and
   `Show(List<int | NotFound>)` the call `Show([Find(1)])` runs the second ("The union one", 2026-11-01).
 - N3 with N7: the flow is C#'s, as section 4 names it: a test narrows the branch it guards, `!`,
   `&&` and `||` as they come out, and an `if` whose block always leaves the code after it; where
@@ -2050,7 +2113,7 @@ round can ask about it by the rule's id.
   `mut` before that argument or without it (E1).
 - R18 with N3: a test guards where N3 would narrow, and only there: the block of `if` and `while`, the
   right side of `&&`, `!` turning a test around, the `else` and the right side of `||` after a test
-  turned around, and the rest of a block after a test whose block always leaves; a `bool` stored from `IsSupported` guards nothing, and
+  turned around, and the rest of a block after a test turned around whose block always leaves; a `bool` stored from `IsSupported` guards nothing, and
   `IsSupported` is a `bool` wherever it stands. A test of a class guards the classes it derives from,
   as C#'s classes derive (`X86.Sse41` guards `X86.Ssse3` and `X86.Sse2`; `X86.Aes` and `X86.Sha` derive
   from `X86.Sse2`), and not those derived from it. A function an intrinsic stands in is not guarded by
@@ -2058,7 +2121,8 @@ round can ask about it by the rule's id.
   was known where a lambda was made.
 - R18 with F14 and L10: an immediate, a parameter C# types `byte` and takes as a constant, is an `int`
   in the pick of the overload, so that a literal's own type fits it, and then a constant that does not
-  fit the parameter's type is `constant-overflow`.
+  fit the parameter's type is `constant-overflow`, and one that fits and lies past the lanes of a
+  parameter that names a lane, `Extract`'s `index`, is `lane-out-of-range`.
 - R18 with T19: the lanes of a vector are C#'s ten number types, `decimal` not among them, and another
   type is `type-mismatch`, as an unmet limit is. A class under `Arm` is read as on any target: its
   test is a `bool`, its block is checked, and `intrinsic-unguarded` stands outside a test of it.

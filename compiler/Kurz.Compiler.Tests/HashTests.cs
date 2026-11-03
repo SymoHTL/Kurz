@@ -304,7 +304,7 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true, cpu: cpu is null ? null : () => cpu);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var ir = compilation.Program.Ir;
-            Assert.Equal((name, word), (name, ir.Contains("@kz.cpu", StringComparison.Ordinal))); // which path runs is held by the mutations of each
+            Assert.Equal((name, word), (name, ir.Contains("load i64, ptr @kz.cpu", StringComparison.Ordinal))); // which path runs is held by the mutations of each
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name));
             Assert.Equal((name, 0, ""), (name, code, error));
             Assert.Equal(expected, output);
