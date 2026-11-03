@@ -1123,7 +1123,9 @@ public sealed partial class Emitter
     /// that makes the pair smaller (<see cref="PairLayout"/>); the pairs sorted by their keys, and by their positions where two keys are equal,
     /// so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
-    /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
+    /// the keys let go of. The place is taken once, before the keys: where a key gives a field on the way to the list another instance,
+    /// the field written is the one of the instance read before them, which that read holds to the end of its statement (X8, assumed).
+    /// An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
     /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
     /// items of the list as it was read (X8, assumed): a lambda changes no variable it captures (F11), but a key can change the list through an
     /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
