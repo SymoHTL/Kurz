@@ -1,6 +1,6 @@
 ---
 name: a-borrow-outlives-its-source
-description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
+description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; the key of a list's SortBy (2026-11-01) changed the list it sorted through an instance, past the promise of F11 that rested on a lambda changing nothing it captures, and the sort holds the list it read with a count of its own since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
 metadata:
   type: feedback
 ---
@@ -8,7 +8,7 @@ metadata:
 The emitter of pull request 63 counts the holders of a list's block, and a value read from a
 variable, a field or an item is borrowed: no count is raised for the read, since the place still
 holds one (`compiler/README.md`, the counting paragraph). A borrow is sound only while nothing can
-change the place it came from. Five shapes in which something could reached `main`:
+change the place it came from. Six shapes in which something could reached `main`:
 
 - **Inside one expression.** `G(xs, F(mut xs))`: `G`'s first argument is read as a borrowed
   pointer, then `F` runs and gives `xs` a new block, and `G` receives a freed one. The emitter held
@@ -44,6 +44,17 @@ change the place it came from. Five shapes in which something could reached `mai
   owner answered on 2026-10-29: a hole of a string holds what it read until the interpolation is made,
   so the first is `changed-while-held` ("Refuse, as Rust", as Rust's `format!` borrows its arguments),
   and an interpolation of one hole is a new value with a count of its own ("New value, as format!").
+- **Through a key of `SortBy`.** `SortBy` (X8) held the place of its list while its keys ran, on
+  the promise of F11 that a lambda changes nothing it captures. Pull request 181 gave classes their
+  methods, and the owner's "Both allowed" (#110, 2026-11-01) lets a lambda change what an instance
+  it captured holds, so a key could assign the field that holds the list:
+  `b.Items.SortBy(x => b.Reset(x))`, where `Reset` assigns `Items = [0]`. On `main` on 2026-11-01
+  the program ended with the exit code 139 under the fenced allocator, and under the plain one it
+  printed the items of the freed block. It was found while a thread of pull request 181's review was
+  read. The list a sort reads takes a count of its own across the keys since, and a key's change
+  stands (X8; the owner, 2026-11-01, "Change stands, as C#"). The other `mut` members of a list, a
+  map and a hasher make their arguments before they take the place (M4); `SortBy` is the one member
+  that runs a program's code while it holds a place.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
@@ -55,10 +66,16 @@ expression (M7, `Semantics/Checker.Reads.cs`), an interpolation's holes among th
 list or a string (R13),
 the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
 `Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
-2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), and the
+2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), the count
+the read of a field of a class instance takes, held to the statement's end (`InstanceField` in
+`Emit/Emitter.Classes.cs`), so that a call on a handle the field holds keeps that handle while its
+arguments give the field another (pull request 243), and the
 count the emitter takes of a read of a copied type that the checker marks as met by a change, a
-function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25). A construct
-that has none takes a count of what it read. Each one gets a line in a fenced program of `ListTests`
+function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25), and the count
+`SortBy` takes of the list it read while its keys run. A construct
+that has none takes a count of what it read. A promise of another rule that no code can reach the
+place, F11's for a lambda, is no such name: a later rule can open a way to it, as K2's methods did,
+so every member that runs a program's code while it holds a place is listed (`SortBy`, X8). Each one gets a line in a fenced program of `ListTests`
 (an allocator that makes every freed block inaccessible), where a read after the free ends the run
 with the system's signal. A refusal of the checker names every form that changes a place, a `mut`
 argument, a `mut` method on a variable or a path of fields, an assignment, in every place a statement can stand inside an expression,

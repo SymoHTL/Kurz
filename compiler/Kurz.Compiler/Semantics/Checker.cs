@@ -346,6 +346,7 @@ public sealed partial class Checker
 
         CheckMethodBodies(); // K7
         JoinPassingReaders();
+        FindGrowingCycles(); // T34: after the readers are known, which it does not read
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -504,13 +505,7 @@ public sealed partial class Checker
         var clash = IsDeclaredName(d.Name);
         if (clash)
         {
-            // a built-in name among them: `data List` could never be named (M9, T17); a built-in data type names the rule that declares it,
-            // since no line of the file does
-            Report(ErrorIds.Redeclared, d.Line, preludeSeen.Contains(d.Name)
-                ? PreludeClash(d.Name)
-                : BuiltInTypeRules.TryGetValue(d.Name, out var rule)
-                ? $"`{d.Name}` is {(enums.ContainsKey(d.Name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
-                : $"the name `{d.Name}` is declared already (V9)");
+            Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a built-in name among them: `data List` could never be named (M9, T17)
         }
 
         if (d.Kind == TypeDeclarationKind.Enum)
@@ -1212,7 +1207,7 @@ public sealed partial class Checker
 
         if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
-            Report(ErrorIds.Redeclared, d.Line, $"the name `{d.Name}` is declared already (V9)"); // a C declaration's among them, which has one name (R16)
+            Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
             return;
         }
@@ -1608,6 +1603,16 @@ public sealed partial class Checker
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256";
+
+    /// <summary>
+    /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
+    /// a type of the prelude among them (W1), it names that type and the rule that declares it, since no line of the file does.
+    /// </summary>
+    private string Redeclared(string name) => preludeSeen.Contains(name)
+        ? PreludeClash(name)
+        : BuiltInTypeRules.TryGetValue(name, out var rule)
+        ? $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} every file sees, declared before the file's own types ({rule}, V9)"
+        : $"the name `{name}` is declared already (V9)";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
     private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };

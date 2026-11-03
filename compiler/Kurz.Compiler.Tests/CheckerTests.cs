@@ -167,6 +167,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Map() => 1\nm = Map<int, int>(1)\nprint(m.Count)")); // M9
         Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.ArgumentMismatch, 2)], Errors("int Bytes() => 1\nb = Bytes(1, 2)\nprint(b.Count)")); // M9
         Assert.Equal([(ErrorIds.Redeclared, 5), (ErrorIds.TypeMismatch, 7)], Errors("extern \"C\" {\n    int abs(int n)\n}\n\nint abs(int n) => n\nraw {\n    print(abs(\"a\"))\n}", grants: "raw native")); // the C call's argument (R16)
+
+        // the bare name keeps the other declaration's reading too, a type's that no value stands for (D2), where a type every file sees
+        // has it, whose name the text of the function's declaration says, with the rule that declares it, as a type's declaration of it does
+        Assert.Equal([(ErrorIds.Redeclared, 1), (ErrorIds.Syntax, 5)], Errors("void IoError() {\n    print(1)\n}\n\nx = IoError\nprint(x)"));
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Syntax, 6)], Errors("data User(int Id)\nvoid User() {\n    print(1)\n}\n\nx = User\nprint(x)"));
+        Assert.Equal("`IoError` is a data type every file sees, declared before the file's own types (S1, V9)", Check("void IoError() {\n    print(1)\n}\n\nprint(1)").Diagnostics.Sorted.Single().Message);
+        Assert.Equal("`IoKind` is an enum every file sees, declared before the file's own types (S1, V9)", Check("int IoKind() => 1\n\nprint(1)").Diagnostics.Sorted.Single().Message);
+        Assert.Equal("the name `File` is declared already (V9)", Check("int File() => 1\nprint(File())").Diagnostics.Sorted.Single().Message);
     }
 
     [Fact]
@@ -549,6 +557,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 5)], Errors("T Pick<T>(T a, T b) => a\n\nbyte small = 1\nint i = 2\nprint(Pick(small, i))"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 4)], Errors("T Pick<T>(T a, T b) => a\n\nbyte small = 1\nprint(Pick(small, 300))"));
         Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors("T Make<T>() => Make<T>()\n\nprint(Make())"));
+
+        // T27: the text names the first argument whose type has no part where its parameter's type parameter stands, so that it gives
+        // that type parameter nothing; where every argument gives its type parameters a type and they differ, where no argument stands
+        // in a position, and for a lambda, which has no type of its own before the pick (F11), the text names no argument
+        const string notInferable = "the type arguments are neither written nor inferable from the arguments";
+        Assert.Equal(notInferable + ": argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", Assert.Single(Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 1 is a `List<int>` where a `List<List<T>>` is required, and gives `T` nothing (T27)", Assert.Single(Check("int Depth<T>(List<List<T>> xs) => xs.Count\n\nys = List<int>()\nprint(Depth(ys))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Pick<T>(T a, T b) => a\n\nbyte small = 1\nint i = 2\nprint(Pick(small, i))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Make<T>() => Make<T>()\n\nprint(Make())").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(nothing))").Diagnostics.Items.Single(d => d.Id == ErrorIds.CannotInfer).Message); // an argument with an error of its own is named by none
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("T Pick<T>(T a, T b) => a\n\nprint(Pick<int, int>(1, 2))"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair<int> p = Pair(1, \"one\")\nprint(p.First)"));
@@ -1266,6 +1286,30 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_call_whose_argument_does_not_fit_reports_that_alone_and_passes_no_case_on()
+    {
+        // E1 with O2 and O9: an argument that does not fit its parameter is the call's one error, a list literal, a literal that its own
+        // type reads and the parameter's does not, a `null` and a function's name, which the parameter types (M11, L17, N6, F11), as a
+        // variable of another type, so no case of the call's result is passed on beside it, at the top level or in a function; a call whose
+        // arguments fit passes its cases on, and so does one whose argument has an error of its own, which fits every parameter (E1), an
+        // item of a list literal among them
+        var find = "data NotFound\n\nint | NotFound Find(string s) {\n    if s == \"\" {\n        return NotFound\n    }\n    return 1\n}\n\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("x = Hex.Decode([1])\nprint(x)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("void F() {\n    x = Hex.Decode([1])\n    print(x)\n}\n\nF()"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("b = [1]\nx = Hex.Decode(b)\nprint(x)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(find + "x = Find([1])\nprint(x)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(find + "x = Find(2)\nprint(x)"));
+        var apply = "data NotFound\n\nint | NotFound Apply((int) => int f) {\n    if f(1) == 0 {\n        return NotFound\n    }\n    return f(1)\n}\n\n";
+        Assert.Equal([(ErrorIds.Syntax, 12)], Errors(apply + "int Two() => 2\n\nx = Apply(Two)\nprint(x)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors(apply + "x = Apply(null)\nprint(x)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 10)], Errors("data NotFound\n\nint | NotFound F(byte b) {\n    if b == 0 {\n        return NotFound\n    }\n    return 1\n}\n\nx = F(300)\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 1)], Errors("x = Hex.Decode(\"zz\")\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnlistedCase, 10)], Errors(find + "x = Find(\"a\")\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnlistedCase, 1)], Errors("x = Hex.Decode(nothing)\nprint(x)"));
+        Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnlistedCase, 1)], Errors("x = Hex.Decode([nothing])\nprint(x)"));
+    }
+
+    [Fact]
     public void A_type_parameter_inside_a_written_union_takes_what_the_union_does_not_name()
     {
         // O4 (the owner, 2026-11-01, "T = success only"): a call whose cases the union keeps gives the type parameter its success alone, and a
@@ -1310,8 +1354,8 @@ public sealed class CheckerTests
     public void A_list_literal_of_calls_runs_the_function_whose_item_type_keeps_the_cases()
     {
         // O4 with F13 (the owner, 2026-11-01, "The union one"): a list literal of calls is read as such a call, so the function whose item type
-        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly item by item, so a value beside
-        // the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
+        // keeps the cases fits it exactly and wins, and nothing of the call is passed on; a literal fits exactly by the whole result of each
+        // call whose cases its item type keeps and by its own item type for the rest, so a value beside the call leaves the items one exact alone, an exact fit wins over a union with a widening, and two whose item types keep the cases
         // with a widening are ambiguous (assumed, section 5)
         var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
         var show = "int Show(List<int> xs) => 1\n\nstring Show(List<int | NotFound> xs) => \"union\"\n\n";
@@ -1471,6 +1515,37 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data A(int X) : C\ndata B(int Y) : A\ndata C(int Z) : B\n\nprint(1)"));
         Assert.Equal([(ErrorIds.BaseCycle, 3)], Errors("data D(int W) : A\ndata A(int X) : B\ndata B(int Y) : A\n\nprint(D(1, 2, 3).W)"));
         Assert.Equal([(ErrorIds.BaseCycle, 2), (ErrorIds.BaseCycle, 4)], Errors("data A(int X) : B\ndata B(int Y) : A\ndata C(int Z) : D\ndata D(int W) : C\n\nprint(1)"));
+    }
+
+    [Fact]
+    public void A_derived_data_type_without_fields_of_its_own_has_the_fields_of_its_base()
+    {
+        // D21 (decided, §4): `data Dot : Shape` has the fields of its base (D7), through every base above it, so its bare name stands for no
+        // value (D2), `Dot(...)` binds the base's fields, a member on its name is no field of a value, and no text of D8 names it. Where no base
+        // has a field, the bare name is the one value (D8), and an argument or `()` keeps D8's errors; a type of a cycle of bases has no base
+        // and keeps its own fields
+        var shape = "data Shape(int A, int B)\ndata Dot : Shape\ndata Spot : Dot\n\n";
+        Clean(shape + "d = Dot(1, 2)\nprint(Spot(3, 4).B + d.A)");
+        var bare = Assert.Single(Check(shape + "print(Dot)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.Syntax, 5, "`Dot` is a type, and no value stands here (D2; E4)"), (bare.Id, bare.Line, bare.Message));
+        var member = Assert.Single(Check(shape + "print(Spot.A)").Diagnostics.Sorted);
+        Assert.Equal((ErrorIds.UnknownName, 5, "`Spot` is a type and has no member `A` (D1, V10)"), (member.Id, member.Line, member.Message));
+        foreach (var (call, text) in new[]
+        {
+            ("Dot()", "the parameter `A` gets no argument and has no default (D11)"),
+            ("Dot(1)", "the parameter `B` gets no argument and has no default (D11)"),
+            ("Spot(1, 2, 3)", "the call passes 3 arguments to 2 parameters (D11)"),
+        })
+        {
+            var wrong = Assert.Single(Check(shape + $"print({call})").Diagnostics.Sorted);
+            Assert.Equal((ErrorIds.ArgumentMismatch, 5, text), (wrong.Id, wrong.Line, wrong.Message));
+        }
+
+        var tag = "data Tag\ndata Mark : Tag\n\n";
+        Clean(tag + "m = Mark\nprint(m == Mark)");
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 4)], Errors(tag + "print(Mark(1))"));
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors(tag + "print(Mark())"));
+        Assert.Equal([(ErrorIds.BaseCycle, 2)], Errors("data A : B\ndata B : A\n\nprint(A == A)"));
     }
 
     [Fact]
@@ -2105,6 +2180,7 @@ public sealed class CheckerTests
     [InlineData("enum HttpKind { Lost }", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
     [InlineData("int Same<HttpError>(HttpError x) => 1", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
     [InlineData("data Box<HttpKind>(HttpKind V)", "`HttpKind` is an enum of `std/` every file sees, declared before the file's own types (W1, V9)")]
+    [InlineData("int HttpError() => 1", "`HttpError` is a data type of `std/` every file sees, declared before the file's own types (W1, V9)")]
     public void A_file_s_own_declaration_of_a_type_of_the_prelude_is_redeclared_and_names_W1(string text, string message)
     {
         var error = Assert.Single(CheckSeeingStd(text).Diagnostics.Items);
@@ -2958,6 +3034,15 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_list_literal_that_nothing_types_has_its_own_cannot_infer_text()
+    {
+        // M11 with T27: `[]` and items of no one type keep the text of a list literal, which names no argument, where a call's text names
+        // the argument that gives a type parameter nothing
+        Assert.Equal("`[]` has no item type, and no list type stands where it does: `List<int> xs = []` (M11, T27)", Assert.Single(Check("x = []\nprint(x)").Diagnostics.Items).Message);
+        Assert.Equal("the items have no one type, and no list type stands where the list does (M11, T27)", Assert.Single(Check("x = [1, \"a\"]\nprint(x)").Diagnostics.Items).Message);
+    }
+
+    [Fact]
     public void A_list_literal_argument_takes_its_parameter_s_type()
     {
         // M11: `Take([1, 2])` (the owner, 2026-10-30, "[1, 2, 3], as C#"): the literal is read under its parameter's type, as a number
@@ -3148,6 +3233,17 @@ public sealed class CheckerTests
     [InlineData("l = Vector128.Create(1L)\nif X86.Sse2.IsSupported {\n    print(X86.Sse2.CompareEqual(l, l).GetElement(0))\n}", ErrorIds.ArgumentMismatch, 5)] // SSE2 compares no 8-byte lanes; SSE4.1 does
     public void A_name_type_or_immediate_an_intrinsic_does_not_take_is_its_error(string program, string id, int line) =>
         Assert.Equal([(id, line)], Errors(Lanes(program)));
+
+    [Fact]
+    public void A_constant_lane_of_extract_past_the_lanes_of_its_vector_is_lane_out_of_range_at_its_line()
+    {
+        // section 13, the owner, 2026-11-02 (#39): refused at its line, as Rust's constant assertion refuses it, with an id of its own;
+        // a constant that does not fit the parameter stays `constant-overflow`; the test pins the id and the line, never the text (section 8)
+        Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 4))\n}")));
+        Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(b, 16))\n}")));
+        Assert.Equal([(ErrorIds.LaneOutOfRange, 4)], Errors(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 255))\n}")));
+        Clean(Lanes("if X86.Sse41.IsSupported {\n    print(X86.Sse41.Extract(v, 3))\n    print(X86.Sse41.Extract(b, 15))\n}")); // the last lanes, the positive control
+    }
 
     [Theory]
     [InlineData("print(X86.Avx2.IsSupported)", "3: `X86.Avx2`, a class of C#'s whose intrinsics the compiler does not build (R18)")]
@@ -3486,8 +3582,12 @@ public sealed class CheckerTests
         // O10: a `void` method's call assigned to a field, by its name and through the instance
         Assert.Equal([(ErrorIds.Syntax, 6)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n\n    pub void Set() {\n        N = Go()\n    }\n}\n\nC(1).Set()"));
         Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class C(mut int N) {\n    pub void Go() {\n    }\n}\n\nc = C(1)\nc.N = c.Go()"));
-        // F13: two methods with the same parameter types; F3: the end of a method reached without a `return`
+        // F12: two methods with the same parameter types; F3: the end of a method reached without a `return`
         Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)"));
+        // the message names F12, the rule that makes two methods of one name with the same parameters one too many, as a duplicate
+        // function's message does (#156, item 12)
+        Assert.EndsWith("(F12)", Check("class C(int N) {\n    pub int Get() => N\n    pub int Get() => 1\n}\n\nprint(C(1).N)").Diagnostics.Sorted.Single().Message, StringComparison.Ordinal);
+        Assert.EndsWith("(F12)", Check("int F(int a) => a\nint F(int b) => b\nprint(F(1))").Diagnostics.Sorted.Single().Message, StringComparison.Ordinal);
         Clean("class C(int N) {\n    pub int Get() => N\n    pub int Get(int k) => N + k\n}\n\nprint(C(1).Get(2))");
         Assert.Equal([(ErrorIds.MissingReturn, 2)], Errors("class C(int N) {\n    pub int Get() {\n        if N > 0 {\n            return 1\n        }\n    }\n}\n\nprint(C(1).Get())"));
         // V9: a variable of a method named as a field; V10: a member and a method the class does not have
@@ -3814,13 +3914,13 @@ public sealed class CheckerTests
 
         // X6: two forms, `Join<T>(string separator, List<T> values)` and `Join<T>(char separator, List<T> values)`; values that are no
         // list give `T` nothing to infer from in either form (T27), so the call fits neither, `argument-mismatch` (F13), as a separator
-        // that is neither a `string` nor a `char`; `[]` fits a form and gives it no item type, `cannot-infer` (M11); items without a text
-        // are `no-text` (A4, A7)
+        // that is neither a `string` nor a `char`, and each form's line names the argument that gives `T` nothing; `[]` fits a form and
+        // gives it no item type, `cannot-infer` (M11); items without a text are `no-text` (A4, A7)
         (diagnostics, _) = Check("print(string.Join(\", \", 5))");
         Assert.Equal(
             "the call fits none of the forms of `Join` (F13):\n"
-                + "  `string Join<T>(string separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments (T27)\n"
-                + "  `string Join<T>(char separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments (T27)",
+                + "  `string Join<T>(string separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments: argument 2 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)\n"
+                + "  `string Join<T>(char separator, List<T> values)`: its type arguments are neither written nor inferable from the arguments: argument 2 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
             Assert.Single(diagnostics.Items).Message);
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(string.Join(',', 5))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(string.Join(1, [\"a\"]))"));
@@ -4174,6 +4274,47 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.VoidTypeArgument, 7)], Errors(reader + "Only<void>()"));
         Assert.Equal([(ErrorIds.VoidTypeArgument, 11)], Errors(reader + "void Outer<U>() {\n    Only<U>()\n}\n\nOuter<void>()"));
         Clean(reader + "Only<int>()");
+    }
+
+    [Fact]
+    public void A_cycle_of_generic_calls_whose_type_argument_grows_is_refused_at_each_call_where_it_grows()
+    {
+        // T34: where the type parameters lead back along the calls of the generic bodies, a call that gives one a larger type is refused,
+        // a written type argument, a map, a data type and a call in a lambda among them, and a call with two such type arguments one time;
+        // a cycle that keeps, swaps or takes back a type, a union's case, and a larger type outside any cycle make a finite number of copies
+        static List<string> Texts(string program) => [.. Check(program).Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}")];
+        const string Deep = "data Box<T>(T V)\n\nvoid Deep<T>(T x, int n) {{\n    if n > 0 {{\n        {0}\n    }}\n}}\n\nDeep(1, 3)";
+        Assert.Equal(["growing-type-argument 5: `Deep` calls itself with `List<T>` for `T`, a type larger than its `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(Deep, "Deep([x], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Map<string, T>(), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "Deep<() => T>(() => x, n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 5)], Errors(string.Format(Deep, "f = () => Deep([x], n - 1)\n        f()")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3)], Errors("void Deep<T>(T x, int n) {\n    if n > 0 {\n        Deep([x], n - 1)\n    }\n}"));
+
+        var pingPong = "void Ping<T>(T x, int n) {{\n    if n > 0 {{\n        Pong([x], n - 1)\n    }}\n}}\n\nvoid Pong<U>(U y, int n) {{\n    Ping({0}, n)\n}}\n\nPing(1, 3)";
+        Assert.Equal(["growing-type-argument 3: `Ping` calls `Pong` with `List<T>` for `U`, a type larger than its `T`, and the cycle `Ping` to `Pong` to `Ping` gives it back to `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(pingPong, "y")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3), (ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(pingPong, "[y]")));
+        Assert.Equal(["growing-type-argument 3: `F` calls `G` with `List<A>` for `U`, a type larger than its `A`, and the cycle `F` to `G` to `F` gives it back to `A`, so each copy makes a larger one without end (T34)"],
+            Texts("void F<A>(A a, int n) {\n    if n > 0 {\n        G([a], 1, n - 1)\n    }\n}\n\nvoid G<U, V>(U u, V v, int n) {\n    if n > 0 {\n        G(v, u, n - 1)\n        F(v, n - 1)\n    }\n}\n\nF(1, 3)"));
+        Assert.Equal(["growing-type-argument 3: `Swap` calls itself with `List<A>` for `B`, a type larger than its `A`, so each copy makes a larger one without end (T34)"],
+            Texts("void Swap<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Swap(b, [a], n - 1)\n    }\n}\n\nSwap(1, \"a\", 3)"));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 3)], Errors("void Two<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Two([a], [b], n - 1)\n    }\n}\n\nTwo(1, 2, 3)"));
+
+        Clean(string.Format(Deep, "Deep(x, n - 1)"));
+        Clean("void Swap<A, B>(A a, B b, int n) {\n    if n > 0 {\n        Swap(b, a, n - 1)\n    }\n}\n\nSwap(1, \"a\", 3)");
+        Clean("void Widen<T>(T x, int n) {\n    if n > 0 {\n        T | string y = x\n        Widen(y, n - 1)\n    }\n}\n\nWiden(1, 3)");
+        Clean(string.Format(pingPong.Replace("Pong<U>(U y", "Pong<U>(List<U> y"), "y[0]"));
+        Clean("List<T> Wrap<T>(T x) => [x]\n\nList<List<T>> Twice<T>(T x) => Wrap(Wrap(x))\n\nprint(Twice(1).Count)");
+
+        // E1: a call with an error of its own takes no part in a cycle; T33: a function that passes its type parameter to one that reads its
+        // type is read in its copies alone, and its chain of copies stays bounded
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(string.Format(Deep, "Deep([nothing], n - 1)")));
+        var passing = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nvoid Outer<U>(U x, int n) {\n    Only<U>()\n    if n > 0 {\n        Outer([x], n - 1)\n    }\n}\n\nOuter(1, 3)";
+        Assert.Equal(["14: a chain of more than 64 copies of generic functions that read their type, from `Outer<int>` (T33)"], NotSupported(passing));
+        Clean("void Deep<T>() {\n    match T.Kind {\n        TypeKind.List => print(1)\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
     }
 
     [Fact]

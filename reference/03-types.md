@@ -1486,6 +1486,96 @@ void Show<T>(T value, Invoice other) {
 Show(Order("a1"), Invoice("b2"))
 ```
 
+### T34 (decided, §4) A cycle of generic calls whose type argument grows
+
+A generic function becomes one copy of its code for each list of type arguments it is called with
+(§4). A call in a generic function's body whose type argument holds a type parameter of that
+function inside a list, as `[x]`, a `List<T>` for `T`, makes a copy for a larger type than the copy
+it stands in. Where such a call lies on a cycle of calls among generic
+functions, directly or through others, so that the type argument comes back to the type parameter
+it grew from, each copy makes a larger one without end, and the call is the compile error
+`growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a
+type parameter unchanged, swaps two of them, or gives one to a function that takes it back out of
+a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
+refused where it is written, whether or not a call reaches it. A generic function that reads its
+type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
+none of its calls is read for such a cycle, and a chain of more than 64 copies stays
+`not supported`. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+the calling function inside any other form of a type, a map, a `data` type and a function type
+among them, and not where it is a case of a union, which holds each case once, so that a
+`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
+as one of the body)*
+
+Case: [types/generic-growing-cycle.kz](../corpus/types/generic-growing-cycle.kz)
+```kurz
+void Deep<T>(T x, int n) {
+    if n > 0 {
+        Deep([x], n - 1)
+    }
+}
+
+Deep(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-through.kz](../corpus/types/generic-growing-cycle-through.kz)
+```kurz
+void Ping<T>(T x, int n) {
+    if n > 0 {
+        Pong([x], n - 1)
+    }
+}
+
+void Pong<U>(U y, int n) {
+    Ping(y, n)
+}
+
+Ping(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-no-cycle.kz](../corpus/types/generic-growing-no-cycle.kz)
+```kurz
+void Same<T>(T x, int n) {
+    if n > 0 {
+        Same(x, n - 1)
+    }
+}
+
+void Swap<A, B>(A a, B b, int n) {
+    if n > 0 {
+        Swap(b, a, n - 1)
+    }
+}
+
+void Widen<T>(T x, int n) {
+    if n > 0 {
+        T | string y = x
+        Widen(y, n - 1)
+    }
+}
+
+void Down<T>(T x, int n) {
+    if n > 0 {
+        Up([x], n - 1)
+    }
+}
+
+void Up<U>(List<U> ys, int n) {
+    Down(ys[0], n)
+}
+
+List<T> Wrap<T>(T x) => [x]
+
+Same(1, 3)
+Swap(1, "a", 3)
+Widen(1, 3)
+Down(1, 3)
+print(Wrap(Wrap(1)).Count)
+print("done")
+```
+
 ### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
