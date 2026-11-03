@@ -29,13 +29,18 @@ item 16 found the regression after the merge.
 - Measure a speed change on the sweep's rows of every function it touches, beside the rows of its own
   bench, and list them in the description. For `Same` and `Order` those are `compare-equal` and
   `compare-less` of the strings family; a sort of strings also reads `Order`, and a map whose keys
-  are strings reads `Same`.
+  are strings and `indexof-string` of the lists family, an `IndexOf` on a list of strings, read `Same`.
 - Measure each touched function in both shapes: as a call, in a program where it has several
   callers, and inlined, in a program where one function holds its one caller, in a loop.
   `nm <executable> | grep <name>` says which shape a program has: a function inlined at its every
   caller has no symbol.
-- A result that a caller branches on is computed as a value, for example the difference of two bytes,
-  not as a constant chosen in a branch. LLVM can turn constants that branches choose into a branch at
-  the caller, and that branch mispredicts where the data is random.
+- Measure a result that a caller branches on in both forms, computed as a value and chosen by a test,
+  each inlined into a loop of one caller: neither form wins everywhere. Where the first bytes differ,
+  the difference of the two bytes, a value, kept the sweep's `<` at 16.46 ms against 34.30 for a `-1`
+  or `1` chosen by a test (above). Where two words differ, item 16's `Order` took 49.65 ms on 50 rounds
+  of 200k sorted neighbours with a `-1` or `1` chosen by a test of which word is the lower, against
+  52.99 with a value made from the words' bits, the best of five runs of two builds that differ in that
+  line alone. LLVM can turn constants that branches choose into a branch at the caller, and that
+  branch mispredicts where the data is random.
 
 No CI job runs a benchmark, so nothing goes red when a change skips this: `judgment step`.

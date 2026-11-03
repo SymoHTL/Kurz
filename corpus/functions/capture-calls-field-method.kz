@@ -1,0 +1,10 @@
+// expect: output
+// | [1, 0, 3]
+// rules: F11, K2, M5
+
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)

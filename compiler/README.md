@@ -651,7 +651,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
   type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
   emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
-  type, `Order.Source`, where a pass made the copy;
+  type, `Order.Source`, where a pass made the copy; `T.Make(f => ...)` in a copy that binds a
+  `data` type becomes one call of its primary constructor, with an argument for each field in order,
+  each a copy of the lambda's body read as a pass of such a loop reads its body, and checked and
+  emitted as that call, a type with no fields giving its value;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -697,8 +700,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
   strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
-  two instances, by their addresses where a field is `mut` or `weak` (K4), by the fields an `equal by`
-  names, in its order (K5, K8, K15), and else field by field as a `data` value compares (K4, D3), in a
+  two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
+  K8, K15), else by their addresses where a field is `mut` or `weak` (K4), and else field by field as a
+  `data` value compares (K4, D3), in a
   function per class that gives true for one address before it reads a field. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
@@ -983,10 +987,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
-  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
-  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
-  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
-  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
+  as the order, then words on the runtime's own path, where Rust's `<` of `str` calls the C library's `memcmp`,
+  reading no byte past the end of either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the
+  counts, the first bytes and up to 16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more,
+  which the emitter marks `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1635,9 +1639,9 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
-`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
-call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
+`Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
+in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
@@ -1703,7 +1707,8 @@ round can ask about it by the rule's id.
   has none; in a class that compares by identity or by its clause such a field is not compared, and is no
   error *(assumed)*. `==` on values that hold an instance of a class that names its fields, a list, a
   `data` value, a union or an instance compared by content, compares that instance by its clause too, and
-  so ends a narrowing as N9's call, as `==` on the instance itself does *(assumed)*. A field named twice in
+  so ends a narrowing as N9's call, as `==` on the instance itself does (the owner, 2026-11-02, #110, comment 6586836827:
+  such an `==` is a call everywhere). A field named twice in
   one `equal by` is no error and counts once *(assumed)*.
 
 - E4: the rule gives one id, `syntax`, to text no rule gives a meaning, and names shapes only the
@@ -2082,9 +2087,11 @@ round can ask about it by the rule's id.
   after its value and then its index or key, in the order they run (M4), so `Head = Head.Rest`
   reads a narrowed `Head`, while a call in the value ends it before the index; an assignment of a
   field that the checker refuses narrows nothing *(assumed)*. A write into a list or a map that a
-  variable holds, itself or through `data` fields, `xs[0] = 2`, ends nothing, while one into what a
-  field of an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment
-  6573114335).
+  variable holds, itself or through `data` fields, `xs[0] = 2`, keeps the narrowing of a path with no
+  `weak` reference in it and ends it for one with a `weak` reference, while one into what a field of
+  an instance holds, `h.Xs[0] = 2`, ends it (the owner, 2026-11-02, #156, comment 6573114335). A read
+  or a write of a map's entry whose key type compares by an `equal by` clause, `m[k]` and `m[k] = 2`,
+  ends it as a call, since it runs that `==` and the key's hash (the owner, 2026-11-02, #110, comment 6586836827).
 - R2 with R4: a ring of classes is reported once, at the line of its class declared first, with the
   path of fields that closes it; a field holds a class through a list, a map's key or value, a union's
   case and a `data` value's fields, at any depth.

@@ -1,0 +1,14 @@
+// expect: error nullable-unchecked at 13
+// rules: N9, K5
+
+class Node(int V)
+class Holder(mut Node? Head)
+class K(int Id) equal by Id
+
+h = Holder(Node(1))
+k = K(1)
+mut seen = Map<K, int>()
+if h.Head != null {
+    seen[k] = 2
+    print(h.Head.V)
+}

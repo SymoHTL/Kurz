@@ -1,0 +1,6 @@
+// expect: error kind-not-read at 6
+// rules: T33
+
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<int>())

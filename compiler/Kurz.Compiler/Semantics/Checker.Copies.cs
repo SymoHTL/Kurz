@@ -56,6 +56,9 @@ public sealed partial class Checker
     /// <summary>The passes being checked, innermost last: a call of a function that reads its type keeps the one it stands in, for the path of fields.</summary>
     private readonly List<FieldPass> activePasses = [];
 
+    /// <summary>T33: the arguments of the calls <c>T.Make</c> became, each its lambda's body for one field, with that field's pass.</summary>
+    private readonly Dictionary<Expression, (FieldPass Pass, Parameter Parameter)> madeArguments = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>The generic functions that read their type, and those that pass their type parameter to one: never checked on their own.</summary>
     private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
 
@@ -417,6 +420,80 @@ public sealed partial class Checker
 
         model.RecordPasses(f, passes);
         return true;
+    }
+
+    /// <summary>
+    /// T33: <c>T.Make(f => ...)</c> in a copy that binds <c>T</c> to a <c>data</c> type, unrolled into one call of the type's primary
+    /// constructor with an argument for each field in order, each a copy of the lambda's body in a pass that declares <c>f</c> for its
+    /// field, as a loop over <c>T.Fields</c> is (section 4, "T.Make(f => ...)"), and checked as that construction is; a type with no
+    /// fields gives its value. A type of another kind is <c>kind-not-read</c>, as for <c>T.Fields</c>, and a call with anything but one
+    /// lambda of one parameter with no type is <c>syntax</c>. Null where the call is no <c>T.Make</c> of a copy.
+    /// </summary>
+    private Typed? CheckMake(CallExpression c)
+    {
+        if (c.Callee is not MemberAccess { Target: NameExpression n, Member: "Make", Conditional: false }
+            || Lookup(n.Name).Variable is not null || BoundType(n.Name) is not { } bound || CurrentCopy() is not { } copy)
+        {
+            return null;
+        }
+
+        if (c.TypeArguments.Count != 0
+            || c.Arguments is not [{ Name: null, Mut: false, Value: LambdaExpression { Parameters: [{ Mut: false, Type: null } parameter] } lambda }])
+        {
+            Report(ErrorIds.Syntax, c.Line, $"`{n.Name}.Make` takes one lambda of one parameter with no type, `{n.Name}.Make(f => ...)` (T33)");
+            return Typed.Error;
+        }
+
+        if (lambda.ExpressionBody is not { } body)
+        {
+            NotSupported(lambda.Line, $"a block as the body of the lambda `{n.Name}.Make` takes (T33)"); // no rule makes a block an argument
+            return Typed.Error;
+        }
+
+        if (bound is not DataType made)
+        {
+            var outermost = copy.Outermost;
+            Report( // into the copy's own list, as for a `match` on `T.Kind`
+                ErrorIds.KindNotRead,
+                outermost.Origin.Line,
+                $"`{outermost.Symbol.Name}`: {Named(copy, bound)} is of the kind `TypeKind.{KindOf(bound)}`, and `{n.Name}.Make` in `{copy.Original.Name}` makes a value of a `data` type alone (T33)");
+            return Typed.Error;
+        }
+
+        if (!made.Symbol.HasFields)
+        {
+            CountNamesRead(new ExpressionStatement(body.Line, body)); // the body is made for no field, and what it names counts as read
+            model.RecordMade(c, null);
+            return new Typed(made, new UnitConstant()); // D8: its value is the bare name, and no argument is made
+        }
+
+        var arguments = new List<Argument>();
+        foreach (var field in made.Symbol.Fields)
+        {
+            var pass = new FieldPass(parameter.Name, n.Name, made, field, SubstituteData(made, field.Type));
+            var argument = SyntaxCopy.Copy(body, (e, copyOf) => FieldGet(e, copyOf, pass));
+            madeArguments[argument] = (pass, parameter);
+            arguments.Add(new Argument(argument.Line, null, false, argument));
+        }
+
+        var construction = new CallExpression(c.Line, new NameExpression(n.Line, made.Symbol.Name), [], arguments);
+        var typed = CheckConstruction(made.Symbol, construction, made, made.TypeArguments);
+        model.RecordType(construction, typed);
+        model.RecordMade(c, construction);
+        return typed;
+    }
+
+    /// <summary>T33: checks an argument of the call <c>T.Make</c> became in the pass of its field, which declares the lambda's parameter.</summary>
+    private Typed CheckMadeArgument(Expression argument, (FieldPass Pass, Parameter Parameter) made, Func<Typed> check)
+    {
+        PushScope();
+        DeclareChecked(made.Parameter.Name, Types.Error, false, VariableKind.Parameter, made.Parameter.Line, made.Parameter);
+        passVariables[frame.Scope.Variables[made.Parameter.Name]] = made.Pass;
+        activePasses.Add(made.Pass);
+        var typed = check();
+        activePasses.RemoveAt(activePasses.Count - 1);
+        PopScope();
+        return typed;
     }
 
     /// <summary>A pass's copy of <c>f.Get(value)</c>, with one value and no name, as <c>(value).Field</c>; null for any other expression.</summary>
