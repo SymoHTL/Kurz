@@ -6,8 +6,8 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError` and
-`UriKind`, as `std/`
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
 lambda's parameter, a variable in a block, a loop variable or a name an arm of `match` binds, is
@@ -29,8 +29,8 @@ exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an 
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
 every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
-`HttpWriter` are two of them, against a body type no program can name; the two of `Uri` are the
-record's assumptions).
+`HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
