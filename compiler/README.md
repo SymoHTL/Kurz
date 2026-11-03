@@ -1308,7 +1308,7 @@ A trace and the line tables name a guarded block's function `<function>.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
 tables as the function's name; a guarded block made in the block adds its own mark, `main.guarded.guarded`
 (section 13, the owner, 2026-11-03); a lambda made in the block is named after the function the block
-stands in, `main.lambda`, as its symbol is. A trace names a copy by its whole symbol,
+stands in, `main.lambda`, as its symbol is (section 13, assumed). A trace names a copy by its whole symbol,
 `Next.1.for.X86.Sse41`, since its numbers do not end it: the name the emitter gives, which the record
 leaves open (section 14).
 
