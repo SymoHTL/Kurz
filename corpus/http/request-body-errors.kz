@@ -1,0 +1,59 @@
+// expect: output
+// | 5 Protocol: malformed request: unexpected end of body
+// | again Protocol: malformed request: unexpected end of body
+// | Protocol: malformed request: bad chunk size
+// | Protocol: malformed request: bad chunk
+// | TooLarge: request body over limit
+// | Protocol: malformed request: unexpected end of body
+// rules: W6
+
+// a body the client breaks off, or chunks that are not chunks, is an `HttpError`, and every read after it gives it again
+Bytes | IoError | HttpError Sent(string request) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(request.Bytes)
+    client.ShutdownWrite()
+    r = HttpRequest.Read(server)
+    return r.Body.ReadAll(100)
+}
+
+void Show(string request) {
+    match Sent(request) {
+        Bytes b => print(b.Count)
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError | HttpError All() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nhello".Bytes)
+    client.ShutdownWrite()
+    r = HttpRequest.Read(server)
+    mut got = Bytes()
+    n = r.Body.Read(mut got, 100)
+    match r.Body.Read(mut got, 100) {
+        int m => print(m)
+        IoError e => print(e)
+        HttpError e => print("{n} {e.Kind}: {e.Detail}")
+    }
+
+    match r.Body.Read(mut got, 100) {
+        int m => print(m)
+        IoError e => print(e)
+        HttpError e => print("again {e.Kind}: {e.Detail}")
+    }
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+
+Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n")
+Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhelloX\r\n0\r\n\r\n")
+Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2000000\r\nhello\r\n0\r\n\r\n")
+Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel")

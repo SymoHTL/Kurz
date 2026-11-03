@@ -2199,6 +2199,31 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_type_every_file_sees_is_one_symbol_in_std_and_in_the_file()
+    {
+        // W1 with S1: `HttpRequest.Read` gives std/'s `IoError`, and the file's `IoError` is that symbol, so that a match names it as a
+        // case and a function of the file that gives `IoError` passes it on (O2); two symbols of one name would be an unlisted case
+        // and a type the function does not give
+        var (diagnostics, _) = CheckSeeingStd("""
+            void | IoError | HttpError Show(TcpStream s) {
+                r = HttpRequest.Read(s)
+                print(r.Method)
+            }
+
+            void Each(TcpStream s) {
+                match HttpRequest.Read(s) {
+                    HttpRequest r => print(r.Path)
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+            }
+
+            print(IoError(IoKind.Other, 9, "").Code)
+            """);
+        Assert.Empty(diagnostics.Items);
+    }
+
+    [Fact]
     public void A_class_of_the_file_may_hold_a_class_of_std_in_its_fields()
     {
         // R2 with W1: the cycle rule walks the fields of the file's classes, and a class of std/ the prelude names is no class of the

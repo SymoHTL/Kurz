@@ -1,0 +1,70 @@
+// expect: output
+// | Protocol: malformed request: no request line
+// | Protocol: malformed request: incomplete
+// | Protocol: malformed request: empty method
+// | Protocol: malformed request: bad request line
+// | Protocol: malformed request: bad request line
+// | Protocol: malformed request: line not ended by CR LF
+// | Protocol: malformed request: CONNECT
+// | Protocol: malformed request: no Host
+// | Protocol: malformed request: two Host headers
+// | Protocol: malformed request: bad Host
+// | Protocol: malformed request: folded header
+// | Protocol: malformed request: header without a colon
+// | Protocol: malformed request: space before a header's colon
+// | Protocol: malformed request: control byte in a header
+// | Protocol: malformed request: bad Content-Length
+// | Protocol: malformed request: bad Content-Length
+// | Protocol: malformed request: Content-Length beside Transfer-Encoding
+// | Protocol: malformed request: target not UTF-8
+// | Protocol: malformed request: header not UTF-8
+// rules: W5
+
+// a head the server cannot serve is an `HttpError` of the kind `Protocol`, which the server answers `400`; its text names what
+// was wrong and quotes no value of the request
+void | IoError Show(Bytes request) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(request)
+    client.ShutdownWrite()
+    match HttpRequest.Read(server) {
+        HttpRequest r => print("read {r.Method} {r.Path}")
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+// a request with the byte 255, which no UTF-8 text holds, between two pieces
+Bytes Split(string before, string after) {
+    mut bytes = before.Bytes
+    bytes.Add(255)
+    bytes.AddRange(after.Bytes)
+    return bytes
+}
+
+void | IoError All() {
+    Show("".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\n".Bytes)
+    Show(" / HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Show("GET /\r\nHost: h\r\n\r\n".Bytes)
+    Show("G(T / HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\nHost: h\n\n".Bytes)
+    Show("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nAccept: */*\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: a b\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\n X: y\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\nNoColon\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost : h\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\nX: a\u0000b\r\n\r\n".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +5\r\n\r\nhello".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello".Bytes)
+    Show(Split("GET /", " HTTP/1.1\r\nHost: h\r\n\r\n"))
+    Show(Split("GET / HTTP/1.1\r\nHost: h\r\nX: ", "\r\n\r\n"))
+}
+
+All() else {
+    IoError e => print(e)
+}
