@@ -6,7 +6,8 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions` and `Uri`, with `UriError` and `UriKind`, as `std/`
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
 lambda's parameter, a variable in a block, a loop variable or a name an arm of `match` binds, is
@@ -27,8 +28,9 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
-assumptions).
+every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
+`HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -207,7 +209,11 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 `HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
 list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
 ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*.
+product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
+map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
+`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
+names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
@@ -235,13 +241,16 @@ split at its first `?`, raw, and `r.Headers` each header as sent, its value with
 tabs around it (W4) (§12, assumed with the product passes of 2026-10-31 and 2026-11-03). A refusal
 is of the kind `Protocol` where the server answers `400`, `TooLarge` where it answers `413`, `414`
 or `431`, and `Unsupported` where it answers `501`, `505` or `417`, for the causes §12 lists with
-each status (the owner, 2026-10-31, "Status line only"). In a build for Windows the call is `not
-supported` at the line of the program that makes it, though the read of the socket lies in `std/`
-(§12, "Loop not supported"). *(assumed, §12, not put to the owner: each refusal's text, which names
-the cause and quotes nothing of the request, `malformed request: ...` for a `400`; a line ended by a
-LF alone refused, as RFC 9112, section 2.2, lets a server refuse it; a `Host` that is the host of
-RFC 3986 with an optional port; and a stream that ends before its request line `malformed request:
-no request line`, which the server answers with nothing)*
+each status (the owner, 2026-10-31, "Status line only", and 2026-11-03, "`HttpKind` keeps the
+record's four kinds"), each with a text that names the cause and quotes no value of the request,
+`malformed request: header without a colon`, `request line too long` or `unsupported HTTP version`
+(§12, the owner, 2026-11-03, "The server's error texts mirror the client's" and "The refusals that
+had no text take the kind `Unsupported`"). In a build for Windows the call is `not supported` at the
+line of the program that makes it, though the read of the socket lies in `std/` (§12, "Loop not
+supported"). *(assumed, §12, not put to the owner: a stream that ends before its request line is
+`malformed request: no request line`, which the server answers with nothing; a line ended by a LF
+alone is refused, as RFC 9112, section 2.2, lets a server refuse it; and a valid `Host` is the host
+of RFC 3986 with an optional port)*
 
 Case: [http/request-read.kz](../corpus/http/request-read.kz)
 ```kurz
