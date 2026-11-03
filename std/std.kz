@@ -5946,12 +5946,18 @@ pub data HttpLimits(
     int MaxChunkSizeLine = 4096)
 
 // A request a server reads from a stream: its method, its target split at the first `?`, its headers and its body, each as the
-// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`.
+// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`, and
+// `HttpRequest.Read(stream, limits)` with others (W7).
 pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Headers, HttpBody Body) {
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
     // failure of the network, or the request the server refuses (W5).
     pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
-        match HttpReadRequest(stream, HttpLimits()) {
+        return Read(stream, HttpLimits())
+    }
+
+    // The same, held to `limits` (W7).
+    pub static HttpRequest | IoError | HttpError Read(TcpStream stream, HttpLimits limits) {
+        match HttpReadRequest(stream, limits) {
             HttpRequest r => return r
             IoError e => return e
             HttpRefused no => return no.Error
@@ -6101,7 +6107,7 @@ pub class HttpBody {
                 return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
             }
 
-            if size > (most - taken - d) / 16 {
+            if most - taken - d < 0 || size > (most - taken - d) / 16 {
                 return HttpError(HttpKind.TooLarge, "request body over limit")
             }
 
@@ -6447,7 +6453,7 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
                 return HttpBad("bad Content-Length")
             }
 
-            if n > (limits.MaxRequestBodySize - (c - 48)) / 10 {
+            if limits.MaxRequestBodySize - (c - 48) < 0 || n > (limits.MaxRequestBodySize - (c - 48)) / 10 {
                 over = true
             } else {
                 n = n * 10 + (c - 48)

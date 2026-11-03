@@ -1,28 +1,33 @@
 // expect: output
 // | 5 Protocol: malformed request: unexpected end of body
 // | again Protocol: malformed request: unexpected end of body
-// | Protocol: malformed request: bad chunk size
-// | Protocol: malformed request: bad chunk
-// | TooLarge: request body over limit
-// | Protocol: malformed request: unexpected end of body
+// | Protocol: malformed request: bad chunk size, then Protocol: malformed request: bad chunk size
+// | Protocol: malformed request: bad chunk, then Protocol: malformed request: bad chunk
+// | TooLarge: request body over limit, then TooLarge: request body over limit
+// | Protocol: malformed request: unexpected end of body, then Protocol: malformed request: unexpected end of body
 // rules: W6
 
 // a body the client breaks off, or chunks that are not chunks, is an `HttpError`, and every read after it gives it again
-Bytes | IoError | HttpError Sent(string request) {
+// the chunks' failures, each read once more after it: a chunk over the limit of the body stays `TooLarge`, though the line that
+// follows it, `hello`, is no size
+void | IoError | HttpError Show(string request) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.Write(request.Bytes)
     client.ShutdownWrite()
     r = HttpRequest.Read(server)
-    return r.Body.ReadAll(100)
-}
-
-void Show(string request) {
-    match Sent(request) {
+    match r.Body.ReadAll(100) {
         Bytes b => print(b.Count)
         IoError e => print(e)
-        HttpError e => print("{e.Kind}: {e.Detail}")
+        HttpError e => {
+            mut got = Bytes()
+            match r.Body.Read(mut got, 100) {
+                int n => print("{e.Kind}: {e.Detail}, then {n}")
+                IoError again => print(again)
+                HttpError again => print("{e.Kind}: {e.Detail}, then {again.Kind}: {again.Detail}")
+            }
+        }
     }
 }
 
@@ -46,14 +51,14 @@ void | IoError | HttpError All() {
         IoError e => print(e)
         HttpError e => print("again {e.Kind}: {e.Detail}")
     }
+
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhelloX\r\n0\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2000000\r\nhello\r\n0\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel")
 }
 
 All() else {
     IoError e => print(e)
     HttpError e => print("{e.Kind}: {e.Detail}")
 }
-
-Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n")
-Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhelloX\r\n0\r\n\r\n")
-Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2000000\r\nhello\r\n0\r\n\r\n")
-Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel")
