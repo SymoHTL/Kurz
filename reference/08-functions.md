@@ -508,6 +508,37 @@ int | NotFound Run() {
 }
 ```
 
+Case: [outcomes/keep-items-the-union-one.kz](../corpus/outcomes/keep-items-the-union-one.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(List<int> xs) {
+    print("the items")
+}
+
+void Show(List<int | NotFound> xs) {
+    print("the union")
+}
+
+int | NotFound Run() {
+    // a list literal of calls is read as such a call: the function whose item type keeps the cases fits it exactly, and wins
+    Show([Find(1)])
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
+}
+```
+
 ### F14 (decided, §8) A literal as an argument of an overloaded function
 
 For the pick of an overload (F13), a literal argument has the type it has on its own (L10, L11):
