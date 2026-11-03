@@ -92,12 +92,13 @@ peer closed, reads no bytes and returns 0. `into` grows as `Add` grows a list (M
 A `max` below 0 raises `index-out-of-range`. `into.Clear()` empties a list and keeps its room (M9).
 *(assumed, §12: the room before the read and a `max` below 0)*
 
-A read goes through a buffer of 8 KiB that the handle keeps, a `File`'s and a `TcpStream`'s alike,
-as Rust's `BufReader::read` reads: the bytes the buffer holds go first, at most `max` of them, with
-no system call; where it holds none, a `max` of 8 KiB or more is read straight into `into`, and a
-smaller one fills the buffer with one read of the system and takes at most `max` of what that read
-gave (§12, the owner, 2026-11-02, "the stream keeps a read buffer", 8 KiB "as Rust's `BufReader`",
-and a `File` too, against the stream alone). A `max` of 0 goes straight, so that it reads nothing and
+A read goes through a buffer of 8 KiB that the handle keeps, a `File`'s and a `TcpStream`'s alike
+(§12, the owner, 2026-11-02, "the stream keeps a read buffer", 8 KiB "as Rust's `BufReader`", and a
+`File` too, against the stream alone). It reads as Rust's `BufReader::read` reads: the bytes the
+buffer holds go first, at most `max` of them, with no system call; where it holds none, a `max` of
+8 KiB or more is read straight into `into`, past the buffer, and a smaller one fills the buffer with
+one read of the system and takes at most `max` of what that read gave (§12, the owner, 2026-11-03,
+issue 39, comment 6605104107). A `max` of 0 goes straight, so that it reads nothing and
 waits for no byte, as it did before the buffer. `Read` and a `File`'s `Lines()` (S16) are the ways to
 the buffered bytes: no member shows them or takes them (§12, the owner, 2026-11-02). The buffer is
 made at the handle's first read that fills it, and every holder shares it (S5), under the handle's
