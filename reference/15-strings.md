@@ -588,13 +588,15 @@ nullable items, and a nullable key, sort with `null` before every value, as C#'s
 `Comparer<T>.Default` and Rust's ordering of `Option`, though `<` takes no nullable operand (§12, the
 owner, 2026-10-31, "Null first, as C#/Rust").
 A key that changes the list it sorts, through an instance whose field holds the list (K2), leaves its
-change standing, and the sort of the list as it was read is dropped, as C#'s `List.Sort` sorts the list
-it read where a comparer assigns the field another list (§12, the owner, 2026-11-01, "Change stands, as
-C#", #39, comment 6562795140); where a key adds to the list, C#'s result depends on the list's capacity,
-and the sort is dropped as for any change. Every key is made over the items of the list as it was read
-*(assumed, §12)*. The list counts as changed where the field holds another list than the one read once
-the keys are made, whatever items that list holds: a field assigned the list it held, or given it back,
-is unchanged and sorted (§12, the owner, 2026-11-02, #194, comment 6573115730).
+change standing, and the sort of the list as it was read is dropped (§12, the owner, 2026-11-01, "Change
+stands, as C#", #39, comment 6562795140). C#'s `List.Sort` does the same where a comparer assigns the
+field another list: it sorts the list it read. Where a comparer adds to the list, C#'s result depends on
+the list's capacity, the items it read sorted where the add finds room in their block and not where it
+moves them to a new one (§12, .NET 10's `List<T>.Sort`, run 2026-11-03); Kurz drops the sort as for any
+change. Every key is made over the items of the list as it was read *(assumed, §12)*. The list counts as
+changed where the field holds another list than the one read once the keys are made, whatever items that
+list holds: a field assigned the list it held, or given it back, is unchanged and sorted (§12, the owner,
+2026-11-02, #194, comment 6573115730).
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz

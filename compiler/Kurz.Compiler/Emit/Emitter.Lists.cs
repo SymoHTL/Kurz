@@ -1125,11 +1125,12 @@ public sealed partial class Emitter
     /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
     /// items of the list as it was read: a lambda changes no variable it captures (F11), but a key can change the list through an
     /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
-    /// one. Where the place holds another block after the keys, the list counts as changed, whatever items it holds: the change stands
-    /// and the sort of the list as it was read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as C#", #39); a field
-    /// assigned the list it held, or given it back, is unchanged and sorted (X8, assumed). Where a key assigns the field, C#'s
-    /// <c>List.Sort</c> does the same, sorting the list it read while the field holds another; where a key adds to the list, C#'s result
-    /// depends on the list's capacity. A key that reads the list by the variable that holds it is the checker's
+    /// one. Where the place holds another block after the keys, the list counts as changed, whatever items it holds, and a field
+    /// assigned the list it held, or given it back, is unchanged and sorted (X8, section 12, the owner, 2026-11-02, #194); a change
+    /// stands and the sort of the list as it was read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as C#", #39).
+    /// Where a key assigns the field, C#'s <c>List.Sort</c> does the same, sorting the list it read while the field holds another;
+    /// where a key adds to the list, C#'s result depends on the list's capacity (.NET 10's <c>List&lt;T&gt;.Sort</c>, run 2026-11-03).
+    /// A key that reads the list by the variable that holds it is the checker's
     /// <c>changed-while-held</c> (M7); one that reads or changes it through an instance passes, and reads the list the field holds at
     /// that moment, with a count of its own: the list as it was read before a change, and the new one after it. A copy of the list a
     /// lambda holds keeps the block shared, so that the sort copies it (M3).

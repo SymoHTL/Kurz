@@ -780,16 +780,17 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a sorting network for items of up to 8 bytes or a merge of two sorted halves for wider ones; and
   `SortBy` the key of each item made once, in order, kept with the item's position in a pair, a position
   of 4 bytes where that makes the pair smaller, the pairs sorted by ipnsort and the items moved where
-  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made, so
-  that a key which changes it through an instance whose field holds it leaves its change standing and the
-  sort of the list it read is dropped, as C#'s `List.Sort` sorts the list it read where a comparer assigns
-  the field another list (X8, section 12, the owner, 2026-11-01, "Change stands, as C#", #39, comment
-  6562795140), the list counted as changed where the field holds another one than it read, whatever
-  items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at one count
-  for each call. Two forms are not Rust's and measured faster on the same results: an item of 8 or 16
-  bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of 64 bits
-  or fewer is compared as one integer of the key above the position. A scratch or a block of pairs the
-  system refuses ends the program with `allocation-failed` (M9); `SortTests` holds `Sort` and
+  they say, as Rust's `sort_by_cached_key`, the list held by a count of its own while the keys are made,
+  so that a key which changes it through an instance whose field holds it leaves its change standing and
+  the sort of the list it read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as
+  C#", #39, comment 6562795140), as C#'s `List.Sort` does where a comparer assigns the field another
+  list (.NET 10's `List<T>.Sort`, run 2026-11-03), every key made over the items of the list as it was
+  read (X8, assumed), the list counted as changed where the field holds another one than it read,
+  whatever items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at
+  one count for each call. Two forms are not Rust's and measured faster on the same results: an item of
+  8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of
+  64 bits or fewer is compared as one integer of the key above the position. A scratch or a block of
+  pairs the system refuses ends the program with `allocation-failed` (M9); `SortTests` holds `Sort` and
   `SortUnstable` to .NET's `OrderBy` over 300 generated lists of each of five item types, `int`, `byte`,
   `double`, `string` and `int?`, the unstable sort of `double` items with `-0` read as `0`, and `SortBy`
   of the `int` lists by an `int`, a `string`, a `double`, a `ulong`, a `byte`, an enum and a `duration`

@@ -3242,8 +3242,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
         // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
         // change stands (X8, section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that frees the instance whose field holds
-        // the list, which the read of `h.B` holds to the end of the statement (K2); a key that changes nothing sorts, which the item it
-        // moves shows
+        // the list, which the read of `h.B` holds as a temporary to the end of its statement (R3, section 3); a key that changes nothing
+        // sorts, which the item it moves shows; a key that reads the list through the instance sorts, and one that reads it before a
+        // change and after it reads the list the field holds at that moment, the list read and then the new one
         const string sortByChange = """
             class Bag(mut List<int> Items) {
                 pub int Reset(int x) {
@@ -3264,6 +3265,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             class Names(mut List<string> Items) {
                 pub string Reset(string x) {
                     Items = ["z"]
+                    return x
+                }
+            }
+
+            class Log(mut List<int> Items, mut List<int> Seen) {
+                pub int Read(int x) {
+                    Seen.Add(Items.Count)
+                    if x == 3 {
+                        Items = [0]
+                    }
                     return x
                 }
             }
@@ -3296,9 +3307,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             h = Holder(Bag([3, 1, 2]))
             h.B.Items.SortBy(x => h.Swap(x))
             print(h.B.Items[0])
+            r = Bag([3, 1, 2])
+            r.Items.SortBy(x => r.Items.Count - x)
+            print(r.Items[1])
+            l = Log([3, 1, 2], [9])
+            l.Items.SortBy(x => l.Read(x))
+            print(l.Seen)
+            print(l.Items[0])
 
             """;
-        Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0"], "");
+        Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "2", "[9, 3, 1, 1]", "0"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
