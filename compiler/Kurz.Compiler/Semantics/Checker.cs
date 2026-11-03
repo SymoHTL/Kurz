@@ -179,6 +179,9 @@ public sealed partial class Checker
         /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
         public bool Static { get; init; }
 
+        /// <summary>K14: the constructor of <see cref="Class"/>'s body this frame checks, with the marks of the fields it assigns; a lambda inside it finds it through <see cref="Outer"/>.</summary>
+        public Building? Building { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -358,6 +361,7 @@ public sealed partial class Checker
         }
 
         CheckMethodBodies(); // K7
+        CheckConstructorBodies(); // K14
         JoinPassingReaders();
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
@@ -2667,6 +2671,7 @@ public sealed partial class Checker
 
     private void CheckReturn(ReturnStatement r)
     {
+        frame.Building?.Returns.Add(frame.Known); // K14: a path that leaves a constructor here assigns its fields first
         if (frame.IsTopLevel && r.Value is not null)
         {
             NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");

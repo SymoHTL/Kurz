@@ -4507,6 +4507,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(outer, toolchain.Runtime, "class-first-released-holds-a-class"), 0, ["1"], "");
     }
 
+    [Fact]
+    public void A_constructor_of_a_class_body_fills_its_instance_after_the_base_and_before_its_body()
+    {
+        // K14 with C#'s constructors: the base's constructor runs before the body, the one that takes no arguments for a class without a
+        // primary constructor and the one the explicit form picks; `: this(...)` runs what it calls first, the primary constructor
+        // or another of the body; a field's first assignment stores into a field that holds nothing, and a second one lets go of the
+        // list it held, which the fence holds; the defaults of the body run before the body, a lambda of the body reads a field once
+        // every field is assigned, a `return` leaves the body, and a private constructor is called from a `static` method of its class
+        const string constructors = "class A {\n    pub A() {\n        print(\"A body\")\n    }\n}\n\nclass B : A {\n    pub B() {\n        print(\"B body\")\n    }\n}\n\nclass C : A\n\nclass D(int N) : A() {\n    pub D() : this(7) {\n        print(\"D further {N}\")\n    }\n}\n\nclass Named {\n    string name\n    mut List<int> items\n    int count = 3\n\n    pub Named(string n) {\n        name = \"{n}!\"\n        items = [1, 2]\n        items = [count]\n        items.Add(4)\n        show = () => \"{name}?\"\n        print(show())\n    }\n\n    pub Named() : this(\"anon\") {\n        items.Add(5)\n    }\n\n    pub string Text() => \"{name} {items}\"\n}\n\nclass Counter(int Start) {\n    pub Counter() : this(0) { }\n\n    Counter(string s) : this(9) {\n        if s == \"\" {\n            return\n        }\n\n        print(s)\n    }\n\n    pub static Counter Of(string s) => Counter(s)\n\n    pub int Value() => Start\n}\n\nB()\nC()\nd = D()\nprint(d.N)\nprint(D(2).N)\nprint(Named(\"x\"))\nprint(Named())\nprint(Counter().Value())\nprint(Counter(5).Value())\nprint(Counter.Of(\"abc\").Value())\nprint(Counter.Of(\"\").Value())\n";
+        Ran(BuildAndRun(constructors, Fenced, "class-constructors-fenced"), 0, ["A body", "B body", "A body", "A body", "D further 7", "7", "A body", "2", "x!?", "x! [3, 4]", "anon!?", "anon! [3, 4, 5]", "0", "5", "abc", "9", "9"], "");
+    }
+
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists
     // all held
     private const string LargeRounds = "long Fill(int n) {\n    mut xs = List<int>()\n    mut i = 0\n    while i < n {\n        xs.Add(i)\n        i = i + 1\n    }\n    return long(xs.Count)\n}\n\nmut round = 0\nmut long total = 0\nwhile round < 200 {\n    round = round + 1\n    total = total + Fill(70000)\n}\nprint(total)\n";

@@ -3799,6 +3799,62 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_constructor_of_a_class_body_assigns_each_field_without_a_default_once_on_every_path()
+    {
+        // K14: in a class without a primary constructor, a field of the body without `=` is assigned on every path of every constructor
+        // that calls no other, once without `mut`: a branch each, a `throw` that leaves no path, a `return` after the assignments, a
+        // `mut` field assigned again, the instance used once every field is assigned, a constructor that calls another, overloads
+        // picked by their parameters, and a `while true` left by its `break` and a `match` whose every arm assigns
+        Clean("class Point {\n    int x\n    mut int y\n    string s = \"p\"\n\n    pub Point(int v, bool flip) {\n        if v < 0 {\n            throw \"negative\"\n        }\n\n        if flip {\n            x = -v\n        } else {\n            x = v\n        }\n\n        y = x\n        y = y + 1\n        while y > 10 {\n            y = y - 10\n        }\n\n        print(Sum())\n        f = () => x + y\n        print(f())\n        print(this.s)\n    }\n\n    pub Point() : this(0, false) { }\n\n    pub Point(string label) {\n        x = 1\n        y = 2\n        if label == \"\" {\n            return\n        }\n\n        print(label)\n    }\n\n    pub int Sum() => x + y\n}\n\nprint(Point(3, true).Sum())\nprint(Point().Sum())\nprint(Point(\"a\").Sum())");
+        Clean("enum Kind { A, B }\n\nclass Once {\n    int x\n\n    pub Once(Kind k) {\n        while true {\n            match k {\n                Kind.A => x = 1\n                Kind.B => x = 2\n            }\n\n            break\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(Once(Kind.B).X())");
+        // a second assignment, after one or around a loop, is `assign-immutable`; a path that leaves the field unassigned, a branch
+        // without it, a loop that may run no round or a `return` before it, is `field-unassigned` at the constructor
+        Assert.Equal([(ErrorIds.AssignImmutable, 6)], Errors("class P {\n    int x\n\n    pub P() {\n        x = 1\n        x = 2\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 4), (ErrorIds.AssignImmutable, 6)], Errors("class P {\n    int x\n\n    pub P(int n) {\n        for i in 0..<n {\n            x = i\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(1).X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 4)], Errors("class P {\n    mut int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(true).X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 4)], Errors("class P {\n    int x\n\n    pub P(int v) {\n        if v < 0 {\n            return\n        }\n\n        x = v\n    }\n\n    pub int X() => x\n}\n\nprint(P(1).X())"));
+        // a read before the first assignment on every path is `field-unassigned` at the read, and so is a default that reads a field a
+        // constructor's body assigns, which every default runs before (K7)
+        Assert.Equal([(ErrorIds.FieldUnassigned, 8)], Errors("class P {\n    int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        } else {\n            print(x)\n            x = 2\n        }\n    }\n\n    pub int X() => x\n}\n\nprint(P(true).X())"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 3)], Errors("class P {\n    int x\n    int y = x + 1\n\n    pub P() {\n        x = 1\n    }\n\n    pub int Y() => y\n}\n\nprint(P().Y())"));
+        // a lambda there assigns no field without `mut`, as a lambda anywhere does not
+        Assert.Equal([(ErrorIds.AssignImmutable, 7)], Errors("class P {\n    int x\n\n    pub P() {\n        x = 1\n        f = () => {\n            x = 2\n        }\n        f()\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
+        // a constructor that calls another assigns no field without `mut`, as a method does not
+        Assert.Equal([(ErrorIds.AssignImmutable, 9)], Errors("class P {\n    int x\n\n    pub P(int v) {\n        x = v\n    }\n\n    pub P() : this(1) {\n        x = 2\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
+        // a further constructor of a class with a primary constructor calls it, else `constructor-must-chain`; the arguments of
+        // `: this(...)` read the parameters and no instance
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class C(int N) {\n    pub C() { }\n}\n\nprint(C().N)"));
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("class C(int N) {\n    pub C() : this() { }\n\n    pub C(string s) : this(1) { }\n}\n\nprint(C().N)"));
+        // F9: a constructor without `pub` is its class's own; F12: two of one parameter types, the primary one's among them
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class C(int N) {\n    C() : this(0) { }\n}\n\nprint(C().N)"));
+        Clean("class C(int N) {\n    C() : this(0) { }\n\n    pub static C Zero() => C()\n}\n\nprint(C.Zero().N)");
+        Assert.Equal([(ErrorIds.DuplicateFunction, 3)], Errors("class C {\n    pub C(int a) { }\n    pub C(int b) { }\n}\n\nprint(C(1) == C(1))"));
+        Assert.Equal([(ErrorIds.DuplicateFunction, 2)], Errors("class C(int N) {\n    pub C(int m) : this(m) { }\n}\n\nprint(C(1).N)"));
+        // K10, K14: a class without a primary constructor builds its base with no arguments, a constructor of the base's body among them
+        Clean("class A {\n    pub A() {\n        print(\"a\")\n    }\n}\n\nclass B : A {\n    pub B() {\n        print(\"b\")\n    }\n}\n\nclass C : A\n\nclass D(int N) : A()\n\nB()\nC()\nprint(D(1).N)");
+    }
+
+    [Theory]
+    [InlineData("class P {\n    int x\n\n    pub P() {\n        Show(this)\n        x = 1\n    }\n}\n\nvoid Show(P p) {\n}\n\nprint(1)", "5: `this` before the constructor assigns `x` on every path, which would reach a field with no value (K14)")]
+    [InlineData("class P {\n    int x\n\n    pub P() {\n        Go()\n        x = 1\n    }\n\n    pub void Go() {\n    }\n}\n\nprint(1)", "5: a call of the method `Go` before the constructor assigns `x` on every path, which would reach a field with no value (K14)")]
+    [InlineData("class P {\n    mut int x\n\n    pub P() {\n        f = () => x\n        x = 1\n        print(f())\n    }\n}\n\nprint(1)", "5: a lambda that reads `x` before the constructor assigns it on every path (K14, F15)")]
+    [InlineData("class P {\n    mut int x\n\n    pub P() {\n        f = () => {\n            x = 1\n        }\n        x = 2\n        f()\n    }\n}\n\nprint(1)", "6: a lambda that assigns `x` before the constructor assigns it on every path (K14, F15)")]
+    [InlineData("class P {\n    mut int x\n\n    pub P(bool b) {\n        if b {\n            x = 1\n        }\n\n        x = 2\n    }\n}\n\nprint(1)", "9: an assignment of the `mut` field `x` that one path to it reaches with the field assigned and another without (K14)")]
+    [InlineData("class A {\n    pub A() {\n        Go()\n    }\n\n    pub virtual void Go() {\n    }\n}\n\nclass B : A {\n    pub override void Go() {\n    }\n}\n\nprint(1)", "3: a call of the method `Go` in a constructor of `A`, a class another class derives from, where an override could read a field of the derived class while the constructor runs (K6, K14)")]
+    [InlineData("class A(int N) {\n    pub A() : this(1) {\n        print(this.N)\n    }\n}\n\nclass B(int N) : A\n\nprint(1)", "3: `this` in a constructor of `A`, a class another class derives from, where an override could read a field of the derived class while the constructor runs (K6, K14)")]
+    [InlineData("class P {\n    pub P() : this(1) { }\n\n    pub P(int n) : this() { }\n}\n\nprint(1)", "2: `: this(...)` calls that come back to this constructor of `P` through 2 calls, which would never end (K14)")]
+    [InlineData("class P {\n    pub P(int n) : this(n) { }\n}\n\nprint(1)", "2: `: this(...)` calls that come back to this constructor of `P` through 1 call, which would never end (K14)")]
+    [InlineData("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n}\n\nprint(1)", "5: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
+    public void What_a_constructor_of_a_class_body_reaches_before_the_instance_is_built_is_not_supported(string program, string expected)
+    {
+        // K14: the instance before every field is assigned (Swift's rule), `this` and a method of it in a class with derived classes,
+        // `: this(...)` calls that come back to their constructor (C#'s CS0768), a `mut` field assigned where one path assigned it and
+        // another did not, and a base whose constructors all take arguments, which a constructor passes with C#'s `: base(...)`
+        Assert.Equal([expected], NotSupported(program));
+    }
+
+    [Fact]
     public void A_static_method_has_no_instance_and_is_called_by_its_class_name()
     {
         // K7: `T.M(args)` from outside, `M(args)` alone inside the class, from a method of the instance and from another `static` one,
@@ -4406,8 +4462,8 @@ public sealed class CheckerTests
     [InlineData("int Two() => 2\n\nclass C {\n    pub static int Step = Two()\n}\n\nprint(C.Step)", "4: the initial value of the `static` field `Step`, which is no constant: section 4 computes it at the field's first read, and section 14 holds that read's open items (K18)")]
     [InlineData("class C {\n    mut n = 0\n}\n\nprint(1)", "2: a field of a class body without a written type (K7, V2)")]
     [InlineData("class C {\n    prot int n = 0\n}\n\nprint(1)", "2: the modifier `prot` of a field (K7, F9)")]
-    [InlineData("class C(int V) {\n    int a = 1\n\n    pub C() : this(0) { }\n}\n\nprint(1)", "4: a constructor declared in the body of a class (K14)")]
-    [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
+    [InlineData("class C(int N) {\n    prot C() : this(0) { }\n}\n\nprint(1)", "2: the modifier `prot` of a constructor (K14, F9)")]
+    [InlineData("class C {\n    pub C(int a, mut int n) { }\n}\n\nprint(1)", "2: a `mut` parameter of a constructor (K14, M7)")]
     [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nf = C.Make\nprint(f())", "5: a method as a value, named without a call (K7, F11)")]
     [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
@@ -4471,7 +4527,8 @@ public sealed class CheckerTests
     {
         // generic classes (T19), of an interface its type parameters, the modifiers, type parameters and defaults of its
         // methods and a member that is no method (K7, T19), `weak` before it, arguments after it, it named twice or before the base
-        // class, and its name where a value or a call stands (K6, K7), constructors in the body (K14), a field there without a written
+        // class, and its name where a value or a call stands (K6, K7), a constructor's modifier other than `pub` and its `mut` parameter
+        // (K14), a field there without a written
         // type or of another modifier than `pub` and `mut` (K7), a `static` field of another modifier, of another type, or with an initial value that is no
         // constant (K18), a field in the body or a `static` member of a class in a chain (K6, K7, K18), a base that is no class, a
         // second one and a cycle of bases (K6), the arguments of a base for a class without a primary constructor (K10, K14), a passed-on

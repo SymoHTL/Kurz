@@ -1831,7 +1831,7 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none,
+M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
@@ -1897,7 +1897,8 @@ their text); of an interface, type parameters (T19, K6), and of a method of one 
 parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
 of which leaves the interface and every value of it unread; `weak` before an interface, which R3 and R5
 do not name, and the name of an interface where a value, a member or a call stands (K6); of a class,
-type parameters (T19), a constructor or a type declared in its body (K7, K14), a field there without a written type
+type parameters (T19), a type declared in its body (K7), a constructor there with a modifier other than `pub` or a
+`mut` parameter (K14, F9, M7), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
 other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type
 parameters of its own (K7, section 4) and a property that is `static`, `virtual`, `override` or `prot`, which section 14
@@ -1906,7 +1907,12 @@ class it reads, a field in its body or a `static` member where the class has a b
 (K6, K7, K18), a type after `:` that is neither a class nor an interface, or a class of `std/` the prelude brings (W1), a
 second base class, a base class after an interface, an interface named twice or with arguments, and a base that closes a cycle of
 bases (K6, K7, K10), the arguments of a base for a class without a primary constructor, which a constructor in its body
-passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
+passes (K10, K14), so that such a class builds its base by the base's constructor that takes no arguments (the default of the
+question on #110, comment 6597071850, whether C#'s `: base(...)` takes a word), in a constructor of the body a use of the instance,
+`this`, a method of it or a lambda that reaches it, before every field is assigned, as Swift refuses it, `this` and a method of the
+instance in a constructor of a class with derived classes, where an override could read a field of the derived class while the
+constructor runs, `: this(...)` calls that come back to their constructor, which C# refuses (CS0768), and an assignment of a `mut`
+field that one path reaches with the field assigned and another without (K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
 parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
@@ -2470,6 +2476,17 @@ round can ask about it by the rule's id.
   A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
+- K14 with C#'s constructors (section 4): a construction picks among the primary constructor and the
+  constructors of the body as a call picks an overload (F13), and a class without a primary
+  constructor that declares one has no empty one, as C# makes none. The arguments of `: this(...)`
+  read the parameters and no instance, as C#'s initializer does. Of a class with no primary
+  constructor, no base and no derived classes, each field of the body without `=` is assigned on
+  every path of each constructor that calls no other, read as C#'s definite assignment reads a
+  `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
+  is read again until what it keeps holds, a `while true` leaves by its `break`s alone, and a `throw`
+  leaves no path. A default reads such a field nowhere: every default runs before the body (K7), so
+  the read is `field-unassigned`. The base's constructor runs before the body, as C#, Java and Swift
+  run it.
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is
