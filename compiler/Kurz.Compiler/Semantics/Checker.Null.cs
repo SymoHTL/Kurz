@@ -17,6 +17,9 @@ internal sealed class LoopExits
     public List<ImmutableHashSet<NullPath>> Breaks { get; } = [];
 
     public List<ImmutableHashSet<NullPath>> Continues { get; } = [];
+
+    /// <summary>T33: a loop over <c>T.Fields</c>, unrolled into a pass for each field, whose <c>break</c> and <c>continue</c> are <c>not supported</c>.</summary>
+    public bool Unrolled { get; init; }
 }
 
 /// <summary>

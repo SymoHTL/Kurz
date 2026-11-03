@@ -640,12 +640,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27);
-- a generic function that reads its type with `T.Kind`, and one that passes its type parameter to
+- a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
   every node is new (`Syntax/SyntaxCopy.cs`), so that the model holds each copy's types apart, with
   the type parameter's name bound to the type argument and `T.Kind` a constant of `TypeKind`; a
   `match` on it reads the one arm that takes the copy's kind, and the emitter emits that arm alone;
+  a loop over `T.Fields` is unrolled in a copy into a pass for each field of the primary constructor
+  of the `data` type it binds (D14), in order, each a copy of the loop's body in which
+  `f.Get(value)` reads `(value).Field`, with `f.Name` a constant `string` and `f.Type` the field's
+  type, as a type argument too, so that a copy made with it reads the field's type, and the emitter
+  emits the passes in order with no loop; `kind-not-read` names the path of fields that led to its
+  type, `Order.Source`, where a pass made the copy;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
@@ -977,10 +983,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
-  as the order, then words as the C library's `memcmp` compares a small count, reading no byte past the end of
-  either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the counts, the first bytes and up to
-  16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more, which the emitter marks
-  `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
+  as the order, then words on the runtime's own path, where Rust's `<` of `str` calls the C library's `memcmp`,
+  reading no byte past the end of either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the
+  counts, the first bytes and up to 16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more,
+  which the emitter marks `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
 - the raw forms the runtime is written in: `raw` blocks, pointers, their arithmetic, `*p`, `&x`
   and `p[i]` (R10), `Ptr<T>(x)`, `long(p)` and `SizeOf<T>()` (R14), `s.Pointer`, `s.Bytes.Count`,
   `string.Allocate(n)` and `string.FromRaw(p, n)`, `l.Pointer`, which for a list without a block is the alignment of
@@ -1419,12 +1425,18 @@ that sit under a rule by its id. Every one is pinned by a test.
   actor bodies write `mut users = Map<int, User>()`.
 - T17 with T19: how a call's type arguments are told from comparisons. The front end keeps the list
   when `(` follows the `>`, so `a < b, c > (d)` is the call `a<b, c>(d)` and `a < b, c > d` two
-  comparisons, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
+  comparisons, a type argument that is a dotted name included, `a < b.c, d > (e)` being the call
+  `a<b.c, d>(e)` as in C#, and after a name when a member and its `(` follow, R15's `List<T>.FromRaw(p, n)`
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
   `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
   states no such rule.
+- T17: `void` as a type argument written in a type or a call, of a generic function, a generic `data`
+  type, `List` and `Map`, is `void-type-argument` where it is written, nested ones and one in a
+  result's or a field's type included, where `List<void>.FromRaw(p, n)` and `List<void>.Allocate(n)`
+  keep R14's `type-mismatch` and the result of a function type inside a type argument,
+  `List<(int) => void>`, stands.
 - R10 to R17: the raw forms, each edge with the rule it rests on.
   - `*` and `&` before a value are prefix operators that bind as `-` does, since R10 writes a pointer
     as C# writes it, so `*b.Next` reads through `b.Next`. A line that starts with `*` starts a
@@ -1623,8 +1635,10 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
 error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
-`T.Fields`, `T.Make` and the parts beyond the fields, in the copy that a call makes, and a chain of more than 64 copies of
+`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind` and
+`Fields`, `T.Make` and the parts beyond the fields, and `T.Fields` anywhere but after `in` in a `for` loop, in the copy that a
+call makes, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
+such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
@@ -1645,10 +1659,7 @@ generic data type (T19), each of which leaves the data type, and every data type
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
-type or a time type (T10, T29); `void` as a type argument written in a type or a call, of a generic
-function, a generic `data` type, `List` and `Map`, which C# refuses and Rust's `()`, a type of no
-size, takes, and of which the record says neither (T17, T19), where `List<void>.FromRaw(p, n)` and
-`List<void>.Allocate(n)` keep R14's `type-mismatch` (below);
+type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory

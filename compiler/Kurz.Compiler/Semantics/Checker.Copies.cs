@@ -35,8 +35,26 @@ public sealed partial class Checker
         /// <summary>The copy that a call outside every copy made, at the end of the chain: where the build stops on a fault in a copy (F-R7).</summary>
         public Copy Outermost => Outer?.Outermost ?? this;
 
+        /// <summary>The path of fields, from the type of the outermost copy, that led to a type argument of this copy: <c>Order.Source</c>.</summary>
+        public Dictionary<TypeParameterSymbol, string> Paths { get; } = [];
+
         public KurzType? Bound(string name) => Map.FirstOrDefault(p => p.Key.Name == name).Value;
+
+        /// <summary>The path of fields that led to a type this copy binds, null where none did.</summary>
+        public string? PathOf(KurzType type) => Map.Where(p => p.Value.Text == type.Text && Paths.ContainsKey(p.Key)).Select(p => Paths[p.Key]).FirstOrDefault();
     }
+
+    /// <summary>T33: a pass of a loop over <c>T.Fields</c> in a copy: the name the loop gives a field, the data type it walks, the field, and the field's type there.</summary>
+    private sealed record FieldPass(string Variable, string TypeName, DataType Walked, FieldSymbol Field, KurzType Type);
+
+    /// <summary>The variable of each pass, which stands in <c>f.Name</c>, <c>f.Type</c> and <c>f.Get(value)</c> alone.</summary>
+    private readonly Dictionary<VariableSymbol, FieldPass> passVariables = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>What <c>f.Get(value)</c> became in a pass, <c>(value).Field</c>, with its pass: its value is held to the type the loop walks.</summary>
+    private readonly Dictionary<MemberAccess, FieldPass> fieldGets = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The passes being checked, innermost last: a call of a function that reads its type keeps the one it stands in, for the path of fields.</summary>
+    private readonly List<FieldPass> activePasses = [];
 
     /// <summary>The generic functions that read their type, and those that pass their type parameter to one: never checked on their own.</summary>
     private readonly HashSet<FunctionSymbol> readers = new(ReferenceEqualityComparer.Instance);
@@ -45,8 +63,8 @@ public sealed partial class Checker
 
     private readonly Dictionary<(FunctionSymbol Original, string Arguments), Copy> copiesByArguments = [];
 
-    /// <summary>Each call of a generic function of the file the checker typed, with the function whose body holds it, null in the top-level code.</summary>
-    private readonly List<(FunctionSymbol? Caller, CallExpression Call)> genericCalls = [];
+    /// <summary>Each call of a generic function of the file the checker typed, with the function whose body holds it, null in the top-level code, and the pass of a loop over <c>T.Fields</c> it stands in.</summary>
+    private readonly List<(FunctionSymbol? Caller, CallExpression Call, FieldPass? Pass)> genericCalls = [];
 
     private readonly HashSet<CallExpression> genericCallSeen = new(ReferenceEqualityComparer.Instance);
 
@@ -159,7 +177,7 @@ public sealed partial class Checker
     {
         if (callee is { IsGeneric: true } && genericCallSeen.Add(c))
         {
-            genericCalls.Add((checking, c));
+            genericCalls.Add((checking, c, activePasses.Count == 0 ? null : activePasses[^1]));
         }
     }
 
@@ -174,7 +192,7 @@ public sealed partial class Checker
         while (changed)
         {
             changed = false;
-            foreach (var (caller, c) in genericCalls)
+            foreach (var (caller, c, _) in genericCalls)
             {
                 if (caller is not { IsGeneric: true } || readers.Contains(caller) || CalledReader(c) is not { } info)
                 {
@@ -219,7 +237,7 @@ public sealed partial class Checker
     {
         for (var i = from; i < to; i++)
         {
-            var (caller, c) = genericCalls[i];
+            var (caller, c, pass) = genericCalls[i];
             if ((caller is not null && readers.Contains(caller)) || CalledReader(c) is not { } info)
             {
                 continue;
@@ -231,7 +249,7 @@ public sealed partial class Checker
                 continue; // a type argument that was reported, or a caller that is no copy of a reader and so reads no type parameter here
             }
 
-            var copy = CopyOf(info.Function!, info.Map, c, outer);
+            var copy = CopyOf(info.Function!, info.Map, c, outer, pass);
             if (copy is not null)
             {
                 model.RecordCall(c, info with { Function = copy.Symbol, Map = NoMap });
@@ -239,8 +257,11 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>The copy of a function for a list of type arguments, made and checked at its first call; null where the chain is too deep to read.</summary>
-    private Copy? CopyOf(FunctionSymbol original, IReadOnlyDictionary<TypeParameterSymbol, KurzType> map, CallExpression origin, Copy? outer)
+    /// <summary>
+    /// The copy of a function for a list of type arguments, made and checked at its first call; null where the chain is too deep to read.
+    /// A type argument that is the field's type of the pass the call stands in has the path to that field, and one its caller bound has the caller's path.
+    /// </summary>
+    private Copy? CopyOf(FunctionSymbol original, IReadOnlyDictionary<TypeParameterSymbol, KurzType> map, CallExpression origin, Copy? outer, FieldPass? pass)
     {
         var arguments = string.Join(", ", original.TypeParameters.Select(p => map[p].Text));
         if (copiesByArguments.TryGetValue((original, arguments), out var made))
@@ -259,6 +280,18 @@ public sealed partial class Checker
         var symbol = new FunctionSymbol($"{original.Name}<{arguments}>", declaration) { ReturnType = Types.Substitute(original.ReturnType, map) };
         symbol.Parameters.AddRange(original.Parameters.Select(p => p with { Type = Types.Substitute(p.Type, map) }));
         var copy = new Copy(symbol, original, map, origin, outer);
+        foreach (var (parameter, type) in map)
+        {
+            if (pass is not null && type.Text == pass.Type.Text)
+            {
+                copy.Paths[parameter] = $"{outer?.PathOf(pass.Walked) ?? pass.Walked.Text}.{pass.Field.Name}";
+            }
+            else if (outer?.PathOf(type) is { } path)
+            {
+                copy.Paths[parameter] = path;
+            }
+        }
+
         copiesByArguments[(original, arguments)] = copy;
         copies[symbol] = copy;
         model.RecordFunction(declaration, symbol);
@@ -302,7 +335,154 @@ public sealed partial class Checker
         Report( // into the copy's own list, which CheckCopy reports once
             ErrorIds.KindNotRead,
             outermost.Origin.Line,
-            $"`{outermost.Symbol.Name}`: `{type.Text}` is of the kind `TypeKind.{KindOf(type)}`, which no arm of the `match` on `T.Kind` in `{copy.Original.Name}` takes (T33)");
+            $"`{outermost.Symbol.Name}`: {Named(copy, type)} is of the kind `TypeKind.{KindOf(type)}`, which no arm of the `match` on `T.Kind` in `{copy.Original.Name}` takes (T33)");
+    }
+
+    /// <summary>A type a copy binds, named by the path of fields that led to it where one did: <c>`Order.Source` of the type `Source`</c>.</summary>
+    private static string Named(Copy copy, KurzType type) =>
+        copy.PathOf(type) is { } path ? $"`{path}` of the type `{type.Text}`" : $"`{type.Text}`";
+
+    /// <summary>
+    /// T33: <c>for f in T.Fields</c> in a copy, unrolled: its body is checked once for each field of the primary constructor of the
+    /// <c>data</c> type the copy binds to <c>T</c> (D14), in the order of their declaration, each pass a copy of the body's syntax in which
+    /// <c>f.Get(value)</c> reads <c>(value).Field</c> (section 4, assumed with "for f in T.Fields"); <c>f.Name</c> is a constant
+    /// <c>string</c> there and <c>f.Type</c> the field's type. Where the copy binds a type of another kind, the loop is
+    /// <c>kind-not-read</c> (section 4, assumed with "Fixed compile error"). A <c>break</c> and a <c>continue</c> of the loop are
+    /// <c>not supported</c>. False where the loop walks no <c>T.Fields</c> of a copy.
+    /// </summary>
+    private bool CheckFieldsLoop(ForInStatement f)
+    {
+        if (Unwrap(f.Collection) is not MemberAccess { Target: NameExpression n, Member: "Fields", Conditional: false }
+            || Lookup(n.Name).Variable is not null || BoundType(n.Name) is not { } bound || CurrentCopy() is not { } copy)
+        {
+            return false;
+        }
+
+        if (f.Second is not null)
+        {
+            Report(ErrorIds.TypeMismatch, f.Collection.Line, $"two names walk the entries of a map, not the fields of `{n.Name}` (C6, T33)");
+            CountNamesRead(f.Body);
+            return true;
+        }
+
+        if (bound is not DataType walked)
+        {
+            var outermost = copy.Outermost;
+            Report( // into the copy's own list, as for a `match` on `T.Kind`
+                ErrorIds.KindNotRead,
+                outermost.Origin.Line,
+                $"`{outermost.Symbol.Name}`: {Named(copy, bound)} is of the kind `TypeKind.{KindOf(bound)}`, and `{n.Name}.Fields` in `{copy.Original.Name}` walks the fields of a `data` type alone (T33)");
+            CountNamesRead(f.Body);
+            return true;
+        }
+
+        var passes = new List<Block>();
+        var redeclared = Redeclares(f.Variable, f.VariableLine); // V9: the loop's name, once, whatever the count of fields
+        foreach (var field in walked.Symbol.Fields)
+        {
+            var pass = new FieldPass(f.Variable, n.Name, walked, field, SubstituteData(walked, field.Type));
+            var body = SyntaxCopy.Copy(f.Body, (e, copyOf) => FieldGet(e, copyOf, pass));
+            passes.Add(body);
+            PushScope();
+            if (redeclared)
+            {
+                DeclareUnreadable(f.Variable, VariableKind.Loop, f.VariableLine, f);
+            }
+            else
+            {
+                Declare(f.Variable, Types.Error, false, VariableKind.Loop, f.VariableLine, f);
+            }
+
+            passVariables[frame.Scope.Variables[f.Variable]] = pass;
+            activePasses.Add(pass);
+            frame.Loops.Add(new LoopExits { Unrolled = true });
+            frame.LoopDepth++;
+            CheckBlock(body);
+            frame.LoopDepth--;
+            frame.Loops.RemoveAt(frame.Loops.Count - 1);
+            activePasses.RemoveAt(activePasses.Count - 1);
+            PopScope();
+        }
+
+        if (passes.Count == 0)
+        {
+            CountNamesRead(f.Body); // a type with no fields: the body runs in no pass, and what it names counts as read
+        }
+
+        if (f.Arms is not null)
+        {
+            // S16: the fields fail with no case, as a list's items, so the `else` after the loop is read as after a list's
+            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)");
+        }
+
+        model.RecordPasses(f, passes);
+        return true;
+    }
+
+    /// <summary>A pass's copy of <c>f.Get(value)</c>, with one value and no name, as <c>(value).Field</c>; null for any other expression.</summary>
+    private MemberAccess? FieldGet(Expression e, Func<Expression, Expression> copyOf, FieldPass pass)
+    {
+        if (e is MemberAccess earlier && fieldGets.TryGetValue(earlier, out var outer))
+        {
+            var again = earlier with { Target = copyOf(earlier.Target) }; // a pass of a loop inside a pass: the outer read keeps its pass
+            fieldGets[again] = outer;
+            return again;
+        }
+
+        if (e is not CallExpression { Callee: MemberAccess { Target: NameExpression target, Member: "Get", Conditional: false }, TypeArguments.Count: 0, Arguments: [{ Name: null, Mut: false } argument] } call
+            || target.Name != pass.Variable)
+        {
+            return null;
+        }
+
+        var read = new MemberAccess(call.Line, new ParenthesizedExpression(argument.Value.Line, copyOf(argument.Value)), pass.Field.Name, false);
+        fieldGets[read] = pass;
+        return read;
+    }
+
+    /// <summary>The variable's pass where it is the variable of a loop over <c>T.Fields</c>: <c>f.Name</c> and <c>f.Type</c> in a lambda capture no <c>f</c>, which holds no value.</summary>
+    private FieldPass? PassOf(string name) => Lookup(name, capture: false).Variable is { } v && passVariables.TryGetValue(v, out var pass) ? pass : null;
+
+    /// <summary><c>f</c> of a loop over <c>T.Fields</c> where it stands as a value, or with a member but <c>Name</c> or a call but <c>Get</c>: <c>syntax</c> (section 4, assumed).</summary>
+    private Typed FieldVariableAsValue(FieldPass pass, int line)
+    {
+        Report(ErrorIds.Syntax, line, $"`{pass.Variable}` walks the fields of `{pass.TypeName}`, and stands only in `{pass.Variable}.Name`, `{pass.Variable}.Type` as a type and `{pass.Variable}.Get(value)` (T33)");
+        return Typed.Error;
+    }
+
+    /// <summary><c>f.Name</c>, a constant <c>string</c>; null for any other member, whose <c>f</c> the check of a name finds no value (<see cref="FieldVariableAsValue"/>).</summary>
+    private Typed? PassMember(MemberAccess m) =>
+        m is { Target: NameExpression n, Member: "Name", Conditional: false } && PassOf(n.Name) is { } pass ? new Typed(Types.String, new StringConstant(pass.Field.Name)) : null;
+
+    /// <summary><c>(value).Field</c>, what <c>f.Get(value)</c> became: its value is of the type the loop walks, or one derived from it.</summary>
+    private Typed CheckFieldGet(MemberAccess m, FieldPass pass)
+    {
+        var target = CheckExpression(m.Target, pass.Walked);
+        if (target.IsError)
+        {
+            return Typed.Error;
+        }
+
+        if (!Types.Assignable(target.Type, pass.Walked))
+        {
+            ReportMismatch(target.Type, pass.Walked, m.Line, $"`{pass.Variable}.Get` reads a field of {Types.A(pass.Walked)}, not of {Types.A(target.Type)}", "T33");
+            return Typed.Error;
+        }
+
+        return Narrowed(m, MemberOf(target.Type, m.Member, m.Line));
+    }
+
+    /// <summary><c>f.Type</c> as a type in a pass, the field's type; any other dotted name as a type is <c>not supported</c>.</summary>
+    private KurzType ResolveDotted(NamedType n)
+    {
+        var dot = n.Name.IndexOf('.');
+        if (n.Name[(dot + 1)..] == "Type" && n.TypeArguments.Count == 0 && PassOf(n.Name[..dot]) is { } pass)
+        {
+            return pass.Type;
+        }
+
+        NotSupported(n.Line, $"a dotted name as a type, `{n.Name}`, but `f.Type` of a loop over `T.Fields` (T33)");
+        return Types.Error;
     }
 
     /// <summary>The variables a body that a copy does not read names, which count as read there, as a use in a branch that never runs counts.</summary>
