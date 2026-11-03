@@ -22,6 +22,9 @@ public sealed partial class Emitter
     // the IR types of the entries defined in the module
     private readonly HashSet<string> entries = new(StringComparer.Ordinal);
 
+    /// <summary>The map values a loop over a map holds, by the function they are values of: the end of their region ends the loop's hold of the block (<c>MapWalk</c>).</summary>
+    private readonly HashSet<(IrFunction Function, string Value)> walkedMaps = [];
+
     /// <summary>
     /// The IR type of an entry in a slot of the map's block: the hash of its key, the key and the value where the map keeps the hash
     /// (<see cref="KeepsHash"/>), else the key and the value.
@@ -235,7 +238,9 @@ public sealed partial class Emitter
     /// the slot's address, or null where the map has no entry of the key. It reads a group's 8 control bytes as one word and marks
     /// the bytes equal to the hash's control byte as hashbrown's generic group does (a byte after a match can be marked too, which
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
-    /// 128, whose entry was removed, does not.
+    /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 64 groups without a slot of 255, in a block on
+    /// the fast hash that no loop over a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
+    /// new hash (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto SipHash-1-3 past the bound").
     /// </summary>
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () =>
     {
@@ -296,11 +301,59 @@ public sealed partial class Emitter
         fn.Block(next);
         var stepped = fn.Value($"add i64 {fn.Value($"load i64, ptr {step}")}, 8");
         fn.Emit($"store i64 {stepped}, ptr {step}");
+        var bound = fn.Label("bound");
+        var rehash = fn.Label("rehash");
+        var onward = fn.Label("onward");
+        fn.CondBranch(fn.Value($"icmp eq i64 {stepped}, 520"), bound, onward); // 65 groups without a slot of 255: past 512 slots (section 4)
+        fn.Block(bound);
+        fn.CondBranch(fn.Value($"call i1 {StdFunction("MapLongLookup")}(ptr %a0)"), rehash, onward);
+        fn.Block(rehash);
+        fn.Emit($"call void {Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type))}(ptr %a0)");
+        fn.Return($"ptr {fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})")}");
+        fn.Block(onward);
         fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}")}, ptr {at}"); // the last group followed by the first
         fn.Branch(group);
         fn.Block(none);
         fn.Return("ptr null");
     });
+
+    /// <summary>
+    /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on:
+    /// each entry's hash written again under the block's keys, then every entry moved to the slot its new hash probes first
+    /// (<c>MapRehashInPlace</c>), as hashbrown's <c>rehash_in_place</c>, so that every value that holds the block finds its entries.
+    /// </summary>
+    private void RehashBody(MapType type)
+    {
+        var entry = EntryType(type);
+        var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr %a0)")} to i64");
+        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr %a0)");
+        var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr %a0)");
+        var counter = fn.Alloca("i64", "slot");
+        fn.Emit($"store i64 0, ptr {counter}");
+        var check = fn.Label("slots");
+        var body = fn.Label("slot");
+        var held = fn.Label("entry");
+        var next = fn.Label("slot.next");
+        var done = fn.Label("slots.done");
+        fn.Branch(check);
+        fn.Block(check);
+        var i = fn.Value($"load i64, ptr {counter}");
+        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
+        fn.Block(body);
+        var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
+        fn.CondBranch(fn.Value($"icmp sge i8 {mark}, 0"), held, next); // 255 and 128 hold none
+        fn.Block(held);
+        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
+        var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+        fn.Emit($"store i64 {KeyHash("%a0", key, type.Key)}, ptr {slot}");
+        fn.Branch(next);
+        fn.Block(next);
+        fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {counter}");
+        fn.Branch(check);
+        fn.Block(done);
+        fn.Emit($"call void {StdFunction("MapRehashInPlace")}(ptr %a0, i64 {EntrySize(type)})");
+        fn.Return(null);
+    }
 
     /// <summary><paramref name="each"/> for the key and the value of every entry of the map's block, in the order of its slots (M10).</summary>
     private void EachEntry(string block, MapType type, Action<string, string> each)
@@ -473,6 +526,7 @@ public sealed partial class Emitter
         fn.Block(ready);
         var current = fn.Value("load ptr, ptr %a0");
         var hash = KeyHash(current, "%a1", type.Key);
+        var fast = fn.Value($"call i1 {StdFunction("MapFastHash")}(ptr {current})");
         var slot = fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})");
         var found = fn.Label("found");
         var absent = fn.Label("absent");
@@ -486,6 +540,17 @@ public sealed partial class Emitter
 
         fn.Return(null);
         fn.Block(absent);
+        var hashed = fn.Alloca("i64", "hash");
+        fn.Emit($"store i64 {hash}, ptr {hashed}");
+        var rehashed = fn.Label("rehashed");
+        var hashKept = fn.Label("hash.kept");
+        var moved = fn.Value($"and i1 {fast}, {fn.Value($"xor i1 {fn.Value($"call i1 {StdFunction("MapFastHash")}(ptr {current})")}, true")}");
+        fn.CondBranch(moved, rehashed, hashKept); // the lookup rehashed the block onto SipHash-1-3 (section 4): the key's hash under it
+        fn.Block(rehashed);
+        fn.Emit($"store i64 {KeyHash(current, "%a1", type.Key)}, ptr {hashed}");
+        fn.Branch(hashKept);
+        fn.Block(hashKept);
+        hash = fn.Value($"load i64, ptr {hashed}");
         var grow = fn.Label("grow");
         var add = fn.Label("add");
         var at = fn.Alloca("ptr", "slot");
@@ -809,6 +874,8 @@ public sealed partial class Emitter
         var exit = fn.Label("endfor");
         fn.CondBranch(fn.Value($"icmp eq ptr {map}, null"), exit, walk);
         fn.Block(walk);
+        fn.Emit($"call void {StdFunction("MapWalk")}(ptr {map}, i32 1)"); // a lookup inside the loop rehashes no block it holds (section 4)
+        walkedMaps.Add((fn, map));
         EachSlot(map, entry, onward, exit, slot =>
         {
             var k = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");

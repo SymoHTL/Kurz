@@ -4133,7 +4133,8 @@ ulong FiveDigits(int word) => match word {
 // has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1 for SipHash-1-3 under its
-// keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
+// keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), the count of the
+// loops over a map that hold the block, 4 bytes (`MapWalk`),
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
 // entry: the hash of its key, 8 bytes, then the key and the value, for a key of a kind the emitter's
@@ -4259,6 +4260,7 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
             *Ptr<int>(p + 32) = int(MapCapacity(room))
             *Ptr<int>(p + 36) = 0
             *Ptr<int>(p + 40) = 0
+            *Ptr<int>(p + 44) = 0
             mut long i = 0
             while i < room {
                 p[48 + i] = 255
@@ -4324,6 +4326,7 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
                 i = i + 1
             }
 
+            *Ptr<int>(p + 44) = 0
             *Ptr<long>(block) = *Ptr<long>(block) - 1
         }
     }
@@ -4530,6 +4533,118 @@ pub bool MapTripped(byte* block) {
     }
 
     return tripped
+}
+
+// One loop over a map more (`change` 1) or less (-1) holds the block, nothing for a map that holds none:
+// a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
+// (`MapLongLookup`).
+pub void MapWalk(byte* block, int change) {
+    raw {
+        if block != null {
+            *Ptr<int>(block + 44) = *Ptr<int>(block + 44) + change
+        }
+    }
+}
+
+// For a lookup whose probe passed more than 512 slots, 64 groups of 8 without a slot of 255: whether the
+// block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
+// over a map holds it (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto
+// SipHash-1-3 past the bound"); the block is then marked as on SipHash-1-3, so that `MapHash` hashes
+// under its keys, and the emitted code writes each entry's new hash and calls `MapRehashInPlace`.
+pub bool MapLongLookup(byte* block) {
+    mut bool rehash = false
+    raw {
+        if *Ptr<int>(block + 36) == 0 && *Ptr<int>(block + 44) == 0 {
+            *Ptr<int>(block + 36) = 1
+            rehash = true
+        }
+    }
+
+    return rehash
+}
+
+// Whether the block hashes with the fast hash, not yet with SipHash-1-3.
+pub bool MapFastHash(byte* block) {
+    mut bool fast = false
+    raw {
+        fast = *Ptr<int>(block + 36) == 0
+    }
+
+    return fast
+}
+
+// The block's entries moved within it to the slots their hashes probe first, the hash in each entry's
+// first 8 bytes, as hashbrown's `rehash_in_place` moves them, with nothing allocated: every entry's
+// control byte made 128 and every removed entry's 255, then each entry marked 128 put in the first slot
+// of its probe whose control byte is 255 or 128, where it stays if that slot is in its own group, takes
+// the slot of 255 and leaves its own 255, or changes places with the marked entry there and goes on with
+// that one. The slots entries can still take are then the block's capacity less its count.
+pub void MapRehashInPlace(byte* block, long entry) {
+    long room = long(MapRoom(block))
+    long mask = room - 1
+    byte* control = MapControl(block)
+    byte* slots = MapSlots(block)
+    raw {
+        mut long i = 0
+        while i < room {
+            if control[i] == 128 {
+                control[i] = 255
+            } else if control[i] < 128 {
+                control[i] = 128
+            }
+
+            i = i + 1
+        }
+
+        i = 0
+        while i < room {
+            mut bool placed = control[i] != 128
+            while !placed {
+                ulong hash = *Ptr<ulong>(slots + i * entry)
+                mut long at = long(hash & ulong(mask)) / 8 * 8
+                mut long step = 0
+                mut long j = -1
+                while j < 0 {
+                    mut long b = 0
+                    while b < 8 && j < 0 {
+                        if control[at + b] >= 128 {
+                            j = at + b
+                        }
+
+                        b = b + 1
+                    }
+
+                    step = step + 8
+                    at = (at + step) & mask
+                }
+
+                byte mark = byte((hash >> 56) & 127UL)
+                if j / 8 == i / 8 {
+                    control[i] = mark
+                    placed = true
+                } else {
+                    byte taken = control[j]
+                    control[j] = mark
+                    mut long w = 0
+                    while w < entry {
+                        ulong moved = *Ptr<ulong>(slots + i * entry + w)
+                        *Ptr<ulong>(slots + i * entry + w) = *Ptr<ulong>(slots + j * entry + w)
+                        *Ptr<ulong>(slots + j * entry + w) = moved
+                        w = w + 8
+                    }
+
+                    if taken == 255 {
+                        control[i] = 255
+                        placed = true
+                    }
+                }
+            }
+
+            i = i + 1
+        }
+
+        *Ptr<int>(block + 32) = int(MapCapacity(room)) - MapCount(block)
+    }
 }
 
 // For a map whose insert's probe passed the bound: a block of its slots and its count, under SipHash-1-3
