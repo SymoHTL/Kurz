@@ -284,6 +284,13 @@ public sealed partial class Checker
                 Report(ErrorIds.ConstantOverflow, c.Arguments[i].Line, $"{immediate.Value} does not fit {Types.A(parameter.Type)}, the type of `{parameter.Name}` of `{intrinsic.Owner}.{intrinsic.Name}` (L10, R18)");
                 return Typed.Error;
             }
+
+            // section 13, the owner, 2026-11-02: a lane past the lanes is refused at its line, as Rust's constant assertion refuses it
+            if (parameter.Lane && intrinsic.Parameters[0].Type is VectorType vector && immediate.Value >= vector.Count)
+            {
+                Report(ErrorIds.LaneOutOfRange, c.Arguments[i].Line, $"lane {immediate.Value} of `{intrinsic.Owner}.{intrinsic.Name}` lies past the {vector.Count} lanes of {Types.A(vector)} (R18)");
+                return Typed.Error;
+            }
         }
 
         if (cls is not null && rawDepth == 0 && !KnownClasses(frame.Known).Any(k => Intrinsics.Guards(k, cls)))
