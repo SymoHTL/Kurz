@@ -2142,7 +2142,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // a list and a map in a field, written through a path from a `mut` variable (M4, M5, M9) by each `mut` member, an item and an entry
     // written, `Add`, `Clear` and `Remove`: beside a copy taken before (M3), in a `mut` parameter, after a value that replaced the variable
     // (M4), nested, in a data type that holds itself, whose block another variable holds, with a key `Remove` reads from that block,
-    // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block
+    // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block; and each field read by
+    // `f.Get(value)` in the passes of a loop over `T.Fields` and kept past an assignment that replaces the value (T33)
     private const string Fields = """
         data Store(List<string> Names, Map<string, string> Etags, int Hits)
         data Shelf(Store Main, string Label)
@@ -2158,6 +2159,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         string Reset(mut Store store) {
             store = Store(List<string>(), Map<string, string>(), 0)
             return "after"
+        }
+
+        void Keep<T>(mut T value, T replaced, T back) {
+            for f in T.Fields {
+                read = f.Get(value)
+                value = replaced
+                print(read)
+                value = back
+            }
         }
 
         mut s = Store(List<string>(), Map<string, string>(), 0)
@@ -2260,6 +2270,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         print(bag.Xs)
         print(prior.Xs)
+        mut keep = Store(List<string>(), Map<string, string>(), 7)
+        keep.Names.Add("kept")
+        keep.Etags["k"] = "v"
+        spare = keep
+        Keep(mut keep, Store(List<string>(), Map<string, string>(), 8), spare)
+        print(keep)
         """;
 
     private static readonly string[] FieldsPrint =
@@ -2304,6 +2320,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[]",
         "[4]",
         "[3]",
+        "[kept]", // T33: `f.Get(value)` of each field of a pass, kept past the change of the value it was read from
+        "[k: v]",
+        "7",
+        "Store { Names = [kept], Etags = [k: v], Hits = 7 }",
     ];
 
     // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
