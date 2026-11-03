@@ -239,10 +239,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// K14: the function <see cref="Constructor"/> names, which takes the block of the instance and the parameters, which it borrows:
-    /// what its <c>: this(...)</c> calls, a construction into the same block; without one the base's construction, which takes no
-    /// arguments, and the defaults of the body (<see cref="ClassDefaults"/>); then its body, with the instance as <c>this</c>, whose
-    /// table no code there reads, since the checker refuses <c>this</c> and a method of it in a class with derived classes. A trace
-    /// names its frame by the class, as the construction is written.
+    /// what its <c>: this(...)</c> calls, a construction into the same block; without one the base's construction into that block,
+    /// the one <c>: base(...)</c> picks or C#'s implied <c>base()</c>, and the defaults of the body (<see cref="ClassDefaults"/>); then
+    /// its body, with the instance as <c>this</c>, whose table no code there reads, since the checker refuses <c>this</c> and a method
+    /// of it in a class with derived classes. A trace names its frame by the class, as the construction is written.
     /// </summary>
     private void EmitConstructor(ConstructorSymbol made, string name)
     {
@@ -284,9 +284,10 @@ public sealed partial class Emitter
             }
             else
             {
-                if (symbol.BaseCall is not null)
+                if (made.BaseCall is { } baseCall)
                 {
-                    InRegion(() => FillFields(symbol, [], "%this"));
+                    // `: base(...)` or C#'s implied `base()`: the base's part of the block, before the defaults and the body (K14)
+                    InRegion(() => Construct(symbol.Base!, baseCall, Model.CallOf(baseCall), () => "%this"));
                 }
 
                 if (symbol.Fields.Any(f => f.Body?.Value is not null))

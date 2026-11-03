@@ -259,14 +259,23 @@ public sealed partial class Checker
         if (b is not null && baseSpecifier is not null)
         {
             symbol.Fields.AddRange(b.Fields);
-            if (d.PrimaryConstructor is null && (baseSpecifier.Arguments is not null || !BuildsWithNoArguments(b)))
+            if (d.PrimaryConstructor is null && baseSpecifier.Arguments is not null)
             {
-                NotSupported(baseSpecifier.Line, $"arguments of the base `{b.Name}`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)");
+                NotSupported(baseSpecifier.Line, $"arguments after the name of the base `{b.Name}` for a class without a primary constructor, whose constructors pass them with `: base(...)` (K10, K14)");
+                baseArgumentsRefused.Add(symbol);
             }
-            else if (d.PrimaryConstructor is null && (b.Constructors.Count > 0 || b.BaseCall is not null))
+            else if (d.PrimaryConstructor is null && symbol.Constructors.Count == 0 && RunsAConstructor(b))
             {
-                // K14: the base's constructor runs before the body, as C# runs it: the one of the base that takes no arguments
-                symbol.BaseCall = new CallExpression(baseSpecifier.Line, new NameExpression(baseSpecifier.Line, b.Name), [], []);
+                // K14: the empty constructor runs the base's constructor that takes no arguments first, as C#'s implied `base()`; a
+                // constructor of the body holds its own (CheckConstructorInitializer)
+                if (TakesNoArguments(b))
+                {
+                    symbol.BaseCall = new CallExpression(baseSpecifier.Line, new NameExpression(baseSpecifier.Line, b.Name), [], []);
+                }
+                else
+                {
+                    Report(ErrorIds.ArgumentMismatch, baseSpecifier.Line, $"the empty constructor of `{symbol.Name}` runs the constructor of its base `{b.Name}` that takes no arguments, as C#'s implied `base()`, and `{b.Name}` has none: give `{symbol.Name}` a constructor that passes them with `: base(...)` (K14)");
+                }
             }
             else if (shortForm && b.Declaration.PrimaryConstructor is null)
             {

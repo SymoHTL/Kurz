@@ -1771,7 +1771,7 @@ public sealed class CheckerTests
         // K7, K14: the parser reads a field and a constructor in a type body only, whose members the checker does not read (D16, chapter 7);
         // a tree that holds one among its statements, built here since the parser makes none, gets `not supported` and no error
         var field = new FieldDeclaration(1, Modifiers.None, null, "x", new BoolLiteral(1, true));
-        var constructor = new ConstructorDeclaration(2, Modifiers.None, "P", [], null, new Block(2, [], 2));
+        var constructor = new ConstructorDeclaration(2, Modifiers.None, "P", [], null, null, new Block(2, [], 2));
         var diagnostics = new DiagnosticBag();
         Checker.Check(new ProgramSyntax([field, constructor]), diagnostics);
         Assert.Equal(["1: not supported: a field of a type body (K7)", "2: not supported: a constructor of a type body (K14)"], diagnostics.Sorted.Select(d => d.ToString()));
@@ -3847,6 +3847,24 @@ public sealed class CheckerTests
         Clean("class A(int X) {\n    pub A() : this(0) { }\n}\nclass B(int X) : A(X)\n\nprint(B(1).X)");
         Assert.Equal([(ErrorIds.NotVisible, 4)], Errors("class A {\n    A() { }\n}\nclass B : A\n\nprint(1)"));
         Assert.Equal([(ErrorIds.NotVisible, 4)], Errors("class A {\n    A() { }\n}\nclass B(int N) : A()\n\nprint(1)"));
+        // K14 (the owner, 2026-11-03): a constructor of a class without a primary constructor passes the arguments of its base with
+        // `: base(...)`, which picks among the base's constructors as a construction does and reads the parameters and no instance, as
+        // C# reads them; `base` is a name everywhere else (L18); a constructor without it runs the base's constructor that takes no
+        // arguments, as C#'s implied `base()`, and so does the empty constructor of a class without one, the defaults of the base's
+        // parameters given
+        Clean("class A(string Name) {\n    pub A(int n) : this(\"n{n}\") { }\n}\n\nclass B : A {\n    pub B(int n) : base(n) {\n        print(Name)\n        print(this.Name)\n    }\n\n    pub B(string s) : base(s) { }\n\n    pub B() : this(\"b\") { }\n}\n\nclass P(string Name = \"p\")\n\nclass Q : P\n\nclass R : P {\n    pub R() {\n        print(Name)\n    }\n}\n\nbase = B(2)\nprint(base.Name)\nprint(B().Name)\nprint(Q().Name)\nprint(R().Name)");
+        // where no constructor of the base takes no arguments, a constructor without `: base(...)` is `argument-mismatch` at its line,
+        // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
+        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, and in a class
+        // without a base class `syntax`; its arguments read no field, take the types of the base's parameters, and reach no
+        // constructor of the base without `pub` (F9)
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(\"s\") { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class A {\n    A(int n) { }\n}\n\nclass B : A {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
     }
 
     [Theory]
@@ -3860,15 +3878,15 @@ public sealed class CheckerTests
     [InlineData("class A(int N) {\n    pub A() : this(1) {\n        print(this.N)\n    }\n}\n\nclass B(int N) : A\n\nprint(1)", "3: `this` in a constructor of `A`, a class another class derives from, where an override could read a field of the derived class while the constructor runs (K6, K14)")]
     [InlineData("class P {\n    pub P() : this(1) { }\n\n    pub P(int n) : this() { }\n}\n\nprint(1)", "2: `: this(...)` calls that come back to this constructor of `P` through 2 calls, which would never end (K14)")]
     [InlineData("class P {\n    pub P(int n) : this(n) { }\n}\n\nprint(1)", "2: `: this(...)` calls that come back to this constructor of `P` through 1 call, which would never end (K14)")]
-    [InlineData("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n}\n\nprint(1)", "5: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
+    [InlineData("class A(int N)\n\nclass B : A(1) {\n    pub B() { }\n}\n\nprint(1)", "3: arguments after the name of the base `A` for a class without a primary constructor, whose constructors pass them with `: base(...)` (K10, K14)")]
     public void What_a_constructor_of_a_class_body_reaches_before_the_instance_is_built_is_not_supported(string program, string expected)
     {
         // K14: the instance before every field is assigned (Swift's rule), `this` and a method of it in a class with derived classes,
         // `: this(...)` calls that come back to their constructor (C#'s CS0768), a `mut` field assigned where one path assigned it and
-        // another did not, a default that reads a field a constructor's body assigns, where K7 runs every default before that body and
-        // no rule says what the read is, and a base whose constructors all take arguments, which a constructor passes with C#'s
-        // `: base(...)`; the one line is all: the helper finds no error beside it, so after the `mut` field's assignment the field counts
-        // as assigned, and no `field-unassigned` follows at the constructor (E1)
+        // another did not, a default that reads a field a constructor's body assigns (the owner, 2026-11-03, against `field-unassigned`
+        // at the read), and arguments after the name of the base of a class without a primary constructor, whose constructors pass them
+        // with `: base(...)`; the one line is all: the helper finds no error beside it, so after the `mut` field's assignment the field
+        // counts as assigned, and no `field-unassigned` follows at the constructor (E1)
         Assert.Equal([expected], NotSupported(program));
     }
 
@@ -4527,8 +4545,7 @@ public sealed class CheckerTests
     [InlineData("class A(int N) {\n    pub static int Step = 1\n}\nclass B(int N) : A\n\nprint(1)", "2: a field in the body or a `static` member of `A`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A(int N)\nclass B(int N) : A {\n    pub static int Make() => 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A(int N)\nclass B(int N) : A {\n    mut int m = 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
-    [InlineData("class A(int N)\nclass B : A\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
-    [InlineData("class A\nclass B : A()\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
+    [InlineData("class A\nclass B : A()\n\nprint(1)", "2: arguments after the name of the base `A` for a class without a primary constructor, whose constructors pass them with `: base(...)` (K10, K14)")]
     [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K17)")]
     [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
     [InlineData("class A(string Name = \"a\")\nclass B(string Name = \"b\", int L) : A\n\nprint(1)", "2: a default on `Name`, which in the short form is the field of the base `A` with the base's default (K16)")]
@@ -4549,7 +4566,7 @@ public sealed class CheckerTests
         // (K14), a field there without a written
         // type or of another modifier than `pub` and `mut` (K7), a `static` field of another modifier, of another type, or with an initial value that is no
         // constant (K18), a field in the body or a `static` member of a class in a chain (K6, K7, K18), a base that is no class, a
-        // second one and a cycle of bases (K6), the arguments of a base for a class without a primary constructor (K10, K14), a passed-on
+        // second one and a cycle of bases (K6), arguments after the name of the base of a class without a primary constructor (K10, K14), a passed-on
         // parameter whose `mut` differs from the base's field (K11, K16 in the short form, K17 in the explicit one) or that has a default
         // in the short form (K16), `equal by` over a base with
         // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, either on a `static` method, a `prot`

@@ -6,22 +6,26 @@ namespace Kurz.Compiler.Semantics;
 /// <summary>
 /// K14: the constructors a class declares in its body. A further constructor of a class with a primary constructor calls it first
 /// with <c>: this(...)</c>, else <c>constructor-must-chain</c>; a class without one has C#'s constructors, which may call another of
-/// the body with <c>: this(...)</c>, and a construction picks among them as a call picks among overloads (F13), a private one visible
-/// inside its class alone (F9). A field of the body without <c>=</c> in a class with no primary constructor, no base and no derived
+/// the body with <c>: this(...)</c> or pass the arguments of its base with <c>: base(...)</c>, and a construction picks among them as a
+/// call picks among overloads (F13), a private one visible inside its class alone (F9). A field of the body without <c>=</c> in a class with no primary constructor, no base and no derived
 /// classes is assigned on every path of every constructor that calls no other, once where it has no <c>mut</c>, as C#'s definite
 /// assignment reads a <c>readonly</c> field and Rust's an immutable binding (E0381, E0384): a second assignment is
 /// <c>assign-immutable</c>, a path that leaves it unassigned and a read before its first assignment are <c>field-unassigned</c>. The
 /// flow of that analysis is two marks per field in <see cref="Frame.Known"/>, assigned on every path so far and on none so far, so
 /// that every join and every loop of the flow of the code reads them as it reads what is known not null (N3). The base's constructor
-/// runs before the body, as C#, Java and Swift run it. What the checker does not read is <c>not supported</c>: a use of the instance,
+/// runs before the body, as C#, Java and Swift run it: the one <c>: base(...)</c> picks, else the one that takes no arguments, as C#'s
+/// implied <c>base()</c>. What the checker does not read is <c>not supported</c>: a use of the instance,
 /// <c>this</c>, a method of it or a lambda that reaches it, before every field is assigned (Swift's rule); <c>this</c> and a method of
 /// the instance in a constructor of a class with derived classes, where an override could read a field of the derived class while
-/// the constructor runs; <c>: this(...)</c> calls that come back to their constructor (C#'s CS0768); and arguments a constructor of
-/// the body passes to its base, which takes no arguments then (<c>compiler/README.md</c>).
+/// the constructor runs; <c>: this(...)</c> calls that come back to their constructor (C#'s CS0768); and a default that reads a field
+/// a constructor's body assigns (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
     private readonly HashSet<ConstructorSymbol> duplicateConstructors = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The classes without a primary constructor that write arguments after the name of their base, which is <c>not supported</c>.</summary>
+    private readonly HashSet<ClassSymbol> baseArgumentsRefused = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// K14: a constructor's body while it is read: the fields it assigns, each with its two marks, assigned on every path so far and
@@ -99,16 +103,23 @@ public sealed partial class Checker
         symbol.Constructors.Count > 0 && symbol.Declaration.PrimaryConstructor is null && symbol.Base is null && !symbol.Derived;
 
     /// <summary>
-    /// K14: whether a class derived from <paramref name="b"/> without a primary constructor can build its base with no arguments: the
-    /// base takes none, with no primary constructor that lists one and no constructor of its body, or a constructor of its body takes
-    /// none.
+    /// K14: whether building <paramref name="b"/> as the base of a class without a primary constructor runs a constructor: one of its
+    /// body, a primary one that takes parameters, or the construction of its own base.
     /// </summary>
-    private static bool BuildsWithNoArguments(ClassSymbol b) =>
-        b.Constructors.Count == 0 ? b.Constructor.Count == 0 : b.Constructors.Any(k => k.Parameters.All(p => p.HasDefault));
+    private static bool RunsAConstructor(ClassSymbol b) => b.Constructors.Count > 0 || b.Constructor.Count > 0 || b.BaseCall is not null;
 
     /// <summary>
-    /// K14: what runs before each constructor's body, its parameters' defaults and its <c>: this(...)</c>, then its body, class by
-    /// class; the arguments of <c>: this(...)</c> read the parameters and no instance, as C# reads them.
+    /// K14: whether <paramref name="b"/> has a constructor a construction with no arguments can pick, every parameter of it with a
+    /// default: its primary one, or the empty one of a class without a constructor in its body, or one of its body.
+    /// </summary>
+    private static bool TakesNoArguments(ClassSymbol b) =>
+        ((b.Declaration.PrimaryConstructor is not null || b.Constructors.Count == 0) && b.Constructor.All(s => s.Declaration.Default is not null))
+        || b.Constructors.Any(k => k.Declaration.Parameters.All(p => p.Default is not null));
+
+    /// <summary>
+    /// K14: what runs before each constructor's body, its parameters' defaults and its <c>: this(...)</c> or the construction of its
+    /// base, then its body, class by class; the arguments of <c>: this(...)</c> and <c>: base(...)</c> read the parameters and no
+    /// instance, as C# reads them.
     /// </summary>
     private void CheckConstructorBodies()
     {
@@ -139,13 +150,20 @@ public sealed partial class Checker
             }
         }
 
-        if (d.ThisArguments is null)
+        if (d.ThisArguments is null && symbol.Declaration.PrimaryConstructor is not null)
         {
-            if (symbol.Declaration.PrimaryConstructor is not null)
-            {
-                Report(ErrorIds.ConstructorMustChain, d.Line, $"a further constructor of `{symbol.Name}`, which has a primary constructor, calls it first, with `: this(...)` (K14)");
-            }
+            Report(ErrorIds.ConstructorMustChain, d.Line, $"a further constructor of `{symbol.Name}`, which has a primary constructor, calls it first, with `: this(...)` (K14)");
+            return;
+        }
 
+        if (d.BaseArguments is not null && symbol.Base is null)
+        {
+            Report(ErrorIds.Syntax, d.Line, $"`: base(...)` in a constructor of `{symbol.Name}`, which has no base class (K14)");
+            return;
+        }
+
+        if (d.ThisArguments is null && (symbol.Base is not { } b || baseArgumentsRefused.Contains(symbol) || (d.BaseArguments is null && !RunsAConstructor(b))))
+        {
             return;
         }
 
@@ -155,9 +173,25 @@ public sealed partial class Checker
             k.InitializerParameters.Add(DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node));
         }
 
-        // the call of the primary constructor is direct (K14); in a class without one, the call of another constructor of the body
-        k.ThisCall = new CallExpression(d.Line, new NameExpression(d.Line, symbol.Name), [], d.ThisArguments);
-        CheckClassConstruction(symbol, k.ThisCall, null, insideOf: symbol, primaryOnly: symbol.Declaration.PrimaryConstructor is not null);
+        if (d.ThisArguments is not null)
+        {
+            // the call of the primary constructor is direct (K14); in a class without one, the call of another constructor of the body
+            k.ThisCall = new CallExpression(d.Line, new NameExpression(d.Line, symbol.Name), [], d.ThisArguments);
+            CheckClassConstruction(symbol, k.ThisCall, null, insideOf: symbol, primaryOnly: symbol.Declaration.PrimaryConstructor is not null);
+            return;
+        }
+
+        // `: base(...)`, as C# writes it (the owner, 2026-11-03), or C#'s implied `base()`: a construction of the base, whose
+        // constructors without `pub` this class does not see (F9)
+        var named = symbol.Base!;
+        if (d.BaseArguments is null && !TakesNoArguments(named))
+        {
+            Report(ErrorIds.ArgumentMismatch, d.Line, $"this constructor of `{symbol.Name}` runs the constructor of its base `{named.Name}` that takes no arguments, as C#'s implied `base()`, and `{named.Name}` has none: pass the arguments with `: base(...)` (K14)");
+            return;
+        }
+
+        k.BaseCall = new CallExpression(d.Line, new NameExpression(d.Line, named.Name), [], d.BaseArguments ?? []);
+        CheckClassConstruction(named, k.BaseCall, null);
     }
 
     /// <summary>K14: <c>: this(...)</c> calls that come back to the constructor they start from, reported once, at the first of the ring.</summary>

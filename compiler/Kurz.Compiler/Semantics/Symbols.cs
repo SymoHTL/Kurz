@@ -182,9 +182,10 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     public List<ConstructorSlot> Constructor { get; } = [];
 
     /// <summary>
-    /// K10: the explicit form's arguments of the base, read as a construction of the base; K14: for a class with a base and no primary
-    /// constructor, the construction of the base with no arguments, which runs before the body of each of its constructors that calls
-    /// no other, where the base declares constructors in its body; null for the short form and for a class without a base.
+    /// K10: the explicit form's arguments of the base, read as a construction of the base; K14: for a class with a base, no primary
+    /// constructor and no constructor in its body, the construction of the base with no arguments, which its empty constructor runs, as
+    /// C#'s implied <c>base()</c>, where the base has a constructor to run (a constructor of a body holds its own,
+    /// <see cref="ConstructorSymbol.BaseCall"/>); null for the short form and for a class without a base.
     /// </summary>
     public CallExpression? BaseCall { get; set; }
 
@@ -308,7 +309,14 @@ public sealed class ConstructorSymbol(ConstructorDeclaration declaration, ClassS
     /// <summary>The call of <c>: this(...)</c>; null for a constructor without one.</summary>
     public CallExpression? ThisCall { get; set; }
 
-    /// <summary>The parameters as the variables the arguments of <c>: this(...)</c> read, which no instance is visible to.</summary>
+    /// <summary>
+    /// The construction of the base this constructor runs before its body: <c>: base(...)</c>, or C#'s implied <c>base()</c> where it
+    /// calls no other constructor and the base has one to run; null where it calls another with <c>: this(...)</c>, and in a class
+    /// without a base.
+    /// </summary>
+    public CallExpression? BaseCall { get; set; }
+
+    /// <summary>The parameters as the variables the arguments of <c>: this(...)</c> or <c>: base(...)</c> read, which no instance is visible to.</summary>
     public List<VariableSymbol> InitializerParameters { get; } = [];
 }
 

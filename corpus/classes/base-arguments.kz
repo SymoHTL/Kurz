@@ -1,0 +1,30 @@
+// expect: output
+// | Animal 4
+// | Dog legs 4
+// | legs 4
+// | rex
+// | pet
+// rules: K14
+
+class Animal(string Name) {
+    pub Animal(int legs) : this("legs {legs}") {
+        print("Animal {legs}")
+    }
+}
+
+class Dog : Animal {
+    pub Dog(int legs) : base(legs) {
+        print("Dog {Name}")
+    }
+
+    pub Dog(string name) : base(name) { }
+}
+
+class Pet(string Name = "pet")
+
+class Cat : Pet
+
+base = Dog(4)
+print(base.Name)
+print(Dog("rex").Name)
+print(Cat().Name)
