@@ -861,17 +861,19 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   can still take before the block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1
   for SipHash-1-3, and whether an insert's probe passed the bound, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
-  key and the value, laid out as a `data` value of the three, for a key whose hash reads more than one
-  word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that compares by its
-  fields), as .NET's `Dictionary` keeps each entry's hash code, and the key and the value alone for a key
-  of one word (an integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`,
-  an instance that compares by identity, hashed by its address), whose growth hashes every key
-  again, as `hashbrown`'s buckets keep no hash *(assumed: taken under the owner's "Allow, faster wins"
-  of 2026-11-01, issue 157, comment 6556450466, by the rows of item 14 there: without the hash
-  a `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
+  key and the value, laid out as a `data` value of the three, for a key of a kind whose hash can read
+  more than one word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that
+  does not compare by identity: by its content, K4, or by the fields it names, K5), as .NET's
+  `Dictionary` keeps each entry's hash code, and the key and the value alone for a key of one word (an
+  integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`, an instance
+  that compares by identity, hashed by its address), whose growth hashes every key again, as
+  `hashbrown`'s buckets keep no hash; the emitter's `KeepsHash` is the one definition of the split (the
+  owner, 2026-11-02, answer (a) on pull request 210, comment 6573116036: the bytes `allocation-failed`
+  names follow the layout, under "Allow, faster wins"; issue 157, item 14: without the hash a
+  `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
   `data` value of two strings and by a list of 4 `int`s grew 31% to 36% slower; a program sees the layout
   only in the bytes `allocation-failed` names for a map's block (M9), 192 for the first block of a
-  `Map<long, long>` and 320 for that of a `Map<string, long>`)*. A key's hash is taken over its
+  `Map<long, long>` and 320 for that of a `Map<string, long>`). A key's hash is taken over its
   bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
   8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
   `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
