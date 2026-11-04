@@ -268,8 +268,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// Whether a value of the type can hold a function value: a function type, a type parameter, which may stand for one, a list or
-    /// a union that holds one, and a <c>data</c> type when one of its type arguments holds one, or a field of it or of a type derived
-    /// from it does (M7). A type the checker could not tell holds none (E1).
+    /// a union that holds one, a <c>data</c> type when one of its type arguments holds one, or a field of it or of a type derived
+    /// from it does, and a class when a field of it does (M7). A type the checker could not tell holds none (E1).
     /// </summary>
     private bool HoldsFunction(KurzType type, HashSet<DataSymbol> path) => type switch
     {
@@ -278,8 +278,26 @@ public sealed partial class Checker
         MapType m => HoldsFunction(m.Value, path),
         UnionType u => u.Cases.Any(c => HoldsFunction(c, path)),
         DataType d => DataHoldsFunction(d, path),
+        ClassType c => ClassHoldsFunction(c.Symbol, path),
         _ => false, // a number, a string, a pointer, a C function
     };
+
+    /// <summary>The classes on the way to this one, as <c>path</c> holds the data types: a class met again has its fields read at the first meeting.</summary>
+    private readonly HashSet<ClassSymbol> classesOnTheWay = [];
+
+    // M7, R9: an instance holds what its fields hold, a field of a function type among them (section 4 assumes a class can hold
+    // one where a field of it can); a class that reaches itself through its fields ends the walk
+    private bool ClassHoldsFunction(ClassSymbol c, HashSet<DataSymbol> path)
+    {
+        if (!classesOnTheWay.Add(c))
+        {
+            return false;
+        }
+
+        var holds = c.Fields.Any(f => HoldsFunction(f.Type, path));
+        classesOnTheWay.Remove(c);
+        return holds;
+    }
 
     // the data types on the way to this one: a type holds what its type arguments hold, whether a field stores them or not, as
     // Rust's `PhantomData<T>` keeps the borrow of its argument (the owner, 2026-10-28, "Counts, as Rust"), so `Q<() => int>`
