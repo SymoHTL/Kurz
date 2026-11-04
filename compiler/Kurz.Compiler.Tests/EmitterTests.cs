@@ -364,9 +364,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_end_of_a_block_and_the_end_of_an_instance_let_go_of_their_fields_in_their_order()
     {
-        // section 3, assumed: the end of a value lets go of what its fields hold in the order of the fields, as Rust drops a value's
-        // fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of their string before
-        // their list
+        // section 3, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust
+        // drops a value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of
+        // their string before their list
         const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nprint(p.B)\nprint(t.B)\n";
         var ir = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
         foreach (var name in new[] { "drop.block.Pair", "drop.class.Two" })
