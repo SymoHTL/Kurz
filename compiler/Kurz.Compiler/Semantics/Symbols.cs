@@ -99,6 +99,9 @@ public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bo
 {
     /// <summary>F9, D14: a field of a primary constructor is visible wherever its type is, one of a class body only with <c>pub</c>.</summary>
     public bool IsPub => Body is null || (Body.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>F9: a field of a class body marked <c>internal</c>, visible to the files of the folder that declares its class.</summary>
+    public bool IsInternal => Body is not null && (Body.Modifiers & Modifiers.Internal) != 0;
 }
 
 /// <summary>A <c>data</c> type (D1) with its fields, the base fields first (D7), its base (D6) and its type parameters (T19).</summary>
@@ -196,6 +199,9 @@ public sealed class StaticFieldSymbol(FieldDeclaration declaration, ClassSymbol 
 
     /// <summary>F9: a field without <c>pub</c> is private to its class.</summary>
     public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>F9: a field marked <c>internal</c>, visible to the files of the folder that declares its class.</summary>
+    public bool IsInternal => (Declaration.Modifiers & Modifiers.Internal) != 0;
 }
 
 /// <summary>

@@ -92,6 +92,26 @@ peer closed, reads no bytes and returns 0. `into` grows as `Add` grows a list (M
 A `max` below 0 raises `index-out-of-range`. `into.Clear()` empties a list and keeps its room (M9).
 *(assumed, §12: the room before the read and a `max` below 0)*
 
+A read goes through a buffer of 8 KiB that the handle keeps, a `File`'s and a `TcpStream`'s alike
+(§12, the owner, 2026-11-02, "the stream keeps a read buffer", 8 KiB "as Rust's `BufReader`", and a
+`File` too, against the stream alone). It reads as Rust's `BufReader::read` reads: the bytes the
+buffer holds go first, at most `max` of them, with no system call; where it holds none, a `max` of
+8 KiB or more is read straight into `into`, past the buffer, and a smaller one fills the buffer with
+one read of the system and takes at most `max` of what that read gave (§12, the owner, 2026-11-03,
+issue 39, comment 6605104107). A `max` of 0 goes straight, so that it reads nothing and
+waits for no byte, as it did before the buffer. `Read`, a `File`'s `Lines()` (S16), and `Fill` and
+`Consume` (S24) are the ways to the buffered bytes. The buffer is
+made at the handle's first read that fills it, and every holder shares it (S5), under the handle's
+lock: a fill holds the lock while its read waits, so that a read or a pull through another holder
+waits behind it, and a read that goes straight lets it go before it waits. A read that fails, or
+whose time runs out (S9), stores nothing in the buffer. A `Write` after buffered reads of one handle
+would land where the program's reads ended, the position moved back over the bytes read ahead, as
+C#'s `FileStream` moves it, which no handle reaches, since `File.Open` opens a file to read and
+`File.Create` to write (S2) and a stream has no position; a second `File.Open` of a file has its own
+descriptor, position and buffer. *(assumed, §12: the `max` of 0, the buffer made at the first fill,
+every holder sharing it under the lock, the read that fails storing nothing, the write after
+buffered reads and the second handle)*
+
 Case: [system/read-appends.kz](../corpus/system/read-appends.kz)
 ```kurz
 void | IoError Chunks() {
@@ -131,6 +151,468 @@ Negative() else {
 }
 ```
 
+Case: [system/read-buffer-fill.kz](../corpus/system/read-buffer-fill.kz)
+```kurz
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`, and -1 where it has none
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+// whether the reads between `before` and `after` were at least one and fewer than 100, where a read of the system for each byte makes
+// 3000, and a count that could not be read, -1 at both ends, makes none
+bool Few(long before, long after) => before > 0 && after - before >= 1 && after - before < 100
+
+void | IoError Show() {
+    mut small = Bytes()
+    for i in 0..<3000 {
+        small.Add(byte(i % 251))
+    }
+
+    // 3000 bytes read one at a time from a stream: a read of the system fills the buffer of 8 KiB with what the stream holds, and the
+    // reads after it take their byte from the buffer
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(small)
+    mut got = Bytes()
+    before = Reads()
+    for i in 0..<3000 {
+        server.Read(mut got, 1)
+    }
+
+    after = Reads()
+    print("{got.Count} {got == small} {Few(before, after)}")
+
+    // the same from a file
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-fill.txt", sent)
+    f = File.Open("read-buffer-fill.txt")
+    mut read = Bytes()
+    start = Reads()
+    for i in 0..<3000 {
+        f.Read(mut read, 1)
+    }
+
+    end = Reads()
+    print("{read.Count} {read == small} {Few(start, end)}")
+
+    // a second handle on the file has its own position and buffer
+    h = File.Open("read-buffer-fill.txt")
+    File.Delete("read-buffer-fill.txt")
+    mut first = Bytes()
+    h.Read(mut first, 1)
+    print(first[0])
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-straight.kz](../corpus/system/read-buffer-straight.kz)
+```kurz
+void | IoError Show() {
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-straight.txt", sent)
+    g = File.Open("read-buffer-straight.txt")
+    File.Delete("read-buffer-straight.txt")
+
+    // a read of 8 KiB or more into an empty buffer goes straight to the list
+    mut large = Bytes()
+    print(g.Read(mut large, 10000))
+
+    // a smaller one fills the buffer with 8192 bytes and takes one; a read of 8 KiB or more then takes the 8191 the buffer holds and
+    // no more, with no system call, and the next one, with the buffer empty, goes straight to the list again
+    one = g.Read(mut large, 1)
+    rest = g.Read(mut large, 10000)
+    print("{one} {rest}")
+    print(g.Read(mut large, 10000))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-zero.kz](../corpus/system/read-buffer-zero.kz)
+```kurz
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a `max` of 0 reads nothing and waits for no byte, where a read that waited would run out of time
+    print(server.Read(mut got, 0))
+
+    // and it reads nothing where the stream holds bytes, which the next read takes
+    client.Write("ab".Bytes)
+    print(server.Read(mut got, 0))
+    print(server.Read(mut got, 2))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
+```kurz
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a read that would fill the buffer, and one that goes straight to the list, each run out of time with nothing sent: each stores
+    // nothing and lets the next read in
+    match server.Read(mut got, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match server.Read(mut got, 10000) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Read(mut got, 1)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
+```kurz
+void | IoError Show() {
+    // a read of one byte fills the file's buffer with the 20 bytes the file holds; its close drops the 19 no read took, and a read
+    // after it is S5's error and takes none of them
+    File.WriteAll("read-buffer-close.txt", "abcdefghijklmnopqrst".Bytes)
+    f = File.Open("read-buffer-close.txt")
+    File.Delete("read-buffer-close.txt")
+    mut read = Bytes()
+    print(f.Read(mut read, 1))
+    f.Close()
+    match f.Read(mut read, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    // a read of one byte fills the stream's buffer with the 10 bytes of one write, which leaves the system's queue empty; the close
+    // drops the 9 the buffer holds, and the peer reads the end of the stream, where bytes left in the queue would have reset it
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("abcdefghij".Bytes)
+    mut got = Bytes()
+    print(server.Read(mut got, 1))
+    server.Close()
+    mut last = Bytes()
+    print(client.Read(mut last, 16))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+### S24 (decided, §12) Looking into the read buffer
+
+`s.Fill(mut into)` appends to `into`, a `Bytes`, what the read buffer of a `File` or a `TcpStream`
+holds (S3), all of it, and consumes none of it, as Rust's `BufRead::fill_buf` gives the buffer: where
+the buffer holds bytes it makes no system call, and where it holds none it first fills it with one
+read of the system, as a `Read` below 8 KiB fills it. `s.Consume(n)` drops the first `n` of the bytes
+the buffer holds, as `BufRead::consume` does, so that the next `Read` or `Fill` starts after them. A
+reader so looks at a message's head without taking what follows it: it fills,
+finds the head's end in the bytes it was given, and consumes that far (§12, the owner, 2026-11-03,
+issue 110, comment 6615078257, against the same two members visible to `std/` alone and against a
+`Read` of one byte at a time; the cost is two public members, and a program can misuse `Consume`).
+
+`Consume` returns `void | IoError` and is a call in flight, as every call on a handle is (S5), so that
+through a holder of a closed handle it gets the closed handle's error; an `n` past the bytes the
+buffer holds, or below 0, raises `index-out-of-range`, as an index past a list's end does, the bound
+Rust's documentation of `consume` states, enforced as C#'s `PipeReader.AdvanceTo` enforces it (§12,
+the owner, 2026-11-03, issue 110, comment 6615355264, against such an `n` clamped, as Rust's
+`BufReader` clamps it, and against a plain `void` that does nothing on a closed handle).
+
+`Fill` returns the count it appended, `int | IoError`, 0 at the end of a file or of a connection its
+peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A pull of a line (S16)
+starts after the bytes a `Consume` dropped, as the next `Read` does. A `Fill` is a call in
+flight too, and one that fills is a read as a `Read`'s fill is: it holds the handle's lock while its
+read waits, its time runs out as a read's does (S9), a read that fails stores nothing, and one that
+finds the handle marked by a `Close` when its read returns gives `into` all it read and keeps none of
+it. *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
+of a line starting after the bytes consumed, and `Fill` as a call in flight whose fill
+holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does)*
+
+Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a file's bytes looked at and consumed: a `Fill` appends what the buffer holds and consumes none of it, so that a second gives the same
+// bytes again; a `Consume` drops bytes from the front, and the `Read` and the `Fill` after it start past them; at the end of the file a
+// `Fill` appends nothing and gives 0
+void | IoError Look() {
+    File.WriteAll("fill-consume.txt", "abcdef".Bytes)
+    f = File.Open("fill-consume.txt")
+    File.Delete("fill-consume.txt")
+    mut seen = Bytes()
+    first = f.Fill(mut seen)
+    second = f.Fill(mut seen)
+    print("{first} {second} {seen.Count}")
+    print(Text(seen))
+    f.Consume(2)
+    mut rest = Bytes()
+    read = f.Read(mut rest, 2)
+    print("{read} {Text(rest)}")
+    rest.Clear()
+    filled = f.Fill(mut rest)
+    print("{filled} {Text(rest)}")
+    f.Consume(filled)
+    print(f.Fill(mut rest))
+    f.Close()
+}
+
+Look() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-head.kz](../corpus/system/fill-head.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// the index after the first blank line, "\r\n\r\n", in `bytes`, or -1 where it has none
+int HeadEnd(Bytes bytes) {
+    for i in 3..<bytes.Count {
+        if bytes[i - 3] == byte(13) && bytes[i - 2] == byte(10) && bytes[i - 1] == byte(13) && bytes[i] == byte(10) {
+            return i + 1
+        }
+    }
+
+    return -1
+}
+
+// a request's head read from a stream without taking what follows it: each fill appends what the buffer holds, the bytes before the
+// blank line are consumed, and the body after it is left to the reads that follow
+void | IoError Serve() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET / HTTP/1.1\r\nHost: a\r\n\r\nhello".Bytes)
+    client.ShutdownWrite()
+    mut head = Bytes()
+    mut end = -1
+    while end < 0 {
+        before = head.Count
+        got = server.Fill(mut head)
+        if got == 0 {
+            print("no head")
+            return
+        }
+
+        end = HeadEnd(head)
+        if end < 0 {
+            server.Consume(got)
+        } else {
+            server.Consume(end - before)
+        }
+    }
+
+    print("head {end}")
+    mut body = Bytes()
+    mut more = 1
+    while more > 0 {
+        more = server.Read(mut body, 100)
+    }
+
+    print(Text(body))
+    print(server.Fill(mut body))
+    server.Close()
+    client.Close()
+}
+
+Serve() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-held.kz](../corpus/system/fill-held.kz)
+```kurz
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`, and -1 where it has none
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+// 1000 fills of a buffer that holds a file's 6 bytes make no read of the system, fewer than 100 reads between the counts, which read
+// `/proc/self/io` themselves; once they are consumed, each of 1000 fills at the end of the file reads, 1000 reads or more
+void | IoError Show() {
+    File.WriteAll("fill-held.txt", "abcdef".Bytes)
+    f = File.Open("fill-held.txt")
+    File.Delete("fill-held.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    before = Reads()
+    for i in 0..<1000 {
+        seen.Clear()
+        f.Fill(mut seen)
+    }
+
+    after = Reads()
+    print("{seen.Count} {before > 0 && after - before < 100}")
+    f.Consume(6)
+    start = Reads()
+    mut given = 0
+    for i in 0..<1000 {
+        given = given + f.Fill(mut seen)
+    }
+
+    end = Reads()
+    print("{given} {start > 0 && end - start >= 1000}")
+    f.Close()
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-timeout.kz](../corpus/system/fill-timeout.kz)
+```kurz
+// a fill that waits on a stream with nothing sent runs out of time as a read does, stores nothing, and lets the next fill in
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+    match server.Fill(mut got) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Fill(mut got)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-past.kz](../corpus/system/consume-past.kz)
+```kurz
+// the buffer holds the file's 3 bytes: consuming all of them passes, and one more is past what it holds
+void | IoError Past() {
+    File.WriteAll("consume-past.txt", "abc".Bytes)
+    f = File.Open("consume-past.txt")
+    File.Delete("consume-past.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Consume(3)
+    f.Consume(1)
+}
+
+Past() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-negative.kz](../corpus/system/consume-negative.kz)
+```kurz
+void | IoError Negative() {
+    File.WriteAll("consume-negative.txt", "abc".Bytes)
+    f = File.Open("consume-negative.txt")
+    File.Delete("consume-negative.txt")
+    int n = -1
+    f.Consume(n)
+}
+
+Negative() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
+```kurz
+// a `Close` through one holder while the buffer holds the file's bytes: a `Fill` and a `Consume` through the other holder find the mark
+// before they reach the buffer, and get the closed handle's error
+void | IoError Closed() {
+    File.WriteAll("fill-closed.txt", "abc".Bytes)
+    f = File.Open("fill-closed.txt")
+    File.Delete("fill-closed.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    match g.Fill(mut seen) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
 ### S4 (assumed, §12) Writing writes every byte
 
 `f.Write(bytes)` writes every byte of `bytes`, a `Bytes`, and returns `void | IoError`: where the
@@ -158,16 +640,23 @@ against a new error for a deferred close; the cost is a count kept around each c
 atomic operations, and a `Close` that shuts a socket down holds a count of its own across the
 shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
 call in flight is a `Read`, a `Write`, a stream's `ShutdownWrite`, a listener's `Accept`, a setter of
-a bound (S9) or a pull of a loop over the lines (S16), each from after its arguments have run to its
-return (§12, the owner, 2026-11-02, issue 110, comment 6588037045; `ShutdownWrite`'s, issue 39, comment
-6583351876); a loop over the lines is in flight while it pulls a line, and not while its block runs,
+a bound (S9), a `Fill` or a `Consume` (S24) or a pull of a loop over the lines (S16), each from after
+its arguments have run to its return (§12, the owner, 2026-11-02, issue 110, comment 6588037045;
+`ShutdownWrite`'s, issue 39, comment 6583351876; `Consume`'s, issue 110, comment 6615355264; `Fill`'s
+assumed, S24); a loop over the lines is in flight while it pulls a line, and not while its block runs,
 so that a `Close` in its block ends the handle and the next pull gets the error above, as a borrow
 of `&mut self` in Rust lasts its call (the same comment, against a count held for the loop's whole
-block, at the cost of a `Close` in that block whose release would wait for its own loop). A
-`File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+block, at the cost of a `Close` in that block whose release would wait for its own loop). The bytes
+the file's buffer holds that no read took (S3) are dropped at the close, as dropping Rust's
+`BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
+flight, and one that finds the mark when its read returns gives what it took and keeps none of the
+rest in the buffer, while every later call through any holder finds the mark before it reaches the
+buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
 last count that ignores its error, and no text)*
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two.
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -223,6 +712,8 @@ Closed() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
 
 ### S6 (decided, §12) A whole file
 
@@ -325,7 +816,9 @@ it is written. An address that holds a NUL byte is `InvalidInput`, as a path is 
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
 Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
-and closes as a file does (S3, S4, S5), and a listener accepts and closes. A `Close` of a stream
+and closes as a file does (S3, S4, S5), and a listener accepts and closes. The bytes a stream's
+buffer holds that no read took are dropped at its close, and only the bytes still in the system's
+queue make the close send the peer a reset (§12, the owner, 2026-11-02). A `Close` of a stream
 or a listener also shuts the socket down, `shutdown(2)`, so that a call that blocks on it in another
 thread returns at once, as Go's close wakes it, a blocked `Accept` or `Read` with the error of a closed
 handle, S5's, and a listener's port is free right away (§12, the owner, 2026-11-02, against a call that
@@ -742,6 +1235,14 @@ Half() else {
 }
 ```
 
+Case: [system/read-buffer-zero.kz](../corpus/system/read-buffer-zero.kz)
+
+Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
+
+Case: [system/fill-timeout.kz](../corpus/system/fill-timeout.kz)
+
 ### S10 (decided, §12) A call blocks its thread
 
 A call on a file or a socket is a system call that blocks the thread that makes it. A program
@@ -1039,10 +1540,9 @@ print(Count("a\n\nb") else {
 The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
 a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
 goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
-"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
-buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
-`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
-*(assumed, §12)*.
+"`f.Lines()` on an open File" and "Stays open, continues"). The buffer is the one every `Read` goes
+through (S3), so that such a `Read` takes at most `max` of the buffered bytes first, and it holds
+8 KiB, as Rust's `BufReader` (§12, the owner, 2026-11-02).
 
 Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
 ```kurz
@@ -1074,7 +1574,7 @@ Show() else {
 ```
 
 `Close` gives up the bytes the buffer holds, so that a later `Lines()` or `Read` takes none of them
-and gets the error of a closed file (S5) *(proposed)*. A line longer than the buffer is read whole,
+and gets the error of a closed file (S5; §12, the owner, 2026-11-02). A line longer than the buffer is read whole,
 and one of more bytes than the largest `int` ends the process with `allocation-failed`, as a string
 past it does *(assumed, §12)*. The loop keeps the `File` its collection gave when it started: an
 assignment to the variable in the block changes the variable, not what the loop pulls *(proposed)*.

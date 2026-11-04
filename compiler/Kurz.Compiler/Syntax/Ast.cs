@@ -257,6 +257,7 @@ public enum Modifiers
     Naked = 64,
     Thread = 128,
     Extern = 256,
+    Internal = 512, // F9: visible to the files of the folder that declares it
 }
 
 /// <summary>A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name and a default (D11).</summary>
