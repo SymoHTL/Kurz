@@ -1499,8 +1499,12 @@ type parameter unchanged, swaps two of them, or gives one to a function that tak
 a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
 refused where it is written, whether or not a call reaches it. A generic function that reads its
 type (T33) keeps its check in the copies alone: an arm of a `match` on `T.Kind` can end its chain,
-none of its calls is read for such a cycle, and a chain of more than 64 copies stays
-`not supported`. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+and a chain of more than 64 copies stays `not supported`. Of its calls, those in a loop over
+`T.Fields` are read for such a cycle on its text, and a cycle that grows there is refused at that
+call, with no copy made, so that the chain does not reach that bound; a type argument there that is
+the field's type takes no part, since the text does not give that type. A cycle that grows in an
+arm of a `match` on `T.Kind`, or that leaves the loop through a call outside it, shows only at that
+bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
 `T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
@@ -1574,6 +1578,165 @@ Widen(1, 3)
 Down(1, 3)
 print(Wrap(Wrap(1)).Count)
 print("done")
+```
+
+Case: [types/generic-growing-cycle-fields.kz](../corpus/types/generic-growing-cycle-fields.kz)
+```kurz
+data Box<T>(T A)
+
+// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: no copy is made for `Box<int>`
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Box(x), n - 1)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")
+```
+
+### T35 (decided, §4) A type parameter that holds a constant
+
+A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
+type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
+writes the constant among its type arguments, `Json.Parse<Order, JsonKeys.SnakeCase>(text)`; each
+constant makes a copy of the function of its own (T19), and the function's code reads the
+parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
+as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
+call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
+`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
+type parameter with a default comes after every one without, and one without after one with is
+`syntax`; the parameter's name stands as a value of its type, and where a type stands it is
+`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
+where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
+constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
+parameter is checked in each copy a call makes, as one that reads its type is (T33))*
+
+A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
+where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
+the call `a<64, c>(d)`, and two comparisons take parentheses, `f((a < 64), c > (d))` (§4, the
+owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer takes its `-`,
+`Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
+an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
+another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
+`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
+
+Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    match M {
+        Mode.Plain => print(text)
+        Mode.Loud => print("{text}!")
+    }
+}
+
+void Twice<T, const Mode M = Mode.Plain>(T value) {
+    Say<M>("{value}")
+    Say<M>("{value}")
+}
+
+void Shout<const Mode M>(string text) {
+    Say<M>(text)
+}
+
+void Report<const Mode M>() {
+    f = () => M
+    print("{M} {f()}")
+    Shout<M>("c")
+}
+
+Say<Mode.Loud>("a")
+Twice(1)
+Twice<string, Mode.Loud>("b")
+Report<Mode.Loud>()
+```
+
+Case: [types/const-parameter-mismatch.kz](../corpus/types/const-parameter-mismatch.kz)
+```kurz
+enum Mode { Plain, Loud }
+enum Color { Red }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say<Color.Red>("a")
+```
+
+Case: [types/const-parameter-default-order.kz](../corpus/types/const-parameter-default-order.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Late<const Mode M = Mode.Plain, T>(T value) {
+    print("{M} {value}")
+}
+
+Late<Mode.Loud, int>(1)
+```
+
+Case: [types/const-parameter-as-type.kz](../corpus/types/const-parameter-as-type.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(M value) {
+    print(value)
+}
+
+Keep<Mode.Plain>(Mode.Plain)
+```
+
+Case: [types/const-parameter-not-inferred.kz](../corpus/types/const-parameter-not-inferred.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say("a")
+```
+
+Case: [types/const-parameter-literal.kz](../corpus/types/const-parameter-literal.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+bool Flag<const bool B>() => B
+char Mark<const char C>() => C
+
+void Show<const int N = 4>() {
+    print("{N}")
+}
+
+void Pass<const long L>() {
+    Show<5>()
+    print(L)
+}
+
+print(Scaled<64>(2))
+print(Flag<true>())
+print(Mark<'x'>())
+Show()
+Show<-3>()
+Pass<7>()
+```
+
+Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+print(Scaled<true>(2))
+```
+
+Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)
+```kurz
+bool Both(bool x, bool y) => x && y
+
+a = 1
+c = 5
+d = 3
+print(Both((a < 64), c > (d)))
 ```
 
 ### T18 (assumed, §4) Operators

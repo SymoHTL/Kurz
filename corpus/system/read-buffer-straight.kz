@@ -1,0 +1,31 @@
+// expect: output
+// | 10000
+// | 1 8191
+// | 1808
+// rules: S3
+
+void | IoError Show() {
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-straight.txt", sent)
+    g = File.Open("read-buffer-straight.txt")
+    File.Delete("read-buffer-straight.txt")
+
+    // a read of 8 KiB or more into an empty buffer goes straight to the list
+    mut large = Bytes()
+    print(g.Read(mut large, 10000))
+
+    // a smaller one fills the buffer with 8192 bytes and takes one; a read of 8 KiB or more then takes the 8191 the buffer holds and
+    // no more, with no system call, and the next one, with the buffer empty, goes straight to the list again
+    one = g.Read(mut large, 1)
+    rest = g.Read(mut large, 10000)
+    print("{one} {rest}")
+    print(g.Read(mut large, 10000))
+}
+
+Show() else {
+    IoError e => print(e)
+}

@@ -344,9 +344,12 @@ def cases_in(base):
     g = globals()
     saved = g["check"], g["copy_of_tree"]
     g["check"], g["copy_of_tree"] = noting_check, small_copy
-    inside = os.environ.pop(NESTED, None)  # inside a replay this self-test is marked itself: each case below sets the mark it needs
+    # the replay below runs with the mark cleared, so it runs only on both stand-ins: a real one there would copy a tree whose
+    # mutated self-test clears the mark again, without end (#156)
+    stood_in = g["check"] is noting_check and g["copy_of_tree"] is small_copy
+    inside = os.environ.pop(NESTED, None) if stood_in else os.environ.get(NESTED)  # inside a replay this self-test is marked itself: each case below sets the mark it needs
     try:
-        replayed = replay()
+        replayed = replay() if stood_in else None
         os.environ[NESTED] = "1"  # a stand-in replay above this one: a copy and a check recorded now would be its second level
         nested = replay()
     finally:
@@ -354,6 +357,8 @@ def cases_in(base):
         os.environ.pop(NESTED, None)
         if inside is not None:
             os.environ[NESTED] = inside
+    cases.append(("the replay this self-test starts with the mark cleared runs only while both stand-ins are in place, so a mutation of them starts no real replay inside a replay",
+                  stood_in, (g["check"].__name__, g["copy_of_tree"].__name__)))
     cases.append(("a replay removes the copy it checked",
                   replayed == ([], {}) and len(seen) == 1 and bool(seen[0]) and not os.path.exists(os.path.dirname(seen[0])), seen))
     cases.append(("a replay inside a self-test that a replay runs is refused before it copies or checks anything, and says why",

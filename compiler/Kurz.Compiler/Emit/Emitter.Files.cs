@@ -31,10 +31,10 @@ public sealed partial class Emitter
     private const string LineBuffer = "8192";
 
     /// <summary>
-    /// S16: where a handle's block holds the state of its reader of lines, 20 bytes: the address of the buffer, null until the first pull,
-    /// 8 bytes, then the position of the buffer's first byte not taken yet, the count of the bytes read into it and the word of the lock a
-    /// pull takes, 4 bytes each. The pull reads nothing else of the handle but its descriptor, so that whatever holds a
-    /// descriptor can hold a reader's state.
+    /// S3, S16: where a handle's block holds the state of its reader, which its reads and a file's lines go through, 20 bytes: the address
+    /// of the buffer, null until the first fill or pull, 8 bytes, then the position of the buffer's first byte not taken yet, the count of
+    /// the bytes read into it and the word of the lock a read or a pull takes, 4 bytes each. The pull reads nothing else of the handle but
+    /// its descriptor, so that whatever holds a descriptor can hold a reader's state.
     /// </summary>
     private const int ReaderAt = 32;
 
@@ -86,7 +86,7 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+        if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
             or CallKind.TcpShutdownWrite)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
@@ -97,6 +97,12 @@ public sealed partial class Emitter
             {
                 case CallKind.FileRead:
                     EmitFileRead(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.FileFill:
+                    EmitFileFill(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.FileConsume:
+                    EmitFileConsume(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.FileWrite:
                     EmitFileWrite(c, info, outcome, handle, kinds);
@@ -273,9 +279,14 @@ public sealed partial class Emitter
     /// S3: <c>f.Read(mut into, max)</c>: a <c>max</c> below 0 raises <c>index-out-of-range</c>; then the room for <c>max</c> more bytes
     /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end; the kind of a
     /// failure is the one the runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
-    /// S16: the bytes a loop over the lines left in the buffer go first, at most <c>max</c> of them, under the lock a pull takes, and the
-    /// descriptor is read only where the buffer holds none, as Rust's <c>BufReader::read</c> gives what it holds before it reads.
-    /// S5: the bytes and the descriptor are read as a call in flight on the handle (<see cref="Enter"/>), after the room is made.
+    /// The read goes through the handle's buffer of <see cref="LineBuffer"/> bytes, which a loop over a file's lines fills too (S16), under
+    /// the lock a pull takes, as Rust's <c>BufReader::read</c> reads (§12, the owner, 2026-11-02): the bytes the buffer holds go first, at
+    /// most <c>max</c> of them, with no system call; where it holds none, a <c>max</c> of 8 KiB or more, and one of 0, lets the lock go and
+    /// is read straight into the list, and a smaller one fills the buffer with one read, the buffer made at the first fill, holding the lock
+    /// while that read waits, and takes at most <c>max</c> of what it read. A failed read stores nothing.
+    /// S5: the read is a call in flight on the handle (<see cref="Enter"/>), after the room is made, and a socket's read that a <c>Close</c>
+    /// woke gets the closed handle's error (<see cref="Woken"/>), the fill's as the straight one's; a fill that finds the handle marked when
+    /// its read returns keeps none of the rest in the buffer, so that a <c>Close</c> made while the read waited drops those bytes too.
     /// </summary>
     private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {
@@ -292,36 +303,178 @@ public sealed partial class Emitter
         var block = Reserve(place, more);
         var o = Enter(outer, handle, kinds);
         var reader = HandleField(handle, ReaderAt);
-        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
-        var buffered = fn.Label("buffered");
-        var unbuffered = fn.Label("unbuffered");
-        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, unbuffered);
-        fn.Block(buffered);
         var word = ReaderField(reader, ReaderLock);
+        void Unlock() => fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        void Append(string from, string count) => AppendBytes(block, from, count);
+
         fn.Emit($"call void {LockReader()}(ptr {word})");
         var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
         var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
         var take = fn.Label("take");
         var empty = fn.Label("empty");
         fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, empty);
+
+        // the bytes the buffer holds, at most `max` of them, with no system call
         fn.Block(take);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
         var taken = fn.Value($"select i1 {fn.Value($"icmp slt i32 {held}, {max}")}, i32 {held}, i32 {max}");
-        var wide = fn.Value($"sext i32 {taken} to i64");
-        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, i64 {wide}, i1 false)");
-        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {wide})");
+        Append(fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}"), fn.Value($"sext i32 {taken} to i64"));
         fn.Emit($"store i32 {fn.Value($"add i32 {at}, {taken}")}, ptr {ReaderField(reader, ReaderPosition)}");
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Unlock();
         Succeed(o, taken);
+
+        // none held: a `max` of 8 KiB or more, as Rust's `BufReader` passes such a read by, and one of 0, which waits for no byte, read
+        // straight into the list with the lock let go
         fn.Block(empty);
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
-        fn.Branch(unbuffered);
-        fn.Block(unbuffered);
+        var straight = fn.Label("straight");
+        var fill = fn.Label("fill");
+        var large = fn.Value($"icmp sge i32 {max}, {LineBuffer}");
+        fn.CondBranch(fn.Value($"or i1 {large}, {fn.Value($"icmp eq i32 {max}, 0")}"), straight, fill);
+        fn.Block(straight);
+        Unlock();
         var r = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}"), kinds, read: true);
         FailBelowZero(o, r, HandlePath(handle), kinds: kinds);
         fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
         Succeed(o, fn.Value($"trunc i64 {r} to i32"));
+
+        // a smaller one: one read of up to 8 KiB into the buffer, made at the first, under the lock, and at most `max` of it taken; the
+        // rest kept for the next read, unless a `Close` marked the handle while the read waited (S5)
+        fn.Block(fill);
+        var (filled, read) = FillBuffer(o, handle, reader, kinds, Unlock);
+        var given = fn.Value($"select i1 {fn.Value($"icmp slt i64 {read}, {more}")}, i64 {read}, i64 {more}");
+        Append(filled, given);
+        var gave = fn.Value($"trunc i64 {given} to i32");
+        KeepUnlessMarked(handle, reader, gave, fn.Value($"trunc i64 {read} to i32"));
+        Unlock();
+        Succeed(o, gave);
         Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S24: <c>s.Fill(mut into)</c>, as Rust's <c>BufRead::fill_buf</c> (§12, the owner, 2026-11-03): the bytes the handle's buffer
+    /// holds are appended to <c>into</c>, all of them, with no system call, and none is consumed; where it holds none, the buffer is filled
+    /// first, as a <c>Read</c> below 8 KiB fills it (<see cref="FillBuffer"/>), and all that read gave is appended and kept from the
+    /// buffer's start. The room in the list is made for the bytes appended, as <c>Add</c> grows a list. The count appended is the result,
+    /// 0 at the end of the file or the stream (assumed, as a <c>Read</c>'s). A call in flight on the handle (S5), whose fill, where a
+    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it (assumed, as a <c>Read</c>'s fill
+    /// gives what it took).
+    /// </summary>
+    private void EmitFileFill(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, _ => new ListType(Types.Byte), _ => true, _ => null, cConvention: false, owned: false);
+        var place = arguments[0]["ptr ".Length..];
+        var o = Enter(outer, handle, kinds);
+        var reader = HandleField(handle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        void Unlock() => fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
+        var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
+        var take = fn.Label("fill.held");
+        var empty = fn.Label("fill.empty");
+        fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, empty);
+
+        // the bytes the buffer holds, all of them, with no system call, its position left where it is
+        fn.Block(take);
+        var count = fn.Value($"sext i32 {held} to i64");
+        var from = fn.Value($"getelementptr i8, ptr {fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}")}, i64 {fn.Value($"sext i32 {at} to i64")}");
+        AppendBytes(Reserve(place, count), from, count);
+        Unlock();
+        Succeed(o, held);
+
+        // none held: one read of up to 8 KiB into the buffer, all of it appended and kept from the buffer's start
+        fn.Block(empty);
+        var (filled, read) = FillBuffer(o, handle, reader, kinds, Unlock);
+        AppendBytes(Reserve(place, read), filled, read);
+        var gave = fn.Value($"trunc i64 {read} to i32");
+        KeepUnlessMarked(handle, reader, "0", gave);
+        Unlock();
+        Succeed(o, gave);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S24: <c>s.Consume(n)</c>, as Rust's <c>BufRead::consume</c> (§12, the owner, 2026-11-03): the first <c>n</c> bytes the handle's
+    /// buffer holds are dropped, under the lock, with no system call. An <c>n</c> below 0 raises <c>index-out-of-range</c>, as a
+    /// <c>Read</c>'s <c>max</c> below 0 does, and so does one past the bytes the buffer holds, the bound Rust's <c>consume</c> states held
+    /// as C#'s <c>PipeReader.AdvanceTo</c> holds it (assumed). A call in flight on the handle (S5), so that a closed handle gives its error.
+    /// </summary>
+    private void EmitFileConsume(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false);
+        var n = arguments[0]["i32 ".Length..];
+        var negative = fn.Label("negative");
+        var counted = fn.Label("counted");
+        fn.CondBranch(fn.Value($"icmp slt i32 {n}, 0"), negative, counted);
+        fn.Block(negative);
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(counted);
+        var o = Enter(outer, handle, kinds);
+        var reader = HandleField(handle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var position = ReaderField(reader, ReaderPosition);
+        var at = fn.Value($"load i32, ptr {position}");
+        var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
+        var past = fn.Label("consume.past");
+        var within = fn.Label("consume.within");
+        fn.CondBranch(fn.Value($"icmp sgt i32 {n}, {held}"), past, within);
+        fn.Block(past);
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(within);
+        fn.Emit($"store i32 {fn.Value($"add i32 {at}, {n}")}, ptr {position}");
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Succeed(o, null);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S3, S24: the fill of the handle's empty buffer that a <c>Read</c> below 8 KiB and a <c>Fill</c> make, under the lock the caller
+    /// holds: the buffer made at the first fill, then one read of up to <see cref="LineBuffer"/> bytes into it, a socket's woken by a
+    /// <c>Close</c> (<see cref="Woken"/>), whose failure lets the lock go (<paramref name="unlock"/>) and stores nothing; the buffer and
+    /// the count read, an <c>i64</c>.
+    /// </summary>
+    private (string Buffer, string Read) FillBuffer(FileOutcome o, string handle, string reader, string kinds, Action unlock)
+    {
+        var slot = ReaderField(reader, ReaderBuffer);
+        var none = fn.Label("unbuffered");
+        var made = fn.Label("buffered");
+        fn.CondBranch(fn.Value($"icmp eq ptr {fn.Value($"load ptr, ptr {slot}")}, null"), none, made);
+        fn.Block(none);
+        fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {LineBuffer})")}, ptr {slot}");
+        fn.Branch(made);
+        fn.Block(made);
+        var filled = fn.Value($"load ptr, ptr {slot}");
+        var read = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {filled}, i64 {LineBuffer}"), kinds, read: true);
+        FailBelowZero(o, read, HandlePath(handle), unlock, kinds);
+        return (filled, read);
+    }
+
+    /// <summary>
+    /// S5: the <paramref name="position"/> and the <paramref name="count"/>, <c>i32</c>s, that a fill leaves in the handle's buffer for
+    /// the calls after it, unless a <c>Close</c> marked the handle while the fill's read waited, so that the bytes it read go with the
+    /// close as the bytes the buffer held do.
+    /// </summary>
+    private void KeepUnlessMarked(string handle, string reader, string position, string count)
+    {
+        var kept = fn.Label("kept");
+        var done = fn.Label("filled");
+        var mark = fn.Value($"and i32 {fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4")}, 1");
+        fn.CondBranch(fn.Value($"icmp eq i32 {mark}, 0"), kept, done);
+        fn.Block(kept);
+        fn.Emit($"store i32 {position}, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Emit($"store i32 {count}, ptr {ReaderField(reader, ReaderCount)}");
+        fn.Branch(done);
+        fn.Block(done);
+    }
+
+    /// <summary><paramref name="count"/> bytes, an <c>i64</c>, at <paramref name="from"/> added at the end of the list of bytes <paramref name="block"/>, for which <see cref="Reserve"/> made room.</summary>
+    private void AppendBytes(string block, string from, string count)
+    {
+        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {from}, i64 {count}, i1 false)");
+        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {count})");
     }
 
     /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>; the kind of a failure as <see cref="EmitFileRead"/> gives it; a call in flight on the handle (S5).</summary>

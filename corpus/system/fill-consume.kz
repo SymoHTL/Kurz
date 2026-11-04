@@ -1,0 +1,43 @@
+// expect: output
+// | 6 6 12
+// | abcdefabcdef
+// | 2 cd
+// | 2 ef
+// | 0
+// rules: S24
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a file's bytes looked at and consumed: a `Fill` appends what the buffer holds and consumes none of it, so that a second gives the same
+// bytes again; a `Consume` drops bytes from the front, and the `Read` and the `Fill` after it start past them; at the end of the file a
+// `Fill` appends nothing and gives 0
+void | IoError Look() {
+    File.WriteAll("fill-consume.txt", "abcdef".Bytes)
+    f = File.Open("fill-consume.txt")
+    File.Delete("fill-consume.txt")
+    mut seen = Bytes()
+    first = f.Fill(mut seen)
+    second = f.Fill(mut seen)
+    print("{first} {second} {seen.Count}")
+    print(Text(seen))
+    f.Consume(2)
+    mut rest = Bytes()
+    read = f.Read(mut rest, 2)
+    print("{read} {Text(rest)}")
+    rest.Clear()
+    filled = f.Fill(mut rest)
+    print("{filled} {Text(rest)}")
+    f.Consume(filled)
+    print(f.Fill(mut rest))
+    f.Close()
+}
+
+Look() else {
+    IoError e => print(e)
+}

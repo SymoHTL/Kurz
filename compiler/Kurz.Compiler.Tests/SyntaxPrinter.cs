@@ -58,9 +58,19 @@ internal static class SyntaxPrinter
         return $"(function {Mods(f.Modifiers)}{Type(f.ReturnType)}{f.Name}{typeParameters}({Parameters(f.Parameters)}){body})";
     }
 
-    /// <summary>Type parameters with their limits, <c>&lt;T, U: Shape&gt;</c>, so that a limit the parser dropped shows; nothing for none.</summary>
+    /// <summary>
+    /// Type parameters with their limits, <c>&lt;T, U: Shape&gt;</c>, and one that holds a constant with its type and default,
+    /// <c>&lt;const Mode M = (. Mode Plain)&gt;</c>, so that a limit or a default the parser dropped shows; nothing for none.
+    /// </summary>
     private static string TypeParameters(IReadOnlyList<TypeParameter> parameters) =>
-        parameters.Count == 0 ? "" : "<" + string.Join(", ", parameters.Select(p => p.Limit is null ? p.Name : $"{p.Name}: {Type(p.Limit)}".TrimEnd())) + ">";
+        parameters.Count == 0 ? "" : "<" + string.Join(", ", parameters.Select(TypeParameter)) + ">";
+
+    private static string TypeParameter(TypeParameter p) => p switch
+    {
+        { Constant: { } constant } => $"const {Type(constant)}{p.Name}{(p.Default is null ? "" : " = " + Print(p.Default))}",
+        { Limit: { } limit } => $"{p.Name}: {Type(limit)}".TrimEnd(),
+        _ => p.Name,
+    };
 
     private static string TypeDeclaration(TypeDeclaration t)
     {
@@ -129,6 +139,7 @@ internal static class SyntaxPrinter
         WeakType { Inner: UnionType } w => "weak (" + Type(w.Inner).TrimEnd() + ") ",
         WeakType w => "weak " + Type(w.Inner),
         VoidType => "void ",
+        ConstantTypeArgument c => Print(c.Value) + " ",
         // a pointer to a union, a function type or a weak type is parenthesized as a nullable one is: `(A | B)*` against `A | B*`
         PointerType { Pointee: FunctionType or UnionType or WeakType or ExternFunctionType } p => "(" + Type(p.Pointee).TrimEnd() + ")* ",
         PointerType p => Type(p.Pointee).TrimEnd() + "* ",
