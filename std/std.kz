@@ -6705,6 +6705,19 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
             piece.AddRange("\r\n".Bytes)
         }
 
+        if sent == length {
+            // the last piece goes out in one write with the end of the body, as hyper flushes the end with its last data: written
+            // on its own after the piece, the end waits under Nagle's algorithm for the client's acknowledgement (W8)
+            mut more = Bytes()
+            extra = f.Read(mut more, 1)
+            if extra > 0 {
+                f.Close()
+                return IoError(IoKind.InvalidData, 0, path)
+            }
+
+            break
+        }
+
         HttpPace(s, pace, piece.Count)
         s.Write(piece)
         piece = Bytes()

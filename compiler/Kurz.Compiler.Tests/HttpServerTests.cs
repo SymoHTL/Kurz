@@ -15,7 +15,8 @@ namespace Kurz.Compiler.Tests;
 /// the rules of the throw and not the server's; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at
 /// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; and the time a write of a response is given (W10), and
 /// each write of a streamed response and the time its end takes (W11), which need a client beside the server's loop, a second thread
-/// no corpus case has.
+/// no corpus case has; and the end of a chunked file's body, which goes out in the write of its last piece, where the bytes are the
+/// same either way and only the time of a client that sends each request after the whole response tells them apart.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -331,6 +332,94 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var (code, output, error) = await run;
         Assert.Equal((0, "", "served\n", 100, ""), (code, error, output, whole, failed));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 streamed responses took {watch.Elapsed.TotalMilliseconds:F0} ms");
+    }
+
+    [Fact]
+    public async Task A_chunked_file_ends_its_body_in_the_write_of_its_last_piece()
+    {
+        // W8: the chunk of no bytes that ends a chunked file goes out in the one write of the file's last piece, as hyper flushes the
+        // end of a body with its last data; written on its own after that piece, it waits under Nagle's algorithm for the client's
+        // acknowledgement, which a client that sends its next request only after the whole response gives at its delayed-ACK timer,
+        // about 40 ms on Linux, so that 100 requests one after the other take 4 seconds and not a few milliseconds
+        const string text = """
+            void | IoError Main(string address) {
+                File.WriteAll("http-server-coded-file.txt", "hello".Bytes)
+                listener = TcpListener.Bind(address)
+                server = listener.Accept()
+                coded = HttpResponse.File(200, "http-server-coded-file.txt")
+                coded.Headers.Set("Transfer-Encoding", "gzip") else {
+                    HttpError e => print(e.Detail)
+                }
+
+                HttpServer.ServeConnection(server, (HttpRequest r) => coded) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                File.Delete("http-server-coded-file.txt")
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-coded-file");
+        var free = new TcpListener(IPAddress.Loopback, 0);
+        free.Start();
+        var port = ((IPEndPoint)free.LocalEndpoint).Port;
+        free.Stop();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var whole = 0;
+        var failed = "";
+        var watch = new System.Diagnostics.Stopwatch();
+        using (var client = Connect(port, run))
+        {
+            client.NoDelay = true;
+            var stream = client.GetStream();
+            var buffer = new byte[65536];
+            watch.Start();
+            try
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    stream.Write(i == 99 ? "GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8 : "GET / HTTP/1.1\r\nHost: h\r\n\r\n"u8);
+                    var got = new MemoryStream();
+                    while (!got.ToArray().AsSpan().EndsWith("\r\n0\r\n\r\n"u8))
+                    {
+                        var n = stream.Read(buffer);
+                        if (n == 0)
+                        {
+                            break;
+                        }
+
+                        got.Write(buffer, 0, n);
+                    }
+
+                    whole += got.ToArray().AsSpan().EndsWith("5\r\nhello\r\n0\r\n\r\n"u8) ? 1 : 0;
+                }
+            }
+            catch (IOException e)
+            {
+                // the server's exit code and what it printed say why the connection broke, so the client's error does not end the test
+                failed = $"after {whole} responses: {e.Message}";
+            }
+
+            watch.Stop();
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n", 100, ""), (code, error, output, whole, failed));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 chunked files took {watch.Elapsed.TotalMilliseconds:F0} ms");
     }
 
     /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
