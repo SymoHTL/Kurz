@@ -717,6 +717,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 IoError e => -e.Code
             })
 
+            looked = TcpStream.Connect("127.0.0.1:{pair.Port}")
+            looked.SetReadTimeout(100ms)
+            ArmClose(2)
+            print(looked.Fill(mut bytes) else {
+                IoError e => -e.Code
+            })
+
             timed = TcpListener.Bind("127.0.0.1:0")
             a = TcpStream.Connect("127.0.0.1:{timed.Port}")
             ArmClose(2)
@@ -744,14 +751,15 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_close_of_a_socket_shuts_it_down_so_a_call_in_flight_on_it_ends_with_the_closed_handle_s_error()
     {
-        // S5, S9: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is released,
-        // which `F_GETFD` shows; the port binds again, which the shutdown frees; a read in flight takes the bytes the socket holds, and one
-        // that finds none, as a write, ends with that error; a setter in flight sets its time; each next call is `EBADF`
-        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "false", "9", "true", "3", "-9", "9", "-9", "9", "9"], ["raw", "native"]);
+        // S5, S9, S24: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is
+        // released, which `F_GETFD` shows; the port binds again, which the shutdown frees; a read in flight takes the bytes the socket
+        // holds, and one that finds none, as a write and as a `Fill` that finds none, ends with that error; a setter in flight sets its
+        // time; each next call is `EBADF`
+        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "false", "9", "true", "3", "-9", "9", "-9", "-9", "9", "9"], ["raw", "native"]);
 
         // the positive control: built as it is, the second accept takes the second connection, the listener holds its descriptor and its
-        // port, the second read takes the fourth byte, and the idle read runs out of its time
-        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11"], grants: ["raw", "native"]);
+        // port, the second read takes the fourth byte, and the idle read and the idle `Fill` run out of their time
+        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11", "-11"], grants: ["raw", "native"]);
     }
 
     private const string QueuedConnections = Armed + """

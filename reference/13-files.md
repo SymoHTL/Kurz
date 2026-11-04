@@ -100,7 +100,9 @@ buffer holds go first, at most `max` of them, with no system call; where it hold
 one read of the system and takes at most `max` of what that read gave (§12, the owner, 2026-11-03,
 issue 39, comment 6605104107). A `max` of 0 takes none of the bytes the buffer holds and keeps them;
 where the buffer holds none, a `max` of 0 goes straight, so that it reads nothing and waits for no
-byte, as it did before the buffer. `Read`, a `File`'s `Lines()` (S16), and `Fill` and
+byte of the system, as it did before the buffer. A `max` of 0 enters the call as every `Read` does,
+so that through a holder of a closed handle it gets S5's error, and otherwise takes the handle's lock
+to look at the buffer, as every `Read` does (below). `Read`, a `File`'s `Lines()` (S16), and `Fill` and
 `Consume` (S24) are the ways to the buffered bytes. The buffer is
 made at the handle's first read that fills it, and every holder shares it (S5), under the handle's
 lock: a fill holds the lock while its read waits, so that a read or a pull through another holder
@@ -355,6 +357,32 @@ Show() else {
 }
 ```
 
+Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
+```kurz
+// a `Close` through one holder after a read of one byte filled the buffer with the file's 3 bytes: through the other holder, a `max`
+// of 0 enters the call as every `Read` does, and gets the closed handle's error, not the 0 of a read that looks at no buffer; the list
+// keeps the one byte read before
+void | IoError Show() {
+    File.WriteAll("read-buffer-zero-closed.txt", "abc".Bytes)
+    f = File.Open("read-buffer-zero-closed.txt")
+    File.Delete("read-buffer-zero-closed.txt")
+    g = f
+    mut read = Bytes()
+    print(f.Read(mut read, 1))
+    f.Close()
+    match g.Read(mut read, 0) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    print(read.Count)
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
 Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
 ```kurz
 void | IoError Show() {
@@ -440,10 +468,12 @@ starts after the bytes a `Consume` dropped, as the next `Read` does. A `Fill` is
 flight too, and one that fills is a read as a `Read`'s fill is: it holds the handle's lock while its
 read waits, its time runs out as a read's does (S9), a read that fails stores nothing, and one that
 finds the handle marked by a `Close` when its read returns gives `into` all it read and keeps none of
-it. *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
+it, having no `max`, where a `Read`'s fill gives at most `max` of it; a stream's `Fill` whose read
+returned with no byte after the mark gets the closed handle's error, as a stream's `Read` does (S5).
+*(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
 of a line starting after the bytes consumed, `Fill` as a call in flight whose fill
-holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does, and the order of
-`Consume`'s failures on a closed handle)*
+holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does, giving all it read
+where a `Read`'s fill gives at most `max`, and the order of `Consume`'s failures on a closed handle)*
 
 Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
 ```kurz
@@ -662,8 +692,7 @@ Negative() else {
 Case: [system/consume-closed.kz](../corpus/system/consume-closed.kz)
 ```kurz
 // a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 5, past the bytes
-// held, gets the closed handle's error, which the call finds as it enters, before it reads what the buffer holds; a `Consume` of -1
-// raises `index-out-of-range` before the call enters, closed handle or not
+// held, gets the closed handle's error, which the call finds as it enters, before it reads what the buffer holds
 void | IoError Closed() {
     File.WriteAll("consume-closed.txt", "abc".Bytes)
     f = File.Open("consume-closed.txt")
@@ -677,6 +706,29 @@ void | IoError Closed() {
     }
 
     print(seen.Count)
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negative.kz)
+```kurz
+// a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 0 gets the closed
+// handle's error, as it enters the call, and a `Consume` of -1 raises `index-out-of-range` before the call enters, closed handle or not
+void | IoError Closed() {
+    File.WriteAll("consume-closed-negative.txt", "abc".Bytes)
+    f = File.Open("consume-closed-negative.txt")
+    File.Delete("consume-closed-negative.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+
     g.Consume(-1) else {
         IoError e => print(e)
     }
@@ -786,10 +838,12 @@ the file's buffer holds that no read took (S3) are dropped at the close, as drop
 `BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
 flight, and one that finds the mark when its read returns gives what it took, at most `max` of what
 that read gave, as S3's fill takes it, and keeps none of the rest in the buffer, a stream's fill whose
-read the `Close`'s shutdown ended with no byte getting the closed handle's error, as every read the
-shutdown wakes gets it (S9), while every later call through any holder finds the mark before it
-reaches the buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
-last count that ignores its error, and no text)*
+read returned with no byte after the mark getting the closed handle's error, as every read the
+`Close`'s shutdown wakes gets it (S9), while every later call through any holder finds the mark before
+it reaches the buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+last count that ignores its error, no text, and the bound between the two halves of the answer of
+2026-11-03: a stream's fill whose read returned with no byte after the mark gets the closed handle's
+error, not a 0, and one whose read gave bytes gives what it took)*
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two.
 
@@ -853,6 +907,10 @@ Closed() else {
 Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
 
 Case: [system/consume-closed.kz](../corpus/system/consume-closed.kz)
+
+Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negative.kz)
+
+Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
 
 ### S6 (decided, §12) A whole file
 
