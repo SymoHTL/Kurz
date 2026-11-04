@@ -6355,8 +6355,9 @@ pub class HttpResponse {
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
     // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
-    // write, and where `hold` a response of 64 KiB or less, with them, is held there in place of a write; `request` the body of the
-    // request it answers, which sends no `100 Continue` once the head of a body a function writes has gone out (F9).
+    // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
+    // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
+    // writes has gone out (F9).
     internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold, HttpBody request) => Send(stream, withBody, date, close, plain, pace, mut pending, hold, request)
 
     // Whether a function writes the body, which the loop calls before it drains the request's body, since the function may read it (F9).
@@ -6473,7 +6474,7 @@ pub class HttpResponse {
 
         if body != null {
             // the head goes out with the first chunk, in one write, so that the chunk does not wait for the acknowledgement of
-            // the head, and the last chunk after the function's return
+            // the head, and the last chunk after the function's return, held as a response is where `hold`
             w = HttpWriter.Make(s, out, chunked, pace, request)
             body(w) else {
                 IoError e => {
@@ -6482,7 +6483,7 @@ pub class HttpResponse {
                 }
             }
 
-            w.End()
+            w.End(mut pending, hold)
             return true
         }
 
@@ -6611,8 +6612,9 @@ pub class HttpWriter {
     // Writes `text` in UTF-8 as one chunk of the body.
     pub void | IoError Write(string text) => Write(text.Bytes)
 
-    // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body (F9).
-    internal void | IoError End() {
+    // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
+    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response (F9).
+    internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
         s = stream
         if s == null {
@@ -6624,6 +6626,11 @@ pub class HttpWriter {
         Started()
         if chunked {
             out.AddRange("0\r\n\r\n".Bytes)
+        }
+
+        if hold && out.Count <= 65536 {
+            pending = out
+            return
         }
 
         if out.Count > 0 {

@@ -1976,7 +1976,9 @@ no write sent it, and `Write` and `ServeConnection` giving that error; the funct
 request's body while it writes, what it left unread drained after it and the connection closing
 where that is past `MaxDrainSize` or the request still awaits `100 Continue`, a read before the head
 went out sending `100 Continue` and none after it; no bound on the stream's whole time; and the head
-going out with the first write, and the CR LF that ends a chunk with the write after it)* The
+going out with the first write, and the CR LF that ends a chunk with the write after it; and the
+end of the body after the function's return held where the next request's head stands whole in the
+stream's buffer, as a response is held (W9), and written with the response after it)* The
 response holds its function in a field of a function type, so that a function that reads a class
 that holds a `mut` response closes a ring through it (R9), which a handler that reads that class
 does not, by R9's reading of a field of a function type (§3, the owner, 2026-11-04, #110, comment
