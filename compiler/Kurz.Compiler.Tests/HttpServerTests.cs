@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -14,7 +15,7 @@ namespace Kurz.Compiler.Tests;
 /// <c>"r"</c> form of the same second; a handler that throws, which ends the program at the throw, where a corpus case would name
 /// the rules of the throw and not the server's; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at
 /// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; and the time a write of a response is given (W10), and
-/// each write of a streamed response and the time its end takes (W11), which need a client beside the server's loop, a second thread
+/// each write of a streamed response, a write over 64 KiB given its own length at the rate, and the time its end takes (W11), which need a client beside the server's loop, a second thread
 /// no corpus case has; and the end of a chunked file's body, which goes out in the write of its last piece, where the bytes are the
 /// same either way and only the time of a client that sends each request after the whole response tells them apart.
 /// </summary>
@@ -253,6 +254,91 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     [Fact]
+    public async Task A_write_of_a_streamed_response_over_64_KiB_is_given_its_length_at_the_rate()
+    {
+        // W11 (assumed, section 12): a write over 64 KiB goes out on its own after its chunk's size line, and it is given the longer of
+        // the grace and its own length at the `MinResponseDataRate` (W10), not the time of the size line before it, which is the grace
+        // alone; a client that reads at 4 MB a second, above the rate of 500 KB a second, holds each write of 512 KiB about 130 ms
+        // once the buffers of the connection are full, within the 1 second its length gives and past the 20 ms of the grace
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 524288 {
+                    piece.Add(122)
+                }
+
+                streamed = HttpResponse.Stream(200, (HttpWriter w) => {
+                    for i in 0..<32 {
+                        w.Write(piece)
+                    }
+                })
+                HttpServer.ServeConnection(server, (HttpRequest r) => streamed, HttpLimits(MinResponseDataRate: HttpRate(500_000, 20ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-big-write");
+        var free = new TcpListener(IPAddress.Loopback, 0);
+        free.Start();
+        var port = ((IPEndPoint)free.LocalEndpoint).Port;
+        free.Stop();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        long read = 0;
+        using (var client = Connect(port, run, receiveBuffer: 65536))
+        {
+            var stream = client.GetStream();
+            stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
+            var buffer = new byte[65536];
+            var clock = Stopwatch.StartNew();
+            while (true)
+            {
+                int n;
+                try
+                {
+                    n = stream.Read(buffer);
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+
+                if (n == 0)
+                {
+                    break;
+                }
+
+                read += n;
+                var due = TimeSpan.FromSeconds(read / 4_000_000.0) - clock.Elapsed;
+                if (due > TimeSpan.Zero)
+                {
+                    Thread.Sleep(due);
+                }
+            }
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n", true), (code, error, output, read > 32 * 524288));
+    }
+
+    [Fact]
     public async Task A_streamed_response_ends_without_waiting_for_the_acknowledgement_of_its_last_chunk()
     {
         // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream, as Kestrel sets it on every connection, so that the
@@ -423,13 +509,29 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
-    private static TcpClient Connect(int port, Task program)
+    private static TcpClient Connect(int port, Task program, int receiveBuffer = 0)
     {
         while (true)
         {
             try
             {
-                var client = new TcpClient("127.0.0.1", port);
+                var client = new TcpClient();
+                if (receiveBuffer > 0)
+                {
+                    // set before the connect, so that the window the client offers is no larger from its first segment on
+                    client.ReceiveBufferSize = receiveBuffer;
+                }
+
+                try
+                {
+                    client.Connect("127.0.0.1", port);
+                }
+                catch
+                {
+                    client.Dispose();
+                    throw;
+                }
+
                 if (client.Client.LocalEndPoint is IPEndPoint local && local.Port == port)
                 {
                     // a connect to a port of the ephemeral range that nothing listens on yet may take that port as its own and
