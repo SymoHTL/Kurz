@@ -228,7 +228,7 @@ program (§12) *(assumed, §12: that reading)*. How the body's rate is timed on 
 actor that got the body stands open in §14 (§12). A `copy` of an `HttpRequest` is the compile error
 `copy-server-request`, which names `move`, and a send of it with no word is section 6's
 `send-needs-word` (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the
-error's name, `copy-server-request`)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any
+error's name, `copy-server-request`; §6: the name `send-needs-word`)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any
 value is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
 6643376941).
 
