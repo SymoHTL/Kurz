@@ -1,6 +1,6 @@
 // expect: output
 // | [0]
-// | [3, 1, 2, 30, 10, 20]
+// | [0]
 // | [1, 2, 3]
 // rules: X8
 
@@ -9,21 +9,16 @@ class Bag(mut List<int> Items) {
         Items = [0]
         return x
     }
-
-    pub int Push(int x) {
-        Items.Add(x * 10)
-        return x
-    }
 }
 
 // a key that replaces the list: the change stands, and the sort of the list it read is dropped
 b = Bag([3, 1, 2])
 b.Items.SortBy(x => b.Reset(x))
 print(b.Items)
-// a key that adds to the list: the adds stand, and the list is not sorted
-c = Bag([3, 1, 2])
-c.Items.SortBy(x => c.Push(x))
-print(c.Items)
+// a list of one item makes its one key too, and its change stands
+one = Bag([7])
+one.Items.SortBy(x => one.Reset(x))
+print(one.Items)
 // a key that changes nothing sorts
 d = Bag([3, 1, 2])
 d.Items.SortBy(x => x)

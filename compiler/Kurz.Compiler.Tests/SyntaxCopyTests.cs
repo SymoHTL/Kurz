@@ -16,7 +16,7 @@ public sealed class SyntaxCopyTests
     private const string Program = """
         data Point(int X, int Y)
 
-        int Every<T>(T value, mut List<int> xs, int step = 1) {
+        int Every<T, const Mode M = Mode.Plain>(T value, mut List<int> xs, int step = 1) {
             a = 1
             mut int b = 2
             b = a + -b
