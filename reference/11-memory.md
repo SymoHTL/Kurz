@@ -11,6 +11,14 @@ links are freed as two are (§3, the owner, 2026-11-01, "Iterative, never crashe
 release that calls itself for each nested instance, as Rust's drop glue does, under which a long
 chain ends the program with `stack-overflow`).
 
+The end of an instance or of a block lets go of what its fields hold in the order of the fields, as
+Rust drops a value's fields (§3, §4, the owner, 2026-11-04, issue 156, comment 6643376941), and a
+value whose last count a field held ends after the value that held it, from the work list.
+*(assumed, §4: a derived block's base's fields first, a reading of that answer from D7, put to the
+owner in issue 110, comment 6645291354; the end after its holder, a reading of the answer above)* No
+case shows the order: a release runs no code of the program between two fields, and a handle that
+closes at its last count (S5) shows it only outside the program.
+
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
 class Link(int Value, Link? Next)

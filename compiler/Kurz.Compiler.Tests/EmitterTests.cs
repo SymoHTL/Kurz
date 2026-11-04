@@ -364,21 +364,42 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void The_end_of_a_block_and_the_end_of_an_instance_let_go_of_their_fields_in_their_order()
     {
-        // section 3, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust
-        // drops a value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of
-        // their string before their list
-        const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nprint(p.B)\nprint(t.B)\n";
+        // R1, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust drops a
+        // value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of their
+        // string before their list, `Rev` and `Owt` of their list before their string, so that an order by the kind of a field
+        // fails one of them; a derived block lets go of its base's fields first (R1, assumed: the reading of D7), so `Tagged`
+        // lets go of the string of `Named` before its own list
+        const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\ndata Rev(List<int> B, string A, Rev? Next)\nclass Owt(List<int> B, string A)\ndata Named(string A)\ndata Tagged(List<int> B) : Named\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nr = Rev([5], \"{6}\", null)\no = Owt([7], \"{8}\")\ng = Tagged(\"{9}\", [10])\nprint(p.B)\nprint(t.B)\nprint(r.B)\nprint(o.B)\nprint(g.B)\n";
+        const string release = "call void @\"release.string\"(";
+        const string releaseList = "call void @\"release.List<int>\"(";
         var ir = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
-        foreach (var name in new[] { "drop.block.Pair", "drop.class.Two" })
+        string Body(string name)
         {
             var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
             Assert.True(start >= 0, $"no {name} in the IR");
-            var body = ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
-            var first = body.IndexOf("call void @\"release.string\"(", StringComparison.Ordinal);
-            var second = body.IndexOf("call void @\"release.List<int>\"(", StringComparison.Ordinal);
-            Assert.True(first >= 0 && second >= 0, $"{name} lets go of no string or of no list");
-            Assert.True(first < second, $"{name} lets go of its list before its string");
+            return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
         }
+
+        foreach (var (name, earlier, later) in new[]
+        {
+            ("drop.block.Pair", release, releaseList), ("drop.class.Two", release, releaseList),
+            ("drop.block.Rev", releaseList, release), ("drop.class.Owt", releaseList, release),
+        })
+        {
+            var body = Body(name);
+            var first = body.IndexOf(earlier, StringComparison.Ordinal);
+            var second = body.IndexOf(later, StringComparison.Ordinal);
+            Assert.True(first >= 0 && second >= 0, $"{name} lets go of no string or of no list");
+            Assert.True(first < second, $"{name} lets go of its fields out of their order");
+        }
+
+        // the release of the family `Named` branches on the number the block holds: one arm for `Named`, one for `Tagged`
+        var arms = Body("drop.block.Named").Split("\nkind.").Skip(1).ToList();
+        Assert.Equal(2, arms.Count);
+        Assert.Contains(arms, arm => arm.Contains(release, StringComparison.Ordinal) && !arm.Contains(releaseList, StringComparison.Ordinal));
+        var tagged = Assert.Single(arms, arm => arm.Contains(releaseList, StringComparison.Ordinal));
+        Assert.True(tagged.Contains(release, StringComparison.Ordinal), "a `Tagged` block lets go of no string of its base");
+        Assert.True(tagged.IndexOf(release, StringComparison.Ordinal) < tagged.IndexOf(releaseList, StringComparison.Ordinal), "a `Tagged` block lets go of its own list before its base's string");
     }
 
     [Fact]

@@ -1210,7 +1210,7 @@ Rust's `Rc` holds its count in front of its value *(assumed, section 4: the coun
 immutable data, as the owner's answer of 2026-11-01, "Implements section 3", issue 180, comment
 6561898721, marks it)*. Its last count lets go of the counted values in its fields in their order, as
 Rust drops a value's fields (section 4: the owner, 2026-11-04, as an instance's), by the number of the type the block holds, so that a derived value lets go of its own
-fields too, and gives the block back to `Free` with that type's size. A block whose last count another
+fields too, after its base's *(assumed, section 4: a reading of D7)*, and gives the block back to `Free` with that type's size. A block whose last count another
 release lets go of waits on the work list of its family, the type at the top of its relation of
 inheritance, as an instance waits on its class's, and the same release works it off, so that a chain
 of any length is freed with no stack deeper than the nesting of the types in it (a reading of the
