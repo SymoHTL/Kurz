@@ -735,6 +735,14 @@ public sealed class ParserTests
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
     }
 
+    [Fact]
+    public void A_dot_between_two_names_of_a_use_path_names_the_slash()
+    {
+        // F10: the text says what the path takes, so that a line written as C#'s `using a.b` is fixed from it
+        var d = Assert.Single(Parse("use net.http").Diagnostics.Items);
+        Assert.Equal((ErrorIds.Syntax, 1, "a `use` path has `/` between its names, found `.`"), (d.Id, d.Line, d.Message));
+    }
+
     [Theory]
     [InlineData("xs = [,]")]
     [InlineData("xs = [1,,2]")]

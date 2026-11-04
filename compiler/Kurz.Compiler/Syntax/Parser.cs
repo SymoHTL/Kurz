@@ -638,6 +638,11 @@ public sealed class Parser
             parts.Add(ExpectName("a name").Text);
         }
 
+        if (At(TokenKind.Dot))
+        {
+            throw new ParseError(ErrorLine(), $"a `use` path has `/` between its names, found {Current}");
+        }
+
         return new UseStatement(use.Line, string.Join('/', parts));
     }
 
