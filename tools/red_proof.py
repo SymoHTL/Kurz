@@ -18,8 +18,16 @@ made its self-test reach this replay, which ran the mutated self-test again, wit
 
 An entry: {"tool": path of the tool, "file": the file to break (default: the tool), "anchor": text
 that occurs exactly once, "replacement": what it becomes, "expect": the name of the case that must
-fail, or a part of it that no other case shares}."""
+fail, or a part of it that no other case shares}.
+
+Calls, each alone: no argument replays the ledger as above; `--format` writes the ledger in its
+form; `--self-test` runs this tool's cases. Any other call, `--help` and `-h` among them, a mistyped
+option, a positional argument, a second argument or two of these together, is refused with its
+arguments and the usage and exits 2 before anything is copied or run, as a mistyped option of the
+merge tool merges nothing: a typo that started the full replay took minutes of the machine (#156)."""
+import contextlib
 import glob
+import io
 import json
 import os
 import re
@@ -344,9 +352,12 @@ def cases_in(base):
     g = globals()
     saved = g["check"], g["copy_of_tree"]
     g["check"], g["copy_of_tree"] = noting_check, small_copy
-    inside = os.environ.pop(NESTED, None)  # inside a replay this self-test is marked itself: each case below sets the mark it needs
+    # the replay below runs with the mark cleared, so it runs only on both stand-ins: a real one there would copy a tree whose
+    # mutated self-test clears the mark again, without end (#156)
+    stood_in = g["check"] is noting_check and g["copy_of_tree"] is small_copy
+    inside = os.environ.pop(NESTED, None) if stood_in else os.environ.get(NESTED)  # inside a replay this self-test is marked itself: each case below sets the mark it needs
     try:
-        replayed = replay()
+        replayed = replay() if stood_in else None
         os.environ[NESTED] = "1"  # a stand-in replay above this one: a copy and a check recorded now would be its second level
         nested = replay()
     finally:
@@ -354,6 +365,8 @@ def cases_in(base):
         os.environ.pop(NESTED, None)
         if inside is not None:
             os.environ[NESTED] = inside
+    cases.append(("the replay this self-test starts with the mark cleared runs only while both stand-ins are in place, so a mutation of them starts no real replay inside a replay",
+                  stood_in, (g["check"].__name__, g["copy_of_tree"].__name__)))
     cases.append(("a replay removes the copy it checked",
                   replayed == ([], {}) and len(seen) == 1 and bool(seen[0]) and not os.path.exists(os.path.dirname(seen[0])), seen))
     cases.append(("a replay inside a self-test that a replay runs is refused before it copies or checks anything, and says why",
@@ -386,24 +399,79 @@ def cases_in(base):
     cached = [d for d, _, _ in os.walk(root) if os.path.basename(d) == "__pycache__"]
     cases.append(("a run leaves no cached module for the next mutation to be read through",
                   not errors and stats["tools/toy.py"]["cases"] == 1 and not cached, (errors, cached)))
+    # the call: one of three, each alone; any other call is refused with the usage and exit 2, before anything is copied or run
+    calls = [mode([]), mode(["--format"]), mode(["--self-test"])]
+    cases.append(("call: no argument replays, --format writes the ledger, --self-test runs the cases, each alone",
+                  calls == ["replay", "format", "self-test"], calls))
+    odd = (["--help"], ["-h"], ["--slef-test"], ["tools"], ["--format", "--format"], ["--self-test", "--format"], ["--self-test", "--help"])
+    cases.append(("call: --help, -h, a mistyped option, a positional argument, a repeated option and two calls together are not understood",
+                  [mode(a) for a in odd] == [None] * len(odd), [mode(a) for a in odd]))
+    reached = []
+
+    def noting_replay():
+        """Stands in for replay(), which copies the tree and runs every self-test: a call that reaches it is recorded."""
+        reached.append(True)
+        return [], {}
+    inside = os.environ.get(NESTED)
+    os.environ[NESTED] = "1"  # should a call get past the stand-in, the real replay refuses before it copies anything
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            codes = [run(a, noting_replay) for a in (["--help"], ["--slef-test"], ["tools"])]
+        refused, before = printed.getvalue(), list(reached)
+        with contextlib.redirect_stdout(io.StringIO()):
+            replayed = run([], noting_replay)
+    finally:
+        if inside is None:
+            os.environ.pop(NESTED, None)
+        else:
+            os.environ[NESTED] = inside
+    cases.append(("call: a call that is not understood is refused with its arguments and the usage, exits 2, and copies and runs nothing",
+                  codes == [2, 2, 2] and not before and refused.count("usage: red_proof.py") == 3
+                  and all(f"REFUSED, nothing copied or run: {a} " in refused for a in ("--help", "--slef-test", "tools")), (codes, before, refused[:300])))
+    cases.append(("call: no argument reaches the replay, the positive control of the refusal", replayed == 0 and reached == [True], (replayed, reached)))
     return kit.report(cases)
 
 
-if __name__ == "__main__":
-    if "--self-test" in sys.argv:
-        sys.exit(self_test())
-    if "--format" in sys.argv:
+USAGE = ("usage: red_proof.py\n"
+         "       red_proof.py --format      (alone)\n"
+         "       red_proof.py --self-test   (alone)\n"
+         "  (no argument)  replay every red proof of tools/red_proofs.json in a copy of the tree\n"
+         "  --format       write the ledger in its form\n"
+         "  --self-test    this tool's cases")
+
+
+def mode(argv):
+    """What a call does: "replay" with no argument, "format" with --format alone, "self-test" with --self-test
+    alone, or None when the call is not understood (the docstring above)."""
+    return {(): "replay", ("--format",): "format", ("--self-test",): "self-test"}.get(tuple(argv))
+
+
+def run(argv, replay_with=None):
+    """The command's exit code. A call that is not understood is refused with its arguments and the usage,
+    exit 2, before anything is copied or run; `replay_with` stands in for replay() in a self-test."""
+    call = mode(argv)
+    if call is None:
+        print(f"REFUSED, nothing copied or run: {' '.join(argv)} is not a call of this tool")
+        print(USAGE)
+        return 2
+    if call == "self-test":
+        return self_test()
+    if call == "format":
         try:
             print(f"{LEDGER}: " + ("rewritten in its form" if format_ledger(kit.ROOT) else "already in its form"))
         except kit.Refused as e:
             print(f"REFUSED, nothing written: {e}")
-            sys.exit(1)
-        sys.exit(0)
-    errors, stats = replay()
+            return 1
+        return 0
+    errors, stats = (replay_with or replay)()
     for tool, s in stats.items():
         print(f"{tool}: {s['cases']} self-test cases, {s['proofs']} red proofs")
     for e in errors:
         print("ERROR:", e)
     print(f"self-tests: {len(stats)} tools, {sum(s['cases'] for s in stats.values())} cases, "
           f"{sum(s['proofs'] for s in stats.values())} red proofs replayed, {len(errors)} errors")
-    sys.exit(1 if errors else 0)
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(run(sys.argv[1:]))

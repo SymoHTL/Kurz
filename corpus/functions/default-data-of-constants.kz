@@ -1,0 +1,19 @@
+// expect: output
+// | 8192 240 5s
+// | 1000 240 5s
+// | 1
+// | 7
+// rules: F12
+
+data Rate(int BytesPerSecond, duration Grace)
+
+data Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s))
+
+int PerSecond(Rate r = Rate(BytesPerSecond: 1, Grace: 1s)) => r.BytesPerSecond
+
+a = Limits()
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.Grace}")
+b = Limits(MaxLine: 1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.Grace}")
+print(PerSecond())
+print(PerSecond(Rate(7, 2s)))

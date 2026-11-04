@@ -8,7 +8,7 @@ public static class CoreWords
     {
         "if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw",
         "mut", "data", "class", "interface", "enum", "flags", "with", "equal", "by",
-        "pub", "prot", "static", "this", "virtual", "override", "weak", "raw", "use", "void",
+        "pub", "prot", "internal", "static", "this", "virtual", "override", "weak", "raw", "use", "void",
         "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf",
     };
 
