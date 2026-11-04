@@ -1225,7 +1225,9 @@ Pinned by `ListTests`: rounds of values of block types through every way out of 
 the sixteen pieces, and the same with a tree of 1023 nodes kept each round not, and twenty under the
 allocator that makes every freed block inaccessible; rounds of instances of a class held by blocks, the
 same three ways, the instances kept in a list beside the blocks the second, and the same rounds with a
-`weak` reference to each instance beside it, within the sixteen pieces and under that allocator; a chain
+`weak` reference to each instance beside it, within the sixteen pieces and under that allocator; rounds
+of copies of blocks that hold a list, a `with` of a block another variable holds, a `with` that replaces
+the list and a write into the list through a path, the same two ways; a chain
 of a million values freed where a function that walks it by calling itself overflows the stack; and a
 block that lets go of another family's, the first release a program builds, which declares no second
 flag of a release under way. By `DataTests`: the constant and its mark, and no test of the mark in a family without such a type.

@@ -2872,6 +2872,38 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         .Replace("t = Tree(b, t)", "t = Tree(b, b, t)", StringComparison.Ordinal)
         .Replace("n = n + at.Item.Xs.Count", "n = n + (at.Seen?.Xs.Count ?? 0)", StringComparison.Ordinal);
 
+    // copies of blocks that hold a list of 2000 items, round after round: a `with` of a block another variable holds too, whose copy
+    // starts at one count, a `with` that replaces the list, which the copy lets go of, and a write into the list through a path, whose
+    // copied block takes no count of the list beyond the copy's own: each count kept too many keeps a list of 8000 bytes each round
+    private const string BlockCopyRounds = """
+        data Big(List<int> Xs, Big? Next)
+
+        List<int> Fill(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            return xs
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Big(Fill(2000), null)
+            b = a
+            c = a with { Next = null }
+            d = Big(Fill(2000), null) with { Xs = Fill(10) }
+            mut e = Big(Fill(2000), null)
+            e.Xs.Add(1)
+            total = total + b.Xs.Count + c.Xs.Count + d.Xs.Count + e.Xs.Count
+        }
+
+        print(round)
+        print(total)
+        """;
+
     // every way out of a block a map is held in, round after round: the end of a block, a `return`, a `break`, a `continue`, a
     // result nothing holds, the body of a `void` function, a `with`, a copy written to, a lambda's environment, a list of maps, a map
     // of maps whose entry is written over, a map of strings whose value and key a write over a key lets go of, and entries kept, made
@@ -3490,6 +3522,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(DataRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "data-rounds-fenced"), 0, ["20", "2181"], "");
         Ran(BuildAndRun(HeldInstanceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "held-instance-rounds-fenced"), 0, ["20", "4000"], "");
         Ran(BuildAndRun(WeakHeldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "weak-held-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(BlockCopyRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "block-copy-rounds-fenced"), 0, ["20", "120220"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -3568,6 +3601,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(HeldInstanceRounds, Budget(), "held-instance-rounds"), 0, ["3000", "600000"], "");
         Assert.Contains("n = n + (at.Seen?.Xs.Count ?? 0)", WeakHeldRounds, StringComparison.Ordinal); // the variant reads through the weak field
         Ran(BuildAndRun(WeakHeldRounds, Budget(), "weak-held-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(BlockCopyRounds, Budget(), "block-copy-rounds"), 0, ["3000", "18033000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
