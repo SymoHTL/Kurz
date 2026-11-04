@@ -213,10 +213,18 @@ owner, 2026-11-03, issue 110, comment 6600034158). The response is written when 
 returns. The moved body stays the other actor's to read to its end: every read gives the body's
 bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
 connection reads its next request only after that, with no new kind of error (§12, the owner,
-2026-11-03, issue 39, comment 6601737306). A request a client builds is sent as any value is (§12).
+2026-11-03, issue 39, comment 6601737306). A `move` of the request ends every path into it,
+`b = r.Body` included, by the region check of the record's section 6 (§12). A read of a moved body
+that falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes;
+the `408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
+6603205575). A `copy` of a server's request is the compile error `copy-server-request`, which names
+`move`, and a send of it with no word is section 6's error (§12, the same answer) *(assumed, §12:
+the error's name)*. A request a client builds is sent as any value is (§12).
 
 No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
-build, so that the move is not built either.
+build, so that the move is not built either. No case expects `copy-server-request` for the same
+reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md), whose row
+comes with the case that expects it (§12, the owner, 2026-11-03, issue 156, comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
 
