@@ -70,11 +70,11 @@ anywhere in the program, `Button` reaches itself, and the class is `reference-cy
 on the path is the error. The owner chose this on 2026-10-03, against a weak capture inside
 stored lambdas, which would need a rule for what a gone capture reads as and a check at every
 use, and against forbidding such a capture. *(assumed: that a field without `mut` counts, which
-the second ring needs)* *(assumed, put to the owner on issue 110, comment 6624472418, and taken at
-its default until answered: the field reaches only what the lambdas capture whose type it can hold,
+the second ring needs)* The field reaches only what the lambdas capture whose type it can hold,
 and the lambdas a function value such a lambda captures can be, every lambda counting where a type
 on the way names a type parameter; so a button's `mut () => void` field is not reached by an
-`(int) => void` lambda that reads the button, unless a `() => void` lambda captures that one)* The
+`(int) => void` lambda that reads the button, unless a `() => void` lambda captures that one (§3,
+the owner, 2026-11-04, #110, comment 6643368937, answering comment 6624472418). The
 cost is not local: once a class has a field of function type, any lambda of a type the field can
 hold, anywhere in the program, that captures an instance of that class, or of a class that holds
 one, makes it an error, and the lambda can sit in another file. An event handler escapes the

@@ -1955,11 +1955,11 @@ a streamed response takes its writer without `mut`"). `w.Write` takes a `Bytes` 
 gives `void | IoError`, the function gives `void | IoError` too, and an `IoError` closes the
 connection, since no status can be sent after the head went out (§12, the owner, 2026-11-03).
 `Stream` sends `application/octet-stream`, which a handler replaces with `Set` (§12, the owner,
-2026-11-03). *(assumed, §12, put to the owner on issue 110, comment 6623201585, and taken at its
-default until answered: a status that has no body, 100 to 199, `204`, `205` or `304`, stopping the
-program at `Stream` with `status <n> has no body to stream`; and a write after the function
-returned giving an `IoError` of the kind `InvalidInput`, `writer used after its response ended`,
-writing nothing)* *(assumed, §12, not put to the owner: a `HEAD` answered with the head,
+2026-11-03). A status that has no body, 100 to 199, `204`, `205` or `304`, stops the program at
+`Stream` with `status <n> has no body to stream`, and a write after the function returned gives an
+`IoError` of the kind `InvalidInput`, `writer used after its response ended`, and writes nothing
+(§12, the owner, 2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585).
+*(assumed, §12, not put to the owner: a `HEAD` answered with the head,
 `Transfer-Encoding: chunked` in it, and the function not called; a `Content-Length` the handler set
 giving `InvalidInput` with nothing written; a write of no bytes writing nothing; each write held to
 `MinResponseDataRate` (W10); `response.Write(stream)` chunking always, and `WriteHead` writing the
@@ -1971,8 +1971,8 @@ went out sending `100 Continue` and none after it; no bound on the stream's whol
 going out with the first write, and the CR LF that ends a chunk with the write after it)* The
 response holds its function in a field of a function type, so that a function that reads a class
 that holds a `mut` response closes a ring through it (R9), which a handler that reads that class
-does not *(assumed: R9's reading put to the owner on issue 110, comment 6624472418, whose case
-`http/stream-cycle.kz` stands under R9)*.
+does not, by R9's reading of a field of a function type (§3, the owner, 2026-11-04, #110, comment
+6643368937), whose case `http/stream-cycle.kz` stands under R9.
 
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
