@@ -176,12 +176,16 @@ It gives that text through a `Text()` that `std/` declares in its body, as a `da
 text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body, since the
 compiler reads no body of a `data` type (D16) and `std/` compiles with every program, so a build says
 `not supported` to the text of an `HttpError` and of a value of a type whose text can hold an
-`HttpError`'s text, a list, a union, a map or a `data` type with one among its items, its cases, its
-keys and values or its fields, whatever the value holds when the program runs, a class whose own
-`Text()` reads none being no such type, at the expression where
+`HttpError`'s text, a list, a union, a nullable form, a map or a `data` type with one among its
+items, its cases, its value, its keys and values or its fields, whatever the value holds when the
+program runs, a class whose own `Text()` reads none being no such type, at the expression where
 `print`, a hole of an interpolated string (L6) or `string.Join` (X6) takes it (§12, the owner,
-2026-11-02, the design standing) *(assumed: the values and the expressions named, as §12 marks
-them)*, and to a call of that `Text()`, `e.Text()`, at the call, with the same words (§12, the
+2026-11-02, the design standing), so that the text of an HTTP outcome,
+`string | IoError | HttpError` among them, is `not supported` whatever case it holds, until a
+`match` gives each case its own arm, and an empty `List<HttpError>` and a null `HttpError?` are
+refused as well (§12, the owner, 2026-11-03, Q2 (a))
+*(assumed: the values and the expressions named, as §12 marks them)*, and to a call of that
+`Text()`, `e.Text()`, at the call, with the same words (§12, the
 owner, 2026-11-02, against `unknown-name`, which says that the method does not exist, and against a
 `Text()` that builds by reading the body, the mechanism Q15 (a) set aside).
 
@@ -196,4 +200,46 @@ Case: [http/http-error-text-call.kz](../corpus/http/http-error-text-call.kz)
 ```kurz
 e = HttpError(HttpKind.Protocol, "malformed response: no status line")
 print(e.Text())
+```
+
+### W3 (decided, §12) A server's request sent to another actor moves with its body
+
+A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
+connection's socket: the handler keeps neither, and the connection waits for the handler's
+response, as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02,
+issue 110, comment 6573113786, against refusing a server's request that has a body as not
+sendable). The send is written with `move`, as the send of a mutable class instance is (§12, the
+owner, 2026-11-03, issue 110, comment 6600034158). The response is written when the handler
+returns. The moved body stays the other actor's to read to its end: every read gives the body's
+bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
+connection reads its next request only after that, with no new kind of error (§12, the owner,
+2026-11-03, issue 39, comment 6601737306). A request a client builds is sent as any value is (§12).
+
+No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
+build, so that the move is not built either.
+
+### W4 (decided, §12) `HttpHeaders`
+
+`HttpHeaders` is an ordered list of names and values, a class of `std/`: `h.Get(name)` gives the
+first value of the name, a `string?`, `h.GetAll(name)` gives every value, and `h.Add(name, value)`,
+`h.Set(name, value)` and `h.Remove(name)` change it. A name compares without regard to ASCII case
+and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay apart, as hyper's
+`HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
+list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
+ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
+product pass and not put to the owner)*.
+
+Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
+```kurz
+h = HttpHeaders()
+h.Add("Host", "example.com")
+h.Add("Set-Cookie", "a=1")
+h.Add("set-cookie", "b=2")
+print(h.Get("HOST") ?? "none")
+print(h.Get("Accept") ?? "none")
+print(h.GetAll("SET-COOKIE"))
+h.Set("Set-Cookie", "c=3")
+print(h.GetAll("set-cookie"))
+h.Remove("host")
+print(h.Get("Host") ?? "gone")
 ```

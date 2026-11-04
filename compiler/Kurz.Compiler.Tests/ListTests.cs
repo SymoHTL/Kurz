@@ -4396,10 +4396,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // the first block of a `Map<long, long>`: 48 bytes of counts and keys, 16 of the control bytes of its 8 slots, padded, and 8
-        // entries of a hash, a key and a value
+        // entries of a key and a value, 16 bytes each, since a key of one word keeps no hash in its slot (`KeepsHash`, issue 157, item
+        // 14: 256 bytes before, with the hash); of a `Map<string, long>` 8 entries of a hash, a key and a value, 32 bytes each, since a
+        // string's hash reads its bytes
         const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
-        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (256 bytes)\n");
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (192 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "map-granted"), 0, ["1"], ""); // the positive control
+        const string strings = "mut m = Map<string, long>()\nm[\"a\"] = 1\nprint(m[\"a\"] ?? 0)\n";
+        Ran(BuildAndRun(strings, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-string-refused"), 1, [], "error: allocation-failed (320 bytes)\n");
+        Ran(BuildAndRun(strings, toolchain.Runtime, "map-string-granted"), 0, ["1"], "");
     }
 
     [Fact]

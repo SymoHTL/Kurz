@@ -1,0 +1,33 @@
+// expect: output
+// | TimedOut 11
+// | TimedOut 11
+// | 1 120
+// rules: S3, S9
+
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a read that would fill the buffer, and one that goes straight to the list, each run out of time with nothing sent: each stores
+    // nothing and lets the next read in
+    match server.Read(mut got, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match server.Read(mut got, 10000) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Read(mut got, 1)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
