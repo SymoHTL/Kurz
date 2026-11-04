@@ -207,7 +207,10 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   is 1.10x faster than Rust (256 against 282 ms)." (results). Kurz: ADOPTABLE, Q7, not asked.
 - W2, copies with no move. "By-value semantics with no move operation (4.1, TODO 3) mean that idioms
   a Rust programmer would express as a cheap move are an O(size) copy in Goose." (design). Kurz:
-  ALREADY avoided (copy on write).
+  ALREADY avoided where a value is assigned or passed, which shares its storage until one side
+  writes, and where a list's storage is written while nobody else holds it (section 4); not where a
+  `data` value laid out as a block is written, by `with` or into a path, which copies the whole
+  block whatever its count, an O(size) copy at every such write (section 4, assumed).
 - W3, pools for lifetimes that are not nested. Lifetimes that are not nested "must go through
   reusable pools" (design). Kurz: ALREADY avoided (counts free in any order).
 
