@@ -98,7 +98,9 @@ flowchart TD
     merge-checks is red until it is back. Exit 6: post the waiver record by hand.
     Judgment step, HAZARD issue 3"]
     N --> L
-    K --> L["delete the branch. The gates job runs on main: red when a gate of subgraph G fails there.
+    K --> L["py -3 tools/merge_pr.py --delete-branch PR: every open pull request on the branch gets the merged
+    pull request's base, then the branch is deleted. A deletion by hand closes them: HAZARD issue 14.
+    The gates job runs on main: red when a gate of subgraph G fails there.
     A red main is fixed by the next pull request, before any other merges: judgment step"]
     X["a defect escapes anyway"] -.-> Y["one pull request: the rule with its gate in CLAUDE.md,
     a knowledge entry with its INDEX line, the gate map updated. Never a private note: judgment step"]
@@ -111,7 +113,8 @@ flowchart TD
 - `.github/workflows/review.yml` (triggers, the job's `if`) changes: nodes F, G and P.
 - `tools/review/review.py` changes a failure kind, what a run without CI posts, or where lows go:
   nodes H, O and I.
-- `tools/merge_pr.py` changes what it refuses or waives: nodes J, K and N.
+- `tools/merge_pr.py` changes what it refuses or waives: nodes J, K and N; what `--delete-branch`
+  does: node L.
 - `tools/ruleset.json` changes: nodes A, J and K.
 - `tools/pr_gates.py` changes a pull-request gate: nodes D and I.
 - `tools/gates.py` changes a verdict or the gate list: nodes B2, E and L.

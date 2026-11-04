@@ -1,0 +1,37 @@
+// expect: output
+// | [3, 1, 2]
+// | [1, 2, 3]
+// | [1, 2, 3]
+// rules: X8
+
+class Bag(mut List<int> Items) {
+    pub int Equal(int x) {
+        Items = [3, 1, 2]
+        return x
+    }
+
+    pub int Same(int x) {
+        Items = Items
+        return x
+    }
+
+    pub int Restore(int x) {
+        saved = Items
+        Items.Add(9)
+        Items = saved
+        return x
+    }
+}
+
+// another list with the same items is a change: it stands, and the sort of the list it read is dropped
+b = Bag([3, 1, 2])
+b.Items.SortBy(x => b.Equal(x))
+print(b.Items)
+// the list the field holds, assigned to it, is no change, and the list is sorted
+c = Bag([3, 1, 2])
+c.Items.SortBy(x => c.Same(x))
+print(c.Items)
+// nor is the list given back after an add, which copied it
+d = Bag([3, 1, 2])
+d.Items.SortBy(x => d.Restore(x))
+print(d.Items)

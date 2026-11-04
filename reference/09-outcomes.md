@@ -499,6 +499,7 @@ void Report(int | NotFound found) {
 }
 
 // the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
 Report(Find(1))
 ```
 
