@@ -266,8 +266,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_map_keeps_the_hash_of_a_key_whose_hash_reads_more_than_one_word()
     {
         // `KeepsHash`: a slot of a key of one word holds the key and the value, as hashbrown's bucket, and its growth hashes the key
-        // again; a slot of a key whose hash reads more holds its hash first, as .NET keeps an entry's hash code (issue 157, item 14,
-        // under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
+        // again; a slot of a key of a kind whose hash can read more than one word holds its hash first, as .NET keeps an entry's hash
+        // code (issue 157, item 14, under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
         const string program =
             "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\n\nlongduration far = 100000days\n" +
             "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
@@ -418,7 +418,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var program = Emit(Program);
         Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
         Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
-        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("type { i64, i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its count, its type's number, `Value` and `Next`
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
     }

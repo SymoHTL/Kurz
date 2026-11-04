@@ -176,12 +176,16 @@ It gives that text through a `Text()` that `std/` declares in its body, as a `da
 text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body, since the
 compiler reads no body of a `data` type (D16) and `std/` compiles with every program, so a build says
 `not supported` to the text of an `HttpError` and of a value of a type whose text can hold an
-`HttpError`'s text, a list, a union, a map or a `data` type with one among its items, its cases, its
-keys and values or its fields, whatever the value holds when the program runs, a class whose own
-`Text()` reads none being no such type, at the expression where
+`HttpError`'s text, a list, a union, a nullable form, a map or a `data` type with one among its
+items, its cases, its value, its keys and values or its fields, whatever the value holds when the
+program runs, a class whose own `Text()` reads none being no such type, at the expression where
 `print`, a hole of an interpolated string (L6) or `string.Join` (X6) takes it (§12, the owner,
-2026-11-02, the design standing) *(assumed: the values and the expressions named, as §12 marks
-them)*, and to a call of that `Text()`, `e.Text()`, at the call, with the same words (§12, the
+2026-11-02, the design standing), so that the text of an HTTP outcome,
+`string | IoError | HttpError` among them, is `not supported` whatever case it holds, until a
+`match` gives each case its own arm, and an empty `List<HttpError>` and a null `HttpError?` are
+refused as well (§12, the owner, 2026-11-03, Q2 (a))
+*(assumed: the values and the expressions named, as §12 marks them)*, and to a call of that
+`Text()`, `e.Text()`, at the call, with the same words (§12, the
 owner, 2026-11-02, against `unknown-name`, which says that the method does not exist, and against a
 `Text()` that builds by reading the body, the mechanism Q15 (a) set aside).
 

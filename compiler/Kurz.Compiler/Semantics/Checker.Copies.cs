@@ -71,6 +71,18 @@ public sealed partial class Checker
 
     private readonly HashSet<CallExpression> genericCallSeen = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>T34: the generic calls that stand in a loop over <c>T.Fields</c> of a function's text, which the walk reads in a function that reads its type.</summary>
+    private readonly HashSet<CallExpression> fieldsLoopCalls = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The loops over <c>T.Fields</c> of a function's text around the statement the checker reads, outside a copy.</summary>
+    private int fieldsLoopDepth;
+
+    /// <summary>T34: the calls of a function's text it refused, at which the chain of copies stops, so that the bound of T33 does not report the cycle a second time.</summary>
+    private readonly HashSet<CallExpression> refusedCalls = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The call of a function's text that each call of a copy, or of a pass of a copy, was copied from.</summary>
+    private readonly Dictionary<CallExpression, CallExpression> callOrigins = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>The diagnostics of each generic function's body, which leave the build where the function turns out to read its type.</summary>
     private readonly Dictionary<FunctionSymbol, List<Diagnostic>> genericDiagnostics = new(ReferenceEqualityComparer.Instance);
 
@@ -189,6 +201,53 @@ public sealed partial class Checker
         if (callee is { IsGeneric: true } && genericCallSeen.Add(c))
         {
             genericCalls.Add((checking, c, activePasses.Count == 0 ? null : activePasses[^1]));
+            if (fieldsLoopDepth > 0)
+            {
+                fieldsLoopCalls.Add(c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// T34: the text of a function that reads its type, read for the calls in its loops over <c>T.Fields</c>, which <see cref="FindGrowingCycles"/>
+    /// reads; what the reading reports leaves the build, since the function keeps its check in its copies (T33).
+    /// </summary>
+    private void ReadForCycles(FunctionSymbol f)
+    {
+        checking = f;
+        Push();
+        CheckFunctionBody(f);
+        Pop(commit: false);
+        checking = null;
+    }
+
+    /// <summary>A loop over <c>T.Fields</c> of a type parameter, as the text of a generic function writes it.</summary>
+    private bool WalksFieldsOfTypeParameter(ForInStatement f) =>
+        Unwrap(f.Collection) is MemberAccess { Target: NameExpression n, Member: "Fields", Conditional: false } && TypeParameter(n.Name) is not null;
+
+    /// <summary>
+    /// T34: the subject <c>T.Kind</c> of a type parameter, as the text of a generic function writes it: a call in one of its arms is read in
+    /// the copies alone, inside a loop over <c>T.Fields</c> as outside it, since each copy takes the one arm of its kind (the owner,
+    /// 2026-11-03, comment 6603481343 on issue 156).
+    /// </summary>
+    private bool KindOfTypeParameter(Expression subject) =>
+        Unwrap(subject) is MemberAccess { Target: NameExpression n, Member: "Kind", Conditional: false } && TypeParameter(n.Name) is not null;
+
+    /// <summary>T34: whether a function's text reads the fields of one of its type parameters, where alone the walk reads a call of a function that reads its type.</summary>
+    private static bool ReadsFields(FunctionSymbol f)
+    {
+        var names = f.TypeParameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var reads = false;
+        SyntaxCopy.Walk(f.Declaration!, e => reads |= e is MemberAccess { Target: NameExpression n, Member: "Fields" } && names.Contains(n.Name));
+        return reads;
+    }
+
+    /// <summary>Keeps, for a call of a copy, the call of the function's text it comes from.</summary>
+    private void KeepOrigin(Expression from, Expression to)
+    {
+        if (from is CallExpression f && to is CallExpression t)
+        {
+            callOrigins[t] = callOrigins.GetValueOrDefault(f) ?? f;
         }
     }
 
@@ -241,18 +300,22 @@ public sealed partial class Checker
     /// T34: a call in a generic function's body that gives a type parameter of the callee a type holding one of the caller's inside a
     /// form of a type makes a copy for a larger type; where the type parameters lead from the callee's back to the caller's along the
     /// calls of the generic bodies, each copy makes a larger one without end, and the call is <c>growing-type-argument</c> (section 4,
-    /// the owner, 2026-11-02, "refused at the cycle"). The walk reads the generic functions checked on their text, called or not: a
-    /// function that reads its type is read in its copies alone (T33), and none of its calls is read here.
+    /// the owner, 2026-11-02, "refused at the cycle"). The walk reads the generic functions checked on their text, called or not: of a
+    /// function that reads its type (T33), the calls in its loops over <c>T.Fields</c> alone, a type argument that is the field's type
+    /// taking no part, since the text does not give that type (the owner, 2026-11-03, comment 6600218932 on issue 156), and a call in an arm
+    /// of a <c>match</c> on <c>T.Kind</c> inside such a loop none (comment 6603481343 there). The chain of copies stops at a call it
+    /// refuses, so that its error is the one error of the cycle, and the copies before that call report what else their bodies hold
+    /// (the same comment).
     /// </summary>
     private void FindGrowingCycles()
     {
         var edges = new List<GrowthEdge>();
         foreach (var (caller, c, _) in genericCalls)
         {
-            if (caller is not { IsGeneric: true } || readers.Contains(caller)
+            if (caller is not { IsGeneric: true } || (readers.Contains(caller) && !fieldsLoopCalls.Contains(c))
                 || model.TryCallOf(c) is not { Kind: CallKind.Function, Function: { IsGeneric: true } callee } info)
             {
-                continue; // a function that calls a reader with its own type parameter is a reader (T33), so no edge leads into a reader's
+                continue; // a function that calls a reader with its own type parameter is a reader (T33), whose calls outside such a loop are not read
             }
 
             foreach (var to in callee.TypeParameters)
@@ -275,6 +338,7 @@ public sealed partial class Checker
             if (PathBack(edges, edge.To, edge.From) is { } path && reported.Add(edge.Call))
             {
                 Report(ErrorIds.GrowingTypeArgument, edge.Call.Line, GrowthText(edge, path));
+                refusedCalls.Add(edge.Call);
             }
         }
     }
@@ -358,6 +422,11 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (refusedCalls.Contains(callOrigins.GetValueOrDefault(c) ?? c))
+            {
+                continue; // T34 refused the call: the chain stops at it, where its copies would reach the bound of T33 for the same cycle
+            }
+
             var outer = caller is null ? null : copies.GetValueOrDefault(caller);
             if (info.Map.Values.Any(t => Types.IsError(t) || t is TypeParameterType))
             {
@@ -391,7 +460,7 @@ public sealed partial class Checker
             return null;
         }
 
-        var declaration = SyntaxCopy.Copy(original.Declaration!);
+        var declaration = SyntaxCopy.Copy(original.Declaration!, KeepOrigin);
         var symbol = new FunctionSymbol($"{original.Name}<{arguments}>", declaration) { ReturnType = Types.Substitute(original.ReturnType, map) };
         symbol.Parameters.AddRange(original.Parameters.Select(p => p with { Type = Types.Substitute(p.Type, map) }));
         var copy = new Copy(symbol, original, map, origin, outer);
@@ -496,7 +565,7 @@ public sealed partial class Checker
         foreach (var field in walked.Symbol.Fields)
         {
             var pass = new FieldPass(f.Variable, n.Name, walked, field, SubstituteData(walked, field.Type));
-            var body = SyntaxCopy.Copy(f.Body, (e, copyOf) => FieldGet(e, copyOf, pass));
+            var body = SyntaxCopy.Copy(f.Body, (e, copyOf) => FieldGet(e, copyOf, pass), KeepOrigin);
             passes.Add(body);
             PushScope();
             if (redeclared)
@@ -583,7 +652,7 @@ public sealed partial class Checker
         foreach (var field in made.Symbol.Fields)
         {
             var pass = new FieldPass(parameter.Name, n.Name, made, field, SubstituteData(made, field.Type));
-            var argument = SyntaxCopy.Copy(body, (e, copyOf) => FieldGet(e, copyOf, pass));
+            var argument = SyntaxCopy.Copy(body, (e, copyOf) => FieldGet(e, copyOf, pass), KeepOrigin);
             madeArguments[argument] = (pass, parameter);
             arguments.Add(new Argument(argument.Line, null, false, argument));
         }

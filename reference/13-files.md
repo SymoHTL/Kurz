@@ -645,7 +645,9 @@ its arguments have run to its return (§12, the owner, 2026-11-02, issue 110, co
 `ShutdownWrite`'s, issue 39, comment 6583351876; `Consume`'s, issue 110, comment 6615355264; `Fill`'s
 assumed, S24); a loop over the lines is in flight while it pulls a line, and not while its block runs,
 so that a `Close` in its block ends the handle and the next pull gets the error above, as a borrow
-of `&mut self` in Rust lasts its call (the same comment, against a count held for the loop's whole
+of `&mut self` in Rust lasts one call, `read_line`'s, while Rust's loop over `lines()` holds its
+reader for the whole loop and refuses a close in its block when it compiles (the same comment,
+against a count held for the loop's whole
 block, at the cost of a `Close` in that block whose release would wait for its own loop). The bytes
 the file's buffer holds that no read took (S3) are dropped at the close, as dropping Rust's
 `BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
@@ -836,14 +838,15 @@ and the next `Accept` gets that error, so that the connection it got is not thro
 2026-11-02, issue 39, comment 6578783655, against that error with the connection closed, at the cost
 of a connection the system accepted and its client sees closed; the cost is a stream that reaches
 the program after the listener's `Close`, which the program closes, or lets go of, as any other; the costs,
-issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset when the
-descriptor is released, as Linux resets it for any program that closes a listener, a cost of a
-listener's `Close` (§12); and a `Write` that the shutdown
+issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset at the
+listener's `Close`, by the release where no call is in flight and by the shutdown where one is, as
+Linux resets the queue of a listener that stops listening: the system's behaviour, not a choice of
+§12, which names it as a cost of a listener's `Close`; and a `Write` that the shutdown
 ends after part of its bytes went out gives that error, the part sent not reported, as Rust's
 `write_all` and C#'s `Stream.Write` report none (§12, the owner, 2026-11-02, the same comment, against
 the count sent with the error left to the next call, at the cost of a `Write` that returns a count,
 where a `Write` writes every byte and returns none (S4); the cost is that the program cannot tell
-how many bytes the peer got; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
+how many of its bytes went out before the shutdown; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
@@ -882,7 +885,7 @@ looking it up and trying its addresses in turn, as the first form's `address` re
 owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker on
 the one bound of `TcpStream.Connect` below. A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
-the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
+the time of a stream's reads and of its writes, taking a `duration?`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as
 `InvalidInput`, as Rust refuses a zero `Duration` (§12, the owner, 2026-11-01, Q8 (a), against
 `WouldBlock`, which Rust gives on Linux for the same timeout, and against properties, as C#'s
