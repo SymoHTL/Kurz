@@ -644,8 +644,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
   the five whitespace characters of X4, the ASCII changes of case, over the letters `A` to `Z` and `a` to `z`, and an
   empty separator or pattern, which gives the string as it is (X5), and the replaces of a byte by 0, 2, 3, 4, 8 and 9
-  bytes over strings whose matches stand next to each other and far apart, and over a text each of whose results
-  is a block the allocator maps on its own, under the allocator that ends the process at a byte written past it;
+  bytes over strings whose matches stand next to each other and far apart, and over a text that is a block the
+  allocator maps on its own, as each of its results is, under the allocator that ends the process at a byte read or
+  written past such a block;
   and `ParseTests` each integer type's `Parse`,
   `Hex.Decode` and the cuts that stand to .NET's `Parse`, `Convert.FromHexString` and cut of the UTF-8 bytes,
   each over 2000 generated strings, the first 500 of them under the allocator that makes every freed block

@@ -163,8 +163,12 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
-    /// <summary>The 16 bytes the long text of <see cref="OneByteProgram"/> repeats: six commas, two of them next to each other, one at the end, and a letter of two bytes.</summary>
-    private const string Unit = "ab,,c,dé,fg,ij,";
+    /// <summary>
+    /// The 16 bytes the long text of <see cref="OneByteProgram"/> repeats: six commas, two of them next to each other, one at the end, and a
+    /// letter of two bytes. The first comma stands at 1, so that the count's vectors of 16 bytes from it end 15 bytes before the end of the
+    /// text: one more vector would read a byte past it.
+    /// </summary>
+    private const string Unit = "a,,bc,dé,fg,ij,";
 
     /// <summary>
     /// The times <see cref="Unit"/> stands in the long text: a multiple of 16, so that every replace of its commas by 0, 2, 3, 4 or 8 bytes
