@@ -813,7 +813,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the sort of the list it read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as
   C#", #39, comment 6562795140), as C#'s `List.Sort` does where a comparer assigns the field another
   list (.NET 10's `List<T>.Sort`, run 2026-11-03), every key made over the items of the list as it was
-  read (X8, assumed), the list counted as changed where the field holds another one than it read,
+  read (X8, assumed), the field read after the keys and written with the sort the one of the instance
+  read before them, which that read holds to the end of its statement, as C# evaluates a call's receiver
+  once (X8, assumed), the list counted as changed where the field holds another one than it read,
   whatever items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at
   one count for each call. Two forms are not Rust's and measured faster on the same results: an item of
   8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of
