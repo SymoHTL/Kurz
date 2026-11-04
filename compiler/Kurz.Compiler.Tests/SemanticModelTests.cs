@@ -111,6 +111,34 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_walk_reads_a_copy_for_each_constant_a_call_gives()
+    {
+        // T35: each constant makes a copy of its own, a default and a constant a copy passes on among them, through two copies too, and a
+        // second call with the same constant reads the copy the first made; the name, in a lambda and in a hole, is the constant
+        var (tree, model) = Clean("enum Mode { Plain, Loud }\n\nvoid Say<const Mode M>() {\n    print(M)\n}\n\nvoid Twice<T, const Mode M = Mode.Loud>(T value) {\n    Say<M>()\n}\n\n" +
+            "void Report<const Mode M>() {\n    f = () => M\n    print(\"{M} {f()}\")\n    Twice<string, M>(\"r\")\n}\n\nSay<Mode.Plain>()\nSay<Mode.Plain>()\nTwice(1)\nTwice<int, Mode.Loud>(2)\nReport<Mode.Plain>()");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Say<Mode.Plain>", "Say<Mode.Loud>", "Twice<int, Mode.Loud>", "Twice<string, Mode.Plain>", "Report<Mode.Plain>"], walk.Copies);
+
+        // in each copy the parameter's name is the constant its call gave, the value's place among the enum's values
+        var say = model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Say")));
+        Assert.Equal([0, 1], say.Select(copy =>
+        {
+            var names = new List<NameExpression>();
+            Nodes.Collect(copy.Declaration!, names);
+            return Assert.IsType<EnumConstant>(model.TypeOf(names.Single(n => n.Name == "M")).Constant).Index;
+        }));
+
+        // in the lambda and in the hole as well
+        var report = Assert.Single(model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Report"))));
+        var inReport = new List<NameExpression>();
+        Nodes.Collect(report.Declaration!, inReport);
+        Assert.Equal([0, 0], inReport.Where(n => n.Name == "M").Select(n => Assert.IsType<EnumConstant>(model.TypeOf(n).Constant).Index));
+    }
+
+    [Fact]
     public void The_walk_reads_the_constructor_s_call_T_Make_became()
     {
         // T33: a code generator reads the call of the primary constructor in place of `T.Make`, with an argument of its own for each
@@ -789,7 +817,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _) || model.IsStaticField(n, out _), n.Line, $"what `{n.Name}` means");
+                    // a variable, a function, a data value without fields, an implicit field (K7), a static field, or the name of a type parameter that
+                    // holds a constant, a value of its enum, an integer, a `bool` or a `char` a code generator reads whole (T35)
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant or IntegerConstant or BoolConstant or CharConstant) || model.IsImplicitField(n, out _, out _) || model.IsStaticField(n, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7

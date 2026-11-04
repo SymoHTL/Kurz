@@ -1,0 +1,25 @@
+// expect: output
+// | TimedOut 11
+// | 1 120
+// rules: S24, S9
+
+// a fill that waits on a stream with nothing sent runs out of time as a read does, stores nothing, and lets the next fill in
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+    match server.Fill(mut got) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Fill(mut got)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
