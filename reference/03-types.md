@@ -1506,8 +1506,7 @@ call, so that it does not reach that bound, and the copies a call made before it
 other error of the function's body in the same build; a function that no call reaches has no copy,
 so its cycle is the one error it reports, as T33 reads such a function. A call in an arm of a
 `match` on `T.Kind` takes no part, in an arm inside such a loop as in one outside it, since each
-copy takes the one arm of its kind, but for a call in a loop over `T.Fields` opened inside the arm,
-which is read as a call of that loop. A type argument of a call in a loop over `T.Fields` that is
+copy takes the one arm of its kind. A type argument of a call in a loop over `T.Fields` that is
 the field's type takes no part either, since the text does not give that type. A cycle
 that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
 bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
