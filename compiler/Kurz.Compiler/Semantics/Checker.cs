@@ -1598,7 +1598,9 @@ public sealed partial class Checker
 
             if (!f.IsLambda || f.Outer is null)
             {
-                return statics.TryGetValue(name, out var state) ? (state, false) : (null, false); // R13: state outside a function, which every function reaches
+                // R13: state outside a function, which every function reaches; inside its class a member of the name hides it (K7, K18),
+                // as a method hides a top-level function of its name there (section 4)
+                return !IsMemberName(name) && statics.TryGetValue(name, out var state) ? (state, false) : (null, false);
             }
 
             captured = true;

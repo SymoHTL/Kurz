@@ -1962,6 +1962,31 @@ public sealed class CheckerTests
         Assert.Equal(["1: `thread static` before a function, which R13 states before state alone (R13)"], NotSupported("thread static void F() {\n}\n\nF()", grants: "raw"));
     }
 
+    [Fact]
+    public void Inside_its_class_a_member_hides_the_state_of_its_name()
+    {
+        // the reading on R13 with K7 (README): inside its class a field, a `static` field or a method hides the state of its name, as a
+        // method hides a top-level function there (section 4): in a method, inside `raw` and outside it, in a lambda inside one, in a
+        // default of the class body and in the initial value of a `static` field
+        const string State = "thread static mut long left = 7\n\n";
+        Clean(State + "class C(long left) {\n    pub long Get() => left\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(mut long left) {\n    pub void Set() {\n        left = 5\n    }\n\n    pub long Get() => left\n}\n\nc = C(3)\nc.Set()\nprint(c.Get())", grants: "raw");
+        Clean(State + "class C(string left) {\n    pub string Get() {\n        raw {\n            return left\n        }\n    }\n}\n\nprint(C(\"f\").Get())", grants: "raw"); // the field's type, not the state's
+        Clean(State + "class C(long V) {\n    pub static long left = 3\n\n    pub static long Get() => left\n}\n\nprint(C.Get())", grants: "raw");
+        Clean(State + "class C(long V) {\n    pub long left() => 3\n\n    pub long Get() => left()\n}\n\nprint(C(1).Get())", grants: "raw");
+        Clean(State + "class C(long left) {\n    pub long Get() {\n        f = () => left\n        return f()\n    }\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(long left) {\n    long Twice = left * 2\n\n    pub long Get() => Twice\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(long V) {\n    pub static long left = 3\n    pub static long Twice = left * 2\n}\n\nprint(C.Twice)", grants: "raw"); // a constant's read (K18)
+        // in a `static` method a field of the instance of that name is `static-mismatch`, as every such read there is (K19)
+        Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors(State + "class C(long left) {\n    pub static long Get() => left\n}\n\nprint(C.Get())", grants: "raw"));
+        // outside the class, and in a class with no member of the name, the state is reached as before: inside `raw` alone (R13), and a
+        // variable named as it is `redeclared` (V9)
+        Assert.Equal([(ErrorIds.RawRequired, 7)], Errors(State + "class C(long left) {\n    pub long Get() => left\n}\n\nlong F() => left\n\nprint(C(1).Get() + F())", grants: "raw"));
+        Assert.Equal([(ErrorIds.RawRequired, 4)], Errors(State + "class C(long V) {\n    pub long Get() => left\n}\n\nprint(C(1).Get())", grants: "raw"));
+        Clean(State + "class C(long V) {\n    pub long Get() {\n        raw {\n            return left\n        }\n    }\n}\n\nprint(C(1).Get())", grants: "raw");
+        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors(State + "class C(long V) {\n    pub long Get() {\n        long left = 3\n        return left\n    }\n}\n\nprint(C(1).Get())", grants: "raw"));
+    }
+
     [Theory]
     [InlineData("static mut long t = 0\nprint(1)", "", "grant")]
     [InlineData("pub static mut string s = \"\"\nprint(1)", "raw", "counted reference")]
