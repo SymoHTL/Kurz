@@ -477,6 +477,28 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// F12, D11: the default of a parameter of a method, <c>static</c> or not, is a constant expression that fits the parameter, read as
+    /// a function's is, with no variable and no member of the class in sight, so that a field named there is <c>unknown-name</c> (V10).
+    /// </summary>
+    private void CheckMethodDefaults()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            foreach (var method in symbol.Methods.Values.SelectMany(list => list))
+            {
+                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = method.Line };
+                foreach (var (p, parameter) in method.Declaration!.Parameters.Zip(method.Parameters))
+                {
+                    if (p.Default is not null)
+                    {
+                        CheckDefault(p.Default, parameter.Type, p.Line);
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>K7: the body of each method, with its instance as the variable <c>this</c>, through which its fields and methods are read by their names.</summary>
     private void CheckMethodBodies()
     {

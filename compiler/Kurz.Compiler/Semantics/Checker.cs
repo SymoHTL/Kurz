@@ -331,6 +331,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         CheckFieldDefaults(); // K7

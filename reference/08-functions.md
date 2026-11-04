@@ -431,6 +431,36 @@ Greet("Ann", "bye")
 Greet("Ann", word: "bye")
 ```
 
+Case: [classes/method-default.kz](../corpus/classes/method-default.kz)
+```kurz
+data Rate(int PerSecond = 1)
+
+class Meter(int Scale) {
+    pub static int Unit(Rate r = Rate()) => r.PerSecond
+
+    pub int Read(int n, Rate r = Rate(PerSecond: 2)) => Scale * n * r.PerSecond
+}
+
+print(Meter.Unit())
+print(Meter.Unit(Rate(5)))
+m = Meter(10)
+print(m.Read(1))
+print(m.Read(1, r: Rate(3)))
+```
+
+Case: [classes/method-default-not-constant.kz](../corpus/classes/method-default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+class Greeter {
+    pub static void Greet(string name, string word = Pick()) {
+        print("{word} {name}")
+    }
+}
+
+Greeter.Greet("Ann")
+```
+
 ### F13 (decided, §8) Which overload a call picks
 
 A call can fit more than one function of its name: through widening (T8), when `Show(int)` and

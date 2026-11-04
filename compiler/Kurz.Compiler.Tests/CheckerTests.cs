@@ -3478,6 +3478,19 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_default_of_a_method_s_parameter_is_a_constant_that_fits_it_as_a_function_s_is()
+    {
+        // F12, D11: the default of a `static` and of an instance method, a literal and data values of constants, left out and by name
+        Clean("data R(int A = 1)\n\nclass C(int V) {\n    pub static int F(R r = R()) => r.A\n\n    pub int G(int x = 2, R r = R(A: 3)) => V + x + r.A\n}\n\nprint(C.F())\nprint(C(1).G())\nprint(C(1).G(r: R(4)))");
+        // F12: one that is no constant is `default-not-constant` at the parameter, and one of another type `type-mismatch`, as a function's
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 4)], Errors("int Other() => 1\n\nclass C(int V) {\n    pub static int F(int x = Other()) => x\n}\n\nprint(C.F(2))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("class C(int V) {\n    pub int G(int x = \"a\") => x\n}\n\nprint(C(1).G(2))"));
+        // V10: no variable and no member of the class is in sight there, as none is in a function's default
+        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int A) {\n    pub int G(int x = A) => x\n}\n\nprint(C(1).G(2))"));
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int V) {\n    pub static int Step = 1\n    pub static int F(int x = Step) => x\n}\n\nprint(C.F(2))"));
+    }
+
+    [Fact]
     public void A_static_field_holds_a_constant_that_nothing_assigns()
     {
         // K18, K20: a constant of each type the checker reads, and one that reads a `static` field of its class declared above it, by its
