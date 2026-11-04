@@ -564,7 +564,8 @@ print(1)
 (below); `xs.SortBy(x => key)`
 sorts it by a key of such a type; `xs.SortUnstable()` sorts it without the buffer of the stable sort,
 as Rust's `sort`, `sort_by_key` and `sort_unstable`. Each changes the list and takes it through a
-`mut` variable, as `Add` does (M5) (§12, the owner, 2026-10-31, "Same + SortUnstable"). A list of
+`mut` variable, or a `mut` field of an instance (K2), as `Add` does (M5) (§12, the owner, 2026-10-31,
+"Same + SortUnstable"). A list of
 `double` or `float` values sorts as C#'s `double.CompareTo` orders them: NaN first, `-0` equal to `0`,
 so that the stable sort keeps the order of `-0` and `0` (§12, the owner, 2026-10-31, "C# CompareTo").
 A buffer the system refuses, the keys `SortBy` keeps among them, raises `allocation-failed`, as a
@@ -587,9 +588,15 @@ nullable items, and a nullable key, sort with `null` before every value, as C#'s
 `Comparer<T>.Default` and Rust's ordering of `Option`, though `<` takes no nullable operand (§12, the
 owner, 2026-10-31, "Null first, as C#/Rust").
 A key that changes the list it sorts, through an instance whose field holds the list (K2), leaves its
-change standing, and the sort of the list as it was read is dropped, as C#'s `List.Sort` sorts the list
-it read while the field holds another (§12, the owner, 2026-11-01, "Change stands, as C#", #39, comment
-6562795140).
+change standing, and the sort of the list as it was read is dropped (§12, the owner, 2026-11-01, "Change
+stands, as C#", #39, comment 6562795140). C#'s `List.Sort` does the same where a comparer assigns the
+field another list: it sorts the list it read. Where a comparer adds to the list, C#'s result depends on
+the list's capacity, the items it read sorted where the add finds room in their block and not where it
+moves them to a new one (§12, .NET 10's `List<T>.Sort`, run 2026-11-03); Kurz drops the sort as for any
+change. Every key is made over the items of the list as it was read *(assumed, §12)*. The list counts as
+changed where the field holds another list than the one read once the keys are made, whatever items that
+list holds: a field assigned the list it held, or given it back, is unchanged and sorted (§12, the owner,
+2026-11-02, #194, comment 6573115730).
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz
@@ -643,16 +650,11 @@ mut empty = List<int>()
 empty.SortBy(x => Key(x))
 ```
 
-Case: [strings/sortby-key-changes-list.kz](../corpus/strings/sortby-key-changes-list.kz)
+Case: [strings/sortby-key-replaces-list.kz](../corpus/strings/sortby-key-replaces-list.kz)
 ```kurz
 class Bag(mut List<int> Items) {
     pub int Reset(int x) {
         Items = [0]
-        return x
-    }
-
-    pub int Push(int x) {
-        Items.Add(x * 10)
         return x
     }
 }
@@ -661,6 +663,25 @@ class Bag(mut List<int> Items) {
 b = Bag([3, 1, 2])
 b.Items.SortBy(x => b.Reset(x))
 print(b.Items)
+// a list of one item makes its one key too, and its change stands
+one = Bag([7])
+one.Items.SortBy(x => one.Reset(x))
+print(one.Items)
+// a key that changes nothing sorts
+d = Bag([3, 1, 2])
+d.Items.SortBy(x => x)
+print(d.Items)
+```
+
+Case: [strings/sortby-key-adds-to-list.kz](../corpus/strings/sortby-key-adds-to-list.kz)
+```kurz
+class Bag(mut List<int> Items) {
+    pub int Push(int x) {
+        Items.Add(x * 10)
+        return x
+    }
+}
+
 // a key that adds to the list: the adds stand, and the list is not sorted
 c = Bag([3, 1, 2])
 c.Items.SortBy(x => c.Push(x))
@@ -668,6 +689,41 @@ print(c.Items)
 // a key that changes nothing sorts
 d = Bag([3, 1, 2])
 d.Items.SortBy(x => x)
+print(d.Items)
+```
+
+Case: [strings/sortby-key-assigns-same-list.kz](../corpus/strings/sortby-key-assigns-same-list.kz)
+```kurz
+class Bag(mut List<int> Items) {
+    pub int Equal(int x) {
+        Items = [3, 1, 2]
+        return x
+    }
+
+    pub int Same(int x) {
+        Items = Items
+        return x
+    }
+
+    pub int Restore(int x) {
+        saved = Items
+        Items.Add(9)
+        Items = saved
+        return x
+    }
+}
+
+// another list with the same items is a change: it stands, and the sort of the list it read is dropped
+b = Bag([3, 1, 2])
+b.Items.SortBy(x => b.Equal(x))
+print(b.Items)
+// the list the field holds, assigned to it, is no change, and the list is sorted
+c = Bag([3, 1, 2])
+c.Items.SortBy(x => c.Same(x))
+print(c.Items)
+// nor is the list given back after an add, which copied it
+d = Bag([3, 1, 2])
+d.Items.SortBy(x => d.Restore(x))
 print(d.Items)
 ```
 
@@ -803,15 +859,25 @@ xs.AddRange([2])
 print(xs)
 ```
 
+### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
+
+The position of the cut stands on the line below the error line, where the text of a `throw` stands
+(O6): `error: not-char-boundary at a.kz:5:`, then `byte 2 is inside a code point` (§12, the owner,
+2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
+*(assumed, §12)*.
+
+No case: a case pins the id and the line of the error (E3), and no case reads the lines below it.
+
 ### X11 (decided, §12) Inserting and removing an item
 
 `xs.Insert(index, item)` puts `item` at the position `index` and moves the items from there one place on,
 and `xs.RemoveAt(index)` takes the item at `index` out of the list, moves the items after it one place
 back and gives the item, as C#'s `List.Insert` and `List.RemoveAt` name them and as Rust's `Vec::insert`
-and `Vec::remove` give it; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
+and `Vec::remove` work; `Insert` at `Count` appends the item, as `Add` does (§12, the owner, 2026-11-01,
 "C# names, RemoveAt gives item"). The item `RemoveAt` gives may be dropped, as the map's `Remove` gives
 one (M9), and both take the list through a `mut` variable (M5) *(assumed, §12)*. Their parameters are
-named `index` and `item`, and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
+`int index` and `item`, as C#'s are, an index of another type widened or refused as for any `int`
+parameter (T7), and a `Bytes` has both, as it has the list's other members *(assumed, §12)*.
 
 Case: [strings/list-insert-remove-at.kz](../corpus/strings/list-insert-remove-at.kz)
 ```kurz
@@ -857,9 +923,24 @@ print(zs)
 
 An index outside the list raises `index-out-of-range`, as a list's index does (M9; §12, the same answer):
 for `Insert` an index below 0 or past `Count`, for `RemoveAt` an index below 0 or at `Count` or past it
-*(assumed, §12: below 0, as C# throws and Rust panics there)*. The index is read before the list is copied
-or grows, so that the list stays as it was, and an `Insert` past the largest `int` of items raises
-`allocation-failed`, as `Add` does (M9) *(assumed, §12)*.
+*(assumed, §12: below 0, and `Count` for `RemoveAt`, as C# throws and Rust panics there)*. The arguments
+are read in the order written, as every call reads them (F12), and the index is then checked before the list
+is copied or grows, so that an `Insert` or a `RemoveAt` outside the list leaves it, and every value that
+shares its block, as it was, and an `Insert` past the largest `int` of items raises `allocation-failed`, as
+`Add` does (M9) *(assumed, §12)*.
+
+Case: [strings/list-insert-argument-order.kz](../corpus/strings/list-insert-argument-order.kz)
+```kurz
+string Item() {
+    print("item")
+    return "b"
+}
+
+mut xs = ["a"]
+// the arguments are read in the order written, and the index is checked after them
+xs.Insert(5, Item())
+print(xs)
+```
 
 Case: [strings/list-insert-below-zero.kz](../corpus/strings/list-insert-below-zero.kz)
 ```kurz
@@ -893,7 +974,7 @@ print(xs.RemoveAt(1))
 print(xs.RemoveAt(1))
 ```
 
-On a list no `mut` variable holds, each is `mut-required`, as `Add` is (M5).
+On a list no `mut` variable holds, each is `mut-required`, as `Add` is (M5) *(assumed, §12)*.
 
 Case: [strings/list-insert-without-mut.kz](../corpus/strings/list-insert-without-mut.kz)
 ```kurz
@@ -907,12 +988,3 @@ Case: [strings/list-remove-at-without-mut.kz](../corpus/strings/list-remove-at-w
 xs = [1]
 print(xs.RemoveAt(0))
 ```
-
-### X10 (decided, §12) Where the error line of `not-char-boundary` names the position
-
-The position of the cut stands on the line below the error line, where the text of a `throw` stands
-(O6): `error: not-char-boundary at a.kz:5:`, then `byte 2 is inside a code point` (§12, the owner,
-2026-10-31, "Below, as throw text"). The error line ends with a colon, as the line of a `throw` does
-*(assumed, §12)*.
-
-No case: a case pins the id and the line of the error (E3), and no case reads the lines below it.

@@ -265,6 +265,23 @@ public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// T35: the constant a call gives a type parameter that holds one, of the parameter's type: a value of an <c>enum</c> by its place
+/// among the enum's values, an integer, a <c>bool</c> or a <c>char</c>; it stands in a copy's list of type arguments beside the
+/// types, and is never the type of a value.
+/// </summary>
+public sealed record ConstantArgument(KurzType Of, Constant Value) : KurzType
+{
+    public override string Text => Value switch
+    {
+        EnumConstant e when Of is EnumType en => $"{en.Symbol.Name}.{en.Symbol.Values[e.Index]}",
+        IntegerConstant i => i.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        BoolConstant b => b.Value ? "true" : "false",
+        CharConstant c => $"'{char.ConvertFromUtf32(c.Value)}'",
+        _ => throw new InvalidOperationException($"a constant argument of `{Of.Text}`"),
+    };
+}
+
 /// <summary>The one instance of each built-in type, and what the chapters say about them.</summary>
 public static class Types
 {

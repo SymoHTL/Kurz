@@ -72,14 +72,14 @@ public sealed partial class Checker
         {
             switch (member)
             {
-                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & Modifiers.Static) != 0 && (modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)) != 0:
-                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Static | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a `static` field (K7, K18, R13)");
+                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & Modifiers.Static) != 0 && (modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Static | Modifiers.Mut)) != 0:
+                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Static | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a `static` field (K7, K18, R13)");
                 case FieldDeclaration { Modifiers: var modifiers } when (modifiers & Modifiers.Static) != 0:
                     break; // K7, K18: read with the class (ResolveStaticField)
                 case FieldDeclaration { Type: null } f:
                     return (f.Line, "a field of a class body without a written type (K7, V2)");
-                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & ~(Modifiers.Pub | Modifiers.Mut)) != 0:
-                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a field (K7, F9)");
+                case FieldDeclaration { Modifiers: var modifiers } f when (modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Mut)) != 0:
+                    return (f.Line, $"the modifier `{(modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a field (K7, F9)");
                 case FieldDeclaration:
                     break; // K7: read with the class (ResolveClass)
                 case ConstructorDeclaration c:
@@ -539,7 +539,7 @@ public sealed partial class Checker
     /// <summary>
     /// K7, F1: the parameter and result types of each method. A method takes no <c>mut</c> marker, which is for values (K9, M5): one
     /// written is text no rule gives a meaning (E4), and so is <c>naked</c> before a method (R12). Two methods of one name with the same
-    /// parameters are <c>duplicate-function</c>, as two functions are (F13).
+    /// parameters are <c>duplicate-function</c>, as two functions are (F12).
     /// </summary>
     private void ResolveMethods()
     {
@@ -567,7 +567,7 @@ public sealed partial class Checker
                 {
                     if (list.Take(i).Any(earlier => SameParameters(earlier, list[i])))
                     {
-                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F13)");
+                        Report(ErrorIds.DuplicateFunction, list[i].Line, $"`{symbol.Name}` has a method `{list[i].Name}` with these parameter types already (F12)");
                     }
                 }
             }
@@ -1019,9 +1019,9 @@ public sealed partial class Checker
     {
         if (symbol.StaticField(m.Member) is { } field)
         {
-            if (!field.IsPub && !ReferenceEquals(CurrentClass(), symbol))
+            if (!field.IsPub && !ReferenceEquals(CurrentClass(), symbol) && !(field.IsInternal && InFolder(symbol)))
             {
-                Report(ErrorIds.NotVisible, m.Line, $"`{field.Name}` of `{symbol.Name}` is private to its class: a field is visible outside it with `pub` (F9)");
+                Report(ErrorIds.NotVisible, m.Line, Hidden(field.Name, symbol, field.IsInternal, "a field"));
                 return Typed.Error;
             }
 
@@ -1122,22 +1122,38 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
-    /// <summary>F9: a field of a class body without <c>pub</c> is private to its class; a use of it from outside the class is <c>not-visible</c>.</summary>
+    /// <summary>
+    /// F9: a field of a class body without <c>pub</c> is private to its class, and one marked <c>internal</c> to the folder that declares
+    /// its class; a use of it from outside is <c>not-visible</c>.
+    /// </summary>
     private bool FieldVisible(FieldSymbol field, ClassSymbol owner, int line)
     {
-        if (field.IsPub || ReferenceEquals(CurrentClass(), owner))
+        if (field.IsPub || ReferenceEquals(CurrentClass(), owner) || (field.IsInternal && InFolder(owner)))
         {
             return true;
         }
 
-        Report(ErrorIds.NotVisible, line, $"`{field.Name}` of `{owner.Name}` is private to its class: a field is visible outside it with `pub` (F9)");
+        Report(ErrorIds.NotVisible, line, Hidden(field.Name, owner, field.IsInternal, "a field"));
         return false;
     }
 
-    /// <summary>F9: a method without <c>pub</c> is private to its class, and one with <c>prot</c> visible in the classes derived from it too; a call of it from elsewhere is <c>not-visible</c>.</summary>
+    /// <summary>F9: a method without <c>pub</c> is private to its class, one marked <c>internal</c> to the folder that declares its class, and one with <c>prot</c> visible in the classes derived from it too; a call of it from elsewhere is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>
         (method.Declaration!.Modifiers & Modifiers.Pub) != 0 || ReferenceEquals(CurrentClass(), method.Owner)
-        || ((method.Declaration.Modifiers & Modifiers.Prot) != 0 && CurrentClass() is { } current && current.HasBaseOrIs(method.Owner!));
+        || ((method.Declaration.Modifiers & Modifiers.Prot) != 0 && CurrentClass() is { } current && current.HasBaseOrIs(method.Owner!))
+        || ((method.Declaration.Modifiers & Modifiers.Internal) != 0 && InFolder(method.Owner!));
+
+    /// <summary>
+    /// F9: whether the folder this checker reads declared <paramref name="owner"/>, so that its <c>internal</c> members are visible here,
+    /// as C#'s <c>internal</c> is in its assembly (the owner, 2026-11-02 and 2026-11-03). A class of <c>std/</c> that the prelude brings into
+    /// a file (W1) is the symbol <c>std/</c>'s checker made, and the one class a file reaches from another folder.
+    /// </summary>
+    private bool InFolder(ClassSymbol owner) => std is null || !ReferenceEquals(std.classes.GetValueOrDefault(owner.Name), owner);
+
+    /// <summary>F9: the text of <c>not-visible</c> for a member of <paramref name="owner"/> used where it is not visible.</summary>
+    private static string Hidden(string member, ClassSymbol owner, bool isInternal, string kind) => isInternal
+        ? $"`{member}` of `{owner.Name}` is `internal` to the folder that declares its class: {kind} is visible outside that folder with `pub` (F9)"
+        : $"`{member}` of `{owner.Name}` is private to its class: {kind} is visible outside it with `pub` (F9)";
 
     /// <summary>K7, F13: a call of a method on an instance, <c>c.Add(1)</c>, the one of its name whose parameters fit; a private one from outside its class is <c>not-visible</c> (F9).</summary>
     private Typed CallMethod(ClassType type, MemberAccess m, CallExpression c, KurzType? expected)
@@ -1194,7 +1210,7 @@ public sealed partial class Checker
         {
             Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
                 ? $"`{picked.Name}` of `{picked.Owner!.Name}` is `prot`, visible in its class and the classes derived from it (F9)"
-                : $"`{picked.Name}` of `{picked.Owner!.Name}` is private to its class: a method is visible outside it with `pub` (F9)");
+                : Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, "a method"));
             return Typed.Error;
         }
 
@@ -1547,7 +1563,14 @@ public sealed partial class Checker
         while (queue.Count > 0)
         {
             var (at, mut) = queue.Dequeue();
-            foreach (var (to, field) in edges[at])
+            if (!edges.TryGetValue(at, out var fields))
+            {
+                // W1: a class of std/ that the prelude brings into the file, whose fields std/'s checker judged; it names no class of
+                // the file, so no ring of the file runs through it
+                continue;
+            }
+
+            foreach (var (to, field) in fields)
             {
                 var next = (to, mut || field.Mut);
                 if (ReferenceEquals(to, start) && next.Item2)

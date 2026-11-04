@@ -194,6 +194,9 @@ public sealed partial class Clang
     [GeneratedRegex(@"^#define (\w+) ", RegexOptions.Multiline)]
     private static partial Regex MacroText();
 
+    [GeneratedRegex(@"^#define __ARM_\w* .*$", RegexOptions.Multiline)]
+    private static partial Regex ArmText();
+
     /// <summary>
     /// The CPU clang knows by <paramref name="name"/>, <c>native</c> among them, as a build that names it compiles for (design record,
     /// section 2): the classes of intrinsics it has, from the macros clang defines for it (R18), and the features clang's driver passes
@@ -201,22 +204,34 @@ public sealed partial class Clang
     /// machine's architecture, with the target clang builds for in <paramref name="target"/>; a <see cref="ToolchainException"/> where
     /// clang fails otherwise.
     /// </summary>
-    public Cpu? DescribeCpu(string name, bool x86, out string target)
+    public Cpu? DescribeCpu(string name, bool x86, out string target) => DescribeCpu(name, x86, null, out target);
+
+    /// <summary>
+    /// <see cref="DescribeCpu(string, bool, out string)"/> for the target <paramref name="triple"/> names, the machine's where it is null:
+    /// on a 64-bit Arm machine clang's driver refuses a CPU it does not know already in the run that shows its target, where on x86-64
+    /// the run of the macros refuses it.
+    /// </summary>
+    internal Cpu? DescribeCpu(string name, bool x86, string? triple, out string target)
     {
         var work = Directory.CreateTempSubdirectory("kurz-cpu-");
         try
         {
             var empty = System.IO.Path.Combine(work.FullName, "cpu.c");
             File.WriteAllText(empty, string.Empty);
-            var flag = CpuFlag(name, x86);
-            var (driverCode, _, driver) = Processes.Capture(Path, [flag, "-###", "-c", empty], work.FullName, TimeSpan.FromSeconds(30));
+            string[] flags = triple is null ? [CpuFlag(name, x86)] : [$"--target={triple}", CpuFlag(name, x86)];
+            var (driverCode, _, driver) = Processes.Capture(Path, [.. flags, "-###", "-c", empty], work.FullName, TimeSpan.FromSeconds(30));
             target = TargetText().Match(driver) is { Success: true } t ? t.Groups[1].Value : "the default target";
+            if (driverCode != 0 && driver.Contains($"unsupported argument '{name}' to option '-mcpu='", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
             if (driverCode != 0)
             {
                 throw new ToolchainException($"{Path} exited with {driverCode.ToString(CultureInfo.InvariantCulture)} and wrote:\n{driver.TrimEnd()}");
             }
 
-            var (code, macros, error) = Processes.Capture(Path, [flag, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
+            var (code, macros, error) = Processes.Capture(Path, [.. flags, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
             if (code != 0 && error.Contains("unknown target CPU", StringComparison.Ordinal))
             {
                 return null;
@@ -233,7 +248,20 @@ public sealed partial class Clang
                 .Select(c => c.Name)
                 .ToList();
             var features = DriverText().Matches(driver).Where(m => m.Groups[1].Value == "feature").Select(m => m.Groups[2].Value).ToList();
-            return new Cpu(name, classes, features, x86);
+
+            // the sets beyond the target's baseline, which the start check reads (section 2, the owner, 2026-11-02): x86-64's by the
+            // macros that name a set, a 64-bit Arm CPU's by the lines of its `__ARM_` macros, their values among them
+            string[] baselineFlags = [.. flags.SkipLast(1), .. x86 ? [CpuFlag("x86-64", x86: true)] : Array.Empty<string>()];
+            var (baselineCode, baseline, baselineError) = Processes.Capture(Path, [.. baselineFlags, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
+            if (baselineCode != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {baselineCode.ToString(CultureInfo.InvariantCulture)} and wrote:\n{baselineError.TrimEnd()}");
+            }
+
+            var sets = x86
+                ? defined.Where(CpuSets.NamesASet).Except(MacroText().Matches(baseline).Select(m => m.Groups[1].Value), StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList()
+                : ArmText().Matches(macros).Select(m => m.Value.TrimEnd()).Except(ArmText().Matches(baseline).Select(m => m.Value.TrimEnd()), StringComparer.Ordinal).ToList();
+            return new Cpu(name, classes, features, x86) { Sets = sets };
         }
         finally
         {
