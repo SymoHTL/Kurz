@@ -27,6 +27,9 @@ stream's buffer, and writes it with the response after it in one write. That is 
 
 What the holding must keep, each with its case:
 
+- **A hold only while the next head stands whole in the buffer.** A response held while the next request is
+  still arriving, or has not been sent, waits for a client that waits for it, until a timeout of the read
+  (`serve-keep-alive`, `serve-head`, `serve-drain`, `serve-accept`).
 - **The order of what the client gets.** Held responses go out before a refusal and before the
   writer's own `500`, in the same write (`serve-refused`, `serve-close`).
 - **What a handler may wait on.** Held responses go out before the handler of a request with a body
