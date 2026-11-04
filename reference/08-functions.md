@@ -500,10 +500,10 @@ long big = 5
 Show(big)
 ```
 
-A call that does not fit the one function of its name is `type-mismatch` (T1), a value of one type
-where another is required, and not `argument-mismatch`, and so is a call whose argument is a call
-with a case the parameter's union does not list (O4) *(assumed, §5: as the outcomes chapter reads
-both)*.
+A call of a name that has one function, with an argument of a type its parameter does not take, is
+`type-mismatch` (T1), a value of one type where another is required, and not `argument-mismatch`,
+and so is a call of such a name whose argument is a call with a case the parameter's union does not
+list (O4) *(assumed, §5: as the outcomes chapter reads both)*.
 
 Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
 ```kurz
