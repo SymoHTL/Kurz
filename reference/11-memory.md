@@ -178,7 +178,7 @@ Case: [http/stream-cycle.kz](../corpus/http/stream-cycle.kz)
 ```kurz
 // a function that writes a response's body and reads a class that holds a `mut` response closes a ring through the response's
 // function, which the cycle rule refuses, while a handler that reads that class closes none, since the response's function cannot
-// be a handler (R9, assumed)
+// be a handler (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class App(mut HttpResponse Cached)
 
 void Keep((HttpRequest) => HttpResponse handler) {

@@ -1954,7 +1954,9 @@ void Unread() {
 ### W11 (decided, §12) A streamed response
 
 A handler streams a body by `HttpResponse.Stream(status, (HttpWriter w) => ...)`, a function of the
-type `(HttpWriter) => void | IoError`: the writer writes the head and calls the function, each
+type `(HttpWriter) => void | IoError`: the server writes the head and then calls the function
+*(assumed: in the system call of the function's first write, or at its return where it wrote nothing,
+as `Results.Stream` on Kestrel sends it; put to the owner, #110, comment 6645606334)*, each
 `w.Write` sends one chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body
 goes without chunks and the close of the connection ends it; and the writer lives only inside the
 call (§12, the owner, 2026-11-03, "A response can be streamed"). The function takes its writer
@@ -1975,8 +1977,8 @@ head alone; the function's `IoError` ending the body without its last chunk, the
 no write sent it, and `Write` and `ServeConnection` giving that error; the function reading the
 request's body while it writes, what it left unread drained after it and the connection closing
 where that is past `MaxDrainSize` or the request still awaits `100 Continue`, a read before the head
-went out sending `100 Continue` and none after it; no bound on the stream's whole time; and the head
-going out with the first write, and the CR LF that ends a chunk with the write after it; and the
+went out sending `100 Continue` and none after it; no bound on the stream's whole time; the CR LF
+that ends a chunk going out with the write after it; and the
 end of the body after the function's return held where the next request's head stands whole in the
 stream's buffer, as a response is held (W9), and written with the response after it)* The
 response holds its function in a field of a function type, so that a function that reads a class
