@@ -4438,6 +4438,28 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_cycle_that_grows_through_a_loop_over_T_Fields_is_refused_at_the_call_in_the_loop_with_no_copy()
+    {
+        // T34 with T33: of a function that reads its type, the walk reads the calls in a loop over `T.Fields` on its text, called or not, and
+        // refuses a cycle that grows there at that call, with no copy made, so that the bound of T33 does not report it too (the owner,
+        // 2026-11-03, Q2 (b) and Q3 (a)); a type argument that is the field's type takes no part (Q4 (a)), and a cycle that leaves the loop
+        // through a call outside it, which the walk does not read, keeps the bound of T33
+        static List<string> Texts(string program) => [.. Check(program).Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}")];
+        const string Deep = "data Box<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        Assert.Equal(["growing-type-argument 6: `Deep` calls itself with `Box<T>` for `T`, a type larger than its `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)", "Deep(Box(1), 3)")));
+
+        var leaving = string.Format(Deep, "Wrap(Box(x), n - 1)", "void Wrap<U>(U y, int n) {\n    Deep(y, n)\n}\n\nDeep(Box(1), 3)");
+        Assert.Equal(["15: a chain of more than 64 copies of generic functions that read their type, from `Deep<Box<int>>` (T33)"], NotSupported(leaving));
+
+        Clean("data Point(int X, int Y)\ndata Shape(string Name, Point Corner)\n\nstring Show<T>(T value) => match T.Kind {\n    TypeKind.Data => Fields(value)\n"
+            + "    else => \"{value}\"\n}\n\nstring Fields<T>(T value) {\n    mut text = \"\"\n    for f in T.Fields {\n        f.Type part = f.Get(value)\n"
+            + "        shown = Show<f.Type>(part)\n        text = \"{text}{f.Name}=({shown});\"\n    }\n    return text\n}\n\nprint(Show(Shape(\"box\", Point(1, 2))))");
+    }
+
+    [Fact]
     public void A_member_named_as_a_type_reading_keeps_its_meaning_on_a_name_that_is_no_type_parameter()
     {
         // T33 reads the members of a type parameter alone: an enum's own value `Kind` stays a value of the enum

@@ -342,11 +342,15 @@ public sealed partial class Checker
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
             }
+            else
+            {
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone
+            }
         }
 
         CheckMethodBodies(); // K7
         JoinPassingReaders();
-        FindGrowingCycles(); // T34: after the readers are known, which it does not read
+        FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -2467,7 +2471,10 @@ public sealed partial class Checker
             DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
         }
 
+        var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
+        fieldsLoopDepth -= fields ? 1 : 0;
         PopScope();
         if (untyped && f.Arms is not null)
         {
