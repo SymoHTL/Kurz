@@ -766,13 +766,17 @@ def self_test():
     old = verdict(behind=2)[1]
     case("taking main: below the cap a branch behind its base is told to update it, as before",
          taking_main(kit.ROUND_CAP - 1, told.get("review"), "main") is None and old == ["the branch is 2 commits behind main: update it and let the checks run"], old)
+    # the owner's choice as its words, not the tool's constant: a change of the words of OWNERS_CHOICE turns the cases
+    # that read it red (#156, comment 6604118922)
+    choice = ("makes the review of the new head end as `cap` before any pass, and the merge needs the owner's choice: "
+              "a paid round, over red at the new head, or hold")
     got = taking_main(kit.ROUND_CAP, told.get("review"), "main")
     refused = verdict(behind=2, costs=got)[1]
     case("taking main: the real status of a round that did not converge on one file says that taking main makes the review of the new head end as cap before any pass and needs the owner's choice",
-         len(unconverged) >= 1 and "did not converge on 1 files" in (got or "") and (got or "").endswith(f"taking main {OWNERS_CHOICE}")
+         len(unconverged) >= 1 and "did not converge on 1 files" in (got or "") and (got or "").endswith(f"taking main {choice}")
          and refused == [f"the branch is 2 commits behind main: {got}"], (got, refused))
     got = taking_main(kit.ROUND_CAP, told_too.get("review"), "main")
-    replays, otherwise = "replays from the cache, as no round, where main changed none", f"; otherwise taking main {OWNERS_CHOICE} ("
+    replays, otherwise = "replays from the cache, as no round, where main changed none", f"; otherwise taking main {choice} ("
     case("taking main: the real status of a round that converged names the conditions of a replay and the entry, and the owner's choice where they do not hold",
          len(converged) >= 1 and "converged on every file" in (got or "") and "a-review-the-cache-answers-is-no-round.md" in (got or "")
          and replays in (got or "") and otherwise in (got or "") and (got or "").index(replays) < (got or "").index(otherwise)
@@ -786,7 +790,7 @@ def self_test():
     got = {name: taking_main(kit.ROUND_CAP, post, "main") for name, post in unknown.items()}
     case("taking main: a head not known to have converged is told what a round that did not converge is told, with the state read",
          unknown["error"] is not None and "review did not complete: cap: " in (got["error"] or "")
-         and all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}")
+         and all("is not known" in (text or "") and (text or "").endswith(f"taking main {choice}")
                  and ("no review status" if unknown[name] is None else f"review is {unknown[name]['state']}") in text
                  for name, text in got.items()), got)
     writer = "f\"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}\""
