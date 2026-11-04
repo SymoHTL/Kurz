@@ -198,6 +198,22 @@ e = HttpError(HttpKind.Protocol, "malformed response: no status line")
 print(e.Text())
 ```
 
+### W3 (decided, §12) A server's request sent to another actor moves with its body
+
+A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
+connection's socket: the handler keeps neither, and the connection waits for the handler's
+response, as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02,
+issue 110, comment 6573113786, against refusing a server's request that has a body as not
+sendable). The send is written with `move`, as the send of a mutable class instance is (§12, the
+owner, 2026-11-03, issue 110, comment 6600034158). The response is written when the handler
+returns. The moved body stays the other actor's to read to its end: every read gives the body's
+bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
+connection reads its next request only after that, with no new kind of error (§12, the owner,
+2026-11-03, issue 39, comment 6601737306). A request a client builds is sent as any value is (§12).
+
+No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
+build, so that the move is not built either.
+
 ### W4 (decided, §12) `HttpHeaders`
 
 `HttpHeaders` is an ordered list of names and values, a class of `std/`: `h.Get(name)` gives the
