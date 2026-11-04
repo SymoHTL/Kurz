@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
@@ -11,7 +13,8 @@ namespace Kurz.Compiler.Tests;
 /// which a case cannot hold since it is the time of the run, read through a function an edited std/ adds and held to .NET's
 /// <c>"r"</c> form of the same second; a handler that throws, which ends the program at the throw, where a corpus case would name
 /// the rules of the throw and not the server's; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at
-/// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>.
+/// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; and the time a write of a response is given (W10), which
+/// needs a client that reads beside the server's loop, a second thread no corpus case has.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -111,5 +114,96 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((3, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+    }
+
+    [Fact]
+    public async Task A_write_of_a_response_is_given_the_longer_of_the_grace_and_its_length_at_the_rate()
+    {
+        // W10 (assumed, section 12, as Kestrel gives it): a response of 32 MiB at 10 MB a second has 3.3 seconds for its write, so a
+        // client that stops reading for 500 ms, five times the grace of 100 ms, still gets every byte; a write held to the grace alone
+        // ends in the pause, the connection closed with the body cut. 32 MiB is more than the buffers of the connection hold, so the
+        // server's write waits in the pause. The client is this test's socket, beside the program's loop
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 65536 {
+                    piece.Add(122)
+                }
+
+                mut body = Bytes()
+                while body.Count < 33554432 {
+                    body.AddRange(piece)
+                }
+
+                large = HttpResponse.Bytes(200, body)
+                HttpServer.ServeConnection(server, (HttpRequest r) => large, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-pace");
+        var free = new TcpListener(IPAddress.Loopback, 0);
+        free.Start();
+        var port = ((IPEndPoint)free.LocalEndpoint).Port;
+        free.Stop();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var got = new MemoryStream();
+        var paused = false;
+        using (var client = Connect(port, run))
+        {
+            var stream = client.GetStream();
+            stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
+            var buffer = new byte[65536];
+            int n;
+            while ((n = stream.Read(buffer)) > 0)
+            {
+                got.Write(buffer, 0, n);
+                if (!paused && got.Length >= 1 << 20)
+                {
+                    paused = true;
+                    await Task.Delay(500);
+                }
+            }
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n"), (code, error, output));
+        var bytes = got.ToArray();
+        var body = bytes.Length - (bytes.AsSpan().IndexOf("\r\n\r\n"u8) + 4);
+        Assert.Equal((true, 33554432), (paused, body));
+    }
+
+    /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
+    private static TcpClient Connect(int port, Task program)
+    {
+        while (true)
+        {
+            try
+            {
+                return new TcpClient("127.0.0.1", port);
+            }
+            catch (SocketException) when (!program.IsCompleted)
+            {
+                Thread.Sleep(20);
+            }
+        }
     }
 }

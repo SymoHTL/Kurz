@@ -1799,7 +1799,8 @@ All() else {
 The server's loop holds a request's head to `RequestHeadersTimeout` from its first byte and its body
 to `MinRequestBodyDataRate` after that rate's grace, and a request that falls under either is answered
 `408 Request Timeout` and its connection closes, the handler's response unwritten (§12, the owner,
-2026-11-01, "Kestrel's bounds", and assumed); it holds a response to `MinResponseDataRate` after its
+2026-11-01, "Kestrel's bounds", and assumed), and `ServeConnection` gives the `HttpError` of that refused request,
+`HttpError(Protocol, "request timed out")` (§12, the owner, 2026-11-03, "The server's error texts mirror the client's"); it holds a response to `MinResponseDataRate` after its
 grace, and under it the connection closes, since its status has gone out (§12, the owner, 2026-11-01,
 "Add Kestrel's response rate"); and an idle connection closes without an answer at `KeepAliveTimeout`
 (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03). *(assumed, §12, not put to
@@ -1814,7 +1815,7 @@ Case: [http/serve-timeouts.kz](../corpus/http/serve-timeouts.kz)
 ```kurz
 // a head that does not arrive whole within `RequestHeadersTimeout` from its first byte, and a body whose reads fall under
 // `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection, the handler's response
-// unwritten; a response whose write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate
+// unwritten, and the connection gives `HttpError(Protocol, "request timed out")`; a response whose write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate
 // closes it, since its status has gone out
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
     listener = TcpListener.Bind("127.0.0.1:0") else {

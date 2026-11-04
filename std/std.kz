@@ -6813,8 +6813,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
             IoError e => {
                 if e.Kind == IoKind.TimedOut {
                     HttpRefuse(s, mut pending, 408, date) else {
-                        IoError lost => return e
+                        IoError lost => return HttpTimedOut()
                     }
+
+                    return HttpTimedOut()
                 }
 
                 return e
@@ -6837,10 +6839,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 body = r.Body
                 if body.TimedOut {
                     HttpRefuse(s, mut pending, 408, date) else {
-                        IoError lost => return IoError(IoKind.TimedOut, 0, "")
+                        IoError lost => return HttpTimedOut()
                     }
 
-                    return IoError(IoKind.TimedOut, 0, "")
+                    return HttpTimedOut()
                 }
 
                 if body.Failed || body.AwaitsContinue {
@@ -6850,8 +6852,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                         IoError e => {
                             if e.Kind == IoKind.TimedOut {
                                 HttpRefuse(s, mut pending, 408, date) else {
-                                    IoError lost => return e
+                                    IoError lost => return HttpTimedOut()
                                 }
+
+                                return HttpTimedOut()
                             }
 
                             return e
@@ -6890,6 +6894,10 @@ void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string dat
 
     HttpFlush(s, mut pending)
 }
+
+// The error a connection gives where the server answered its request `408 Request Timeout`, among the server's texts of the kind
+// `Protocol` (W10; section 12, the owner, 2026-11-03, "The server's error texts mirror the client's").
+HttpError HttpTimedOut() => HttpError(HttpKind.Protocol, "request timed out")
 
 // Sets the time of the stream's next read to what is left until `deadline`, at most the 5 seconds of a read on a socket, and gives
 // `TimedOut` where nothing is left (W10).
