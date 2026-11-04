@@ -35,13 +35,16 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   Gate: `self-tests`.
 - A self-test never starts the replay. A self-test that reaches `red_proof.replay()` starts the whole
   replay again inside itself, without end: on 2026-11-02 a mutation of the evidence tool's
-  `--self-test` dispatch made its self-test fall through to the writing mode, which replays the
-  ledger ([knowledge/a-replay-inside-a-replay-has-no-end.md](knowledge/a-replay-inside-a-replay-has-no-end.md)).
+  `--self-test` dispatch made its self-test fall through to the recompute that `--print` runs, which
+  replays the ledger ([knowledge/a-replay-inside-a-replay-has-no-end.md](knowledge/a-replay-inside-a-replay-has-no-end.md)).
   `tools/red_proof.py` marks every self-test it starts with `KURZ_RED_PROOF_REPLAY`, and a replay
-  that finds the mark refuses before it copies anything. A mutation is proved against stand-ins,
-  never against a real replay. Gate: `self-tests` (the cases of the refusal and of the mark, and
-  their red proofs); `check()`, which runs the self-tests in the tree it is given and has no such
-  guard, called from a self-test on the real tree: review rule "tools".
+  that finds the mark refuses before it copies anything. A case whose mutation would reach
+  `replay()` reaches stand-ins for the copy and the check, and the case of `tools/red_proof.py` that
+  calls it with the mark cleared runs it only while both stand-ins are in place. Gate: `self-tests`
+  (the cases of the refusal, of the mark and of the stand-ins, and their red proofs). A mutation
+  proved by hand, outside the ledger, runs with the mark set, in a process group of its own, under
+  a timeout that ends the group; and no self-test calls `check()`, which runs the self-tests in the
+  tree it is given and has no such guard, on the real tree: `judgment step`.
 - `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
   builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
   dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
@@ -345,7 +348,9 @@ Gate: review rule "rules for sessions".
   construct that keeps what it read past a call or a statement either takes a count or rests on a
   refusal of the checker; two that did neither reached `main` with pull request 63, a refusal
   whose walk missed an assignment in an arm reached it with pull request 64, and two in an
-  interpolation, a string's hole and one hole that was the string itself, with pull request 78
+  interpolation, a string's hole and one hole that was the string itself, with pull request 78, and a
+  key of `SortBy` that changed the list it sorted through an instance, which the methods of pull
+  request 181 made possible (the line `sortby-change-fenced` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`
@@ -387,6 +392,16 @@ Gate: review rule "rules for sessions".
   for the field's place) for the `mut` argument; another check that lets such a name pass: review
   rule "compiler".
 
+- **A walk over the classes of a file reads a class of `std/` that is not in its tables.** A class
+  of `std/` that the prelude names (W1) reaches a file as the symbol `std/`'s checker made, so a
+  table that holds the file's own classes, filled from `classDeclared`, has no entry for it. The
+  cycle rule's walk reached `main` so with pull request 276. It looked up every class a field
+  reached, and a class of the program with a field of `HttpHeaders` stopped the checker with
+  `KeyNotFoundException`
+  ([knowledge/a-class-of-std-is-no-class-of-the-file.md](knowledge/a-class-of-std-is-no-class-of-the-file.md)).
+  Gate: `compiler-tests` (`CheckerTests.A_class_of_the_file_may_hold_a_class_of_std_in_its_fields`)
+  for the cycle rule; another walk keyed by the file's classes: review rule "compiler".
+
 ### A public repository
 
 - **Future plans stay out**: what gets built when, steps, milestones, schedules, the order in
@@ -418,6 +433,15 @@ Gate: review rule "rules for sessions".
   threads. What only the tool adds (the exact head, the last scan of the title and the
   description, the read-back of the settings) is not held against a merge by the button:
   HAZARD (#14).
+- **A merged branch is deleted with `py -3 tools/merge_pr.py --delete-branch <pr>`**, never with
+  `git push origin --delete` or a button. The forge closes every open pull request whose base is a
+  branch deleted that way: on 2026-11-01 the deletion of the branch of pull request 188 closed pull
+  request 192, which was reopened by hand
+  ([knowledge/a-deleted-branch-closes-the-pull-requests-on-it.md](knowledge/a-deleted-branch-closes-the-pull-requests-on-it.md)).
+  The command gives every open pull request on the branch the merged pull request's base, reads the
+  list again and deletes the branch only when none is left on it. Gate: `self-tests` (the merge
+  tool's cases "delete:"); a deletion by hand or by a button skips the command, as a merge by the
+  button skips the merge tool: HAZARD (#14).
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
   head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
   at the review cap (the rule "A pull request gets at most one review round" below) carries the
@@ -478,13 +502,13 @@ Gate: review rule "rules for sessions".
   [knowledge/a-round-that-did-not-converge-makes-main-a-round.md](knowledge/a-round-that-did-not-converge-makes-main-a-round.md)).
   The merge tool's refusal of a branch behind `main` at the cap says whether the round converged on
   every file of the head, from the head's `review` status. Where it did not, or where the status does
-  not show it, the refusal says that taking `main` costs a paid round and that the merge needs the
-  owner's choice. Gate: `self-tests` (the count, the label before
+  not show it, the refusal says that taking `main` makes the review of the new head a paid round and
+  that the merge needs the owner's choice. Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
   `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a
   branch behind `main` at the cap, `merge_pr.taking_main`); what the reading says,
-  starting no run at the cap and the rest of the check that a head replays (what `main` changed) are a `judgment step`; a
+  starting no run at the cap and the rest of the check that a head replays (what `main` changed, and whether the title and the description are as the round read them) are a `judgment step`; a
   label taken off or put on by hand, a second open issue that carries the label, two runs of one
   pull request that start at the same moment, and a dry run, which puts on no label: HAZARD (#41).
   The gates job lists the ticket with `issues: read`, which `ci-config` pins.

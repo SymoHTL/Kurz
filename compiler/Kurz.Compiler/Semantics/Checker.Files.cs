@@ -64,7 +64,9 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S9: a listener's
+    /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S24: their
+    /// <c>Fill(mut into)</c>, whose success is the count it appended, as a <c>Read</c>'s is (section 12, assumed), and <c>Consume(n)</c>,
+    /// as Rust's <c>BufRead::fill_buf</c> and <c>BufRead::consume</c> (section 12, the owner, 2026-11-03); S9: a listener's
     /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
     /// a <c>duration?</c> (section 12, assumed), <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (the
     /// owner, 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do
@@ -85,6 +87,8 @@ public sealed partial class Checker
         (CallKind Kind, List<Slot> Slots, KurzType Success)? method = m.Member switch
         {
             "Read" when !listener => (CallKind.FileRead, [new Slot("into", bytes, true, false, false), new Slot("max", Types.Int, false, false, false)], Types.Int),
+            "Fill" when !listener => (CallKind.FileFill, [new Slot("into", bytes, true, false, false)], Types.Int),
+            "Consume" when !listener => (CallKind.FileConsume, [new Slot("n", Types.Int, false, false, false)], Types.Void),
             "Write" when !listener => (CallKind.FileWrite, [new Slot("bytes", bytes, false, false, false)], Types.Void),
             "Accept" when listener => (CallKind.TcpAccept, [], Types.TcpStream),
             "SetReadTimeout" when stream => (CallKind.TcpSetReadTimeout, [timeout], Types.Void),
@@ -96,7 +100,7 @@ public sealed partial class Checker
         };
         if (method is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"{Types.A(handle)} has no member `{m.Member}` (S3 to S5, S9, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"{Types.A(handle)} has no member `{m.Member}` (S3 to S5, S9, S24, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

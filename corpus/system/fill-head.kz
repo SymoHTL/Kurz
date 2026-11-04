@@ -1,0 +1,67 @@
+// expect: output
+// | head 27
+// | hello
+// | 0
+// rules: S24
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// the index after the first blank line, "\r\n\r\n", in `bytes`, or -1 where it has none
+int HeadEnd(Bytes bytes) {
+    for i in 3..<bytes.Count {
+        if bytes[i - 3] == byte(13) && bytes[i - 2] == byte(10) && bytes[i - 1] == byte(13) && bytes[i] == byte(10) {
+            return i + 1
+        }
+    }
+
+    return -1
+}
+
+// a request's head read from a stream without taking what follows it: each fill appends what the buffer holds, the bytes before the
+// blank line are consumed, and the body after it is left to the reads that follow
+void | IoError Serve() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET / HTTP/1.1\r\nHost: a\r\n\r\nhello".Bytes)
+    client.ShutdownWrite()
+    mut head = Bytes()
+    mut end = -1
+    while end < 0 {
+        before = head.Count
+        got = server.Fill(mut head)
+        if got == 0 {
+            print("no head")
+            return
+        }
+
+        end = HeadEnd(head)
+        if end < 0 {
+            server.Consume(got)
+        } else {
+            server.Consume(end - before)
+        }
+    }
+
+    print("head {end}")
+    mut body = Bytes()
+    mut more = 1
+    while more > 0 {
+        more = server.Read(mut body, 100)
+    }
+
+    print(Text(body))
+    print(server.Fill(mut body))
+    server.Close()
+    client.Close()
+}
+
+Serve() else {
+    IoError e => print(e)
+}
