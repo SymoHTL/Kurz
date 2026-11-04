@@ -558,8 +558,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ConstantOverflow, 4)], Errors("T Pick<T>(T a, T b) => a\n\nbyte small = 1\nprint(Pick(small, 300))"));
         Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors("T Make<T>() => Make<T>()\n\nprint(Make())"));
 
-        // T27: the text names the first argument whose type has no part where its parameter's type parameter stands, so that it gives
-        // that type parameter nothing; where every argument gives its type parameters a type and they differ, where no argument stands
+        // T27: the text names the first argument whose type has no part where the type parameter that failed stands in its parameter,
+        // so that it gives that type parameter nothing; where every argument gives it a type and they differ, where no argument stands
         // in a position, and for a lambda, which has no type of its own before the pick (F11), the text names no argument
         const string notInferable = "the type arguments are neither written nor inferable from the arguments";
         Assert.Equal(notInferable + ": argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", Assert.Single(Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(5))").Diagnostics.Items).Message);
@@ -568,6 +568,34 @@ public sealed class CheckerTests
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Make<T>() => Make<T>()\n\nprint(Make())").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
+        // with two type parameters the argument named gives the one that failed nothing, never one that gives the other nothing where
+        // another argument gives the other its type (#156, comment 6620467625), whether the inference ended where nothing gives it a type,
+        // where its direct arguments differ, where a nested position contradicts the type an argument before bound, or where its list
+        // literals differ; where every argument gives the one that failed a type, the text names no argument (assumed, #156, comment
+        // 6620690774)
+        var pair = "int F<T, U>(List<U> a, U d, T b, List<T> c) => 1\n\nint G<T, U>(List<U> a, U d, List<T> c) => 1\n\n"
+            + "int H<T, U>(T a, T b, List<U> c) => 1\n\nint P<T, U>(List<U> e, T a, T b, List<T> c) => 1\n\n"
+            + "int K<T, U>(List<U> e, List<T> a, List<T> b, List<T> c) => 1\n\n";
+        Assert.Equal([(ErrorIds.CannotInfer, 11), (ErrorIds.UnknownName, 11)], Errors(pair + "print(F(5, 1, nothing, 6))"));
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(pair + "print(F(5, 1, nothing, 6))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "print(G(5, 1, 6))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(H(i, s, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(P(6, i, s, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "List<int> xs = [1]\nList<string> ys = [\"a\"]\nprint(K(6, xs, ys, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check(pair + "List<int> xs = [1]\nList<string> ys = [\"a\"]\nprint(K(6, xs, ys, ys))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(K(6, [i], [s], 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", // `U` agrees, `T` is contradicted
+            Assert.Single(Check("data Pair<A, B>(A First, B Second)\n\nint R<U, T>(Pair<U, T> a, Pair<U, T> b, List<T> c) => 1\n\np = Pair(\"k\", 1)\nq = Pair(\"k\", \"s\")\nprint(R(p, q, 5))").Diagnostics.Items).Message);
+        Assert.Equal(
+            "the call fits none of the functions named `M` (F13):\n"
+                + "  `int M<T, U>(List<U> a, U d, List<T> c, int e)` at line 1: its type arguments are neither written nor inferable from the arguments: argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)\n"
+                + "  `int M<T, U>(List<U> a, U d, List<T> c, string e)` at line 2: its type arguments are neither written nor inferable from the arguments: argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check("int M<T, U>(List<U> a, U d, List<T> c, int e) => 1\nint M<T, U>(List<U> a, U d, List<T> c, string e) => 1\n\nprint(M(5, 1, 6, 7))").Diagnostics.Items).Message);
         // E1 with T27: an argument with an error of its own in a nested position, the `T` of a `List<T>`, gives `T` nothing and its own error
         // stands alone, as in a direct one; a result that does not name `T` stays, one that does reports nothing more (the owner, 2026-11-03,
         // #156, comment 6600034940); `T` that another argument fails to give a type is still `cannot-infer`
