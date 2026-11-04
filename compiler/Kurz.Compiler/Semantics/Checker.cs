@@ -1253,7 +1253,7 @@ public sealed partial class Checker
             Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T35)");
         }
 
-        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
+        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Naked | Modifiers.Extern);
         if (unsupportedModifiers != Modifiers.None)
         {
             NotSupported(d.Line, (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"

@@ -134,6 +134,12 @@ exposes it; `prot` exposes a member to inheriting types. The fields of a primary
 are the exception (D14). Using a member that is not visible from where it is used is the compile
 error `not-visible` *(proposed id)*.
 
+A member marked `internal` is visible to the files of its folder and to nothing outside it, as
+C#'s `internal` is visible in its assembly and Rust's `pub(crate)` in its crate (§8, the owner,
+2026-11-02 and 2026-11-03). *(assumed, §8: `internal` is a core word (L18); `pub` and `internal`
+before one declaration are `syntax`, as C# refuses two access modifiers; before a top-level type or
+function `internal` says what no modifier says.)*
+
 Case: [classes/private-member.kz](../corpus/classes/private-member.kz)
 ```kurz
 class Counter {
@@ -148,8 +154,27 @@ c = Counter()
 c.Add()
 ```
 
-No case shows the folder part: it takes several folders, and a case of the corpus is a single
-file.
+Case: [classes/internal-member.kz](../corpus/classes/internal-member.kz)
+```kurz
+class Counter {
+    internal mut int count = 0
+
+    internal void Add() {
+        count = count + 1
+    }
+
+    internal static int Twice(int n) => n * 2
+}
+
+c = Counter()
+c.Add()
+c.Add()
+print(c.count)
+print(Counter.Twice(5))
+```
+
+No case shows the folder part, a member without `pub` or one marked `internal` used from another
+folder: it takes several folders, and a case of the corpus is a single file.
 
 ### F10 (decided, §8, §13) Folders and `use`
 

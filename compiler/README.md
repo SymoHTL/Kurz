@@ -349,7 +349,7 @@ and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
 `HttpError` with its `HttpKind` (W2) and the class `HttpHeaders` (W4), types every program sees (W1: the checker of a program is given
 `std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
-members without `pub` stay private to it (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
+members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
 the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
@@ -945,15 +945,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  freed with the block; each `Read`, `Fill`, `Consume`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
   compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
   takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
   second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
@@ -963,8 +963,16 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   shutdown, and a stream's read and write and a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle
   give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
-  the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
+  holds, before it reads (S3), and under the lock takes the bytes the buffer holds first, at most `max`, with no system call; where it
+  holds none, a `max` of 8192 or more, and one of 0, lets the lock go and is read straight into the list, and a smaller one fills the
+  buffer, made at the first such read, with one read of 8192 bytes, the lock held while it waits, and takes at most `max` of them, the
+  buffer left as it was where the read failed; the whole read is a call in flight, the fill's read and the straight one each given the
+  closed handle's error where a `Close` woke them on a socket, and a fill that finds the mark when its read returns keeps none of the
+  rest in the buffer (S3, S5, S9); `Fill` takes, under the lock, every byte the buffer holds with no system call, its position
+  left where it is, and where it holds none fills it as such a read does and takes all that read gave, the room in the list made for
+  the bytes it appends, and a fill that finds the mark keeps none of them; `Consume` raises `index-out-of-range` for an `n` below 0
+  before it enters and for one past the bytes the buffer holds under the lock, and else moves the position by `n` (S24);
+  `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
   the bytes up to it in a list of bytes, whose block the line's string takes over, without the `\n` and a `\r` in front of it; a line
@@ -1574,7 +1582,8 @@ that sit under a rule by its id. Every one is pinned by a test.
     value of an operand `=>` splits the operand and starts no lambda, while an argument of a call
     there takes one as any argument does.
 - E4's general clause, applied to shapes no rule names: a modifier written twice (K7: class bodies
-  follow C#, which refuses it), type parameters on an `enum` or `flags` type (D12 and D13 give them
+  follow C#, which refuses it), `pub` and `internal` before one declaration (F9: an assumption of
+  the record, section 8, as C# refuses two access modifiers), type parameters on an `enum` or `flags` type (D12 and D13 give them
   a name and a body), a second `?` on a type (N1 gives one), a second `weak` (R3 and R5 write one),
   a form feed or a vertical tab outside a literal (L13 names the carriage return alone), a `//`
   inside an interpolation (L3 runs a comment to the end of its line, which L6's hole does not reach)
@@ -1619,7 +1628,7 @@ class instance or through a `weak` reference, with the two more ends of such a p
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4), a class of `std/` the prelude names (W1) being no step of a ring of the file, since it names no class of the file and `std/`'s checker judges its own and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
@@ -1678,8 +1687,8 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
 (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
-or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
-than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
+other than `pub`, `internal` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
 that has type parameters of its own (K7, section 4), each of which leaves the class and every
 value of it unread, and of a class it reads, a `static` field with an initial value that is no
 constant, which section 4 computes at the field's first read and whose open items section 14

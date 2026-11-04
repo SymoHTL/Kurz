@@ -1,0 +1,54 @@
+// expect: output
+// | 6 true
+// | 0 true
+// rules: S24
+
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`, and -1 where it has none
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+// 1000 fills of a buffer that holds a file's 6 bytes make no read of the system, fewer than 100 reads between the counts, which read
+// `/proc/self/io` themselves; once they are consumed, each of 1000 fills at the end of the file reads, 1000 reads or more
+void | IoError Show() {
+    File.WriteAll("fill-held.txt", "abcdef".Bytes)
+    f = File.Open("fill-held.txt")
+    File.Delete("fill-held.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    before = Reads()
+    for i in 0..<1000 {
+        seen.Clear()
+        f.Fill(mut seen)
+    }
+
+    after = Reads()
+    print("{seen.Count} {before > 0 && after - before < 100}")
+    f.Consume(6)
+    start = Reads()
+    mut given = 0
+    for i in 0..<1000 {
+        given = given + f.Fill(mut seen)
+    }
+
+    end = Reads()
+    print("{given} {start > 0 && end - start >= 1000}")
+    f.Close()
+}
+
+Show() else {
+    IoError e => print(e)
+}
