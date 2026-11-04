@@ -229,7 +229,7 @@ while i <= 3 {
 print(sum)
 ```
 
-### C6 (decided, §4, §8, §13) `for ... in`
+### C6 (decided, §4, §8, §12, §13) `for ... in`
 
 `for name in collection { }` runs its block once for each item: in order for a list and a range
 (C8) *(assumed, §8: the loop means what it means in C#)*, and in the order of the map's storage for a
@@ -244,8 +244,12 @@ The type is built in (§4), so a file's own declaration of the name `Entry` is `
 does (T27), and that `Entry<string, long>("Ann", 31)` takes the types it names; §4 names the form alone)*.
 Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
-2026-10-30); two names over a list or a range are `type-mismatch` *(proposed: the error; §4 gives the
-form over a map alone)*. The loop runs over the collection as it was when
+2026-10-30). Over an instance of a class with `Count`, `NameAt(i)` and `ValueAt(i)`, `HttpHeaders`
+among them (W1), `for name, value in h { }` names each name and value in their order, as C#'s
+`foreach` takes any type with `GetEnumerator()` (§12, the owner, 2026-11-02, against the compiler
+knowing `HttpHeaders` by name and against an iteration interface). Two names over a list or a range
+are `type-mismatch` *(proposed: the error; §4 gives the form over a map and §12 over such a class,
+and over nothing else)*. The loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
 change to the variable, not to what the loop walks. For a map §4 states it, in the words of the option the owner
 chose, "The loop walks the map as it was when the loop started" (the owner, 2026-10-30, "Key and
