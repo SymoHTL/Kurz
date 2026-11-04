@@ -219,7 +219,8 @@ the error's name)*. A request a client builds is sent as any value is (§12).
 
 No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
 build, so that the move is not built either. No case expects `copy-server-request` for the same
-reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md).
+reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md), whose row
+comes with the case that expects it (§12, the owner, 2026-11-03, issue 156, comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
 
