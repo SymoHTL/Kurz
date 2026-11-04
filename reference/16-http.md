@@ -28,8 +28,9 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
-`HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
+every `pub` type of `std/` and against a list written in `std/`, 2026-11-03, that `HttpBody` is one of
+them, against a body type no program can name, and 2026-11-03, that `HttpWriter` is another, the writer
+of the streamed response §12 gives, "A response can be streamed"; the two of `Uri`, and
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
