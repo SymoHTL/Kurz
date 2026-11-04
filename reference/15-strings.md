@@ -596,7 +596,15 @@ moves them to a new one (§12, .NET 10's `List<T>.Sort`, run 2026-11-03); Kurz d
 change. Every key is made over the items of the list as it was read *(assumed, §12)*. The list counts as
 changed where the field holds another list than the one read once the keys are made, whatever items that
 list holds: a field assigned the list it held, or given it back, is unchanged and sorted (§12, the owner,
-2026-11-02, #194, comment 6573115730).
+2026-11-02, #194, comment 6573115730). The sort holds the list as it was read while the keys are made,
+so a key's write into the list through the field, an `Add`, is not seen in the list the sort read, as a
+later change on one side is not seen on the other (M3): the field then holds another list, and the sort
+is dropped, as the case `sortby-key-adds-to-list.kz` below shows. Where a
+key gives a field on the way to the list another instance, `h.B.Items.SortBy(x => h.Swap(x))` with a
+`Swap` that assigns `B`, the field read after the keys and written with the sort is the one of the
+instance read before them, which that read holds to the end of its statement (R3), as C# evaluates a
+call's receiver once, before the call: the instance read has its list sorted, and the new one keeps its
+own *(assumed, §12)*.
 
 Case: [strings/sort.kz](../corpus/strings/sort.kz)
 ```kurz
