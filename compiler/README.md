@@ -661,8 +661,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   called with (T19, T27); a call in a generic function's body whose type argument holds a type
   parameter of the function inside a form of a type other than a union, on a cycle of calls among
   generic functions that gives it back to that type parameter, is `growing-type-argument` at that
-  call, read on the text of every generic function that reads no type, called or not, and of no
-  copy (T34);
+  call, read on the text of every generic function that reads no type and on the calls in a loop
+  over `T.Fields` of one that does, called or not, and of no copy, and no copy is made of a
+  function on such a cycle (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -815,7 +816,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the sort of the list it read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as
   C#", #39, comment 6562795140), as C#'s `List.Sort` does where a comparer assigns the field another
   list (.NET 10's `List<T>.Sort`, run 2026-11-03), every key made over the items of the list as it was
-  read (X8, assumed), the list counted as changed where the field holds another one than it read,
+  read (X8, assumed), the field read after the keys and written with the sort the one of the instance
+  read before them, which that read holds to the end of its statement, as C# evaluates a call's receiver
+  once (X8, assumed), the list counted as changed where the field holds another one than it read,
   whatever items that one holds (X8, section 12, the owner, 2026-11-02, #194, comment 6573115730), at
   one count for each call. Two forms are not Rust's and measured faster on the same results: an item of
   8 or 16 bytes made of parts is moved as one integer, and a pair whose key `<` orders as an integer of
@@ -861,17 +864,19 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   can still take before the block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1
   for SipHash-1-3, and whether an insert's probe passed the bound, 4 bytes, padded to 48 bytes, then a control byte for
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
-  key and the value, laid out as a `data` value of the three, for a key whose hash reads more than one
-  word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that compares by its
-  fields), as .NET's `Dictionary` keeps each entry's hash code, and the key and the value alone for a key
-  of one word (an integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`,
-  an instance that compares by identity, hashed by its address), whose growth hashes every key
-  again, as `hashbrown`'s buckets keep no hash *(assumed: taken under the owner's "Allow, faster wins"
-  of 2026-11-01, issue 157, comment 6556450466, by the rows of item 14 there: without the hash
-  a `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
+  key and the value, laid out as a `data` value of the three, for a key of a kind whose hash can read
+  more than one word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that
+  does not compare by identity: by its content, K4, or by the fields it names, K5), as .NET's
+  `Dictionary` keeps each entry's hash code, and the key and the value alone for a key of one word (an
+  integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`, an instance
+  that compares by identity, hashed by its address), whose growth hashes every key again, as
+  `hashbrown`'s buckets keep no hash; the emitter's `KeepsHash` is the one definition of the split (the
+  owner, 2026-11-02, answer (a) on pull request 210, comment 6573116036: the bytes `allocation-failed`
+  names follow the layout, under "Allow, faster wins"; issue 157, item 14: without the hash a
+  `Map<int, int>` of 1,000,000 entries took its `Remove`s in half the time, while maps keyed by a
   `data` value of two strings and by a list of 4 `int`s grew 31% to 36% slower; a program sees the layout
   only in the bytes `allocation-failed` names for a map's block (M9), 192 for the first block of a
-  `Map<long, long>` and 320 for that of a `Map<string, long>`)*. A key's hash is taken over its
+  `Map<long, long>` and 320 for that of a `Map<string, long>`). A key's hash is taken over its
   bytes, a string's UTF-8 bytes and any other key widened to 64 bits, a time's 16 bytes, a `double`'s
   8 bytes and a `float`'s widened to a `double`, with every NaN as the one NaN of the bits
   `0x7FF8000000000000` and -0.0 as 0.0, as .NET's `double.GetHashCode` folds them, since such a key
@@ -990,7 +995,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
   the socket down and releases a listener's descriptor once its `Accept` is out, as `F_GETFD` shows; a socket's close with a call in
   flight, into whose window before the shutdown the IR puts that call's end and a new socket that listens, which does not take the
-  closed socket's number and still listens after the shutdown; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
+  closed socket's number and still listens after the shutdown; a client waiting in a listener's queue, which
+  reads a reset after the listener's close, with an `Accept` in flight and with none; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
   leaves that stream's writes alone; and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
@@ -1632,7 +1638,7 @@ class instance or through a `weak` reference, with the two more ends of such a p
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4), a class of `std/` the prelude names (W1) being no step of a ring of the file, since it names no class of the file and `std/`'s checker judges its own and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
@@ -1757,7 +1763,7 @@ error stand, and which every file sees, so that a file's own declaration of one 
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
-larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+larger type each time makes without end, by a call outside a loop over `T.Fields` (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
@@ -1895,7 +1901,15 @@ round can ask about it by the rule's id.
   parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
   `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
   arguments give their type parameters types that differ, or no argument stands in a position, it names
-  none. The id stays T27's: no argument stands in the type parameter's position.
+  none. The id stays T27's: no argument stands in the type parameter's position. An argument with an
+  error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
+  alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940: as a misfit is the call's one error). The
+  call's result is read as a direct position reads it: one that does not name the type parameter
+  stays, so `Count(nothing)` is an `int`, and one that does reports nothing more (the owner,
+  2026-11-03, #156, comment 6600034940; the pass's default was a result that is unknown, and this
+  reading was taken since a direct position already gives it). A type parameter that another
+  argument fails to give a type is still `cannot-infer`.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -1914,9 +1928,11 @@ round can ask about it by the rule's id.
   reports nothing more, its arguments checked, as a read of a variable named so does; where a data
   type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
   `Bytes` is it, the call keeps that one's reading and its errors, and so does the bare name: after
-  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a type every
-  file sees has the name, the text of the function's declaration names that type and the rule that
-  declares it, as a type's declaration of the name does.
+  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a data type
+  or an enum that a rule declares has the name (`IoError`, S1), or a type of the prelude (`HttpError`,
+  W1), the text of the function's declaration names that type and the rule that declares it, as a
+  type's declaration of the name does; the other built-in names, `File`, `List`, `Map` and `Bytes`
+  among them, keep the plain text.
 - E1 with O2 and O9: a call whose argument does not fit its parameter reports that misfit alone, and no
   case of its result is passed on beside it, at the top level or in a function. That holds for a list
   literal, a literal that its own type reads and the parameter's does not (`300` for a `byte`), a `null`

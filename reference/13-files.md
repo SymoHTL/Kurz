@@ -349,8 +349,8 @@ Show() else {
 holds (S3), all of it, and consumes none of it, as Rust's `BufRead::fill_buf` gives the buffer: where
 the buffer holds bytes it makes no system call, and where it holds none it first fills it with one
 read of the system, as a `Read` below 8 KiB fills it. `s.Consume(n)` drops the first `n` of the bytes
-the buffer holds, as `BufRead::consume` does, so that the next `Read`, `Fill` or pull of a line (S16)
-starts after them. A reader so looks at a message's head without taking what follows it: it fills,
+the buffer holds, as `BufRead::consume` does, so that the next `Read` or `Fill` starts after them. A
+reader so looks at a message's head without taking what follows it: it fills,
 finds the head's end in the bytes it was given, and consumes that far (§12, the owner, 2026-11-03,
 issue 110, comment 6615078257, against the same two members visible to `std/` alone and against a
 `Read` of one byte at a time; the cost is two public members, and a program can misuse `Consume`).
@@ -363,11 +363,13 @@ the owner, 2026-11-03, issue 110, comment 6615355264, against such an `n` clampe
 `BufReader` clamps it, and against a plain `void` that does nothing on a closed handle).
 
 `Fill` returns the count it appended, `int | IoError`, 0 at the end of a file or of a connection its
-peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A `Fill` is a call in
+peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A pull of a line (S16)
+starts after the bytes a `Consume` dropped, as the next `Read` does. A `Fill` is a call in
 flight too, and one that fills is a read as a `Read`'s fill is: it holds the handle's lock while its
 read waits, its time runs out as a read's does (S9), a read that fails stores nothing, and one that
 finds the handle marked by a `Close` when its read returns gives `into` all it read and keeps none of
-it. *(assumed, §12: `Fill`'s count and its 0 at the end, and `Fill` as a call in flight whose fill
+it. *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
+of a line starting after the bytes consumed, and `Fill` as a call in flight whose fill
 holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does)*
 
 Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
@@ -643,7 +645,9 @@ its arguments have run to its return (§12, the owner, 2026-11-02, issue 110, co
 `ShutdownWrite`'s, issue 39, comment 6583351876; `Consume`'s, issue 110, comment 6615355264; `Fill`'s
 assumed, S24); a loop over the lines is in flight while it pulls a line, and not while its block runs,
 so that a `Close` in its block ends the handle and the next pull gets the error above, as a borrow
-of `&mut self` in Rust lasts its call (the same comment, against a count held for the loop's whole
+of `&mut self` in Rust lasts one call, `read_line`'s, while Rust's loop over `lines()` holds its
+reader for the whole loop and refuses a close in its block when it compiles (the same comment,
+against a count held for the loop's whole
 block, at the cost of a `Close` in that block whose release would wait for its own loop). The bytes
 the file's buffer holds that no read took (S3) are dropped at the close, as dropping Rust's
 `BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
@@ -834,14 +838,15 @@ and the next `Accept` gets that error, so that the connection it got is not thro
 2026-11-02, issue 39, comment 6578783655, against that error with the connection closed, at the cost
 of a connection the system accepted and its client sees closed; the cost is a stream that reaches
 the program after the listener's `Close`, which the program closes, or lets go of, as any other; the costs,
-issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset when the
-descriptor is released, as Linux resets it for any program that closes a listener, a cost of a
-listener's `Close` (§12); and a `Write` that the shutdown
+issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset at the
+listener's `Close`, by the release where no call is in flight and by the shutdown where one is, as
+Linux resets the queue of a listener that stops listening: the system's behaviour, not a choice of
+§12, which names it as a cost of a listener's `Close`; and a `Write` that the shutdown
 ends after part of its bytes went out gives that error, the part sent not reported, as Rust's
 `write_all` and C#'s `Stream.Write` report none (§12, the owner, 2026-11-02, the same comment, against
 the count sent with the error left to the next call, at the cost of a `Write` that returns a count,
 where a `Write` writes every byte and returns none (S4); the cost is that the program cannot tell
-how many bytes the peer got; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
+how many of its bytes went out before the shutdown; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller

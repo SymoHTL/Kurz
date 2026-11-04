@@ -156,8 +156,8 @@ def context_states(contexts, check_runs, statuses, told=None):
 # <summary>" when every batch converged, "review completed, NOT converged on <N> files: <summary>" when one stopped at
 # the pass cap. The cache stores only the files of a batch that converged, so it answers no file of the second kind.
 ROUND_TOLD = re.compile(r"review completed(?:, NOT converged on (\d+) files)?: ")
-OWNERS_CHOICE = ("makes the review of the new head a paid round, and the merge needs the owner's choice: a paid round, "
-                 "over red at the new head, or hold")
+OWNERS_CHOICE = ("makes the review of the new head end as `cap` before any pass, and the merge needs the owner's choice: "
+                 "a paid round, over red at the new head, or hold")
 
 
 def taking_main(rounds, post, base):
@@ -768,7 +768,7 @@ def self_test():
          taking_main(kit.ROUND_CAP - 1, told.get("review"), "main") is None and old == ["the branch is 2 commits behind main: update it and let the checks run"], old)
     got = taking_main(kit.ROUND_CAP, told.get("review"), "main")
     refused = verdict(behind=2, costs=got)[1]
-    case("taking main: the real status of a round that did not converge on one file says that taking main makes the review of the new head a paid round and needs the owner's choice",
+    case("taking main: the real status of a round that did not converge on one file says that taking main makes the review of the new head end as cap before any pass and needs the owner's choice",
          len(unconverged) >= 1 and "did not converge on 1 files" in (got or "") and (got or "").endswith(f"taking main {OWNERS_CHOICE}")
          and refused == [f"the branch is 2 commits behind main: {got}"], (got, refused))
     got = taking_main(kit.ROUND_CAP, told_too.get("review"), "main")
@@ -778,12 +778,16 @@ def self_test():
          and replays in (got or "") and otherwise in (got or "") and (got or "").index(replays) < (got or "").index(otherwise)
          and "free" not in (got or ""), got)
     done = (told_too.get("review") or {"context": "review", "state": "success", "description": "review completed: x"})
+    # the captured error of a run that ended as `cap`, and every state but `success` with a description in the converged
+    # form, so that a check of the state narrowed to one of them is seen red
     unknown = {"no status": None, "error": told_error.get("review"), "pending": dict(done, state="pending"),
+               "error, converged words": dict(done, state="error"), "failure, converged words": dict(done, state="failure"),
                "success": dict(done, description="review did not complete: cap: 1 review rounds reached, the cap is 1")}
     got = {name: taking_main(kit.ROUND_CAP, post, "main") for name, post in unknown.items()}
     case("taking main: a head not known to have converged is told what a round that did not converge is told, with the state read",
          unknown["error"] is not None and "review did not complete: cap: " in (got["error"] or "")
-         and all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}") and ("no review status" if name == "no status" else f"review is {name}") in text
+         and all("is not known" in (text or "") and (text or "").endswith(f"taking main {OWNERS_CHOICE}")
+                 and ("no review status" if unknown[name] is None else f"review is {unknown[name]['state']}") in text
                  for name, text in got.items()), got)
     writer = "f\"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: {summary}\""
     rendered = [f"review completed{f', NOT converged on {len(capped)} files' if capped else ''}: s" for capped in ([], ["a", "b"])]

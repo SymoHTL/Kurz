@@ -2347,6 +2347,7 @@ public sealed partial class Checker
     {
         var map = new Dictionary<TypeParameterSymbol, KurzType>(candidate.Map);
         var direct = candidate.TypeParameters.ToDictionary(p => p, _ => new List<KurzType>());
+        var erred = new HashSet<TypeParameterSymbol>();
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
@@ -2359,6 +2360,12 @@ public sealed partial class Checker
             if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
             {
                 types.Add(ArgumentType(candidate, pres, i));
+            }
+            else if (Types.IsError(ArgumentType(candidate, pres, i)))
+            {
+                // its own error stands in a nested position as in a direct one, the `T` of a `List<T>`: what nothing else gives a type is
+                // inferred as nothing, and no `cannot-infer` is reported beside it (E1; the owner, 2026-11-03, #156, comment 6600034940)
+                erred.UnionWith(candidate.TypeParameters.Where(p => Types.Mentions(slot, p)));
             }
             // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
             // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
@@ -2484,7 +2491,7 @@ public sealed partial class Checker
                 }
             }
 
-            if (fixedType is null && (untypable || untypedLists.Contains(p)))
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)))
             {
                 map[p] = Types.Error;
                 continue;
