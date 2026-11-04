@@ -38,7 +38,7 @@ public static class SyntaxCopy
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
             ReturnType = Type(d.ReturnType),
-            TypeParameters = d.TypeParameters.Select(p => p with { Limit = OptionalType(p.Limit) }).ToList(),
+            TypeParameters = d.TypeParameters.Select(p => p with { Limit = OptionalType(p.Limit), Constant = OptionalType(p.Constant), Default = Optional(p.Default) }).ToList(),
             Parameters = d.Parameters.Select(Parameter).ToList(),
             ExpressionBody = Optional(d.ExpressionBody),
             BlockBody = d.BlockBody is null ? null : Block(d.BlockBody),
@@ -51,6 +51,7 @@ public static class SyntaxCopy
         private TypeSyntax Type(TypeSyntax t) => t switch
         {
             NamedType n => n with { TypeArguments = n.TypeArguments.Select(Type).ToList() },
+            ConstantTypeArgument c => c with { Value = Expression(c.Value) },
             NullableType n => n with { Inner = Type(n.Inner) },
             UnionType u => u with { Cases = u.Cases.Select(Type).ToList() },
             FunctionType f => f with { Parameters = f.Parameters.Select(Type).ToList(), Result = Type(f.Result) },
