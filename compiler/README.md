@@ -660,10 +660,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   parameter of the function inside a form of a type other than a union, on a cycle of calls among
   generic functions that gives it back to that type parameter, is `growing-type-argument` at that
   call, read on the text of every generic function that reads no type and on the calls in a loop
-  over `T.Fields` of one that does, outside an arm of a `match` on `T.Kind`, called or not, and of
-  no copy; the text of a function that reads its type is read a second time for those calls alone
-  where it holds such a loop, and the chain of copies stops at a call so refused, the copies before
-  it reporting what else their bodies hold (T34);
+  over `T.Fields` of one that does, called or not, and of no copy, but for a call in an arm of a
+  `match` on `T.Kind` outside any loop over `T.Fields` opened inside that arm; the text of a function
+  that reads its type is read a second time for those calls alone where it reads `T.Fields`, and the
+  chain of copies stops at a call so refused, the copies before it reporting what else their bodies
+  hold (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which

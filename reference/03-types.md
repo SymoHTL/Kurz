@@ -1502,16 +1502,21 @@ type (T33) keeps its check in the copies, but for the calls this paragraph reads
 arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copies stays
 `not supported`. Of its calls, those in a loop over `T.Fields` are read for such a cycle on its
 text, and a cycle that grows there is refused at that call. The chain of copies stops at that
-call, so that it does not reach that bound, and the copies before it report every other error of
-the function's body in the same build. A call in an arm of a `match` on `T.Kind` takes no part,
-inside such a loop as outside it, since each copy takes the one arm of its kind, and neither does
-a type argument there that is the field's type, since the text does not give that type. A cycle
+call, so that it does not reach that bound, and the copies a call made before it report every
+other error of the function's body in the same build; a function that no call reaches has no copy,
+so its cycle is the one error it reports, as T33 reads such a function. A call in an arm of a
+`match` on `T.Kind` takes no part, in an arm inside such a loop as in one outside it, since each
+copy takes the one arm of its kind, but for a call in a loop over `T.Fields` opened inside the arm,
+which is read as a call of that loop. A type argument of a call in a loop over `T.Fields` that is
+the field's type takes no part either, since the text does not give that type. A cycle
 that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
-bound. *(assumed, §4: the id; a type argument that holds the field's type inside a form of a type,
-`List<f.Type>`, takes no part, as the field's type itself; a type argument grows where it holds a type parameter of
+bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
-`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+`T | string` for `T` makes no larger copy; a type argument that holds the field's type inside a
+form of a type, `List<f.Type>`, takes no part, as the field's type itself; a call in a
+loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a call of that loop;
+every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
 as one of the body)*
 

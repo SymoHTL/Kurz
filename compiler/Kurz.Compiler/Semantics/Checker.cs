@@ -344,7 +344,7 @@ public sealed partial class Checker
             }
             else if (ReadsFields(f))
             {
-                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text has such a loop
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
         }
 
