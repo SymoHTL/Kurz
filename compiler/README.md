@@ -591,7 +591,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   by a `string`, a `char` by a `string` or a `char` by a `char`, each of which counts
   what it makes before it asks for a block, as Rust's `split` and `replace` (X5), a character of one byte by
   another through the standard library's `ReplaceByte`, which finds the first match and maps each byte from it,
-  as Rust's `replace_ascii`, and gives the string itself where it finds none; `string.Join(separator,
+  as Rust's `replace_ascii`, and a byte by none or by 2 to 8 bytes through its `ReplaceOne`, which counts the
+  matches 16 bytes at a time with SSE2 and copies each run between two of them where they stand 256 bytes or more
+  apart on average, as Rust's `replace` copies each piece, and else writes 8 bytes at a time, a word that holds no
+  match whole and each byte of one that does as the byte or the replacement, each of the two giving the string
+  itself where it finds none; `string.Join(separator,
   values)` of a `string` or a `char`, which sums the sizes first, as Rust's `join`, over the strings of a list of strings in place and over
   the text of every other item (A4), made into a buffer it gives back after the join (X6);
   `s.ToLower()` and `s.ToUpper()`, which change each code point by Unicode's full mapping through the standard
@@ -639,7 +643,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   trims, `Split`, `Replace`, `string.Join` and the ASCII changes of case (X3 to X6) to what .NET's members of the same
   strings give where the rules read as they do, and to the rules written out where they do not: the ASCII trims, over
   the five whitespace characters of X4, the ASCII changes of case, over the letters `A` to `Z` and `a` to `z`, and an
-  empty separator or pattern, which gives the string as it is (X5); and `ParseTests` each integer type's `Parse`,
+  empty separator or pattern, which gives the string as it is (X5), and the replaces of a byte by 0, 2, 3, 4, 8 and 9
+  bytes over strings whose matches stand next to each other and far apart, and over a text each of whose results
+  is a block the allocator maps on its own, under the allocator that ends the process at a byte written past it;
+  and `ParseTests` each integer type's `Parse`,
   `Hex.Decode` and the cuts that stand to .NET's `Parse`, `Convert.FromHexString` and cut of the UTF-8 bytes,
   each over 2000 generated strings, the first 500 of them under the allocator that makes every freed block
   inaccessible as well, and the `Parse` of `double`, `float` and `decimal` to .NET's over generated forms, the words,

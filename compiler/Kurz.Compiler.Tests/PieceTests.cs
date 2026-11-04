@@ -162,4 +162,165 @@ public sealed class PieceTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(expected.Take(2 * count), output); // two lines for each string
         }
     }
+
+    /// <summary>The 16 bytes the long text of <see cref="OneByteProgram"/> repeats: six commas, two of them next to each other, one at the end, and a letter of two bytes.</summary>
+    private const string Unit = "ab,,c,dé,fg,ij,";
+
+    /// <summary>
+    /// The times <see cref="Unit"/> stands in the long text: a multiple of 16, so that every replace of its commas by 0, 2, 3, 4 or 8 bytes
+    /// gives a count of bytes that is a multiple of 16, whose block the allocator ends where its pages end; and enough that the replace by
+    /// none still asks for more than 262144 bytes, a block the allocator maps on its own.
+    /// </summary>
+    private const int Units = 26224;
+
+    /// <summary>
+    /// The replaces of one byte by a replacement of another count, the standard library's <c>ReplaceOne</c> up to 8 bytes: 400 strings of up
+    /// to 300 letters out of one to eight, the comma first among them, so that some strings are commas alone and many hold commas next to
+    /// each other, at the start and at the end, beside letters of two bytes; each comma replaced by 0, 2, 3, 4 and 8 bytes, given as a
+    /// <c>char</c> and as a string, and by 9 bytes, which the general path takes, and the <c>x</c> by 2 bytes. Then the long text, whose
+    /// every replace is a block the allocator maps on its own, under the allocator that puts an inaccessible page after every such block:
+    /// a byte written past the end of the string ends the process.
+    /// </summary>
+    private static readonly string OneByteProgram = $$"""
+        string Make(List<string> pool, int length, ulong start, int letters) {
+            mut ulong state = start
+            mut string text = ""
+            mut int made = 0
+            while made < length {
+                state = state *% 6364136223846793005UL +% 1442695040888963407UL
+                text = "{text}{pool[int((state >> 33) % ulong(letters))]}"
+                made = made + 1
+            }
+
+            return text
+        }
+
+        ulong Check(string s) {
+            mut ulong h = 1469598103934665603UL
+            for b in s.Bytes {
+                h = (h ^ ulong(b)) *% 1099511628211UL
+            }
+
+            return h
+        }
+
+        mixed = [",", "a", "é", "b", ",", "€", "x", "ÿ"]
+        mut ulong seed = 13579UL
+        mut n = 0
+        while n < 400 {
+            seed = seed *% 2862933555777941757UL +% 3037000493UL
+            int letters = 1 + int((seed >> 10) % 8UL)
+            hay = Make(mixed, int((seed >> 40) % 301UL), seed, letters)
+            print("{hay.Replace(',', 'é')}|{hay.Replace(',', '€')}|{hay.Replace(",", "")}|{hay.Replace(',', "😀")}|{hay.Replace(",", "12345678")}|{hay.Replace(',', "123456789")}|{hay.Replace("x", "<>")}")
+            n = n + 1
+        }
+
+        plain = ["a", "é", "b", "€", "x", "ÿ"]
+        while n < 500 {
+            seed = seed *% 2862933555777941757UL +% 3037000493UL
+            front = Make(plain, int((seed >> 40) % 300UL), seed, 6)
+            back = Make(plain, int((seed >> 20) % 300UL), seed ^ 31UL, 6)
+            sparse = "{front},{back}"
+            ended = "{sparse},"
+            print("{sparse.Replace(',', 'é')}|{sparse.Replace(",", "")}|{sparse.Replace(',', "12345678")}|{ended.Replace(',', '€')}")
+            n = n + 1
+        }
+
+        mut units = List<string>()
+        for i in 0..<{{Units}} {
+            units.Add("{{Unit}}")
+        }
+
+        big = string.Join("", units)
+        print("{Check(big.Replace(',', 'é'))} {Check(big.Replace(',', '€'))} {Check(big.Replace(",", ""))} {Check(big.Replace(',', "😀"))} {Check(big.Replace(",", "12345678"))}")
+
+        """;
+
+    /// <summary>The string the program's <c>Make</c> makes of <paramref name="pool"/>: <paramref name="length"/> of its first <paramref name="letters"/> letters, each picked by a step of the same generator.</summary>
+    private static string Made(string[] pool, int length, ulong start, int letters)
+    {
+        var state = start;
+        var text = new StringBuilder();
+        for (var made = 0; made < length; made++)
+        {
+            state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+            text.Append(pool[(int)((state >> 33) % (ulong)letters)]);
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>The check the program's <c>Check</c> takes: FNV-1a of 64 bits over the string's UTF-8 bytes.</summary>
+    private static ulong Check(string text)
+    {
+        var h = 1469598103934665603UL;
+        foreach (var b in Encoding.UTF8.GetBytes(text))
+        {
+            h = unchecked((h ^ b) * 1099511628211UL);
+        }
+
+        return h;
+    }
+
+    [Fact]
+    public void A_replace_of_one_byte_by_none_or_by_2_to_9_bytes_gives_what_dotnet_gives_and_writes_nothing_past_the_string()
+    {
+        string[] pool = [",", "a", "é", "b", ",", "€", "x", "ÿ"];
+        var seed = 13579UL;
+        var expected = new List<string>();
+        var (only, next, last, words) = (0, 0, 0, 0);
+        for (var n = 0; n < 400; n++)
+        {
+            seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
+            var letters = 1 + (int)((seed >> 10) % 8UL);
+            var text = Made(pool, (int)((seed >> 40) % 301UL), seed, letters);
+            expected.Add(string.Join(
+                '|',
+                text.Replace(",", "é", StringComparison.Ordinal),
+                text.Replace(",", "€", StringComparison.Ordinal),
+                text.Replace(",", string.Empty, StringComparison.Ordinal),
+                text.Replace(",", "😀", StringComparison.Ordinal),
+                text.Replace(",", "12345678", StringComparison.Ordinal),
+                text.Replace(",", "123456789", StringComparison.Ordinal),
+                text.Replace("x", "<>", StringComparison.Ordinal)));
+            only += text.Length > 0 && text.All(c => c == ',') ? 1 : 0;
+            next += text.Contains(",,", StringComparison.Ordinal) ? 1 : 0;
+            last += text.EndsWith(',') ? 1 : 0;
+            words += Encoding.UTF8.GetByteCount(text) >= 64 && text.Contains(',') && text.Any(c => c != ',') ? 1 : 0;
+        }
+
+        // strings of one comma, and of two with one at the end, between letters, of which most have 256 bytes or more for each comma
+        string[] plain = ["a", "é", "b", "€", "x", "ÿ"];
+        var far = 0;
+        for (var n = 400; n < 500; n++)
+        {
+            seed = unchecked((seed * 2862933555777941757UL) + 3037000493UL);
+            var sparse = $"{Made(plain, (int)((seed >> 40) % 300UL), seed, 6)},{Made(plain, (int)((seed >> 20) % 300UL), seed ^ 31UL, 6)}";
+            expected.Add(string.Join(
+                '|',
+                sparse.Replace(",", "é", StringComparison.Ordinal),
+                sparse.Replace(",", string.Empty, StringComparison.Ordinal),
+                sparse.Replace(",", "12345678", StringComparison.Ordinal),
+                (sparse + ",").Replace(",", "€", StringComparison.Ordinal)));
+            far += Encoding.UTF8.GetByteCount(sparse) >= 256 && Encoding.UTF8.GetByteCount(sparse + ",") >= 512 ? 1 : 0;
+        }
+
+        // the floors: each kind of string is taken often
+        Assert.True(only >= 20, $"only {only} strings are commas alone");
+        Assert.True(next >= 100, $"only {next} strings hold two commas next to each other");
+        Assert.True(last >= 50, $"only {last} strings end in a comma");
+        Assert.True(words >= 100, $"only {words} strings of 64 bytes or more hold a comma and a letter");
+        Assert.True(far >= 30, $"only {far} strings hold 256 bytes or more for each comma");
+        var big = string.Concat(Enumerable.Repeat(Unit, Units));
+        Assert.True(Encoding.UTF8.GetByteCount(big.Replace(",", string.Empty, StringComparison.Ordinal)) is > 262144 and var none && none % 16 == 0);
+        expected.Add(string.Join(' ', new[] { "é", "€", string.Empty, "😀", "12345678" }.Select(r => Check(big.Replace(",", r, StringComparison.Ordinal)))));
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", OneByteProgram), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "replace-one" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
 }
