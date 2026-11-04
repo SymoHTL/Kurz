@@ -1,0 +1,16 @@
+// expect: error growing-type-argument at 10
+// rules: T34
+
+data Box<T>(T A)
+
+// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: no copy is made for `Box<int>`
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Box(x), n - 1)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")

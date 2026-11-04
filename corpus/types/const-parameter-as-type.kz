@@ -1,0 +1,10 @@
+// expect: error unknown-name at 6
+// rules: T35
+
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(M value) {
+    print(value)
+}
+
+Keep<Mode.Plain>(Mode.Plain)

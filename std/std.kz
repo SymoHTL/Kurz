@@ -5844,3 +5844,83 @@ pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut lon
 pub enum HttpKind { Protocol, TooLarge, Status, Unsupported }
 
 pub data HttpError(HttpKind Kind, string Detail)
+
+// The headers of a request or a response, an ordered list of names and values (design record, section 12:
+// the owner, 2026-10-31, "Ordered list type"), as hyper's `HeaderMap` and ASP.NET Core's
+// `IHeaderDictionary` keep them: a name compares without regard to ASCII case and stays as it was spelled,
+// and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came (W1, W4).
+pub class HttpHeaders {
+    mut List<string> names = List<string>()
+    mut List<string> values = List<string>()
+
+    // The first value of the name, or null where the headers do not hold it.
+    pub string? Get(string name) {
+        for i in 0..<names.Count {
+            if SameName(names[i], name) {
+                return values[i]
+            }
+        }
+
+        return null
+    }
+
+    // Every value of the name, in the order they came; empty where the headers do not hold it.
+    pub List<string> GetAll(string name) {
+        mut all = List<string>()
+        for i in 0..<names.Count {
+            if SameName(names[i], name) {
+                all.Add(values[i])
+            }
+        }
+
+        return all
+    }
+
+    // A value of the name after every value the headers hold, as a repeated header of a message.
+    pub void Add(string name, string value) {
+        names.Add(name)
+        values.Add(value)
+    }
+
+    // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them.
+    pub void Set(string name, string value) {
+        Remove(name)
+        Add(name, value)
+    }
+
+    // Takes out every value of the name.
+    pub void Remove(string name) {
+        mut i = 0
+        while i < names.Count {
+            if SameName(names[i], name) {
+                names.RemoveAt(i)
+                values.RemoveAt(i)
+            } else {
+                i = i + 1
+            }
+        }
+    }
+
+    // Whether two names are the same without regard to ASCII case, byte by byte, as Rust's `eq_ignore_ascii_case`.
+    static bool SameName(string a, string b) {
+        if a.Bytes.Count != b.Bytes.Count {
+            return false
+        }
+
+        for i in 0..<a.Bytes.Count {
+            if Lower(a.Bytes[i]) != Lower(b.Bytes[i]) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    static int Lower(byte c) {
+        if c >= 65 && c <= 90 {
+            return c + 32
+        }
+
+        return c
+    }
+}
