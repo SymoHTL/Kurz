@@ -21,6 +21,8 @@ flowchart TD
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
+        A call of the tool it does not take, a mistyped --hook among them, is refused through tools/calls.py with exit 2,
+        which denies the call, and so is a kit.py or a calls.py that does not import.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
@@ -52,7 +54,9 @@ flowchart TD
         another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
         a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
         (KURZ_RED_PROOF_REPLAY), refused before anything is copied; a call of the tool other than none,
-        --format or --self-test alone, which it refuses with the usage and exit 2 before anything is copied or run. The replay runs each
+        --format or --self-test alone, which it refuses with the usage and exit 2 before anything is copied or run;
+        a tool of tools/calls.py's ROUTED list whose __main__ does not begin by asking calls.refused, which refuses a call
+        the tool does not take with the usage and exit 2 before anything runs (issue 156). The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
