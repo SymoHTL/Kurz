@@ -1919,7 +1919,15 @@ round can ask about it by the rule's id.
   parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
   `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
   arguments give their type parameters types that differ, or no argument stands in a position, it names
-  none. The id stays T27's: no argument stands in the type parameter's position.
+  none. The id stays T27's: no argument stands in the type parameter's position. An argument with an
+  error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
+  alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940: as a misfit is the call's one error). The
+  call's result is read as a direct position reads it: one that does not name the type parameter
+  stays, so `Count(nothing)` is an `int`, and one that does reports nothing more (the owner,
+  2026-11-03, #156, comment 6600034940; the pass's default was a result that is unknown, and this
+  reading was taken since a direct position already gives it). A type parameter that another
+  argument fails to give a type is still `cannot-infer`.
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -1938,9 +1946,11 @@ round can ask about it by the rule's id.
   reports nothing more, its arguments checked, as a read of a variable named so does; where a data
   type, an enum, a C declaration or a state of the file has the name, or `print`, `List`, `Map` or
   `Bytes` is it, the call keeps that one's reading and its errors, and so does the bare name: after
-  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a type every
-  file sees has the name, the text of the function's declaration names that type and the rule that
-  declares it, as a type's declaration of the name does.
+  `void IoError()`, `x = IoError` is the `syntax` of a type no value stands for (D2). Where a data type
+  or an enum that a rule declares has the name (`IoError`, S1), or a type of the prelude (`HttpError`,
+  W1), the text of the function's declaration names that type and the rule that declares it, as a
+  type's declaration of the name does; the other built-in names, `File`, `List`, `Map` and `Bytes`
+  among them, keep the plain text.
 - E1 with O2 and O9: a call whose argument does not fit its parameter reports that misfit alone, and no
   case of its result is passed on beside it, at the top level or in a function. That holds for a list
   literal, a literal that its own type reads and the parameter's does not (`300` for a `byte`), a `null`
