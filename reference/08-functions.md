@@ -134,6 +134,12 @@ exposes it; `prot` exposes a member to inheriting types. The fields of a primary
 are the exception (D14). Using a member that is not visible from where it is used is the compile
 error `not-visible` *(proposed id)*.
 
+A member marked `internal` is visible to the files of its folder and to nothing outside it, as
+C#'s `internal` is visible in its assembly and Rust's `pub(crate)` in its crate (§8, the owner,
+2026-11-02 and 2026-11-03). *(assumed, §8: `internal` is a core word (L18); `pub` and `internal`
+before one declaration are `syntax`, as C# refuses two access modifiers; before a top-level type or
+function `internal` says what no modifier says.)*
+
 Case: [classes/private-member.kz](../corpus/classes/private-member.kz)
 ```kurz
 class Counter {
@@ -148,8 +154,27 @@ c = Counter()
 c.Add()
 ```
 
-No case shows the folder part: it takes several folders, and a case of the corpus is a single
-file.
+Case: [classes/internal-member.kz](../corpus/classes/internal-member.kz)
+```kurz
+class Counter {
+    internal mut int count = 0
+
+    internal void Add() {
+        count = count + 1
+    }
+
+    internal static int Twice(int n) => n * 2
+}
+
+c = Counter()
+c.Add()
+c.Add()
+print(c.count)
+print(Counter.Twice(5))
+```
+
+No case shows the folder part, a member without `pub` or one marked `internal` used from another
+folder: it takes several folders, and a case of the corpus is a single file.
 
 ### F10 (decided, §8, §13) Folders and `use`
 
@@ -162,9 +187,17 @@ folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives
 name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
 name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
 agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
-"Both forms", "Root path, last name"). *(assumed, §8, §13: the two ids; a type of the file's own
+"Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
+project and a line of `project.kz`, `use json` beside a folder `json`, is `ambiguous-name` at that
+line, in every file of the project, those of the folder `json` included, and with `as` too,
+`use json as j` (§8, the owner, 2026-11-02). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
-through the folder's name; a package's qualifier is the name of its line)*
+through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
+the folder's name as its qualifier in the file, the old name there being `unknown-name`; the names
+`redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
+top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
+the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
+and a path that holds `.` or `..` are `unknown-name` at the `use` line)*
 
 No case: it takes several files, and a case of the corpus is a single file.
 
@@ -306,8 +339,13 @@ call picks when more than one fits is F13. *(proposed: what "differ" is, and the
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
-folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14) (C# also takes `default` and `new S()` for a value type `S`, which the record does not
-name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, as C# takes
+`new S()` for a value type, while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
+one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
+default, and an instance of a class being no such value)* (C# also takes `default`, which the record
+does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
 
@@ -332,6 +370,22 @@ void Greet(string name, string word = Pick()) {
 }
 
 Greet("Ann")
+```
+
+Case: [functions/default-data-of-constants.kz](../corpus/functions/default-data-of-constants.kz)
+```kurz
+data Rate(int BytesPerSecond, duration Grace)
+
+data Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s))
+
+int PerSecond(Rate r = Rate(BytesPerSecond: 1, Grace: 1s)) => r.BytesPerSecond
+
+a = Limits()
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.Grace}")
+b = Limits(MaxLine: 1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.Grace}")
+print(PerSecond())
+print(PerSecond(Rate(7, 2s)))
 ```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
@@ -444,6 +498,35 @@ void Show(string s) {
 
 long big = 5
 Show(big)
+```
+
+A call that does not fit the one function of its name is `type-mismatch` (T1), a value of one type
+where another is required, and not `argument-mismatch`, and so is a call whose argument is a call
+with a case the parameter's union does not list (O4) *(assumed, §5: as the outcomes chapter reads
+both)*.
+
+Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
+```kurz
+data NotFound
+
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
+Report(Find(1))
 ```
 
 Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)

@@ -453,6 +453,11 @@ public sealed partial class Checker
             return FieldVariableAsValue(pass, n.Line); // T33: `f` of a loop over `T.Fields` is no value
         }
 
+        if (variable is null && BoundConstant(n.Name) is { } constant)
+        {
+            return new Typed(constant.Of, constant.Value); // T35: in a copy, the constant its call gave, known while it compiles
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
