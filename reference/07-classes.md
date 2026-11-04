@@ -352,7 +352,8 @@ field's runs code; an assignment of a property, through an instance or by its na
 (F11), which is `type-mismatch` on an `int`; another form, an accessor `{ get; }`, a setter or parameters,
 is `syntax` (E4); inside its class a method or another property reads it by its name alone, as a field,
 and a field's default does not, where it is `unknown-name` as a method of the instance is (V10); its body
-may change the instance, as a method's does (K9); a property without `pub` is private to its class (F9);
+may change the instance, as a method's does (K9); a property without `pub` is private to its class, and
+one marked `internal` is visible to the files of its folder, as every member marked so is (F9);
 a property and a field, a method or a parameter of the primary constructor of one name are `redeclared`
 (V9); a property is no field, so it stands in no list of the fields (T33), in no text `print` gives (A5)
 and in no equality (K4, K5), and one named `Text` gives an instance no text (A5); a read is a call, so a

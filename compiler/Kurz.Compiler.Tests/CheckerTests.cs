@@ -2285,15 +2285,16 @@ public sealed class CheckerTests
     [InlineData("h = HttpHeaders()\nprint(h.names.Count)\n", "a field is visible outside that folder with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside that folder with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.Most)\n", "a field is visible outside that folder with `pub` (F9)")]
+    [InlineData("h = HttpHeaders()\nprint(h.Size)\n", "a property is visible outside that folder with `pub` (F9)")]
     public void An_internal_member_of_a_class_of_std_is_visible_to_std_and_to_no_file(string program, string end)
     {
-        // F9 with W1: a member std/ marks `internal`, a field, a `static` method and a `static` field, is visible to std/'s own files, here
-        // a class beside HttpHeaders that reads the fields and calls the method, which the edited std/ checks clean (Edited holds it to no
-        // error), and to no file of a program, which is another folder (the owner, 2026-11-03)
+        // F9 with W1: a member std/ marks `internal`, a field, a `static` method, a `static` field and a property (K7), is visible to std/'s
+        // own files, here a class beside HttpHeaders that reads the fields and the property and calls the method, which the edited std/
+        // checks clean (Edited holds it to no error), and to no file of a program, which is another folder (the owner, 2026-11-03)
         var runtime = ListTests.Edited(
             ("std/std.kz", "    mut List<string> names = List<string>()", "    internal mut List<string> names = List<string>()"),
             ("std/std.kz", "    static bool SameName(string a, string b)", "    internal static bool SameName(string a, string b)"),
-            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100"));
+            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && h.Size < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100\n    internal int Size => names.Count"));
         var error = Assert.Single(CheckSeeingStd(program, runtime).Diagnostics.Items);
         Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
         Assert.Contains("is `internal` to the folder that declares its class", error.Message);
@@ -3957,8 +3958,10 @@ public sealed class CheckerTests
         var program = "class C {\n    int Hidden => 1\n\n    pub int Shown() => Hidden + 1\n}\n\n";
         Assert.Equal([(ErrorIds.NotVisible, 7)], Errors(program + "print(C().Hidden)\n"));
 
-        // the positive control: the read inside the class, by its name
+        // the positive control: the read inside the class, by its name; and a property marked `internal` is read by the files of its
+        // folder (F9, the owner, 2026-11-03), here its own file
         Clean(program + "print(C().Shown())\n");
+        Clean(program.Replace("    int Hidden", "    internal int Hidden") + "print(C().Hidden)\n");
     }
 
     [Theory]
