@@ -288,7 +288,18 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         {
             try
             {
-                return new TcpClient("127.0.0.1", port);
+                var client = new TcpClient("127.0.0.1", port);
+                if (client.Client.LocalEndPoint is IPEndPoint local && local.Port == port)
+                {
+                    // a connect to a port of the ephemeral range that nothing listens on yet may take that port as its own and
+                    // connect the socket to itself, TCP's simultaneous open; such a client talks to itself and never to the program,
+                    // which waits in its accept until the test's time ends
+                    client.Dispose();
+                    Thread.Sleep(20);
+                    continue;
+                }
+
+                return client;
             }
             catch (SocketException) when (!program.IsCompleted)
             {
