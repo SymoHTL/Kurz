@@ -1,0 +1,17 @@
+// expect: throws index-out-of-range at 12
+// rules: S24
+
+// the buffer holds the file's 3 bytes: consuming all of them passes, and one more is past what it holds
+void | IoError Past() {
+    File.WriteAll("consume-past.txt", "abc".Bytes)
+    f = File.Open("consume-past.txt")
+    File.Delete("consume-past.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Consume(3)
+    f.Consume(1)
+}
+
+Past() else {
+    IoError e => print(e)
+}

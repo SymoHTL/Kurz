@@ -342,11 +342,15 @@ public sealed partial class Checker
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
             }
+            else if (ReadsFields(f))
+            {
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text has such a loop
+            }
         }
 
         CheckMethodBodies(); // K7
         JoinPassingReaders();
-        FindGrowingCycles(); // T34: after the readers are known, which it does not read
+        FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
@@ -1253,7 +1257,7 @@ public sealed partial class Checker
             Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T35)");
         }
 
-        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
+        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Naked | Modifiers.Extern);
         if (unsupportedModifiers != Modifiers.None)
         {
             NotSupported(d.Line, (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
@@ -1429,7 +1433,7 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported.</summary>
+    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported or is a <c>data</c> value of constants, which no type parameter holds (T35).</summary>
     private Constant? CheckDefault(Expression value, KurzType type, int parameterLine)
     {
         var reading = readingConstant;
@@ -1441,9 +1445,9 @@ public sealed partial class Checker
             return null;
         }
 
-        if (t.Constant is null)
+        if (t.Constant is null && !IsConstantData(value))
         {
-            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields, or literals that T6 folds (F12)");
+            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields or of constant arguments, or literals that T6 folds (F12)");
             return null;
         }
 
@@ -1455,6 +1459,16 @@ public sealed partial class Checker
 
         return t.Constant;
     }
+
+    /// <summary>
+    /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
+    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// </summary>
+    private bool IsConstantData(Expression value) =>
+        value is CallExpression c
+        && model.TryCallOf(c) is { Kind: CallKind.DataNew }
+        && c.Arguments.All(a => model.TypeOf(a.Value).Constant is not null || IsConstantData(a.Value));
 
     private void CheckFunctionBody(FunctionSymbol f)
     {
@@ -2457,7 +2471,10 @@ public sealed partial class Checker
             DeclareChecked(f.Second.Name, value ?? Types.Error, false, VariableKind.Loop, f.Second.Line, f.Second);
         }
 
+        var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
+        fieldsLoopDepth -= fields ? 1 : 0;
         PopScope();
         if (untyped && f.Arms is not null)
         {

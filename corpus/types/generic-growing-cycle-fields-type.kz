@@ -1,0 +1,24 @@
+// expect: output
+// | Name=(box);Corner=(X=(1);Y=(2););
+// rules: T34
+
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+// `Show` calls itself in its loop over `T.Fields` with the field's type, which takes no part in a cycle that grows
+string Show<T>(T value) {
+    match T.Kind {
+        TypeKind.Data => {
+            mut text = ""
+            for f in T.Fields {
+                f.Type part = f.Get(value)
+                shown = Show<f.Type>(part)
+                text = "{text}{f.Name}=({shown});"
+            }
+            return text
+        }
+        else => return "{value}"
+    }
+}
+
+print(Show(Shape("box", Point(1, 2))))
