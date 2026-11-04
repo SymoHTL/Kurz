@@ -988,7 +988,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   built puts between the call's count and its system call where the program arms it, a socket's close among them, which shuts
   the socket down and releases a listener's descriptor once its `Accept` is out, as `F_GETFD` shows; a socket's close with a call in
   flight, into whose window before the shutdown the IR puts that call's end and a new socket that listens, which does not take the
-  closed socket's number and still listens after the shutdown; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
+  closed socket's number and still listens after the shutdown; a client waiting in a listener's queue, which
+  reads a reset after the listener's close, with an `Accept` in flight and with none; a `ShutdownWrite` through a holder of a closed stream whose number a new stream took, which
   leaves that stream's writes alone; and a closed handle whose number the system gave another file; a read
   into a list another value holds; a count and a `max` past the largest `int`; a whole file of the
   largest `int` of bytes, lowered to 20 in the library's text, one byte more, five bytes more and a
