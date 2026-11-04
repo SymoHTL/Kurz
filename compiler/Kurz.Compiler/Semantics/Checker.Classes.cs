@@ -515,6 +515,14 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (!InFolder(baseSymbol))
+            {
+                // W1 with K6: `std/`'s checker judged the class with no class derived from it, so the refusals of a class in a chain did not
+                // run on it, and its symbol is `std/`'s own, which the file's reading leaves as it is
+                NotSupported(b.Line, $"`{named.Name}` after `:`, a class of `std/` the prelude brings into the file (K6, W1)");
+                continue;
+            }
+
             if (taken is not null)
             {
                 NotSupported(b.Line, $"a second base class, `{named.Name}`, where a class inherits from one class (K6)");
@@ -586,7 +594,8 @@ public sealed partial class Checker
     /// K7: a method with the name and the parameter types, in order, of a method of a base class that the class can see, the nearest
     /// such, is marked <c>override</c>, and that method <c>virtual</c> or <c>override</c>; without the mark it is <c>hides-member</c>.
     /// <c>override</c> where no such method is, or where it carries neither mark, is <c>override-without-virtual</c>, and an override
-    /// whose return type differs is <c>override-return-type</c>. A base method the class cannot see, a private one, is hidden by
+    /// whose return type differs is <c>override-return-type</c>. The class sees a base method with <c>pub</c> or <c>prot</c>, and one
+    /// marked <c>internal</c> where its folder declared the base (F9); a base method the class cannot see, a private one, is hidden by
     /// nothing (F9). An override is as visible as it writes, whatever the method it overrides writes: one without <c>pub</c> is private
     /// to its class, which a call through the base reaches and a call on the derived type outside it is refused (F9; the owner,
     /// 2026-11-02, #110, "allowed as written"). The checker does not read <c>virtual</c> on a private method, which no derived class sees,
@@ -604,7 +613,7 @@ public sealed partial class Checker
         }
 
         var overridden = symbol.Base?.Chain
-            .Select(c => c.Methods.TryGetValue(method.Name, out var list) ? list.FirstOrDefault(m => SameParameters(m, method) && (m.Declaration!.Modifiers & (Modifiers.Pub | Modifiers.Prot)) != 0) : null)
+            .Select(c => c.Methods.TryGetValue(method.Name, out var list) ? list.FirstOrDefault(m => SameParameters(m, method) && SeenByDerived(m)) : null)
             .FirstOrDefault(m => m is not null);
         if ((d.Modifiers & Modifiers.Override) == 0)
         {
@@ -632,6 +641,11 @@ public sealed partial class Checker
 
         method.Overridden = overridden;
     }
+
+    /// <summary>F9: whether a class derived from the class of <paramref name="method"/> sees it: with <c>pub</c> or <c>prot</c>, or <c>internal</c> in its folder.</summary>
+    private bool SeenByDerived(FunctionSymbol method) =>
+        (method.Declaration!.Modifiers & (Modifiers.Pub | Modifiers.Prot)) != 0
+        || ((method.Declaration.Modifiers & Modifiers.Internal) != 0 && InFolder(method.Owner!));
 
     /// <summary>
     /// F12, D11: the default of a parameter of a primary constructor is a constant expression, as a parameter's is. K10, K11, K17: the

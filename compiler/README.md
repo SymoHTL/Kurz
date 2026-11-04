@@ -1718,7 +1718,7 @@ or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` f
 other than `pub`, `internal` and `mut` (K18, R13), a method that is `extern` or that has type parameters of its own (K7,
 section 4), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
-(K6, K7, K18), a type after `:` that is no class, a second base class and a base that closes a cycle of bases
+(K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
 (K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), an `equal by` on a class whose

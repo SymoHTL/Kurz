@@ -2199,6 +2199,23 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_class_of_std_that_the_prelude_names_is_no_base_of_a_class_of_the_file()
+    {
+        // K6 with W1: std/'s checker judged the class with no class derived from it, so a class of the file that names it after `:` is
+        // not supported, and std/'s symbol is left as it is
+        var runtime = StdRuntime.Value;
+        var stdHeaders = runtime.StdChecker.Model.ClassOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpHeaders"));
+        var (diagnostics, _) = CheckSeeingStd("class Mine : HttpHeaders {\n    pub int Size() => 1\n}\n\nprint(Mine().Size())\n");
+        Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
+        Assert.Equal(["1: `HttpHeaders` after `:`, a class of `std/` the prelude brings into the file (K6, W1)"], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        Assert.False(stdHeaders.Derived);
+
+        // the positive control: a class of the file after `:` is read, with std/ seen
+        var (own, _) = CheckSeeingStd("class Headers {\n    pub int Size() => 0\n}\nclass Mine : Headers {\n    pub int Count() => 1\n}\n\nprint(Mine().Count())\n");
+        Assert.Empty(own.Items);
+    }
+
+    [Fact]
     public void A_class_of_the_file_may_hold_a_class_of_std_in_its_fields()
     {
         // R2 with W1: the cycle rule walks the fields of the file's classes, and a class of std/ the prelude names is no class of the
@@ -3606,6 +3623,10 @@ public sealed class CheckerTests
         const string animal = "class Animal {\n    pub virtual string Sound() => \"quiet\"\n    pub string Name() => \"animal\"\n    string Secret() => \"s\"\n}\n";
         Assert.Equal([(ErrorIds.HidesMember, 7)], Errors(animal + "class Dog : Animal {\n    pub string Sound() => \"woof\"\n}\n\nprint(Dog().Sound())"));
         Assert.Equal([(ErrorIds.HidesMember, 7)], Errors(animal + "class Dog : Animal {\n    pub string Name() => \"dog\"\n}\n\nprint(Dog().Name())"));
+        // F9 with K7: a base method marked `internal` is one the derived class sees in its folder, so a method of its name and parameters hides it
+        const string quiet = "class Animal {\n    internal string Quiet() => \"q\"\n}\n";
+        Assert.Equal([(ErrorIds.HidesMember, 5)], Errors(quiet + "class Dog : Animal {\n    pub string Quiet() => \"d\"\n}\n\nprint(Dog().Quiet())"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 5)], Errors(quiet + "class Dog : Animal {\n    pub override string Quiet() => \"d\"\n}\n\nprint(Dog().Quiet())"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Name() => \"dog\"\n}\n\nprint(Dog().Name())"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Run() => \"run\"\n}\n\nprint(Dog().Run())"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Secret() => \"d\"\n}\n\nprint(Dog().Secret())"));
