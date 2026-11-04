@@ -568,7 +568,38 @@ public sealed class CheckerTests
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Make<T>() => Make<T>()\n\nprint(Make())").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
-        Assert.Equal(notInferable + " (T27)", Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(nothing))").Diagnostics.Items.Single(d => d.Id == ErrorIds.CannotInfer).Message); // an argument with an error of its own is named by none
+        // E1 with T27: an argument with an error of its own in a nested position, the `T` of a `List<T>`, gives `T` nothing and its own error
+        // stands alone, as in a direct one; a result that does not name `T` stays, one that does reports nothing more (the owner, 2026-11-03,
+        // #156, comment 6600034940); `T` that another argument fails to give a type is still `cannot-infer`
+        var count = "int Count<T>(List<T> xs) => xs.Count\n\nint One(int a) => 1\n\n";
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "print(Count(nothing))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(count + "print(Count(null))"));
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors(count + "print(Count(One))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "int n = Count(nothing)\nprint(n + 1)"));
+        Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.TypeMismatch, 5)], Errors(count + "string s = Count(nothing)\nprint(s)")); // the result is an `int`
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(count + "print(Count(Nope()))")); // a call the checker could not type
+        Assert.Equal([(ErrorIds.CannotInfer, 5)], Errors(count + "print(Count(x => x))")); // a lambda has no type of its own before the pick (F11)
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("T First<T>(List<T> xs) => xs[0]\n\nx = First(nothing)\nprint(x.Length)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("T? Opt<T>(T? x) => x\n\nprint(Opt(null))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 3), (ErrorIds.UnknownName, 3)], Errors("int Two<T, U>(List<T> a, U b) => 1\n\nprint(Two(5, nothing))"));
+        // T27 with E1 on one `T`: an argument with no error of its own that gives `T` nothing keeps the `cannot-infer`, which names it, beside
+        // another argument's own error, nested, direct, a `[]` or a literal's; with no such argument nothing more is reported (the owner,
+        // 2026-11-03, #156, comment 6603205575)
+        var two = "int Two<T>(List<T> a, List<T> b) => 1\n\nint Three<T>(T a, List<T> b) => 1\n\n";
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(5, nothing))"));
+        Assert.Equal(notInferable + ": argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(two + "print(Two(5, nothing))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 6), (ErrorIds.UnknownName, 6)], Errors(two + "int k = 5\nprint(Two(k, nothing))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(\"a\", null))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Three(nothing, 5))"));
+        Assert.Equal(notInferable + ": argument 2 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(two + "print(Three(nothing, 5))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.CannotInfer, 5)], Errors(two + "print(Two([], 5))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.ConstantOverflow, 5)], Errors(two + "print(Three(99999999999999999999, 5))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, nothing))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))")); // a lambda has no type of its own before the pick (F11)
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(two + "List<int> xs = [1]\nprint(Two(xs, nothing))")); // `xs` gives `T` its type
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(5, [1]))")); // and so does the list literal
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("T Pick<T>(T a, T b) => a\n\nprint(Pick<int, int>(1, 2))"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair<int> p = Pair(1, \"one\")\nprint(p.First)"));
@@ -2203,6 +2234,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("h = HttpHeaders()"));
     }
 
+    [Fact]
+    public void A_class_of_the_file_may_hold_a_class_of_std_in_its_fields()
+    {
+        // R2 with W1: the cycle rule walks the fields of the file's classes, and a class of std/ the prelude names is no class of the
+        // file: a field that holds one, `mut` or not, in a list or a nullable type, is no ring, and the walk passes over it
+        var (diagnostics, _) = CheckSeeingStd("class Message(mut HttpHeaders Headers, List<HttpHeaders> Parts, HttpHeaders? Trailer)\n\nm = Message(HttpHeaders(), List<HttpHeaders>(), null)\nprint(m.Headers.Get(\"Host\") ?? \"none\")\n");
+        Assert.Empty(diagnostics.Items);
+
+        // the positive control: a ring of the file's own classes beside such a field is still one
+        var (ring, _) = CheckSeeingStd("class Node(mut HttpHeaders Headers, mut Node? Next)\n\nprint(Node(HttpHeaders(), null).Next == null)\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], ring.Items.Select(d => (d.Id, d.Line)));
+    }
+
     [Theory]
     [InlineData("h = HttpHeaders()\nprint(h.names)\n", "a field is visible outside it with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside it with `pub` (F9)")]
@@ -2211,6 +2255,25 @@ public sealed class CheckerTests
         // W1 with F9: the file sees the class, and a member std/ declares without `pub` stays inside it
         var error = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
         Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
+        Assert.EndsWith(end, error.Message);
+    }
+
+    [Theory]
+    [InlineData("h = HttpHeaders()\nprint(h.names.Count)\n", "a field is visible outside that folder with `pub` (F9)")]
+    [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside that folder with `pub` (F9)")]
+    [InlineData("print(1)\nprint(HttpHeaders.Most)\n", "a field is visible outside that folder with `pub` (F9)")]
+    public void An_internal_member_of_a_class_of_std_is_visible_to_std_and_to_no_file(string program, string end)
+    {
+        // F9 with W1: a member std/ marks `internal`, a field, a `static` method and a `static` field, is visible to std/'s own files, here
+        // a class beside HttpHeaders that reads the fields and calls the method, which the edited std/ checks clean (Edited holds it to no
+        // error), and to no file of a program, which is another folder (the owner, 2026-11-03)
+        var runtime = ListTests.Edited(
+            ("std/std.kz", "    mut List<string> names = List<string>()", "    internal mut List<string> names = List<string>()"),
+            ("std/std.kz", "    static bool SameName(string a, string b)", "    internal static bool SameName(string a, string b)"),
+            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100"));
+        var error = Assert.Single(CheckSeeingStd(program, runtime).Diagnostics.Items);
+        Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
+        Assert.Contains("is `internal` to the folder that declares its class", error.Message);
         Assert.EndsWith(end, error.Message);
     }
 
@@ -3365,6 +3428,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class C {\n    mut int count = 0\n}\n\nc = C()\nf = () => c.count\nprint(f())"));
         var (called, _) = Check("class C {\n    () => int f = () => 1\n}\n\nc = C()\nprint(c.f())"); // R9 leaves the field's type unread
         Assert.Contains(called.Items, d => d.Id == ErrorIds.NotVisible && d.Line == 6);
+        // F9: a member marked `internal`, a field, a method, a `static` field and a `static` method, is visible to the files of its folder
+        // (the owner, 2026-11-03), so its own file reads, assigns and calls it from outside the class; before a function at the top
+        // `internal` says what no modifier says (assumed, section 8); the same members without it are the class's own, the control
+        const string folder = "class Counter {\n    internal mut int count = 0\n    internal static int Start = 5\n\n    internal void Add() {\n        count = count + 1\n    }\n\n    internal static int Twice(int n) => n * 2\n}\n\ninternal int Three() => 3\n\nc = Counter()\nc.Add()\nc.count = 4\nprint(c.count)\nprint(Counter.Start)\nprint(Counter.Twice(Three()))";
+        Clean(folder);
+        Clean("internal class Box(int Side)\n\ninternal data Pair(int A)\n\nprint(Box(2).Side)\nprint(Pair(3).A)");
+        Assert.Equal([(ErrorIds.NotVisible, 15), (ErrorIds.NotVisible, 16), (ErrorIds.NotVisible, 17), (ErrorIds.NotVisible, 18), (ErrorIds.NotVisible, 19)],
+            Errors(folder.Replace("internal ", "")));
         // K1, K14: a field of the body without `mut` is assigned by nothing, from a method or from outside, and changed by no `mut` method (M5)
         Assert.Equal([(ErrorIds.AssignImmutable, 5)], Errors("class C(int V) {\n    int a = 1\n\n    pub void Set() {\n        a = 2\n    }\n}\n\nC(1).Set()"));
         Assert.Equal([(ErrorIds.AssignImmutable, 7)], Errors("class C {\n    pub int n = 3\n}\n\nc = C()\nprint(c.n)\nc.n = 4"));
@@ -4369,6 +4440,50 @@ public sealed class CheckerTests
         var passing = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nvoid Outer<U>(U x, int n) {\n    Only<U>()\n    if n > 0 {\n        Outer([x], n - 1)\n    }\n}\n\nOuter(1, 3)";
         Assert.Equal(["14: a chain of more than 64 copies of generic functions that read their type, from `Outer<int>` (T33)"], NotSupported(passing));
         Clean("void Deep<T>() {\n    match T.Kind {\n        TypeKind.List => print(1)\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
+    }
+
+    [Fact]
+    public void A_cycle_that_grows_through_a_loop_over_T_Fields_is_refused_at_the_call_in_the_loop_where_the_chain_of_copies_stops()
+    {
+        // T34 with T33: of a function that reads its type, the walk reads the calls in a loop over `T.Fields` on its text, called or not, and
+        // refuses a cycle that grows there at that call (the owner, 2026-11-03, Q2 (b)); the chain of copies stops at that call, so that the
+        // bound of T33 does not report the cycle too (Q3 (a)), and the copies before it report what else their bodies hold, in the same build
+        // (comment 6603481343 on issue 156); a cycle that leaves the loop through a call outside it, which the walk does not read, keeps the
+        // bound of T33; a type argument that is the field's type takes no part (Q4 (a))
+        const string Deep = "data Box<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n        {2}if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)", "")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "", "")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)", "Deep(Box(1), 3)", "")));
+
+        const string Other = "int y = \"a\"\n        ";
+        Assert.Equal([(ErrorIds.TypeMismatch, 5), (ErrorIds.UnusedVariable, 5), (ErrorIds.GrowingTypeArgument, 7)],
+            Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)", Other)));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "", Other)));
+
+        var leaving = string.Format(Deep, "Wrap(Box(x), n - 1)", "void Wrap<U>(U y, int n) {\n    Deep(y, n)\n}\n\nDeep(Box(1), 3)", "");
+        var bound = Assert.Single(NotSupported(leaving));
+        Assert.StartsWith("15: ", bound);
+        Assert.EndsWith("(T33)", bound);
+
+        Clean("data Point(int X, int Y)\ndata Shape(string Name, Point Corner)\n\nstring Show<T>(T value) {\n    match T.Kind {\n        TypeKind.Data => {\n"
+            + "            mut text = \"\"\n            for f in T.Fields {\n                f.Type part = f.Get(value)\n                shown = Show<f.Type>(part)\n"
+            + "                text = \"{text}{f.Name}=({shown});\"\n            }\n            return text\n        }\n        else => return \"{value}\"\n    }\n}\n\n"
+            + "print(Show(Shape(\"box\", Point(1, 2))))");
+    }
+
+    [Fact]
+    public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
+    {
+        // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,
+        // inside a loop over `T.Fields` as outside it (the owner, 2026-11-03, comment 6603481343 on issue 156): an arm no copy takes is
+        // clean, and one a copy takes that grows ends at the bound of T33, at the outer call; the same call outside the arm is refused
+        const string Deep = "data Box(int A)\ndata Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n{0}\n    }}\n}}\n\nDeep(Box(1), 3)";
+        const string Arm = "        match T.Kind {{\n            TypeKind.{0} => Deep(Wrap(x), n - 1)\n            else => print(n)\n        }}";
+        Clean(string.Format(Deep, string.Format(Arm, "List")));
+        var bound = Assert.Single(NotSupported(string.Format(Deep, string.Format(Arm, "Data"))));
+        Assert.StartsWith("13: ", bound);
+        Assert.EndsWith("(T33)", bound);
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
     }
 
     [Fact]
