@@ -6,13 +6,16 @@ metadata:
 ---
 
 On a CPU with AVX, LLVM writes every vector instruction it can in its VEX form, and its pass that
-inserts `vzeroupper` cleans the upper halves of the YMM registers before a call and a return
-alone. The SHA instructions (`sha256rnds2`, `sha256msg1`, `sha256msg2`, `sha1rnds4` and the others)
-have no VEX form. A legacy SSE instruction that runs while the upper halves are dirty pays a
-transition of the register state on Intel's cores, at every such instruction.
+inserts `vzeroupper` (`X86VZeroUpper.cpp` in LLVM's x86 back end) cleans the upper halves of the YMM
+registers before a call and a return alone. The SHA instructions (`sha256rnds2`, `sha256msg1`,
+`sha256msg2`, `sha1rnds4` and the others) have no VEX form. A legacy SSE instruction that runs while
+the upper halves are dirty pays for them on Intel's cores, by Intel's 64 and IA-32 Architectures
+Optimization Reference Manual, its section on mixing AVX code with SSE code: before Skylake a
+transition of the whole register state, from Skylake on a dependence on the upper halves and a blend
+at every such instruction.
 
 Pull request 173 built the standard library's SHA-256 through `X86.Sha` and measured it built for
-`raptorlake`: the hash stored its constants through YMM registers just before its rounds, and 48 MiB
+`raptorlake`, on one x86-64 machine with SHA and AVX2, a core of that generation: the hash stored its constants through YMM registers just before its rounds, and 48 MiB
 took 594 ms, where the same rounds after a `vzeroupper` took 19 ms (2026-11-01). Cleaning at the
 entry of every function that runs a guarded run was not enough either: the rounds written as small
 functions, which LLVM inlines into one loop, took 36 ms, since the cleaning then sat inside the loop.
