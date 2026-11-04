@@ -1942,3 +1942,383 @@ void Unread() {
     print(waited >= 100ms && waited < 2s)
 }
 ```
+
+### W11 (decided, §12) A streamed response
+
+A handler streams a body by `HttpResponse.Stream(status, (HttpWriter w) => ...)`, a function of the
+type `(HttpWriter) => void | IoError`: the writer writes the head and calls the function, each
+`w.Write` sends one chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body
+goes without chunks and the close of the connection ends it; and the writer lives only inside the
+call (§12, the owner, 2026-11-03, "A response can be streamed"). The function takes its writer
+without `mut`, since `HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of
+a streamed response takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and
+gives `void | IoError`, the function gives `void | IoError` too, and an `IoError` closes the
+connection, since no status can be sent after the head went out (§12, the owner, 2026-11-03).
+`Stream` sends `application/octet-stream`, which a handler replaces with `Set` (§12, the owner,
+2026-11-03). *(assumed, §12, put to the owner on issue 110, comment 6623201585, and taken at its
+default until answered: a status that has no body, 100 to 199, `204`, `205` or `304`, stopping the
+program at `Stream` with `status <n> has no body to stream`; and a write after the function
+returned giving an `IoError` of the kind `InvalidInput`, `writer used after its response ended`,
+writing nothing)* *(assumed, §12, not put to the owner: a `HEAD` answered with the head,
+`Transfer-Encoding: chunked` in it, and the function not called; a `Content-Length` the handler set
+giving `InvalidInput` with nothing written; a write of no bytes writing nothing; each write held to
+`MinResponseDataRate` (W10); `response.Write(stream)` chunking always, and `WriteHead` writing the
+head alone; the function's `IoError` ending the body without its last chunk, the head written where
+no write sent it, and `Write` and `ServeConnection` giving that error; the function reading the
+request's body while it writes, what it left unread drained after it and the connection closing
+where that is past `MaxDrainSize` or the request still awaits `100 Continue`, a read before the head
+went out sending `100 Continue` and none after it; no bound on the stream's whole time; and the head
+going out with the first write, and the CR LF that ends a chunk with the write after it)* The
+response holds its function in a field of a function type, so that a function that reads a class
+that holds a `mut` response closes a ring through it (R9), which a handler that reads that class
+does not *(assumed: R9's reading put to the owner on issue 110, comment 6624472418, whose case
+`http/stream-cycle.kz` stands under R9)*.
+
+Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
+```kurz
+// a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
+// `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
+// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept, `chunked`
+// added; a `Content-Length` the handler set is `InvalidInput` with nothing written; a function's `IoError` ends the body without its
+// last chunk, the head written where no write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no
+// function; and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
+class Keeper {
+    pub mut List<HttpWriter> Kept = List<HttpWriter>()
+
+    pub void Keep(HttpWriter w) {
+        Kept.Add(w)
+    }
+}
+
+// what the client got from `r.Write`, or from `r.WriteHead` where `head`, each CR LF as `|`, after what the call gave
+void | IoError Wire(HttpResponse r, bool head) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    mut result = "void"
+    if head {
+        r.WriteHead(server) else {
+            IoError e => {
+                result = "{e.Kind}"
+            }
+        }
+    } else {
+        r.Write(server) else {
+            IoError e => {
+                result = "{e.Kind}"
+            }
+        }
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    shown = text.Replace("\r\n", "|")
+    print("{result} [{shown}]")
+}
+
+// a write of more than 64 KiB, its chunk's size line and the count of the bytes the client got
+void | IoError Big() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    mut body = Bytes()
+    for i in 0..<70000 {
+        body.Add(97)
+    }
+
+    HttpResponse.Stream(200, (HttpWriter w) => w.Write(body)).Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    lines = text.Split("\r\n")
+    print("{got.Count} {lines[4]} {lines[5].Bytes.Count} {lines[6]}")
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("hello")
+        w.Write(Bytes())
+        w.Write(" world".Bytes)
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => w.Write("")), false)
+    events = HttpResponse.Stream(201, (HttpWriter w) => w.Write("data: 1"))
+    events.Headers.Set("Content-Type", "text/event-stream")
+    Wire(events, false)
+    coded = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
+    coded.Headers.Set("Transfer-Encoding", "gzip")
+    Wire(coded, false)
+    sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
+    sized.Headers.Set("Content-Length", "1")
+    Wire(sized, false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("a")
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        print("called")
+        w.Write("c")
+    }), true)
+    keeper = Keeper()
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        keeper.Keep(w)
+        w.Write("k")
+    }), false)
+    keeper.Kept[0].Write("late") else {
+        IoError e => print(e)
+    }
+
+    Big()
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
+```
+
+Case: [http/serve-stream.kz](../corpus/http/serve-stream.kz)
+```kurz
+// the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
+// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function; the function may read the
+// request's body while it writes, a read before its first write sending `100 Continue` and none after it, and what it left unread is
+// drained after it, the connection closing where that is past `MaxDrainSize` or the request still awaits `100 Continue`, and a body
+// malformed there closing it with that error; a function's `IoError` closes the connection, which gives it; and a `Content-Length`
+// the handler set is `InvalidInput` with nothing written, to HTTP/1.0 too
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+
+// the body of `r` whole, the failures of HTTP as `InvalidData`
+Bytes | IoError Whole(HttpRequest r) {
+    return r.Body.ReadAll(100) else {
+        HttpError e => return IoError(IoKind.InvalidData, 0, e.Detail)
+    }
+}
+
+paths = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("a")
+    w.Write(r.Path)
+})
+called = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    print("called {r.Path}")
+    w.Write("b")
+})
+echo = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    if r.Path == "/late" {
+        w.Write("x")
+    }
+
+    w.Write(Whole(r))
+})
+unread = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => w.Write("u"))
+failing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("f")
+    size = File.Size("serve-stream-missing.txt")
+    w.Write("{size}")
+})
+sized = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("s"))
+    response.Headers.Set("Content-Length", "1") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
+Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
+Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", called, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits(MaxDrainSize: 2))
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", unread, HttpLimits())
+Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
+Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
+```
+
+Case: [http/serve-stream-timeouts.kz](../corpus/http/serve-stream-timeouts.kz)
+```kurz
+// a streamed response's request body that falls under `MinRequestBodyDataRate` after the function returned closes the connection
+// after the whole response, with no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request
+// timed out")`: a body the function left unread, while it is drained, and one whose read in the function ran out of its time
+// serves `sent`, which the client does not end, on one connection with `handler` within `limits`, and prints the loop's result,
+// whether it took 100 ms to 2 s, and what the client got
+void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(sent.Bytes) else {
+        IoError e => return
+    }
+
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => print(e.Kind)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+
+unread = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => w.Write("u"))
+swallowing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    got = r.Body.ReadAll(100) else {
+        IoError e => {
+            w.Write("read: {e.Kind}")
+            return
+        }
+        HttpError e => return
+    }
+
+    w.Write(got)
+})
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", unread, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", swallowing, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+```
