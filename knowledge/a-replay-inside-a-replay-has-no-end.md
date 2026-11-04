@@ -31,11 +31,14 @@ that had held such an entry would have done the same on the runner.
   one level, exit 1, no copy made.
 - A mutation of a dispatch is proved by one that keeps the dispatch: the evidence tool's
   `return self_test()` becomes `return self_test() + 1`, and a case reads the exit code passed on.
-- A case whose mutation would reach the replay reaches stand-ins. The case of `tools/red_proof.py`
-  that calls `replay()` with the mark cleared, to see the refusal from the unmarked side, runs it
-  only while its stand-ins for `check` and `copy_of_tree` are both in place, and a case of its own
-  fails where one is missing: a mutation of a stand-in would otherwise start a real, unmarked replay
-  inside a replay, whose mutated self-test clears the mark again (the round of #205).
+- The case of `tools/red_proof.py` that calls `replay()` with the mark cleared, to see the refusal
+  from the unmarked side, runs it only while its stand-ins for `check` and `copy_of_tree` are both
+  in place, and a case of its own fails where one is missing: a mutation of a stand-in would
+  otherwise start a real, unmarked replay inside a replay, whose mutated self-test clears the mark
+  again (the round of #205). That case alone has stand-ins for both. The evidence tool's self-test
+  puts its stand-in in place of `red_proof.replay` itself, and a mutation of that stand-in reaches
+  the real `replay()`, where the mark refuses it (above). How another such case is written is a
+  `judgment step` of the rule in `CLAUDE.md`.
 - A proof script outside the replay runs each mutated self-test with the mark set, in a process
   group of its own, under a timeout that ends the whole group: a `judgment step` of the rule in
   `CLAUDE.md`, since no gate sees a proof made by hand.
