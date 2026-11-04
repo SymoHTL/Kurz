@@ -578,9 +578,10 @@ def cases_in(base):
     # working tree and let the write through; the kit's case above is the positive control, the same call let through
     typo = got(lambda: subprocess.run([sys.executable, os.path.join(kit.ROOT, "tools", "tree_gate.py"), "--hok"], input=call(outside),
                                       capture_output=True, text=True, timeout=300, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}))
-    cases.append(("hook: a mistyped --hook is refused with exit 2, which denies the call, and nothing is scanned",
-                  getattr(typo, "returncode", None) == 2 and "REFUSED, nothing run: --hok is not a call of this tool" in typo.stdout
-                  and "tree gate:" not in typo.stdout, getattr(typo, "stdout", typo)))
+    cases.append(("hook: a mistyped --hook is refused with exit 2, which denies the call, says why on stderr, which the session "
+                  "sees, and nothing is scanned",
+                  getattr(typo, "returncode", None) == 2 and "REFUSED, nothing run: --hok is not a call of this tool" in typo.stderr
+                  and "tree gate:" not in typo.stdout, (getattr(typo, "stderr", typo), getattr(typo, "stdout", ""))))
 
     # The command the session settings hand to the harness, run the way the harness runs it: by a
     # shell. Only exit 2 blocks a write, so the command has to end in 0 or in 2 whatever became of

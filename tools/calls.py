@@ -4,7 +4,8 @@
 accepts. A call is one of them, each alone: its words in their places, nothing before, between or after.
 
 `refused(argv, calls, tool)` is True where argv is no call of the table, and then it has printed the
-refusal: `REFUSED, nothing run: <arguments> is not a call of this tool`, or `<option> needs <what>` where
+refusal to stderr, which the harness shows the session on a hook's exit 2 (stdout it does not):
+`REFUSED, nothing run: <arguments> is not a call of this tool`, or `<option> needs <what>` where
 an option's argument is missing or not accepted, then the usage, which is made from the same table, so
 that it names what is taken and nothing else. The arguments are printed in ASCII, a character outside it
 as its escape, so that no log's code page can end the refusal in a traceback. The tool then exits
@@ -75,10 +76,12 @@ def usage(calls, tool):
     return "usage: " + "\n       ".join(lines) + f"\n  each call alone; the docstring of {tool} says what each does"
 
 
-def refused(argv, calls, tool, out=print):
-    """True where argv is no call of `calls`, with the refusal printed: the line `why` gives and the usage."""
+def refused(argv, calls, tool, out=None):
+    """True where argv is no call of `calls`, with the refusal printed to stderr (or to `out`, in a case): the line
+    `why` gives and the usage."""
     if understood(argv, calls) is not None:
         return False
+    out = out or (lambda line: print(line, file=sys.stderr))
     out(f"REFUSED, nothing run: {why(argv, calls)}")
     out(usage(calls, tool))
     return True
@@ -150,7 +153,7 @@ def self_test():
     cases.append(("route: a tool that reads its arguments before the question, names another path in it or exits otherwise is off "
                   "the route; the routed shape is on it", shapes == [True, True, True, False], shapes))
     reached = []
-    with contextlib.redirect_stdout(io.StringIO()) as text:
+    with contextlib.redirect_stderr(io.StringIO()) as text:
         codes = [main(a, lambda: reached.append(True) or 0) for a in (["--slef-test"], ["--self-test", "-v"], [])]
     refusal, before = text.getvalue(), list(reached)
     ran = main(["--self-test"], lambda: reached.append(True) or 0)
