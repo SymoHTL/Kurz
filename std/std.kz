@@ -2009,7 +2009,7 @@ byte* ReplaceByte(byte* bytes, long n, byte* old, byte* replacement, mut long ma
 // commas of 200k words joined by commas, a match every 7.5 bytes, replaced by `é` 20 times, the general path
 // took 48.60 ms, Rust's `replace` 57.49 and this one 11.25 (.NET 10.62, on UTF-16, where `é` is one unit);
 // on matches 750 bytes apart, a new line replaced by two bytes, 3.48 ms, Rust 11.05, this one 2.79, where the
-// runs alone took 2.72 and the words alone 3.02; on matches 130 bytes apart, 7.50 ms, the words 4.14 to 4.74
+// runs alone took 2.72 and the words alone 3.02; on matches 150 bytes apart, 7.50 ms, the words 4.14 to 4.74
 // and the runs 5.44 (issue #157, 2026-11-04, best of 7).
 byte* ReplaceOne(byte* bytes, long n, byte* old, byte* replacement, long k, mut long made, mut long asked) {
     long found = Find(bytes, n, old, 1)
