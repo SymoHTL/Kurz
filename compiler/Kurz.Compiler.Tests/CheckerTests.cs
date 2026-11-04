@@ -3877,6 +3877,7 @@ public sealed class CheckerTests
     [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items.Clear()\n}", "6: a `mut` method on a path through a nullable variable or field (N3, M5)")]
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
+    [InlineData("use a/util\nprint(1)", "1: use (F10)")]
     [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]
     [InlineData("data Box(List<int> Items)\n\nmut bs = List<Box>()\nbs[0].Items[0] = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]

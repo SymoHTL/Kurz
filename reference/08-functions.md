@@ -197,11 +197,13 @@ the top or a line of `project.kz` of that name answers, `unknown-name` where the
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
 the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
-nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+nothing through that line and being `unknown-name` where no other `use` line of the file, and no
+declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
-the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
-and a path that holds `.` or `..` are `unknown-name` at the `use` line; a longer
+the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
+which that package's line alone reaches, are `unknown-name` at the `use` line; a `.` or `..` where
+a name of the path stands, `use ../util`, is `syntax`; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
 folder of the project, so that `use json` beside it names the line)*
@@ -220,9 +222,15 @@ use sys
 print(1)
 ```
 
+Case: [functions/use-path-with-dots.kz](../corpus/functions/use-path-with-dots.kz)
+```kurz
+use ../util
+
+print(1)
+```
+
 No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
-file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
-before the checker reads it.
+file with none.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
