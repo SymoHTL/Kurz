@@ -342,9 +342,9 @@ public sealed partial class Checker
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
             }
-            else
+            else if (ReadsFields(f))
             {
-                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text has such a loop
             }
         }
 

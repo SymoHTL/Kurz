@@ -9,18 +9,23 @@ namespace Kurz.Compiler.Syntax;
 /// </summary>
 public static class SyntaxCopy
 {
-    /// <summary>A new declaration with the same text, every node of its parameters, its result and its body new.</summary>
-    public static FunctionDeclaration Copy(FunctionDeclaration d) => new Copier(null).Function(d);
+    /// <summary>
+    /// A new declaration with the same text, every node of its parameters, its result and its body new; <paramref name="copied"/>, where
+    /// given, is shown each expression with its copy.
+    /// </summary>
+    public static FunctionDeclaration Copy(FunctionDeclaration d, Action<Expression, Expression>? copied = null) => new Copier(null, null, copied).Function(d);
 
     /// <summary>
     /// A new block with the same text, every node of it new, but where <paramref name="rewrite"/> gives an expression its own: it is
     /// shown each expression before its copy, with the copier for the expressions inside it, and returns the expression to stand in
     /// its place or null for the copy. T33: a pass of a loop over <c>T.Fields</c>, in which <c>f.Get(value)</c> reads the field.
     /// </summary>
-    public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite) => (Block)new Copier(null, rewrite).Statement(b);
+    public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
+        (Block)new Copier(null, rewrite, copied).Statement(b);
 
     /// <summary>As the block's copy above, of an expression: T33, an argument of the call <c>T.Make(f => ...)</c> becomes, its lambda's body for one field.</summary>
-    public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite) => new Copier(null, rewrite).Expression(e);
+    public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
+        new Copier(null, rewrite, copied).Expression(e);
 
     /// <summary>Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them.</summary>
     public static void Walk(FunctionDeclaration d, Action<Expression> visit) => new Copier(visit).Function(d);
@@ -28,7 +33,7 @@ public static class SyntaxCopy
     /// <summary>Shows <paramref name="visit"/> every expression of a statement.</summary>
     public static void Walk(Statement s, Action<Expression> visit) => new Copier(visit).Statement(s);
 
-    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null)
+    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Expression, Expression>? copied = null)
     {
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
@@ -67,6 +72,13 @@ public static class SyntaxCopy
                 return rewritten;
             }
 
+            var copy = Copied(e);
+            copied?.Invoke(e, copy);
+            return copy;
+        }
+
+        private Expression Copied(Expression e)
+        {
             return e switch
             {
                 IntegerLiteral or RealLiteral or UnitLiteral or CharLiteral or BoolLiteral or NullLiteral or NameExpression or ThisExpression => e with { },
