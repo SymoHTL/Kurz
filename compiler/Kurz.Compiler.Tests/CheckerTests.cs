@@ -4376,6 +4376,17 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public async Task A_chain_of_copies_that_branches_ends_at_the_bound_with_its_one_diagnostic()
+    {
+        // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
+        // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains
+        const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
+            + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
+        var bound = await Task.Run(() => NotSupported(Branching)).WaitAsync(TimeSpan.FromSeconds(20)); // a `TimeoutException` where it does not end
+        Assert.Equal(["12: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"], bound);
+    }
+
+    [Fact]
     public void A_chain_of_as_many_copies_as_the_build_reads_is_read_and_one_more_is_not_supported()
     {
         // T33: the bound the text names is the one the build keeps: a chain of 64 readers, each calling the next with its type, is read
