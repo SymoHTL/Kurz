@@ -2296,8 +2296,8 @@ round can ask about it by the rule's id.
   *(assumed)*. Of those lambdas the field counts the ones whose type it can hold, `Types.Assignable`
   to one of the function types its type holds, and the ones a function value such a lambda captures
   can be, until none is added; a type on the way that names a type parameter counts every lambda
-  *(assumed: put to the owner on issue 110, comment 6624472418, so that a lambda that captures an
-  `HttpResponse`, whose streamed body is such a field, closes no ring unless it can be that body)*.
+  (the owner, 2026-11-04, #110, comment 6643368937), so that a lambda that captures an
+  `HttpResponse`, whose streamed body is such a field, closes no ring unless it can be that body.
   The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
