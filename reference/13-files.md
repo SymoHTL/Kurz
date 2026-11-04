@@ -1524,8 +1524,8 @@ means nothing in another process or after a restart, and a deadline crosses as t
 (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock, Q8 (a)).
 
 No case: a case runs one actor and keeps no state past its run, and the compiler builds neither a
-send to another actor nor a `durable` actor, so no case can hold the error. Its id stands in
-[12-errors.md](12-errors.md) with the case that expects it.
+send to another actor nor a `durable` actor, so no case can hold the error. The record names no id
+for it, and [12-errors.md](12-errors.md) has none: a row there comes with the case that expects it.
 
 ### S16 (decided, §12) The lines of a file
 
