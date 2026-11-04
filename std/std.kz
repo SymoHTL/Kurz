@@ -6207,14 +6207,14 @@ pub class HttpBody {
         return all
     }
 
-    // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
-    // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
     // The whole body as text, or `InvalidUtf8` where it is no UTF-8, as `string.FromUtf8` gives it.
     pub string | IoError | HttpError | InvalidUtf8 ReadAllText(int max) {
         all = ReadAll(max)
         return string.FromUtf8(all)
     }
 
+    // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
+    // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
     bool | IoError | HttpError NextChunk(TcpStream s) {
         if atChunkEnd {
             end = HttpLine(s, 2)
