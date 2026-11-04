@@ -501,9 +501,9 @@ public sealed partial class Checker
 
         if (Types.IsTime(source.Type) && Types.IsTime(target))
         {
-            if (Types.IsDuration(source.Type) != Types.IsDuration(target))
+            if (Types.IsDuration(source.Type) != Types.IsDuration(target) || Types.IsInstant(source.Type) != Types.IsInstant(target)) // T36
             {
-                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` (T13)");
+                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` ({(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
                 return Typed.Error;
             }
 
@@ -521,7 +521,7 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, T13)");
+        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
         return Typed.Error;
     }
 
