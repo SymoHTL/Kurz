@@ -1,0 +1,20 @@
+// expect: output
+// | none
+// rules: O4
+
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+T Same<T>(T x) => x
+
+// a type argument written as a union keeps the cases of the call
+match Same<int | NotFound>(Find(2)) {
+    int n => print(n)
+    NotFound => print("none")
+}

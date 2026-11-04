@@ -39,11 +39,8 @@ public sealed partial class Emitter
         switch (info.Kind)
         {
             case CallKind.Hash when hasher == Hasher.Crc32:
-                {
-                    var crc = fn.Value($"call i32 {StdFunction("Crc32Hash")}({listed}ptr {asked})");
-                    Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
-                    return crc;
-                }
+                // H1: the register a local of `Crc32Hash`, which asks for no block, so nothing is refused
+                return fn.Value($"call i32 {StdFunction("Crc32Hash")}({listed}ptr {Crc32Table()})");
 
             case CallKind.HmacVerify:
                 {
@@ -104,7 +101,8 @@ public sealed partial class Emitter
         fn.Emit($"store ptr {block}, ptr {place}");
         if (data is not null)
         {
-            fn.Emit($"call void {StdFunction($"{hasher}Update")}(ptr {block}, ptr {data})");
+            var table = hasher == Hasher.Crc32 ? $", ptr {Crc32Table()}" : "";
+            fn.Emit($"call void {StdFunction($"{hasher}Update")}(ptr {block}, ptr {data}{table})");
             return null;
         }
 
@@ -133,7 +131,7 @@ public sealed partial class Emitter
         var made = fn.Alloca("ptr", "made");
         var asked = fn.Alloca("i64", "asked");
         fn.Emit($"store i64 0, ptr {asked}");
-        var at = fn.Value($"call i64 {StdFunction("HexDecode")}(ptr {bytes}, i64 {count}, ptr {made}, ptr {asked})");
+        var at = fn.Value($"call i64 {StdFunction("HexDecode")}(ptr {bytes}, i64 {count}, ptr {HexDigits()}, ptr {made}, ptr {asked})");
         Refused(fn.Value($"icmp ne i64 {fn.Value($"load i64, ptr {asked}")}, 0"), asked);
         var result = fn.Alloca(Ir(union), "decoded");
         var done = fn.Label("hex.done");
@@ -153,6 +151,71 @@ public sealed partial class Emitter
         fn.Branch(done);
         fn.Block(done);
         return fn.Value($"load {Ir(union)}, ptr {result}");
+    }
+
+    /// <summary>
+    /// The global that holds the value of each byte as a hexadecimal digit (H7), written once into a program that decodes hexadecimal:
+    /// 256 bytes, 0 to 15 for <c>0</c> to <c>9</c>, <c>A</c> to <c>F</c> and <c>a</c> to <c>f</c>, and 255 for every other byte, as
+    /// .NET's <c>HexConverter.CharToHexLookup</c> holds them; the standard library's <c>HexDecode</c> reads two of them for each byte it
+    /// makes, as .NET's scalar <c>FromHexString</c> does. The <c>hex</c> crate, whose <c>decode</c> H7 cites for what is read, compares each
+    /// byte with the three ranges (<c>val</c>): a text of 32 MiB decoded 5 times took 468 ms so in Kurz and 610 ms in the crate's own Rust,
+    /// against 47 ms through this table (release builds, the best of seven).
+    /// </summary>
+    private string HexDigits()
+    {
+        const string name = "@\"hex.digits\"";
+        if (helpers.Add(name))
+        {
+            var values = Enumerable.Range(0, 256).Select(b => (char)b switch
+            {
+                >= '0' and <= '9' => b - '0',
+                >= 'A' and <= 'F' => b - 'A' + 10,
+                >= 'a' and <= 'f' => b - 'a' + 10,
+                _ => 255,
+            });
+            module.Global($"{name} = private unnamed_addr constant [256 x i8] [{string.Join(", ", values.Select(v => $"i8 {(sbyte)v}"))}]");
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// H1, H3: the table of CRC-32/ISO-HDLC that the standard library's <c>Crc32Update</c> and <c>Crc32Hash</c> take, 16 rows of 256
+    /// remainders of the reflected polynomial 0xEDB88320, as crc32fast's <c>CRC32_TABLE</c> holds them: row 0 a byte's remainder, as zlib's
+    /// table, and row k the remainder of a byte followed by k bytes of zero, which its slicing-by-16 reads for the byte 15 - k places
+    /// from the end of 16. Each call of a CRC built row 0 into the hasher's block before, a byte at a time: 16 MiB hashed 10 times took
+    /// 250.19 ms so, against 25.08 ms with this table and 24.58 ms in crc32fast's software path (release builds, the best of seven).
+    /// </summary>
+    private string Crc32Table()
+    {
+        const string name = "@\"crc32.table\"";
+        if (helpers.Add(name))
+        {
+            var table = new uint[16 * 256];
+            for (uint b = 0; b < 256; b++)
+            {
+                var c = b;
+                for (var k = 0; k < 8; k++)
+                {
+                    c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                }
+
+                table[b] = c;
+            }
+
+            for (var row = 1; row < 16; row++)
+            {
+                for (var b = 0; b < 256; b++)
+                {
+                    var before = table[((row - 1) * 256) + b];
+                    table[(row * 256) + b] = (before >> 8) ^ table[before & 255];
+                }
+            }
+
+            module.Global($"{name} = private unnamed_addr constant [4096 x i32] [{string.Join(", ", table.Select(v => $"i32 {(int)v}"))}]");
+        }
+
+        return name;
     }
 
     /// <summary>Whether the data type is <c>HexError</c>, which no file can declare beside the one every file sees (H7, V9).</summary>

@@ -49,10 +49,10 @@ map's keys, and compares the case and then the value as a field of a union compa
 value, as Rust") *(assumed, §4: a union key's case read as a key under "Equals inside data/keys")*. A
 union with no `null` case beside a value of one of its cases takes no `==` and no `!=`, on either side:
 `type-mismatch`, as Rust refuses an enum beside the payload of one of its variants, `Ok(5) == 5` on a
-`Result<i32, String>` as `Some(5) == 5` (§4, the owner, 2026-10-30, "Refuse, as Rust"); a side
-whose type is nullable is lifted first (N10), so `int? a == 5`, the shape of `Some(5) == 5`, compares as
-C# lifts it, and `(int | string)? a == 1` is `type-mismatch`, the union the lift leaves standing beside a
-value of one of its cases. A field that is a
+`Result<i32, String>` (§4, the owner, 2026-10-30, "Refuse, as Rust"); a side whose type is nullable is
+lifted first (N10), so `(int | string)? a == 1` is `type-mismatch`, the union the lift leaves standing
+beside a value of one of its cases, while `int? b == 5`, the shape of Rust's `Some(5) == 5`, which Rust
+refuses, compares as C# lifts it, Kurz following C# there and not Rust. A field that is a
 list compares by its items (M9), and its `double` or `float` items, and the values of its `double?` or
 `float?` items, at any depth, compare as C#'s `Equals` compares them, NaN equal to NaN and 0.0 equal to
 -0.0, `null` equal to `null`, so that such a value equals itself, where `==` on two lists outside a
@@ -158,7 +158,7 @@ print(n == n)
 
 Case: [data/union-equality-case-value.kz](../corpus/data/union-equality-case-value.kz)
 ```kurz
-// a union with no `null` case beside a value of one of its cases takes no `==`, as Rust refuses `Ok(5) == 5` on a
+// a union beside a value of one of its cases takes no `==`, as Rust refuses `Ok(5) == 5` on a
 // `Result<i32, String>` (D3)
 int | string a = 1
 print(a == 1)
@@ -407,6 +407,40 @@ data Empty
 
 e = Empty
 print(e == Empty)
+```
+
+### D21 (decided, §4) A derived `data` type without fields of its own
+
+`data Dot : Shape` writes no fields of its own and has the fields of its base (D7): its
+constructor takes them in their order, and a value of it is made as a value of any type with
+fields (D2). Its bare name is its one value (D8) only where no base above it has a field either;
+where one has, the bare name stands for no value (D2).
+
+Case: [data/inherit-no-own-fields.kz](../corpus/data/inherit-no-own-fields.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+data Spot : Dot
+data Tag
+data Mark : Tag
+
+int Sum(Shape s) => s.A + s.B
+
+d = Dot(1, 2)
+print(d.A)
+print(d)
+print(Sum(d))
+print(Spot(4, 5))
+m = Mark
+print(m == Mark)
+```
+
+Case: [data/inherit-no-own-fields-bare.kz](../corpus/data/inherit-no-own-fields-bare.kz)
+```kurz
+data Shape(int A, int B)
+data Dot : Shape
+
+print(Dot)
 ```
 
 ### D9 (decided, §4, §5) Unions
@@ -952,6 +986,17 @@ c.Increment()
 c.Increment()
 print(c.Count)
 print(before.Count)
+```
+
+Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
+```kurz
+data User(int Id, string Name) {
+    pub string Text() => "{Name} ({Id})"
+}
+
+u = User(1, "Ann")
+print(u)
+print("got {u}")
 ```
 
 ### D17 (decided, §4) How sets of flags are combined

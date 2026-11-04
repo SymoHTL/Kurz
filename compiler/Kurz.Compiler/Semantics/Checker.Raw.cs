@@ -164,7 +164,7 @@ public sealed partial class Checker
         PrimitiveType { Kind: Primitive.String } => Holding.Counted,
         PrimitiveType => Holding.Nothing,
         ListType or MapType or FunctionType => Holding.Counted, // a lambda holds what it captures (F11)
-        ClassType => Holding.Counted, // K2: an instance is a counted reference (section 3)
+        ClassType or WeakRefType => Holding.Counted, // K2: an instance is a counted reference (section 3), and a weak one counts its block (R3)
         UnionType u => Worst(u.Cases.Select(c => Holds(c, seen))),
         DataType d => seen.Contains(d.Symbol) ? Holding.Counted : HoldsFields(d, seen),
         TypeParameterType => Holding.Unknown,
@@ -264,22 +264,38 @@ public sealed partial class Checker
     };
 
     /// <summary>A4 with R10 and R17: whether a value of the type holds a raw pointer or a C function value, whose text no rule gives.</summary>
-    private static bool HoldsRaw(KurzType type, List<DataSymbol> seen)
+    private static bool HoldsRaw(KurzType type, List<DataSymbol> seen) => Holds(type, t => t is PointerType or CFunctionType, seen);
+
+    /// <summary>W2: whether a value of the type holds an <c>HttpError</c> of <c>std/</c>, whose text the compiler does not give.</summary>
+    private bool HoldsHttpError(KurzType type) => preludeSeen.Contains("HttpError") && Holds(type, IsHttpError, []);
+
+    /// <summary>W1, W2: whether the type is the <c>HttpError</c> of <c>std/</c>.</summary>
+    private bool IsHttpError(KurzType type) =>
+        preludeSeen.Contains("HttpError") && type is DataType d && ReferenceEquals(d.Symbol, dataTypes["HttpError"]);
+
+    /// <summary>
+    /// Whether a value of the type is or holds one of a type <paramref name="leaf"/> picks, as the text of a value shows it: an item, a
+    /// map's key or value, a case of a union or a field of a data type.
+    /// </summary>
+    private static bool Holds(KurzType type, Func<KurzType, bool> leaf, List<DataSymbol> seen)
     {
+        if (leaf(type))
+        {
+            return true;
+        }
+
         switch (type)
         {
-            case PointerType or CFunctionType:
-                return true;
             case ListType l:
-                return HoldsRaw(l.Element, seen);
+                return Holds(l.Element, leaf, seen);
             case MapType m:
-                return HoldsRaw(m.Value, seen);
+                return Holds(m.Key, leaf, seen) || Holds(m.Value, leaf, seen);
             case UnionType u:
-                return u.Cases.Any(c => HoldsRaw(c, seen));
+                return u.Cases.Any(c => Holds(c, leaf, seen));
             case DataType d when !seen.Contains(d.Symbol):
                 {
                     seen.Add(d.Symbol);
-                    var result = d.Symbol.Fields.Any(f => HoldsRaw(SubstituteData(d, f.Type), seen));
+                    var result = d.Symbol.Fields.Any(f => Holds(SubstituteData(d, f.Type), leaf, seen));
                     seen.RemoveAt(seen.Count - 1);
                     return result;
                 }
@@ -647,13 +663,19 @@ public sealed partial class Checker
     /// </summary>
     private void CheckMapWrite(Assignment a, IndexExpression index, MapType map, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a map reached through an item or a call, or into a path that goes on after the key (M4, M9)", out var throughInstance))
         {
             return;
         }
 
+        CheckWrittenValue(a, index, map.Value); // M4: the value first, then the key, as the write runs them
         CheckKey(index.Index, map);
-        CheckWrittenValue(a, index, map.Value);
+        if (throughInstance)
+        {
+            EndChangeableNarrowing(); // N9: the write, which runs after its value and its key, ends what was known of a path through a `mut` field
+        }
+
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the entry it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -664,18 +686,24 @@ public sealed partial class Checker
     /// </summary>
     private void CheckListWrite(Assignment a, IndexExpression index, ListType list, List<MemberAccess> members)
     {
-        if (!WrittenVariable(a, index, members, "an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)"))
+        if (!WrittenVariable(a, index, members, "an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)", out var throughInstance))
         {
             return;
         }
 
+        CheckWrittenValue(a, index, list.Element); // M4: the value first, then the index, as the write runs them
         var position = CheckExpression(index.Index, Types.Int);
         if (!position.IsError && !Types.IsInteger(position.Type))
         {
             Report(ErrorIds.TypeMismatch, index.Line, $"an index is an integer, not {Types.A(position.Type)} (M9, T2)");
         }
 
-        CheckWrittenValue(a, index, list.Element);
+        if (throughInstance)
+        {
+            EndChangeableNarrowing(); // N9: the write, which runs after its value and its index, ends what was known of a path through a `mut` field
+        }
+
+        frame.Known = Unweak(frame.Known); // N9: the write lets go of the item it replaces, whose count can be a `weak` target's last
     }
 
     /// <summary>
@@ -684,8 +712,9 @@ public sealed partial class Checker
     /// a nullable field is not changed through (N3), a member that is no field cannot be assigned, as in a path assignment, and
     /// anything else is <c>not supported</c> with <paramref name="unread"/>.
     /// </summary>
-    private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread)
+    private bool WrittenVariable(Assignment a, IndexExpression index, List<MemberAccess> members, string unread, out bool throughInstance)
     {
+        throughInstance = false;
         var fields = new List<MemberAccess>();
         var root = Unwrap(index.Target);
         while (root is MemberAccess { Conditional: false } m)
@@ -696,6 +725,7 @@ public sealed partial class Checker
 
         if (members.Count == 0 && (RunsThroughInstance(fields) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null)))
         {
+            throughInstance = true;
             return WrittenThroughInstance(a, index, fields); // K2: a collection a field of an instance holds
         }
 
@@ -920,7 +950,9 @@ public sealed partial class Checker
     /// <summary>R15: <c>List&lt;T&gt;.FromRaw(p, n)</c> and <c>List&lt;T&gt;.Allocate(n)</c>; a member of another type with type arguments is one no rule gives it (V10).</summary>
     private Typed CheckTypeMemberCall(TypeMemberAccess t, CallExpression c)
     {
-        var type = Resolve(t.Type);
+        // `List<void>` is read here, where `void` as any other type argument is `not supported` (compiler/README.md), so that `void`'s
+        // lack of a size is the error (R14)
+        var type = t.Type is NamedType { Name: "List", TypeArguments: [Syntax.VoidType] } ? new ListType(Types.Void) : Resolve(t.Type);
         if (type is ListType list && t.Member == "FromRaw")
         {
             return CheckFromRaw(c, list, list.Element, "List<T>.FromRaw");

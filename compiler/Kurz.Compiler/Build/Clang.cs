@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Kurz.Compiler.Emit;
 
 namespace Kurz.Compiler.Build;
 
@@ -133,10 +134,35 @@ public sealed partial class Clang
     /// them into the PDB. The failure, with what clang wrote, where it
     /// does not exit with 0.
     /// </summary>
-    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines)
+    public void Build(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
+    {
+        var (code, _, error) = Processes.Capture(Path, Arguments(irPath, outputPath, libraries, release, lines, cpuFlag), null, TimeSpan.FromMinutes(2));
+        if (code != 0)
+        {
+            throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+        }
+    }
+
+    /// <summary>
+    /// The arguments <see cref="Build"/> gives this clang, the one list on every target. A release build aligns every function at
+    /// 64 bytes, LLVM's <c>-align-all-functions=6</c>, where LLVM aligns a function at 16 bytes unless it is tiny, as rustc leaves
+    /// it: the owner's choice of 2026-11-02 (issue 156, comment 6580739215), an exception to "no row slower beyond noise" taken
+    /// for the rows it makes faster, against the 8 it makes slower. Of the sweep's 56 rows on Linux x86-64, 18 ran faster beyond
+    /// their band and 8 slower: parsing doubles of 17 digits took 111.90 ms against 136.91, and of 5 digits 43.39 against 55.76,
+    /// while setting and getting strings in a map took 77.35 against 71.07 and 69.96. The option goes to LLVM's code generator,
+    /// which the IR is handed to: clang's <c>-falign-functions</c> is read by its front end, which IR does not pass through, and
+    /// aligns nothing here. A test build keeps LLVM's alignment.
+    /// </summary>
+    internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {
         ArgumentNullException.ThrowIfNull(libraries);
-        var arguments = new List<string> { release ? "-O2" : "-O0", irPath, "-o", outputPath };
+        var arguments = release ? new List<string> { "-O2", "-mllvm", "-align-all-functions=6" } : new List<string> { "-O0" };
+        arguments.AddRange([irPath, "-o", outputPath]);
+        if (cpuFlag is not null)
+        {
+            arguments.Add(cpuFlag); // section 2: the CPU the build names, as rustc passes `-C target-cpu`
+        }
+
         if (lines)
         {
             arguments.Add("-g");
@@ -152,10 +178,94 @@ public sealed partial class Clang
         {
             arguments.Add("-lm");
         }
-        var (code, _, error) = Processes.Capture(Path, arguments, null, TimeSpan.FromMinutes(2));
-        if (code != 0)
+
+        return arguments;
+    }
+
+    /// <summary>The option that names the CPU to clang, as rustc's <c>-C target-cpu</c> reaches LLVM: <c>-march</c> on x86-64, <c>-mcpu</c> on Arm.</summary>
+    public static string CpuFlag(string name, bool x86) => (x86 ? "-march=" : "-mcpu=") + name;
+
+    [GeneratedRegex(@"^Target: (\S+)", RegexOptions.Multiline)]
+    private static partial Regex TargetText();
+
+    [GeneratedRegex(@"""-target-(cpu|feature)"" ""([^""]*)""")]
+    private static partial Regex DriverText();
+
+    [GeneratedRegex(@"^#define (\w+) ", RegexOptions.Multiline)]
+    private static partial Regex MacroText();
+
+    [GeneratedRegex(@"^#define __ARM_\w* .*$", RegexOptions.Multiline)]
+    private static partial Regex ArmText();
+
+    /// <summary>
+    /// The CPU clang knows by <paramref name="name"/>, <c>native</c> among them, as a build that names it compiles for (design record,
+    /// section 2): the classes of intrinsics it has, from the macros clang defines for it (R18), and the features clang's driver passes
+    /// for it, which a function compiled for more sets carries in front of theirs. Null where clang knows no CPU of that name for the
+    /// machine's architecture, with the target clang builds for in <paramref name="target"/>; a <see cref="ToolchainException"/> where
+    /// clang fails otherwise.
+    /// </summary>
+    public Cpu? DescribeCpu(string name, bool x86, out string target) => DescribeCpu(name, x86, null, out target);
+
+    /// <summary>
+    /// <see cref="DescribeCpu(string, bool, out string)"/> for the target <paramref name="triple"/> names, the machine's where it is null:
+    /// on a 64-bit Arm machine clang's driver refuses a CPU it does not know already in the run that shows its target, where on x86-64
+    /// the run of the macros refuses it.
+    /// </summary>
+    internal Cpu? DescribeCpu(string name, bool x86, string? triple, out string target)
+    {
+        var work = Directory.CreateTempSubdirectory("kurz-cpu-");
+        try
         {
-            throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+            var empty = System.IO.Path.Combine(work.FullName, "cpu.c");
+            File.WriteAllText(empty, string.Empty);
+            string[] flags = triple is null ? [CpuFlag(name, x86)] : [$"--target={triple}", CpuFlag(name, x86)];
+            var (driverCode, _, driver) = Processes.Capture(Path, [.. flags, "-###", "-c", empty], work.FullName, TimeSpan.FromSeconds(30));
+            target = TargetText().Match(driver) is { Success: true } t ? t.Groups[1].Value : "the default target";
+            if (driverCode != 0 && driver.Contains($"unsupported argument '{name}' to option '-mcpu='", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            if (driverCode != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {driverCode.ToString(CultureInfo.InvariantCulture)} and wrote:\n{driver.TrimEnd()}");
+            }
+
+            var (code, macros, error) = Processes.Capture(Path, [.. flags, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
+            if (code != 0 && error.Contains("unknown target CPU", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            if (code != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {code.ToString(CultureInfo.InvariantCulture)} and wrote:\n{error.TrimEnd()}");
+            }
+
+            var defined = MacroText().Matches(macros).Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+            var classes = !x86 ? [] : Semantics.Intrinsics.Classes.Values
+                .Where(c => c.IsX86 && (c.Base is null || (c.Macro is not null && defined.Contains(c.Macro))))
+                .Select(c => c.Name)
+                .ToList();
+            var features = DriverText().Matches(driver).Where(m => m.Groups[1].Value == "feature").Select(m => m.Groups[2].Value).ToList();
+
+            // the sets beyond the target's baseline, which the start check reads (section 2, the owner, 2026-11-02): x86-64's by the
+            // macros that name a set, a 64-bit Arm CPU's by the lines of its `__ARM_` macros, their values among them
+            string[] baselineFlags = [.. flags.SkipLast(1), .. x86 ? [CpuFlag("x86-64", x86: true)] : Array.Empty<string>()];
+            var (baselineCode, baseline, baselineError) = Processes.Capture(Path, [.. baselineFlags, "-E", "-dM", empty], work.FullName, TimeSpan.FromSeconds(30));
+            if (baselineCode != 0)
+            {
+                throw new ToolchainException($"{Path} exited with {baselineCode.ToString(CultureInfo.InvariantCulture)} and wrote:\n{baselineError.TrimEnd()}");
+            }
+
+            var sets = x86
+                ? defined.Where(CpuSets.NamesASet).Except(MacroText().Matches(baseline).Select(m => m.Groups[1].Value), StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList()
+                : ArmText().Matches(macros).Select(m => m.Value.TrimEnd()).Except(ArmText().Matches(baseline).Select(m => m.Value.TrimEnd()), StringComparer.Ordinal).ToList();
+            return new Cpu(name, classes, features, x86) { Sets = sets };
+        }
+        finally
+        {
+            work.Delete(recursive: true);
         }
     }
 

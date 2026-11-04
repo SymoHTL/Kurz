@@ -47,6 +47,12 @@ public sealed class TypeParameterSymbol(string name, int line)
     public int Line { get; } = line;
 
     public bool HasLimit { get; init; }
+
+    /// <summary>T35: the type of the constant the parameter holds, written <c>const JsonKeys K</c>; null for a type parameter, the error type where it is not read.</summary>
+    public KurzType? Constant { get; set; }
+
+    /// <summary>T35: the constant a call that leaves the parameter out gives it, <c>= Mode.Plain</c>; null where none is written or it is wrong.</summary>
+    public ConstantArgument? Default { get; set; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
@@ -77,10 +83,26 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     /// <summary>The class whose method this is (K7), with its instance as <c>this</c>; null for a function of the file.</summary>
     public ClassSymbol? Owner { get; init; }
+
+    /// <summary>
+    /// K7: a method written <c>static</c>, which has no instance and no <c>this</c>, and is called by its class's name, <c>T.M(args)</c>,
+    /// as C#'s static method and Rust's associated function, which takes no <c>self</c>.
+    /// </summary>
+    public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
 }
 
-/// <summary>A field of a <c>data</c> type (D1), its own or inherited (D7).</summary>
-public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line);
+/// <summary>
+/// A field of a <c>data</c> type (D1), its own or inherited (D7), or of a class (K1); <paramref name="Body"/> is the declaration of a
+/// field of a class body (K7), which is no parameter of a constructor, and null for a field of a primary constructor.
+/// </summary>
+public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line, FieldDeclaration? Body = null)
+{
+    /// <summary>F9, D14: a field of a primary constructor is visible wherever its type is, one of a class body only with <c>pub</c>.</summary>
+    public bool IsPub => Body is null || (Body.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>F9: a field of a class body marked <c>internal</c>, visible to the files of the folder that declares its class.</summary>
+    public bool IsInternal => Body is not null && (Body.Modifiers & Modifiers.Internal) != 0;
+}
 
 /// <summary>A <c>data</c> type (D1) with its fields, the base fields first (D7), its base (D6) and its type parameters (T19).</summary>
 public sealed class DataSymbol(string name, TypeDeclaration declaration)
@@ -99,8 +121,12 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     /// <summary>Set when the checker starts resolving the type, whatever the outcome, so that it is resolved once and a cycle of bases ends.</summary>
     public bool Resolved { get; set; }
 
-    /// <summary>Whether the declaration writes a primary constructor: <c>data Empty</c> has none and one value (D8); an empty <c>()</c> is <c>syntax</c> and counts as written.</summary>
-    public bool HasFields => Declaration.PrimaryConstructor is not null;
+    /// <summary>
+    /// Whether the type has a field, of its own or of its base (D7, D21), or writes a primary constructor: <c>data Empty</c> has none
+    /// and one value (D8), as has <c>data Leaf : Empty</c>; an empty <c>()</c> is <c>syntax</c> and counts as written. The fields are
+    /// the resolved ones, so it is read after the type is resolved.
+    /// </summary>
+    public bool HasFields => Declaration.PrimaryConstructor is not null || Fields.Count > 0;
 
     public int Line => Declaration.Line;
 
@@ -123,15 +149,59 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>K7, K18: the <c>static</c> fields of the class, in the order written.</summary>
+    public List<StaticFieldSymbol> StaticFields { get; } = [];
+
     public int Line => Declaration.Line;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
 
+    public StaticFieldSymbol? StaticField(string name) => StaticFields.FirstOrDefault(f => f.Name == name);
+
     public int FieldIndex(string name) => Fields.FindIndex(f => f.Name == name);
 
-    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of no parameters with a <c>string</c> result; null where the class has none.</summary>
+    /// <summary>K5, K8, K15: the fields an <c>equal by</c> clause names, each once, in its order; empty where the class has no clause.</summary>
+    public List<FieldSymbol> EqualBy { get; } = [];
+
+    /// <summary>K4: whether two instances compare by identity: a class without a clause that has a <c>mut</c> or a <c>weak</c> field.</summary>
+    public bool ComparesByIdentity => EqualBy.Count == 0 && Fields.Any(f => f.Mut || f.Type is WeakRefType);
+
+    /// <summary>K4, K5: the fields <c>==</c> and the hash read: those the clause names, or every field of a class that compares by content.</summary>
+    public IReadOnlyList<FieldSymbol> FieldsThatCount => EqualBy.Count > 0 ? EqualBy : ComparesByIdentity ? [] : Fields;
+
+    /// <summary>A5: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result; null where the class has none.</summary>
     public FunctionSymbol? TextMethod =>
-        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null;
+}
+
+/// <summary>
+/// K7, K18: a <c>static</c> field of a class, which exists once for the program and holds an immutable value: the constant its
+/// initial value is, which the checker sets once it read that value, and which every read of the field gives.
+/// </summary>
+public sealed class StaticFieldSymbol(FieldDeclaration declaration, ClassSymbol owner)
+{
+    public string Name => Declaration.Name;
+
+    public FieldDeclaration Declaration { get; } = declaration;
+
+    public ClassSymbol Owner { get; } = owner;
+
+    /// <summary>The written type, or the type of the initial value where none is written (V2).</summary>
+    public KurzType Type { get; set; } = Types.Error;
+
+    /// <summary>The constant the field holds; null until the checker read its initial value, and where it reads none.</summary>
+    public Constant? Value { get; set; }
+
+    /// <summary>Set where the field was refused, with its one diagnostic, so that its reads and assignments carry nothing more (E1).</summary>
+    public bool Refused { get; set; }
+
+    public int Line => Declaration.Line;
+
+    /// <summary>F9: a field without <c>pub</c> is private to its class.</summary>
+    public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>F9: a field marked <c>internal</c>, visible to the files of the folder that declares its class.</summary>
+    public bool IsInternal => (Declaration.Modifiers & Modifiers.Internal) != 0;
 }
 
 /// <summary>

@@ -128,6 +128,16 @@ public sealed record ClassType(ClassSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// R3, R5: <c>weak T?</c>, a reference to an instance of the class <c>T</c> that does not keep it alive, null once the instance is
+/// freed. It is the type of a place, a variable, a parameter, a result, a field or a list's item, which takes a <c>T</c>, a
+/// <c>T?</c> or <c>null</c>; a read of the place gives a strong <c>T?</c> (<see cref="Types.Read"/>).
+/// </summary>
+public sealed record WeakRefType(ClassType Target) : KurzType
+{
+    public override string Text => $"weak {Target.Text}?";
+}
+
 /// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
 public sealed record EnumType(EnumSymbol Symbol) : KurzType
 {
@@ -228,6 +238,23 @@ public sealed record CFunctionType(IReadOnlyList<KurzType> Parameters, KurzType 
     public override int GetHashCode() => HashCode.Combine(nameof(CFunctionType), Parameters.Count, Result);
 }
 
+/// <summary>
+/// <c>Vector128&lt;T&gt;</c> or <c>Vector256&lt;T&gt;</c> (R18): the lanes of a CPU's vector register, as C#'s
+/// <c>System.Runtime.Intrinsics</c> holds them (section 13, the owner, 2026-11-01, "C#'s shape"); <paramref name="Lane"/> is one of
+/// the ten number types C# admits there, T2's numbers but <c>decimal</c>, and <paramref name="Bits"/> 128 or 256.
+/// </summary>
+public sealed record VectorType(KurzType Lane, int Bits) : KurzType
+{
+    public override string Text => $"Vector{Bits.ToString(System.Globalization.CultureInfo.InvariantCulture)}<{Lane.Text}>";
+
+    /// <summary>The count of lanes: the bits over the lane's width.</summary>
+    public int Count => Bits / Types.LaneBits(Lane);
+
+    public bool Equals(VectorType? other) => other is not null && Bits == other.Bits && Types.Same(Lane, other.Lane);
+
+    public override int GetHashCode() => HashCode.Combine(nameof(VectorType), Lane, Bits);
+}
+
 /// <summary>A type parameter inside the generic function or type that declares it (T19).</summary>
 public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
 {
@@ -236,6 +263,23 @@ public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
     public bool Equals(TypeParameterType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
 
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
+/// <summary>
+/// T35: the constant a call gives a type parameter that holds one, of the parameter's type: a value of an <c>enum</c> by its place
+/// among the enum's values, an integer, a <c>bool</c> or a <c>char</c>; it stands in a copy's list of type arguments beside the
+/// types, and is never the type of a value.
+/// </summary>
+public sealed record ConstantArgument(KurzType Of, Constant Value) : KurzType
+{
+    public override string Text => Value switch
+    {
+        EnumConstant e when Of is EnumType en => $"{en.Symbol.Name}.{en.Symbol.Values[e.Index]}",
+        IntegerConstant i => i.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        BoolConstant b => b.Value ? "true" : "false",
+        CharConstant c => $"'{char.ConvertFromUtf32(c.Value)}'",
+        _ => throw new InvalidOperationException($"a constant argument of `{Of.Text}`"),
+    };
 }
 
 /// <summary>The one instance of each built-in type, and what the chapters say about them.</summary>
@@ -277,6 +321,12 @@ public static class Types
     public static bool IsError(KurzType type) => type is ErrorType;
 
     public static bool IsVoid(KurzType type) => type is VoidType;
+
+    /// <summary>
+    /// The type a read of a place of the type gives: a strong <c>T?</c> for a <c>weak T?</c>, held at least to the end of its statement
+    /// (R3, the owner, 2026-11-01, "A strong T?, held"); the type itself for any other.
+    /// </summary>
+    public static KurzType Read(KurzType type) => type is WeakRefType weak ? Nullable(weak.Target) : type;
 
     /// <summary>
     /// N1: the type a nullable type makes nullable, the cases of a union beside its <c>null</c>: the one case of <c>T | null</c>, and the
@@ -413,6 +463,7 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
@@ -420,9 +471,16 @@ public static class Types
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),
             (CFunctionType x, CFunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (TypeParameterType x, TypeParameterType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (VectorType x, VectorType y) => x.Bits == y.Bits && Same(x.Lane, y.Lane),
             _ => false,
         };
     }
+
+    /// <summary>R18: whether a vector's lanes take the type: C#'s ten, T2's integers, <c>float</c> and <c>double</c>.</summary>
+    public static bool IsLane(KurzType type) => type is PrimitiveType { Kind: <= Primitive.Double };
+
+    /// <summary>R18: the width of a lane of the type in bits.</summary>
+    public static int LaneBits(KurzType lane) => lane is PrimitiveType { Kind: Primitive.Float } ? 32 : lane is PrimitiveType { Kind: Primitive.Double } ? 64 : Width(lane);
 
     public static bool AllSame(IReadOnlyList<KurzType> a, IReadOnlyList<KurzType> b)
     {
@@ -479,6 +537,11 @@ public static class Types
         if (from is ErrorType || to is ErrorType || Same(from, to))
         {
             return true;
+        }
+
+        if (to is WeakRefType weak)
+        {
+            return from is NullType || Assignable(from, Read(weak)); // R3: a `T`, a `T?` or `null` where a `weak T?` stands
         }
 
         if (from is UnionType fu)

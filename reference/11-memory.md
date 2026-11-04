@@ -5,8 +5,24 @@
 There are no lifetimes, no borrow annotations and no garbage collector. The compiler inserts
 reference counts and removes most of them at compile time.
 
-No case: what a program prints of it, when a `weak` reference finds its instance freed, the
-cases of R3 show.
+An instance whose last count ends lets go of the instances its fields hold through a work list,
+not by a call for each, so a chain of any length is freed without exhausting the stack: a million
+links are freed as two are (§3, the owner, 2026-11-01, "Iterative, never crashes", against a
+release that calls itself for each nested instance, as Rust's drop glue does, under which a long
+chain ends the program with `stack-overflow`).
+
+Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
+```kurz
+class Link(int Value, Link? Next)
+
+mut Link? head = null
+for i in 0..<1000000 {
+    head = Link(i, head)
+}
+print(head?.Value ?? -1)
+head = null
+print("freed")
+```
 
 ### R2 (decided, §3) A possible reference cycle is an error
 
@@ -99,6 +115,17 @@ the `o` that is declared at the top level keeps `Ann` alive while `p.Keeper` is 
 record marks the lifetimes as assumed: proposed on 2026-10-03, against releasing a variable after
 its last use, which would free `Ann` before the print)*
 
+A read of a `weak T?` place, a field, a variable or an item, gives a strong `T?`, which holds the
+target as a temporary does, to the end of its statement, and longer where the read is stored:
+`k = p.Keeper` keeps the target alive while `k` lives, and a `T?` parameter takes the read as it
+is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
+`?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
+
+A `weak T?` type stands wherever a type stands: a field, a list's item, a variable, a parameter, a
+return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
+stands", against a field and a list's item alone). What a nullable type written as a case of a
+union is stays open (§14), a `weak T?` among them.
+
 Case: [memory/weak-back-pointer.kz](../corpus/memory/weak-back-pointer.kz)
 ```kurz
 class Customer(string Name, mut List<Order> Orders)
@@ -134,6 +161,42 @@ p = Pet(o)
 if p.Keeper != null {
     print(p.Keeper.Name)
 }
+```
+
+Case: [memory/weak-read-holds.kz](../corpus/memory/weak-read-holds.kz)
+```kurz
+class Owner(string Name)
+class Home(mut Owner Resident)
+class Pet(weak Owner? Keeper)
+
+h = Home(Owner("Ann"))
+p = Pet(h.Resident)
+k = p.Keeper
+h.Resident = Owner("Bob")
+print(k?.Name ?? "gone")
+print(p.Keeper?.Name ?? "gone")
+```
+
+Case: [memory/weak-anywhere.kz](../corpus/memory/weak-anywhere.kz)
+```kurz
+class Owner(string Name)
+
+weak Owner? Remember(weak Owner? r) {
+    return r
+}
+
+string NameOf(weak Owner? r) {
+    return r?.Name ?? "gone"
+}
+
+o = Owner("Ann")
+weak Owner? a = Remember(o)
+print(NameOf(a))
+weak Owner? b = Remember(Owner("Bob"))
+print(NameOf(b))
+mut keepers = Map<string, weak Owner?>()
+keepers["ann"] = o
+print(keepers["ann"]?.Name ?? "gone")
 ```
 
 ### R4 (decided, §3) Where `weak` is enough
@@ -953,17 +1016,25 @@ An intrinsic is a function of the class of an instruction set, which the compile
 set's instructions, `X86.Sse41.Extract(v, 2)`; the classes stand under `X86` and `Arm`, the value
 types `Vector128<T>` and `Vector256<T>` hold the lanes, and each class has `IsSupported`, which tests
 the CPU for its set (§13, the owner, 2026-11-01, "C#'s shape"). The classes and their functions take
-the names, and each class the class it derives from, of .NET 10's `System.Runtime.Intrinsics`, the
-class of x86's SHA set is `X86.Sha`, derived from `X86.Sse2`, and the operations of `Vector128<T>` and
-`Vector256<T>` on their lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
+the names, and each class the class it derives from, of .NET 10's `System.Runtime.Intrinsics`; the
+class of x86's SHA set, which .NET 10 does not have, is `X86.Sha`, derived from `X86.Sse2` as the
+class of .NET's closed proposal was; and the operations of `Vector128<T>` and `Vector256<T>` on their
+lanes, `Vector128.Create(1, 2, 3, 4)` and `v.GetElement(2)`, are no
 intrinsics and need no test *(assumed: as §13 marks them)*. The functions of `X86.Sha` are the seven
 of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (§13, the owner,
 2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
 types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
-and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`, and one
-that fits and lies past the lanes names the lane its low bits name, as .NET 10 gives it, so
-`X86.Sse41.Extract(v, 255)` of four lanes gives lane 3 *(assumed: as §13 marks it)*. `Vector128.Create` takes one value for every lane or one for each lane, another count being
-`argument-mismatch`, its lane type picked as a call's function is (F13, F14), and `GetElement` of an
+and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`; one for a
+parameter that names a lane, the `index` of `X86.Sse41.Extract`, the one such parameter of the intrinsics the
+compiler builds, that fits and lies past the lanes
+is the compile error `lane-out-of-range` at its line, whose text names the lane and the count of the
+lanes, so `X86.Sse41.Extract(v, 255)` of four lanes builds nothing (§13, the owner, 2026-11-02); any
+other constant is read as the instruction reads it, a count of 32 bytes or more giving 0 in
+`X86.Ssse3.AlignRight`, and one of 16 to 31 the bytes of its left operand from the count less 16 on,
+then zeros *(assumed: as §13 marks them)*. What such a parameter takes
+from a value that is not a constant is open (§14): refused, as Rust refuses it, or chosen at run time
+among the instruction's forms. `Vector128.Create` and `Vector256.Create` take one value, which every
+lane takes, or one for each lane, another count being `argument-mismatch`, its lane type picked as a call's function is (F13, F14), and `GetElement` of an
 index below 0 or past the lanes raises `index-out-of-range` *(assumed: as §13 marks them)*. A file's
 own declaration of `X86`, `Arm`, `Vector128` or `Vector256`, at any level, is `redeclared`, as a file's
 own `EnvError` is (S14), while a field takes the name (§13, the owner, 2026-11-01, "redeclared, as
@@ -986,25 +1057,77 @@ runtime's included, again for them, in which the
 tests of those sets are `true`; where the build names a CPU that has a set, its test is `true`
 everywhere (§2, §13, the owner, 2026-11-01, "Guarded block", "Copied per feature" and "Transitive,
 all"). That function and each copy are compiled for the sets the tests of every guarded block they
-stand in name, and the sets those derive from, all of whose tests are `true` in them; the copy stops
-at a C declaration (R16), at a call through a function value, which runs the function as it was
-compiled where the value was made, and at the compiler's own helpers; a lambda written in a guarded
-block is guarded and compiled for the block's sets *(assumed: as §13 marks them)*. A guarded block
-reads and writes the function's variables, and its `return`, `break`, `continue` and `throw` act as in
-any block; the CPU is read once per process, at its start, in a program that has a test the build
-does not answer as a constant; the two branches of a
-guarded block can give different results *(assumed: as §13 marks them)*.
-`IsSupported` of a set the target's architecture does not have is `false`, and its block is still
-checked and not compiled; a case is read for x86-64 (R11), where the test of every class under `Arm`
+stand in name, and the sets those derive from, all of whose tests are `true` in them, one copy of a
+function for each such union, so that a function that blocks of two sets reach is compiled for each,
+and for both where one of the blocks stands in the other; the copy stops at a C declaration (R16), at
+a call through a function value, which runs the function as it was compiled where the value was made,
+a lambda's, or a C function's (R17), whose address is that of the function compiled for the build's
+CPU alone wherever it is taken, a function of the program being no value (F11), and at the compiler's
+own helpers, the functions it writes into every program itself, the `==` of two values of a `data`
+type or the sort of a list, while the functions of the runtime and the standard library, `print`'s
+among them, are copied; a lambda written in a guarded block is guarded and compiled for the block's
+sets *(assumed: as §13 marks them)*. In a block, the statements from the first that a test guards to
+the block's end are compiled as the guarded block's function: the block of a test, the `else` block
+of a test turned around, the body of a `while` and the rest of a block after a test turned around
+whose block always leaves; the right side of `&&` after a test, and of `||` after a test turned around, is a function of
+its own that gives the side's value; and a statement in either that a test guards for more sets is a
+function again, for them all *(assumed: as §13 marks them)*. A guarded block reads and writes the
+function's variables, and its `return`, `break`, `continue` and `throw` act as in any block; beside
+the call, the function it is compiled into costs this: the variables it reads or writes pass to it by
+their addresses and stay in memory across the call, how it left comes back as a number the caller acts
+on, and the call is never inlined, since the function is compiled for sets its caller is not; where
+its test is a constant `true`, the build naming a CPU that has the set or a copy being compiled for
+it, the block is compiled in place, with none of these costs; the CPU is read once per process, at its
+start, in a program that has a test the build does not answer as a constant, as it is in a build whose
+CPU option names sets beyond the baseline (decided below); the guarded code and the
+code that runs where its test is `false` are the program's own and can give different results
+*(assumed: as §13 marks them)*.
+`IsSupported` of a set the target's architecture does not have, a class under `Arm` on x86-64 and one
+under `X86` on Arm, or of one a target cannot test, is a constant `false`, and the code it guards is still checked and not compiled, with no copy made for its
+set; a case is read for x86-64 (R11), where the test of every class under `Arm`
 is `false` *(assumed: as §13 marks it)*. A set every CPU of the architecture has, `X86.Sse2` on x86-64, is tested as any other: its
-test is `true`, and an intrinsic of it outside a test and outside `raw` is `intrinsic-unguarded`
-*(assumed: as §13 marks them)*. A `raw` block that runs an intrinsic of a set the CPU lacks ends the
-process with an illegal instruction: that the set is there is an invariant `raw` code keeps
-*(assumed: as §13 marks it)*.
-
-The checker does not read the names `X86`, `Arm`, `Vector128` and `Vector256`, and says
-`not supported` to them, so a case of this rule runs through the front end alone; what it prints
-and the error it expects are read against this rule.
+test is a constant `true`, and an intrinsic of it outside a test and outside `raw` is
+`intrinsic-unguarded` *(assumed: as §13 marks them)*. A `raw` block that runs an intrinsic of a set
+the CPU lacks, of the classes the compiler builds, whose every instruction is one a CPU without its set
+refuses *(assumed: as §13 marks it)*, ends the process with an illegal instruction, and nothing beyond the platform's fault
+for it is promised: that the set is there is an invariant `raw` code keeps *(assumed: as §13 marks it)*. A build whose CPU
+option names sets beyond the target's baseline, in which the test of such a set is a constant `true`,
+reads the CPU once at its start, every such set as LLVM reads the CPU for `native`, the state the
+system saves for the sets of AVX and after among it, and where the CPU lacks one of them ends before
+the program's first statement with the exit code 1 and the line
+`error: cpu-lacks-set (<the CPU option>: <the sets it lacks, by clang's names>)`, as .NET's Native AOT
+ends where the sets a build requires are missing; a build without the option, or whose option names
+the baseline, reads nothing for it; a set the build's clang gives the CPU that the check cannot read
+fails the build with a text that names it; and on a 64-bit Arm target such an option is
+`not supported` (§2, §13, the owner, 2026-11-02). The run setting turns sets off for a run, as .NET's
+`DOTNET_EnableHWIntrinsic=0` does: the variable `KURZ_INTRINSICS` of the environment set to `0` turns
+off every set beyond the baseline, and `KURZ_INTRINSICS_<SET>`, the name of a class under `X86`
+upper-cased, `KURZ_INTRINSICS_SSE41` for `X86.Sse41`, the class's set and every set whose class derives
+from it, while the variable of a class of the baseline, `X86.X86Base`, `X86.Sse` or `X86.Sse2`, turns
+nothing off, not even the sets whose classes derive from it, as `KURZ_INTRINSICS=0` keeps the baseline,
+where .NET's turns its baseline off too (the owner, 2026-11-02); they are read once, with the CPU, in a program that reads the CPU: `KURZ_INTRINSICS` and the variables of
+the seven classes a test reads the CPU for, `X86.Sse3`, `X86.Ssse3`, `X86.Sse41`, `X86.Sse42`, `X86.Aes`,
+`X86.Pclmulqdq` and `X86.Sha`, where a test reads it, and for each set the start check reads,
+`KURZ_INTRINSICS` and the variables of the set's class and of the classes beyond the baseline it derives
+from *(assumed: as §13 marks it)*; and a value other than `0`,
+and a name that names no class, turns nothing off *(assumed: the names and that only `0` acts, said
+back to the owner, as §13 marks them)*. A test of a set the setting turned off is `false`, and a set of
+the build's CPU option that it turned off fails the start check, whose line names the variable after
+the set, `avx2 turned off by KURZ_INTRINSICS_AVX2` (§13, the owner, 2026-11-02); where it names several
+sets, the line is grouped: the sets the CPU lacks first, then one group for each variable that turned
+off sets the CPU has, the groups apart by
+`; `, `error: cpu-lacks-set (x86-64-v4: avx512f, avx512bw; avx2 turned off by KURZ_INTRINSICS_AVX2)`
+(§13, the owner, 2026-11-02). In the list of the sets the CPU lacks and in each group the sets stand in
+the order of the start check's table, LLVM's for `native`; the groups stand in the order of their
+variable's class's own set in that table, the group of `KURZ_INTRINSICS` last; and a set that several
+variables turned off stands in the group of the nearest of them: its class's variable, else the
+variable of the nearest class its class derives from, else `KURZ_INTRINSICS` (the owner, 2026-11-02).
+A trace and the line tables name the function a guarded block is compiled
+into after the function it stands in, `<function>.guarded`, `Pick.guarded` for a block in `Pick`, in the
+pattern of a lambda's `main.lambda` (§13, the owner, 2026-11-02). The function is the one written in the
+source: a block in the method `Twice` of `Doubler` is `Doubler.Twice.guarded`, one in a lambda written in
+`main` is `main.lambda.guarded`, one in a guarded block of `Pick` is `Pick.guarded` again, and a lambda
+written in a guarded block of `main` is `main.lambda`, as outside it *(assumed: as §13 marks them)*.
 
 Case: [memory/intrinsic-guarded.kz](../corpus/memory/intrinsic-guarded.kz)
 ```kurz
@@ -1032,21 +1155,25 @@ if X86.Sse41.IsSupported {
 }
 ```
 
-Case: [memory/intrinsic-low-bits.kz](../corpus/memory/intrinsic-low-bits.kz)
+Case: [memory/intrinsic-lane-out-of-range.kz](../corpus/memory/intrinsic-lane-out-of-range.kz)
 ```kurz
 v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
-    // 255 fits a `byte`; past the four lanes, its low bits name lane 3, as .NET 10 gives it (R18)
-    print(X86.Sse41.Extract(v, 255))
-} else {
-    print(v.GetElement(3))
+    // 4 fits a `byte`, and is the first lane past the four lanes of an `int` vector (R18)
+    print(X86.Sse41.Extract(v, 4))
 }
 ```
 
 Case: [memory/intrinsic-create-count.kz](../corpus/memory/intrinsic-create-count.kz)
 ```kurz
 // `Create` takes one value, or one for each of the four lanes of an `int` vector (R18)
-v = Vector128.Create(1, 2, 3)
+print(Vector128.Create(1, 2, 3).GetElement(0))
+```
+
+Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
+```kurz
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+data Vector128(int X)
 ```
 
 Case: [memory/intrinsic-element-range.kz](../corpus/memory/intrinsic-element-range.kz)
@@ -1065,10 +1192,17 @@ print(X86.Sse2.Add(v, v).GetElement(2))
 
 Case: [memory/intrinsic-and.kz](../corpus/memory/intrinsic-and.kz)
 ```kurz
+bool Shown(int lane) {
+    print(lane)
+    return true
+}
+
 v = Vector128.Create(1, 2, 3, 4)
-// the right side of `&&` after a test is guarded (R18)
-found = X86.Sse41.IsSupported && X86.Sse41.Extract(v, 2) == 3
-print(found || v.GetElement(2) == 3)
+// the right side of `&&` after a test is guarded, and prints the lane it extracted (R18)
+found = X86.Sse41.IsSupported && Shown(X86.Sse41.Extract(v, 2))
+if !found {
+    print(v.GetElement(2))
+}
 ```
 
 Case: [memory/intrinsic-not-else.kz](../corpus/memory/intrinsic-not-else.kz)
@@ -1086,10 +1220,10 @@ Case: [memory/intrinsic-derived.kz](../corpus/memory/intrinsic-derived.kz)
 ```kurz
 v = Vector128.Create(1, 2, 3, 4)
 if X86.Sse41.IsSupported {
-    // a test of `X86.Sse41` guards the intrinsics of the classes it derives from, `X86.Sse2` among them (R18)
-    print(X86.Sse2.Add(v, v).GetElement(2))
+    // a test of `X86.Sse41` guards the intrinsics of the classes it derives from, `X86.Ssse3` among them (R18)
+    print(X86.Ssse3.AlignRight(v, v, 4).GetElement(2))
 } else {
-    print(v.GetElement(2) * 2)
+    print(v.GetElement(3))
 }
 ```
 
@@ -1129,9 +1263,10 @@ print(Third(Vector128.Create(1, 2, 3, 4)))
 Case: [memory/intrinsic-other-target-checked.kz](../corpus/memory/intrinsic-other-target-checked.kz)
 ```kurz
 v = Vector128.Create(1, 2, 3, 4)
+b = Vector128.Create(byte(1))
 if Arm.AdvSimd.IsSupported {
-    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: an x86 intrinsic in it is unguarded (R18)
-    print(X86.Sse41.Extract(v, 2))
+    // the test of a class under `Arm` is `false` on x86-64 and its block is still checked: a call of lanes that fit none of its functions is reported (R18)
+    print(Arm.AdvSimd.Add(v, b).GetElement(2))
 }
 ```
 

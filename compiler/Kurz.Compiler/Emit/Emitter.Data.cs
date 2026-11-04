@@ -373,8 +373,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// Whether two values of one type are equal: integers, <c>char</c> and <c>bool</c> by their bits, strings by their bytes (T18),
-    /// data by their type and their fields (D3, D15), and the values of a field of a union by their case and that case's values
-    /// (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
+    /// data by their type and their fields (D3, D15), instances of a class by identity or by the fields that count (K4, K5), and the
+    /// values of a field of a union by their case and that case's values (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
     /// <c>Equals</c> does, NaN equal to NaN and 0 to -0 (D3, the owner, 2026-10-09 and 2026-10-24); a <c>decimal</c> by its value,
     /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
     /// whose <c>double</c> and <c>float</c> items, the values of its <c>double?</c> and <c>float?</c> items, and those of the lists among
@@ -435,6 +435,34 @@ public sealed partial class Emitter
                 {
                     var name = Helper($"equal.{Lower.Mangle(type)}", "i1", [Ir(type), Ir(type)], () => EqualBody((DataType)type, line));
                     return fn.Value($"call i1 {name}({Ir(type)} {left}, {Ir(type)} {right})");
+                }
+
+            case ClassType c when c.Symbol.ComparesByIdentity:
+                return fn.Value($"icmp eq ptr {left}, {right}"); // K4: a class with a `mut` or a `weak` field, and no clause, by identity
+
+            case ClassType c:
+                {
+                    // K4, K5: one instance equals itself, and two by the fields that count, each as a field of a `data` value compares (D3)
+                    var name = Helper($"equal.{Lower.Mangle(type)}", "i1", ["ptr", "ptr"], () =>
+                    {
+                        var fields = fn.Label("fields");
+                        var same = fn.Label("same");
+                        fn.CondBranch(fn.Value("icmp eq ptr %a0, %a1"), same, fields);
+                        fn.Block(same);
+                        fn.Return("i1 true");
+                        fn.Block(fields);
+                        var result = "true";
+                        foreach (var field in c.Symbol.FieldsThatCount)
+                        {
+                            var index = c.Symbol.Fields.IndexOf(field);
+                            var l = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(c.Symbol, "%a0", index)}");
+                            var r = fn.Value($"load {Ir(field.Type)}, ptr {InstanceFieldPointer(c.Symbol, "%a1", index)}");
+                            result = And(result, Equal(l, r, field.Type, line));
+                        }
+
+                        fn.Return($"i1 {result}");
+                    });
+                    return fn.Value($"call i1 {name}(ptr {left}, ptr {right})");
                 }
 
             case ListType list:
@@ -705,9 +733,10 @@ public sealed partial class Emitter
         }
 
         var saved = fn;
-        var (savedRegions, savedScopes) = (regions, scopes);
+        var (savedRegions, savedScopes, savedFeatures) = (regions, scopes, features);
         fn = new IrFunction($"internal {result} {name}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{Number(i)}"))})", attributes);
         (regions, scopes) = ([], []); // a helper makes no temporary and has no variable
+        features = NoFeatures; // one helper serves every caller, so what it calls is compiled for the CPU alone (R18)
         try
         {
             body();
@@ -716,7 +745,7 @@ public sealed partial class Emitter
         finally
         {
             fn = saved;
-            (regions, scopes) = (savedRegions, savedScopes);
+            (regions, scopes, features) = (savedRegions, savedScopes, savedFeatures);
         }
 
         return name;

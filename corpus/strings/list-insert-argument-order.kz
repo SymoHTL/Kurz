@@ -1,0 +1,13 @@
+// expect: throws index-out-of-range at 12
+// | item
+// rules: X11
+
+string Item() {
+    print("item")
+    return "b"
+}
+
+mut xs = ["a"]
+// the arguments are read in the order written, and the index is checked after them
+xs.Insert(5, Item())
+print(xs)

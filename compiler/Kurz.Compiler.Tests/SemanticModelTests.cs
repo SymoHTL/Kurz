@@ -50,7 +50,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             }
 
             var diagnostics = new DiagnosticBag();
-            var checker = Checker.Check(tree, diagnostics, header.Grants);
+            var checker = Checker.Check(tree, diagnostics, header.Grants, CorpusTests.StdChecker.Value); // W1: as a build reads it
             if (diagnostics.Items.Count == 0)
             {
                 yield return (file, tree, checker.Model);
@@ -95,6 +95,94 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         var walk = new Walk(model);
         walk.Program(tree);
         Assert.True(walk.Missing.Count == 0, $"{file}: no entry for\n{string.Join("\n", walk.Missing.Take(20))}");
+    }
+
+    [Fact]
+    public void The_walk_reads_each_copy_of_a_function_that_reads_its_type_and_the_one_arm_of_its_kind()
+    {
+        // T33: a code generator reads the copies of such a function, never its own body, and of a match on `T.Kind` the arm the copy's
+        // kind takes; a function that passes its type parameter to one is read the same way
+        var (tree, model) = Clean("void ShowKind<T>() {\n    match T.Kind {\n        TypeKind.Int => print(\"int\")\n        else => print(\"other\")\n    }\n}\n\nvoid Outer<U>() {\n    ShowKind<U>()\n}\n\nShowKind<int>()\nOuter<bool>()");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["ShowKind<int>", "ShowKind<bool>", "Outer<bool>"], walk.Copies);
+        Assert.Equal(2, walk.KindArms);
+    }
+
+    [Fact]
+    public void The_walk_reads_a_copy_for_each_constant_a_call_gives()
+    {
+        // T35: each constant makes a copy of its own, a default and a constant a copy passes on among them, through two copies too, and a
+        // second call with the same constant reads the copy the first made; the name, in a lambda and in a hole, is the constant
+        var (tree, model) = Clean("enum Mode { Plain, Loud }\n\nvoid Say<const Mode M>() {\n    print(M)\n}\n\nvoid Twice<T, const Mode M = Mode.Loud>(T value) {\n    Say<M>()\n}\n\n" +
+            "void Report<const Mode M>() {\n    f = () => M\n    print(\"{M} {f()}\")\n    Twice<string, M>(\"r\")\n}\n\nSay<Mode.Plain>()\nSay<Mode.Plain>()\nTwice(1)\nTwice<int, Mode.Loud>(2)\nReport<Mode.Plain>()");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Say<Mode.Plain>", "Say<Mode.Loud>", "Twice<int, Mode.Loud>", "Twice<string, Mode.Plain>", "Report<Mode.Plain>"], walk.Copies);
+
+        // in each copy the parameter's name is the constant its call gave, the value's place among the enum's values
+        var say = model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Say")));
+        Assert.Equal([0, 1], say.Select(copy =>
+        {
+            var names = new List<NameExpression>();
+            Nodes.Collect(copy.Declaration!, names);
+            return Assert.IsType<EnumConstant>(model.TypeOf(names.Single(n => n.Name == "M")).Constant).Index;
+        }));
+
+        // in the lambda and in the hole as well
+        var report = Assert.Single(model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Report"))));
+        var inReport = new List<NameExpression>();
+        Nodes.Collect(report.Declaration!, inReport);
+        Assert.Equal([0, 0], inReport.Where(n => n.Name == "M").Select(n => Assert.IsType<EnumConstant>(model.TypeOf(n).Constant).Index));
+    }
+
+    [Fact]
+    public void The_walk_reads_the_constructor_s_call_T_Make_became()
+    {
+        // T33: a code generator reads the call of the primary constructor in place of `T.Make`, with an argument of its own for each
+        // field, typed as that field, never the lambda; a type with no fields gives its value, with no call
+        var (tree, model) = Clean("data Mixed(int A, long B, string C)\ndata Empty\n\nT Value<T>() => match T.Kind {\n    TypeKind.String => \"s\"\n    else => 0\n}\n\nT Zero<T>() => T.Make(f => Value<f.Type>())\n\nprint(Zero<Mixed>())\nprint(Zero<Empty>())");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Value<int>", "Value<long>", "Value<string>", "Zero<Mixed>", "Zero<Empty>"], walk.Copies);
+        Assert.Equal(2, walk.Made);
+        var made = model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree, f => f.Name == "Zero"))).Select(copy =>
+        {
+            var calls = new List<CallExpression>();
+            Nodes.Collect(copy.Declaration!, calls);
+            Assert.True(model.IsMade(Assert.Single(calls, c => c.Callee is MemberAccess { Member: "Make" }), out var construction));
+            return construction;
+        }).ToList();
+        var arguments = made[0]!.Arguments.Select(a => a.Value).ToList();
+        Assert.Equal(["int", "long", "string"], arguments.Select(a => model.TypeOf(a).Type.Text));
+        Assert.Equal(3, arguments.Distinct(ReferenceEqualityComparer.Instance).Count());
+        Assert.Null(made[1]);
+    }
+
+    [Fact]
+    public void The_walk_reads_each_pass_of_a_loop_over_the_fields_of_a_copy_s_type()
+    {
+        // T33: a code generator reads a pass for each field in place of the loop's own collection and body, `f.Name` as a constant, and
+        // a lambda in a pass captures the value it reads and no `f`, which holds no value
+        var (tree, model) = Clean("data Order(string Id, int Count)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        show = () => print(\"{f.Name} {f.Get(value)}\")\n        show()\n    }\n}\n\nShow(Order(\"a\", 1))");
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+        Assert.Equal(["Show<Order>"], walk.Copies);
+        Assert.Equal(2, walk.Passes);
+        var copy = Assert.Single(model.CopiesOf(model.FunctionOf(Find<FunctionDeclaration>(tree))));
+        var loops = new List<ForInStatement>();
+        Nodes.Collect(copy.Declaration!, loops);
+        var passes = model.PassesOf(Assert.Single(loops))!;
+        foreach (var pass in passes)
+        {
+            var lambdas = new List<LambdaExpression>();
+            Nodes.Collect(pass, lambdas);
+            Assert.Equal(["value"], model.LambdaOf(Assert.Single(lambdas)).Captures.Select(v => v.Name));
+        }
     }
 
     [Fact]
@@ -449,6 +537,17 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
 
         public int Seen { get; private set; }
 
+        /// <summary>T33: the copies the walk read in place of the body of a function that reads its type, by name.</summary>
+        public List<string> Copies { get; } = [];
+
+        public int Made { get; private set; }
+
+        /// <summary>T33: the arms the walk read of the matches on <c>T.Kind</c>, one of each in each copy.</summary>
+        public int KindArms { get; private set; }
+
+        /// <summary>T33: the passes the walk read of the loops over <c>T.Fields</c>, in place of each loop's own body.</summary>
+        public int Passes { get; private set; }
+
         private void Need(bool present, int line, string what)
         {
             Seen++;
@@ -509,6 +608,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Expression(w.Condition);
                     Block(w.Body);
                     break;
+                case ForInStatement f when model.PassesOf(f) is { } passes:
+                    foreach (var pass in passes)
+                    {
+                        Passes++; // T33: a code generator reads each pass, never the loop's own collection and body
+                        Block(pass);
+                    }
+
+                    break;
                 case ForInStatement f:
                     Need(model.Declares(f), f.Line, $"loop variable `{f.Variable}`");
                     Expression(f.Collection);
@@ -516,7 +623,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MatchStatement m:
                     Expression(m.Subject);
-                    Arms(m.Arms);
+                    Arms(KindArm(m.Subject) ?? m.Arms);
                     break;
                 case ReturnStatement r:
                     Expression(r.Value);
@@ -561,6 +668,14 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     }
 
                     break;
+                case FunctionDeclaration f when Try(() => model.FunctionOf(f)) && model.ReadsItsType(model.FunctionOf(f)):
+                    foreach (var copy in model.CopiesOf(model.FunctionOf(f)))
+                    {
+                        Copies.Add(copy.Name); // T33: a code generator reads each copy, never the function's own body
+                        Statement(copy.Declaration!);
+                    }
+
+                    break;
                 case FunctionDeclaration f:
                     Need(Try(() => model.FunctionOf(f)), f.Line, $"function `{f.Name}`");
                     foreach (var p in f.Parameters)
@@ -581,9 +696,19 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
+                    foreach (var field in (t.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0 && f.Value is not null))
+                    {
+                        Need(Try(() => model.FieldsThisOf(model.ClassOf(t))), field.Line, $"the instance the default of `{field.Name}` reads"); // K7
+                        Expression(field.Value);
+                    }
+
                     foreach (var method in (t.Members ?? []).OfType<FunctionDeclaration>())
                     {
-                        Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7
+                        if ((method.Modifiers & Modifiers.Static) == 0)
+                        {
+                            Need(Try(() => model.ThisOf(model.FunctionOf(method))), method.Line, $"`this` of `{method.Name}`"); // K7: a `static` one has none
+                        }
+
                         Statement(method);
                     }
 
@@ -611,6 +736,18 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             {
                 Expression(p.Default);
             }
+        }
+
+        /// <summary>T33: the one arm a code generator reads of a match on <c>T.Kind</c> in a copy; null for any other match.</summary>
+        private IReadOnlyList<MatchArm>? KindArm(Expression subject)
+        {
+            if (model.KindArmOf(subject) is not { } taken)
+            {
+                return null;
+            }
+
+            KindArms++;
+            return [taken];
         }
 
         private void Arms(IReadOnlyList<MatchArm> arms)
@@ -680,17 +817,33 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
             switch (e)
             {
                 case NameExpression n:
-                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant) || model.IsImplicitField(n, out _, out _), n.Line, $"what `{n.Name}` means");
+                    // a variable, a function, a data value without fields, an implicit field (K7), a static field, or the name of a type parameter that
+                    // holds a constant, a value of its enum, an integer, a `bool` or a `char` a code generator reads whole (T35)
+                    Need(model.IsVariable(n) || model.IsFunctionName(n) || (model.HasType(n) && model.TypeOf(n).Constant is UnitConstant or EnumConstant or IntegerConstant or BoolConstant or CharConstant) || model.IsImplicitField(n, out _, out _) || model.IsStaticField(n, out _), n.Line, $"what `{n.Name}` means");
                     break;
                 case ThisExpression t:
                     Need(model.IsImplicitField(t, out _, out _), t.Line, "`this`"); // K7
                     break;
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
                     break; // D12: a value of an enum, a constant a code generator reads whole
+                case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is StringConstant:
+                    break; // T33: `f.Name` in a pass of a loop over `T.Fields`, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
+                case MemberAccess m when model.IsStaticField(m, out _):
+                    break; // K18: `T.F`, a `static` field whose constant a code generator reads, with no instance
+                case MemberAccess m when model.SupportTestOf(m) is not null:
+                    break; // R18: `X86.Sse41.IsSupported`, a test of the CPU a code generator reads whole
                 case MemberAccess m:
                     Expression(m.Target);
+                    break;
+                case CallExpression c when model.IsMade(c, out var construction):
+                    Made++; // T33: a code generator reads the call of the constructor `T.Make` became, never its lambda
+                    if (construction is not null)
+                    {
+                        Expression(construction);
+                    }
+
                     break;
                 case CallExpression c:
                     Call(c);
@@ -728,7 +881,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MatchExpression m:
                     Expression(m.Subject);
-                    Arms(m.Arms);
+                    Arms(KindArm(m.Subject) ?? m.Arms);
                     break;
                 case WithExpression w:
                     Expression(w.Target);

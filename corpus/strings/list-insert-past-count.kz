@@ -1,0 +1,8 @@
+// expect: throws index-out-of-range at 7
+// rules: X11
+
+mut xs = [1, 2]
+// at `Count` the item is appended; one past it is outside the list
+xs.Insert(2, 3)
+xs.Insert(4, 9)
+print(xs)

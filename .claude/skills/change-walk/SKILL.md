@@ -193,15 +193,21 @@ the head that will be reviewed is a `judgment step`.
       `git diff --name-only <the merge base the round reviewed> origin/main` names no file of the
       pull request's diff and none of `tools/review/review.py`, `tools/kit.py` and
       `.review/review-rules.yaml`, the round completed and its status does not say "NOT converged",
-      and the title and the description are as the round read them. A push to a Ready pull request
+      and the title and the description are as the round read them. The status is read by the dry
+      run, `py -3 tools/merge_pr.py <N> <full head sha> --dry-run` at the reviewed head: its refusal
+      of the branch behind `main` says whether the round converged on every file, and where it did
+      not, or where the status does not show it, that taking `main` makes the review of the new
+      head a paid round and the owner chooses: a paid round, over red at the new head, or hold
+      (`knowledge/a-round-that-did-not-converge-makes-main-a-round.md`). A push to a Ready pull request
       starts the run; on a Draft, `py -3 tools/review/review.py --pr <N> --plan` prints 0 batches
       before the dispatch. A head with a file to review ends as `cap` before any pass and needs the
       owner's approval for that head (section 4, item 4)
       (`knowledge/a-review-the-cache-answers-is-no-round.md`).
    Gate: `pr-findings` and the merge tool read the move at the cap, and the cap command writes
    it (`self-tests`), `--go` refuses a section with no reading (`self-tests`), and a run at the cap
-   that only replays completes (`self-tests`); what the reading
-   says, starting no run and the check of sub-item 5 are a `judgment step`; the labels a person can change, a second
+   that only replays completes (`self-tests`), and the merge tool's refusal of a branch behind
+   `main` at the cap says whether the round converged (`self-tests`); what the reading
+   says, starting no run and the rest of the check of sub-item 5 are a `judgment step`; the labels a person can change, a second
    issue with the collection label, two runs that start at the same moment and a dry run:
    HAZARD (#41).
 
@@ -235,7 +241,11 @@ the head that will be reviewed is a `judgment step`.
    - Exit 4: the state of the merge is unknown. Look at the pull request before anything else.
    - Exit 6: the merge landed and the record of the waiver is missing: post the line the tool
      printed on the pull request.
-5. Delete the branch. The `gates` job runs again on `main`; a red run there is fixed by the next
+5. Delete the branch: `py -3 tools/merge_pr.py --delete-branch <N> --dry-run`, then the same
+   without `--dry-run`, never `git push origin --delete`; the rule in `CLAUDE.md` that names the
+   command says why. Tell the owner of each pull request it names that its base changed.
+   Gate: `self-tests`; a deletion by hand: HAZARD (#14).
+   The `gates` job runs again on `main`; a red run there is fixed by the next
    pull request, before any other merges. `judgment step`
 
 ## When something escaped

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -111,6 +113,206 @@ public sealed class HashTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(expected, output);
         }
     }
+
+    /// <summary>The register of CRC-32/ISO-HDLC, from 0, after the byte <paramref name="b"/> and <paramref name="zeros"/> bytes of zero, a bit at a time.</summary>
+    private static uint Remainder(byte b, int zeros)
+    {
+        uint c = b;
+        for (var k = 0; k < 8 * (zeros + 1); k++)
+        {
+            c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        }
+
+        return c;
+    }
+
+    [Fact]
+    public void A_crc_reads_a_table_of_16_rows_which_a_program_that_hashes_one_holds_as_a_constant()
+    {
+        // crc32fast's `CRC32_TABLE`, which its slicing-by-16 reads: 16 rows of 256, row k the remainder of a byte followed by k bytes of
+        // zero, row 0 zlib's table; a constant of the program, which `Crc32.Hash` and a hasher's `Update` pass to the standard library,
+        // and which a program that hashes no CRC does not hold, its size unchanged (the positive control: the first program holds it)
+        var program = Compile("mut c = Crc32.New()\nc.Update(\"a\".Bytes)\nprint(Crc32.Hash(Bytes()) + c.Finish())\n", toolchain.Runtime).Program;
+        Assert.True(program is not null, "no program");
+        var table = Regex.Match(program.Ir, @"\n@""crc32\.table"" = private unnamed_addr constant \[4096 x i32\] \[([^\]]*)\]");
+        Assert.True(table.Success, "no table of 4096 words");
+        var words = table.Groups[1].Value.Split(", ").Select(w => unchecked((uint)int.Parse(w["i32 ".Length..], CultureInfo.InvariantCulture))).ToList();
+        Assert.Equal(Enumerable.Range(0, 16).SelectMany(k => Enumerable.Range(0, 256).Select(b => Remainder((byte)b, k))), words);
+        Assert.Equal(0x77073096u, words[1]);
+        Assert.Equal(2, Regex.Count(program.Ir, @"call (i32|void) @""std\.Crc32(Hash|Update)[^""]*""\([^)]*ptr @""crc32\.table"""));
+        var none = Compile("print(Hex.Encode(Sha256.Hash(Bytes())))\n", toolchain.Runtime).Program;
+        Assert.True(none is not null, "no program");
+        Assert.DoesNotContain("crc32.table", none.Ir, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_crc_block_the_system_refuses_reports_the_bytes_of_a_hasher_s_block()
+    {
+        // `Crc32.New()` asks for a hasher's block: 16 bytes of a list's counts and 1028 of the register and the 1024 bytes after it,
+        // where the table stood before it was the program's, which keep the bytes `allocation-failed` names (H1); `Crc32.Hash` asks
+        // for none (the test below)
+        foreach (var (text, name) in new[] { ("mut c = Crc32.New()\nprint(c.Finish())\n", "crc-new") })
+        {
+            var refused = Compile(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+            Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, name + "-refused"));
+            Assert.Equal((1, "error: allocation-failed (1044 bytes)\n"), (code, error));
+            Assert.Empty(output);
+            var granted = Compile(text, toolchain.Runtime); // the positive control
+            Assert.True(granted.Program is not null, string.Join("; ", granted.Diagnostics.Sorted));
+            var (grantedCode, printed, grantedError) = Toolchain.Run(toolchain.Build(granted.Program, name + "-granted"));
+            Assert.Equal((0, ""), (grantedCode, grantedError));
+            Assert.Equal(["0"], printed);
+        }
+    }
+
+    [Fact]
+    public void Crc32_Hash_keeps_its_register_in_a_local_and_asks_for_no_block()
+    {
+        // H1: `Crc32.Hash` keeps its register in a local of `Crc32Hash`, as crc32fast's `hash` keeps its state, so it asks the system
+        // for no block (the owner, 2026-11-02, issue 157, comment 6573114059: the bytes `allocation-failed` names follow the layout).
+        // Where the system refuses every block, a program that hashes no bytes ends as it does with memory, where a block of the
+        // hasher's ended it with `allocation-failed`; it prints only where the CRC is not 0, and a print asks for a block of its own,
+        // so a wrong CRC ends it with `allocation-failed` too. The IR of `Crc32Hash` calls `Crc32Bytes`, the positive control, and
+        // neither `Crc32New` nor `ByteBlock`
+        var refused = Compile("if Crc32.Hash(Bytes()) != 0 {\n    print(1)\n}\n", EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value));
+        Assert.True(refused.Program is not null, string.Join("; ", refused.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(refused.Program, "crc-hash-no-block"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Empty(output);
+        var ir = refused.Program.Ir;
+        var start = ir.IndexOf("define internal i32 @\"std.Crc32Hash.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "the program holds the standard library's `Crc32Hash`");
+        var hash = ir[start..];
+        hash = hash[..hash.IndexOf("\n}", StringComparison.Ordinal)];
+        Assert.Contains("call i32 @\"std.Crc32Bytes.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.Crc32New.", hash, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"std.ByteBlock.", hash, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_crc_hasher_copied_between_two_updates_goes_on_apart_from_its_copy_and_finish_starts_each_over()
+    {
+        // H6: a copy of a `Crc32` hasher taken between two `Update`s is a value, the first `Update` after it writing a block of its own,
+        // so each goes on with its own bytes, against the CRC this class computes bit by bit; `Finish` starts each over, so a second
+        // `Finish` gives the CRC of no bytes (H3); under both allocators
+        const string text = """
+            mut message = Bytes()
+            while message.Count < 130 {
+                message.Add(byte((message.Count * 31 + 7) % 256))
+            }
+
+            mut c = Crc32.New()
+            c.Update(message[0..<70])
+            mut t = c
+            t.Update(message[70..<73])
+            c.Update(message[73..<130])
+            print(c.Finish())
+            print(t.Finish())
+            print(c.Finish())
+            print(t.Finish())
+
+            """;
+        var message = Message();
+        string[] expected = [Crc32([.. message[..70], .. message[73..]]).ToString(CultureInfo.InvariantCulture), Crc32(message[..73]).ToString(CultureInfo.InvariantCulture), "0", "0"];
+        Assert.NotEqual(expected[0], expected[1]); // the two diverge
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Compile(text, runtime);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "crc-copy" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    [Fact]
+    public void Sha256_gives_the_same_digests_through_the_sha_instructions_and_through_the_plain_rounds()
+    {
+        // R18 in std: a block, and the whole blocks a feed holds, take the SHA instructions where a test of the CPU finds them, as the
+        // `shani` backend of Rust's `sha2` crate does, and the plain rounds elsewhere. Three builds of one program: as std is, its test
+        // reading the CPU's word of this machine, which has the instructions; for `native`, which names them, the test a constant; and with
+        // std's tests turned `false`, the plain rounds alone. Each gives the standard's vectors (FIPS 180-2's three messages and two of the
+        // NIST examples) and .NET's digest of every count of bytes from 0 to 200, whole and in two pieces cut at every place.
+        const string text = """
+            mut message = Bytes()
+            while message.Count < 200 {
+                message.Add(byte((message.Count * 31 + 7) % 256))
+            }
+
+            mut differ = 0
+            mut n = 0
+            while n <= 200 {
+                Bytes whole = message[0..<n]
+                Bytes sha = Sha256.Hash(whole)
+                print(Hex.Encode(sha))
+                mut k = 0
+                while k <= n {
+                    mut s = Sha256.New()
+                    s.Update(whole[0..<k])
+                    s.Update(whole[k..<n])
+                    if !FixedTime.Equal(s.Finish(), sha) {
+                        differ = differ + 1
+                    }
+
+                    k = k + 1
+                }
+
+                n = n + 1
+            }
+
+            print(differ)
+            print(Hex.Encode(Sha256.Hash("".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abc".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".Bytes)))
+            print(Hex.Encode(Sha256.Hash("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu".Bytes)))
+            mut a = Bytes()
+            while a.Count < 1000 {
+                a.Add(byte(97))
+            }
+
+            mut million = Sha256.New()
+            mut i = 0
+            while i < 1000 {
+                million.Update(a)
+                i = i + 1
+            }
+
+            print(Hex.Encode(million.Finish()))
+
+            """;
+        var message = Message200();
+        var expected = Enumerable.Range(0, 201).Select(n => Convert.ToHexStringLower(SHA256.HashData(message[..n])))
+            .Append("0")
+            .Append("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+            .Append("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            .Append("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+            .Append("cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1")
+            .Append("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+            .ToList();
+        Assert.True(System.Runtime.Intrinsics.X86.Sse41.IsSupported && (System.Runtime.Intrinsics.X86.X86Base.CpuId(7, 0).Ebx & (1 << 29)) != 0, "this machine lacks SSE4.1 or SHA, so the path through the SHA instructions is not run here");
+        var plain = ListTests.Edited(("std/std.kz", "X86.Sha.IsSupported && X86.Sse41.IsSupported", "false"));
+        var named = toolchain.Clang.DescribeCpu("native", x86: true, out _)!;
+        Assert.Contains("X86.Sha", named.Classes);
+        foreach (var (runtime, cpu, name, word) in new (CheckedRuntime, Cpu?, string, bool)[]
+        {
+            (toolchain.Runtime, null, "hash-sha-tested", true),
+            (toolchain.Runtime, named, "hash-sha-named", false),
+            (plain, null, "hash-sha-plain", false),
+        })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true, cpu: cpu is null ? null : () => cpu);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var ir = compilation.Program.Ir;
+            Assert.Equal((name, word), (name, ir.Contains("load i64, ptr @kz.cpu", StringComparison.Ordinal))); // which path runs is held by the mutations of each
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name));
+            Assert.Equal((name, 0, ""), (name, code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
+    /// <summary>The bytes of the message of <see cref="Sha256_gives_the_same_digests_through_the_sha_instructions_and_through_the_plain_rounds"/>.</summary>
+    private static byte[] Message200() => Enumerable.Range(0, 200).Select(i => (byte)((i * 31 + 7) % 256)).ToArray();
 
     [Fact]
     public void Every_call_of_a_function_of_md5_is_the_lint_md5_insecure_once_at_its_line_and_the_program_is_built()
