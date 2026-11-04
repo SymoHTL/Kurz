@@ -1138,7 +1138,7 @@ public sealed partial class Emitter
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
     /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
     /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
-    /// items of the list as it was read: a lambda changes no variable it captures (F11), but a key can change the list through an
+    /// items of the list as it was read (X8, assumed): a lambda changes no variable it captures (F11), but a key can change the list through an
     /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
     /// one. Where the place holds another block after the keys, the list counts as changed, whatever items it holds, and a field
     /// assigned the list it held, or given it back, is unchanged and sorted (X8, section 12, the owner, 2026-11-02, #194); a change

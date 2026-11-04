@@ -582,6 +582,24 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("T First<T>(List<T> xs) => xs[0]\n\nx = First(nothing)\nprint(x.Length)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("T? Opt<T>(T? x) => x\n\nprint(Opt(null))"));
         Assert.Equal([(ErrorIds.CannotInfer, 3), (ErrorIds.UnknownName, 3)], Errors("int Two<T, U>(List<T> a, U b) => 1\n\nprint(Two(5, nothing))"));
+        // T27 with E1 on one `T`: an argument with no error of its own that gives `T` nothing keeps the `cannot-infer`, which names it, beside
+        // another argument's own error, nested, direct, a `[]` or a literal's; with no such argument nothing more is reported (the owner,
+        // 2026-11-03, #156, comment 6603205575)
+        var two = "int Two<T>(List<T> a, List<T> b) => 1\n\nint Three<T>(T a, List<T> b) => 1\n\n";
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(5, nothing))"));
+        Assert.Equal(notInferable + ": argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(two + "print(Two(5, nothing))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 6), (ErrorIds.UnknownName, 6)], Errors(two + "int k = 5\nprint(Two(k, nothing))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(\"a\", null))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Three(nothing, 5))"));
+        Assert.Equal(notInferable + ": argument 2 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(two + "print(Three(nothing, 5))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.CannotInfer, 5)], Errors(two + "print(Two([], 5))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.ConstantOverflow, 5)], Errors(two + "print(Three(99999999999999999999, 5))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, nothing))"));
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))")); // a lambda has no type of its own before the pick (F11)
+        Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(two + "List<int> xs = [1]\nprint(Two(xs, nothing))")); // `xs` gives `T` its type
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(5, [1]))")); // and so does the list literal
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("T Pick<T>(T a, T b) => a\n\nprint(Pick<int, int>(1, 2))"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("data Pair<A, B>(A First, B Second)\n\nPair<int> p = Pair(1, \"one\")\nprint(p.First)"));
@@ -4417,6 +4435,28 @@ public sealed class CheckerTests
         var passing = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nvoid Outer<U>(U x, int n) {\n    Only<U>()\n    if n > 0 {\n        Outer([x], n - 1)\n    }\n}\n\nOuter(1, 3)";
         Assert.Equal(["14: a chain of more than 64 copies of generic functions that read their type, from `Outer<int>` (T33)"], NotSupported(passing));
         Clean("void Deep<T>() {\n    match T.Kind {\n        TypeKind.List => print(1)\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
+    }
+
+    [Fact]
+    public void A_cycle_that_grows_through_a_loop_over_T_Fields_is_refused_at_the_call_in_the_loop_with_no_copy()
+    {
+        // T34 with T33: of a function that reads its type, the walk reads the calls in a loop over `T.Fields` on its text, called or not, and
+        // refuses a cycle that grows there at that call, with no copy made, so that the bound of T33 does not report it too (the owner,
+        // 2026-11-03, Q2 (b) and Q3 (a)); a type argument that is the field's type takes no part (Q4 (a)), and a cycle that leaves the loop
+        // through a call outside it, which the walk does not read, keeps the bound of T33
+        static List<string> Texts(string program) => [.. Check(program).Diagnostics.Sorted.Select(d => $"{d.Id} {d.Line}: {d.Message}")];
+        const string Deep = "data Box<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        Assert.Equal(["growing-type-argument 6: `Deep` calls itself with `Box<T>` for `T`, a type larger than its `T`, so each copy makes a larger one without end (T34)"],
+            Texts(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)", "Deep(Box(1), 3)")));
+
+        var leaving = string.Format(Deep, "Wrap(Box(x), n - 1)", "void Wrap<U>(U y, int n) {\n    Deep(y, n)\n}\n\nDeep(Box(1), 3)");
+        Assert.Equal(["15: a chain of more than 64 copies of generic functions that read their type, from `Deep<Box<int>>` (T33)"], NotSupported(leaving));
+
+        Clean("data Point(int X, int Y)\ndata Shape(string Name, Point Corner)\n\nstring Show<T>(T value) => match T.Kind {\n    TypeKind.Data => Fields(value)\n"
+            + "    else => \"{value}\"\n}\n\nstring Fields<T>(T value) {\n    mut text = \"\"\n    for f in T.Fields {\n        f.Type part = f.Get(value)\n"
+            + "        shown = Show<f.Type>(part)\n        text = \"{text}{f.Name}=({shown});\"\n    }\n    return text\n}\n\nprint(Show(Shape(\"box\", Point(1, 2))))");
     }
 
     [Fact]

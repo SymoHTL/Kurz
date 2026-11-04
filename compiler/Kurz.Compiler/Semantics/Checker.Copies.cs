@@ -71,6 +71,15 @@ public sealed partial class Checker
 
     private readonly HashSet<CallExpression> genericCallSeen = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>T34: the generic calls that stand in a loop over <c>T.Fields</c> of a function's text, which the walk reads in a function that reads its type.</summary>
+    private readonly HashSet<CallExpression> fieldsLoopCalls = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The loops over <c>T.Fields</c> of a function's text around the statement the checker reads, outside a copy.</summary>
+    private int fieldsLoopDepth;
+
+    /// <summary>T34: the functions on a cycle it refused, of which no copy is made, so that the bound of T33 does not report the cycle a second time.</summary>
+    private readonly HashSet<FunctionSymbol> grownFunctions = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>The diagnostics of each generic function's body, which leave the build where the function turns out to read its type.</summary>
     private readonly Dictionary<FunctionSymbol, List<Diagnostic>> genericDiagnostics = new(ReferenceEqualityComparer.Instance);
 
@@ -189,8 +198,29 @@ public sealed partial class Checker
         if (callee is { IsGeneric: true } && genericCallSeen.Add(c))
         {
             genericCalls.Add((checking, c, activePasses.Count == 0 ? null : activePasses[^1]));
+            if (fieldsLoopDepth > 0)
+            {
+                fieldsLoopCalls.Add(c);
+            }
         }
     }
+
+    /// <summary>
+    /// T34: the text of a function that reads its type, read for the calls in its loops over <c>T.Fields</c>, which <see cref="FindGrowingCycles"/>
+    /// reads; what the reading reports leaves the build, since the function keeps its check in its copies (T33).
+    /// </summary>
+    private void ReadForCycles(FunctionSymbol f)
+    {
+        checking = f;
+        Push();
+        CheckFunctionBody(f);
+        Pop(commit: false);
+        checking = null;
+    }
+
+    /// <summary>A loop over <c>T.Fields</c> of a type parameter, as the text of a generic function writes it.</summary>
+    private bool WalksFieldsOfTypeParameter(ForInStatement f) =>
+        Unwrap(f.Collection) is MemberAccess { Target: NameExpression n, Member: "Fields", Conditional: false } && TypeParameter(n.Name) is not null;
 
     /// <summary>
     /// A generic function that passes its type parameter to a function that reads its type, in a type argument it writes or one the
@@ -241,18 +271,20 @@ public sealed partial class Checker
     /// T34: a call in a generic function's body that gives a type parameter of the callee a type holding one of the caller's inside a
     /// form of a type makes a copy for a larger type; where the type parameters lead from the callee's back to the caller's along the
     /// calls of the generic bodies, each copy makes a larger one without end, and the call is <c>growing-type-argument</c> (section 4,
-    /// the owner, 2026-11-02, "refused at the cycle"). The walk reads the generic functions checked on their text, called or not: a
-    /// function that reads its type is read in its copies alone (T33), and none of its calls is read here.
+    /// the owner, 2026-11-02, "refused at the cycle"). The walk reads the generic functions checked on their text, called or not: of a
+    /// function that reads its type (T33), the calls in its loops over <c>T.Fields</c> alone, a type argument that is the field's type
+    /// taking no part, since the text does not give that type (the owner, 2026-11-03, comment 6600218932 on issue 156). No copy is made
+    /// of a function on a cycle it refuses, so that its error is the one error of the cycle.
     /// </summary>
     private void FindGrowingCycles()
     {
         var edges = new List<GrowthEdge>();
         foreach (var (caller, c, _) in genericCalls)
         {
-            if (caller is not { IsGeneric: true } || readers.Contains(caller)
+            if (caller is not { IsGeneric: true } || (readers.Contains(caller) && !fieldsLoopCalls.Contains(c))
                 || model.TryCallOf(c) is not { Kind: CallKind.Function, Function: { IsGeneric: true } callee } info)
             {
-                continue; // a function that calls a reader with its own type parameter is a reader (T33), so no edge leads into a reader's
+                continue; // a function that calls a reader with its own type parameter is a reader (T33), whose calls outside such a loop are not read
             }
 
             foreach (var to in callee.TypeParameters)
@@ -275,6 +307,7 @@ public sealed partial class Checker
             if (PathBack(edges, edge.To, edge.From) is { } path && reported.Add(edge.Call))
             {
                 Report(ErrorIds.GrowingTypeArgument, edge.Call.Line, GrowthText(edge, path));
+                grownFunctions.UnionWith(path.Select(e => e.Callee).Append(edge.Caller).Append(edge.Callee));
             }
         }
     }
@@ -356,6 +389,11 @@ public sealed partial class Checker
             if ((caller is not null && readers.Contains(caller)) || CalledReader(c) is not { } info)
             {
                 continue;
+            }
+
+            if (grownFunctions.Contains(info.Function!))
+            {
+                continue; // T34 refused its cycle, and its copies would reach the bound of T33 for the same cycle
             }
 
             var outer = caller is null ? null : copies.GetValueOrDefault(caller);
