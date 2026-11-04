@@ -2878,7 +2878,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// T27: the first argument whose type has no part where <paramref name="p"/> stands in its parameter, so that it gives
-    /// <paramref name="p"/> nothing; null where every argument gives <paramref name="p"/> a type.
+    /// <paramref name="p"/> nothing; null where every argument gives <paramref name="p"/> a type. A lambda (F11) and an argument with an
+    /// error of its own (E1) are passed over: neither has a type to name.
     /// </summary>
     private static int? GivingNothing(Candidate candidate, List<Pre> pres, TypeParameterSymbol p)
     {
