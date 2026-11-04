@@ -347,8 +347,9 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
-`HttpError` with its `HttpKind` (W2), types every program sees (W1: the checker of a program is given `std/`'s checker and takes the
-symbols it made of each `pub` type that `Checker.Prelude` names, where the built-in types every file sees, `IoError` among them, are
+`HttpError` with its `HttpKind` (W2) and the class `HttpHeaders` (W4), types every program sees (W1: the checker of a program is given
+`std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
+members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
 the checker's own declarations, made again for each file), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
@@ -677,6 +678,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   emitted as that call, a type with no fields giving its value;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
+- a type parameter that holds a constant of an integer type, `bool`, `char` or an `enum`, `const int N` or `const Mode M`,
+  with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
+  `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
+  the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
+  in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -937,15 +943,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Write` and `Close`, each of a
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
-  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer a file's lines are read through with the position and the count of its bytes and the word of its lock (S16), and the word of the calls in
+  the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  freed with the block; each `Read`, `Fill`, `Consume`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
   compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
   takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
   second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
@@ -955,8 +961,16 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   shutdown, and a stream's read and write and a listener's `Accept` that end in a failure, or a read in no byte, on a marked handle
   give that error too (S5, S9);
   `Read` makes the room for `max` more bytes as an `Add` makes it, copying a block another value
-  holds, before it reads (S3), takes the bytes a loop over the lines left in the buffer first, at most `max`, under the lock, and reads
-  the descriptor only where the buffer holds none (S16); `for line in f.Lines()` holds the file while it runs and pulls a line a round
+  holds, before it reads (S3), and under the lock takes the bytes the buffer holds first, at most `max`, with no system call; where it
+  holds none, a `max` of 8192 or more, and one of 0, lets the lock go and is read straight into the list, and a smaller one fills the
+  buffer, made at the first such read, with one read of 8192 bytes, the lock held while it waits, and takes at most `max` of them, the
+  buffer left as it was where the read failed; the whole read is a call in flight, the fill's read and the straight one each given the
+  closed handle's error where a `Close` woke them on a socket, and a fill that finds the mark when its read returns keeps none of the
+  rest in the buffer (S3, S5, S9); `Fill` takes, under the lock, every byte the buffer holds with no system call, its position
+  left where it is, and where it holds none fills it as such a read does and takes all that read gave, the room in the list made for
+  the bytes it appends, and a fill that finds the mark keeps none of them; `Consume` raises `index-out-of-range` for an `n` below 0
+  before it enters and for one past the bytes the buffer holds under the lock, and else moves the position by `n` (S24);
+  `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
   the bytes up to it in a list of bytes, whose block the line's string takes over, without the `\n` and a `\r` in front of it; a line
@@ -1295,8 +1309,9 @@ before a SHA instruction in `raw` that no test guards, is not cleaned after. `In
 of a guarded block under the fenced allocator, every intrinsic against .NET's `System.Runtime.Intrinsics`
 on the same lanes, and the SHA-1 functions, which .NET does not have, by compressing a block of SHA-1.
 Those of its tests and of `HashTests` that run an instruction fail, naming the set, on a machine without
-SSE4.1, AES or SHA, and the one built for `native` without AVX, since a path no test runs must not look
-clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
+SSE4.1, AES or SHA, the one built for `native` without AVX, the one built for `x86-64-v3` without one of
+its sets, and the start check's against the machine where fewer than 20 of its table's sets read as
+present or none reads as missing, since a path no test runs must not look clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
 A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
 tables as the function's name; a lambda made in the block is named after the function the block
@@ -1517,7 +1532,9 @@ that sit under a rule by its id. Every one is pinned by a test.
   and `List<T>.Allocate(n)`, the forms the reference gives a generic name that is not called; C# also keeps the list
   before `)`, `]`, `,`, `?` and a few more, which the front end reads as comparisons:
   `a < b, c > .5` and `a < b, c > d, e` are comparisons, and `f(a < b, c >)` or `xs[a < b, c >]` is
-  `syntax`, a comparison without its right operand. T17 says generic types are written as in C# and
+  `syntax`, a comparison without its right operand. A literal among the type arguments, which T35 keeps where `(` follows
+  the list (the owner, 2026-11-02), so that `f(a < 64, c > (d))` is the call `a<64, c>(d)`, ends the list before a member
+  and its `(`: `List<64>.FromRaw(p, 0)` is `syntax`. T17 says generic types are written as in C# and
   states no such rule.
 - T17: `void` as a type argument written in a type or a call, of a generic function, a generic `data`
   type, `List` and `Map`, is `void-type-argument` where it is written, nested ones and one in a
@@ -1563,7 +1580,8 @@ that sit under a rule by its id. Every one is pinned by a test.
     value of an operand `=>` splits the operand and starts no lambda, while an argument of a call
     there takes one as any argument does.
 - E4's general clause, applied to shapes no rule names: a modifier written twice (K7: class bodies
-  follow C#, which refuses it), type parameters on an `enum` or `flags` type (D12 and D13 give them
+  follow C#, which refuses it), `pub` and `internal` before one declaration (F9: an assumption of
+  the record, section 8, as C# refuses two access modifiers), type parameters on an `enum` or `flags` type (D12 and D13 give them
   a name and a body), a second `?` on a type (N1 gives one), a second `weak` (R3 and R5 write one),
   a form feed or a vertical tab outside a literal (L13 names the carriage return alone), a `//`
   inside an interpolation (L3 runs a comment to the end of its line, which L6's hole does not reach)
@@ -1608,13 +1626,13 @@ class instance or through a `weak` reference, with the two more ends of such a p
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K5, K7 to K9, K12, K14, K15 and K18 to K20, for a class with its primary constructor or none,
 its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4), a class of `std/` the prelude names (W1) being no step of a ring of the file, since it names no class of the file and `std/`'s checker judges its own and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
-types of `std/` that the list `Checker.Prelude` names, `HttpKind` and `HttpError`, which a program checked with `std/`'s checker, as every
-build checks it, sees as `std/` declares them, and W2 but for the text of an `HttpError`; the other names of W1 are no types of `std/`, and a
+types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError` and `HttpHeaders`, which a program checked with `std/`'s
+checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an `HttpError`, and W4; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
@@ -1667,8 +1685,8 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), a base or an interface
 (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
-or with a modifier other than `pub` and `mut` (K7, F9), a `static` field with a modifier other
-than `pub` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
+or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
+other than `pub`, `internal` and `mut` (K18, R13), a method that is `virtual`, `override`, `prot` or `extern` or
 that has type parameters of its own (K7, section 4), each of which leaves the class and every
 value of it unread, and of a class it reads, a `static` field with an initial value that is no
 constant, which section 4 computes at the field's first read and whose open items section 14
@@ -1727,11 +1745,14 @@ error stand, and which every file sees, so that a file's own declaration of one 
 `Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
-such a loop, which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
+such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end (T33); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
-`redeclared` (G1 to G5); and `use` (F10) of any folder but the runtime's `sys`;
+`redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
+leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
+types, at the place of a type argument a call writes,
+which is read before the overload is picked (T35, F12); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

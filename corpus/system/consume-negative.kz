@@ -1,0 +1,14 @@
+// expect: throws index-out-of-range at 9
+// rules: S24
+
+void | IoError Negative() {
+    File.WriteAll("consume-negative.txt", "abc".Bytes)
+    f = File.Open("consume-negative.txt")
+    File.Delete("consume-negative.txt")
+    int n = -1
+    f.Consume(n)
+}
+
+Negative() else {
+    IoError e => print(e)
+}

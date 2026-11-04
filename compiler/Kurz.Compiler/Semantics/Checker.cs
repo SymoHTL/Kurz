@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -573,6 +573,10 @@ public sealed partial class Checker
         {
             RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            if (p.Constant is not null)
+            {
+                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T35)");
+            }
         }
 
         if (clash)
@@ -586,8 +590,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// W1: each type of <see cref="Prelude"/> that <c>std/</c> declares <c>pub</c>, by the symbol <c>std/</c>'s checker made of it, which
-    /// this file reads as its own and does not resolve again; a name <c>std/</c> does not declare so stays unknown.
+    /// W1: each type of <see cref="Prelude"/> that <c>std/</c> declares <c>pub</c>, a <c>data</c> type, an enum or a class, by the symbol
+    /// <c>std/</c>'s checker made of it, which this file reads as its own and does not resolve again, so that a class's methods are the
+    /// ones <c>std/</c> checked and a member without <c>pub</c> stays private to it (F9); a name <c>std/</c> does not declare so stays
+    /// unknown.
     /// </summary>
     private void DeclarePrelude()
     {
@@ -608,12 +614,18 @@ public sealed partial class Checker
                 enums[name] = e;
                 preludeSeen.Add(name);
             }
+            else if (std.classes.TryGetValue(name, out var c) && (c.Declaration.Modifiers & Modifiers.Pub) != 0)
+            {
+                classes[name] = c;
+                unsupportedBases[name] = "a class a data type names (chapter 7)"; // D6, as DeclareClass says of the file's own class
+                preludeSeen.Add(name);
+            }
         }
     }
 
     /// <summary>W1, V9: what <c>redeclared</c> says to a file's own declaration of a type of the prelude this file sees.</summary>
     private string PreludeClash(string name) =>
-        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
+        $"`{name}` is {(enums.ContainsKey(name) ? "an enum" : classes.ContainsKey(name) ? "a class" : "a data type")} of `std/` every file sees, declared before the file's own types (W1, V9)";
 
     /// <summary>
     /// W1, V9: a type parameter named like a type of the prelude this file sees binds the name in a scope, so it is <c>redeclared</c>
@@ -976,6 +988,10 @@ public sealed partial class Checker
                 return PointerTo(Resolve(p.Pointee), p.Line, "a pointer"); // R10, R14
             case ExternFunctionType f:
                 return ResolveCFunctionType(f); // R17
+            case ConstantTypeArgument c:
+                // T35: a literal stands among a call's type arguments where the type parameter holds a constant, and is no type
+                Report(ErrorIds.TypeMismatch, c.Line, "a literal stands where a type is required, among a call's type arguments (T35, T1)");
+                return Types.Error;
             default:
                 throw new InvalidOperationException(type.GetType().Name);
         }
@@ -1073,6 +1089,13 @@ public sealed partial class Checker
         }
 
         var parameter = TypeParameter(n.Name);
+        if ((parameter?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
+        {
+            // T35: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
+            Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T35)");
+            return Types.Error;
+        }
+
         if (parameter is not null)
         {
             return new TypeParameterType(parameter);
@@ -1211,15 +1234,26 @@ public sealed partial class Checker
     {
         var d = symbol.Declaration!;
         typeContext = symbol.TypeParameters;
-        foreach (var p in d.TypeParameters)
+        foreach (var (p, parameter) in d.TypeParameters.Zip(symbol.TypeParameters))
         {
             if (p.Limit is not null)
             {
                 NotSupported(p.Line, "the limit of a type parameter (T19)"); // not resolved: the one diagnostic of the construct (E1)
             }
+
+            if (p.Constant is not null)
+            {
+                parameter.Constant = ResolveConstantParameter(symbol, p);
+            }
         }
 
-        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Naked | Modifiers.Extern);
+        // T35: a type parameter with a default comes after every one without, as Rust orders them, so that a call leaves out the last
+        if (d.TypeParameters.SkipWhile(p => p.Default is null).FirstOrDefault(p => p.Default is null) is { } after)
+        {
+            Report(ErrorIds.Syntax, after.Line, $"the type parameter `{after.Name}` without a default follows one with a default (T35)");
+        }
+
+        var unsupportedModifiers = d.Modifiers & ~(Modifiers.Pub | Modifiers.Internal | Modifiers.Naked | Modifiers.Extern);
         if (unsupportedModifiers != Modifiers.None)
         {
             NotSupported(d.Line, (unsupportedModifiers & Modifiers.Thread) != 0 ? "`thread static` before a function, which R13 states before state alone (R13)"
@@ -1234,6 +1268,27 @@ public sealed partial class Checker
             CheckCSignature(symbol, d); // R12, R16
         }
     }
+
+    /// <summary>
+    /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
+    /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. The record's list holds no other type, and a
+    /// function with a parameter of one is not read (E1).
+    /// </summary>
+    private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
+    {
+        var type = Resolve(p.Constant!);
+        if (Types.IsError(type) || HoldsConstant(type))
+        {
+            return type;
+        }
+
+        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an integer type, `bool`, `char` or an `enum` is read (T35)");
+        modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
+        return Types.Error;
+    }
+
+    /// <summary>T35: the types a type parameter's constant can have, as the record lists them.</summary>
+    private static bool HoldsConstant(KurzType type) => Types.IsInteger(type) || type is EnumType || type == Types.Bool || type == Types.Char;
 
     private void ResolveTypes(FunctionSymbol symbol, FunctionDeclaration d)
     {
@@ -1336,6 +1391,15 @@ public sealed partial class Checker
                     Unread(f, () => CheckDefault(p.Default, symbol.Type, p.Line));
                 }
             }
+
+            foreach (var (p, parameter) in f.Declaration!.TypeParameters.Zip(f.TypeParameters))
+            {
+                if (p.Default is not null && parameter.Constant is { } of && !Types.IsError(of))
+                {
+                    // T35: a value of the parameter's enum, a constant as F12 has a parameter's default
+                    Unread(f, () => parameter.Default = CheckDefault(p.Default, of, p.Line) is { } value ? new ConstantArgument(of, value) : null);
+                }
+            }
         }
 
         foreach (var d in dataDeclared.Concat(refusedTypes))
@@ -1365,7 +1429,8 @@ public sealed partial class Checker
         }
     }
 
-    private void CheckDefault(Expression value, KurzType type, int parameterLine)
+    /// <summary>F12, D11: a default, which is a constant of the parameter's type; its value where it is one, null where it was reported or is a <c>data</c> value of constants, which no type parameter holds (T35).</summary>
+    private Constant? CheckDefault(Expression value, KurzType type, int parameterLine)
     {
         var reading = readingConstant;
         readingConstant = true; // a read of state or of raw memory is no constant, and `default-not-constant` is its one error (R13, E1)
@@ -1373,18 +1438,33 @@ public sealed partial class Checker
         readingConstant = reading;
         if (t.IsError || Types.IsError(type))
         {
-            return;
+            return null;
         }
 
-        if (t.Constant is null)
+        if (t.Constant is null && !IsConstantData(value))
         {
-            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields, or literals that T6 folds (F12)");
+            Report(ErrorIds.DefaultNotConstant, parameterLine, "a default value is a constant expression: a literal, a data value without fields or of constant arguments, or literals that T6 folds (F12)");
+            return null;
         }
-        else if (!Types.Assignable(t.Type, type))
+
+        if (!Types.Assignable(t.Type, type))
         {
             ReportMismatch(t.Type, type, value.Line, $"the default is {Types.A(t.Type)} where {Types.A(type)} is required");
+            return null;
         }
+
+        return t.Constant;
     }
+
+    /// <summary>
+    /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
+    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// </summary>
+    private bool IsConstantData(Expression value) =>
+        value is CallExpression c
+        && model.TryCallOf(c) is { Kind: CallKind.DataNew }
+        && c.Arguments.All(a => model.TypeOf(a.Value).Constant is not null || IsConstantData(a.Value));
 
     private void CheckFunctionBody(FunctionSymbol f)
     {
