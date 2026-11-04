@@ -1022,7 +1022,7 @@ looking it up and trying its addresses in turn, as the first form's `address` re
 owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker on
 the one bound of `TcpStream.Connect` below. A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
-the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
+the time of a stream's reads and of its writes, taking a `duration?`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as
 `InvalidInput`, as Rust refuses a zero `Duration` (§12, the owner, 2026-11-01, Q8 (a), against
 `WouldBlock`, which Rust gives on Linux for the same timeout, and against properties, as C#'s
