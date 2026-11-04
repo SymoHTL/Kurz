@@ -197,7 +197,8 @@ the head that will be reviewed is a `judgment step`.
       run, `py -3 tools/merge_pr.py <N> <full head sha> --dry-run` at the reviewed head: its refusal
       of the branch behind `main` says whether the round converged on every file, and where it did
       not, or where the status does not show it, that taking `main` makes the review of the new
-      head a paid round and the owner chooses: a paid round, over red at the new head, or hold
+      head end as `cap` before any pass and the owner chooses: a paid round, over red at the new
+      head, or hold
       (`knowledge/a-round-that-did-not-converge-makes-main-a-round.md`). A push to a Ready pull request
       starts the run; on a Draft, `py -3 tools/review/review.py --pr <N> --plan` prints 0 batches
       before the dispatch. A head with a file to review ends as `cap` before any pass and needs the
@@ -241,7 +242,11 @@ the head that will be reviewed is a `judgment step`.
    - Exit 4: the state of the merge is unknown. Look at the pull request before anything else.
    - Exit 6: the merge landed and the record of the waiver is missing: post the line the tool
      printed on the pull request.
-5. Delete the branch. The `gates` job runs again on `main`; a red run there is fixed by the next
+5. Delete the branch: `py -3 tools/merge_pr.py --delete-branch <N> --dry-run`, then the same
+   without `--dry-run`, never `git push origin --delete`; the rule in `CLAUDE.md` that names the
+   command says why. Tell the owner of each pull request it names that its base changed.
+   Gate: `self-tests`; a deletion by hand: HAZARD (#14).
+   The `gates` job runs again on `main`; a red run there is fixed by the next
    pull request, before any other merges. `judgment step`
 
 ## When something escaped

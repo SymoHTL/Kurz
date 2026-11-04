@@ -1924,8 +1924,9 @@ public sealed partial class Checker
     /// <summary>As above, recorded as a call of <paramref name="kind"/>: of a function, or of a method of a class (K7).</summary>
     private Typed ResolveCall(List<FunctionSymbol> candidates, CallExpression c, KurzType? expected, out FunctionSymbol? function, CallKind kind)
     {
-        // once: an error in one is one diagnostic, whatever the number of overloads (E1)
-        var typeArguments = c.TypeArguments.Select(t => ResolveTypeArgument(t, $"`{candidates.FirstOrDefault()?.Name}`")).ToList();
+        // once: an error in one is one diagnostic, whatever the number of overloads (E1); where a type parameter holds a constant, the
+        // type argument is its value (T35)
+        var typeArguments = c.TypeArguments.Select((t, i) => TypeArgument(candidates, t, i, c.Line)).ToList();
         if (WeakUnread(c.Line, "a type argument of a function", [.. typeArguments]))
         {
             function = null;
@@ -1937,16 +1938,18 @@ public sealed partial class Checker
         {
             var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
             var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
+            var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
-                if (typeArguments.Count != f.TypeParameters.Count)
+                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => p.Default is null))
                 {
                     candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
                     candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    candidate.Map = f.TypeParameters.Zip(typeArguments).ToDictionary(p => p.First, p => p.Second);
+                    // T35: a type parameter the call leaves out takes its default
+                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -1956,6 +1959,95 @@ public sealed partial class Checker
         var typed = Record(c, kind, Call(list, c, expected, out var picked), picked);
         function = typed.IsError ? null : picked?.Function;
         return typed;
+    }
+
+    /// <summary>
+    /// T35: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
+    /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
+    /// overload is picked.
+    /// </summary>
+    private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
+    {
+        var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
+        var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
+        if (kinds.Count > 1)
+        {
+            NotSupported(line, $"overloads of `{candidates[0].Name}` that hold {string.Join(" and ", kinds)} at type argument {place + 1} (T35, F12)");
+            return Types.Error;
+        }
+
+        return there.FirstOrDefault(p => p.Constant is { } c && !Types.IsError(c)) is { } holds
+            ? ResolveConstantArgument(argument, holds)
+            : ResolveTypeArgument(argument, $"`{candidates.FirstOrDefault()?.Name}`");
+    }
+
+    /// <summary>
+    /// T35: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
+    /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
+    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
+    /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// </summary>
+    private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
+    {
+        var of = holds.Constant!;
+        if (argument is ConstantTypeArgument literal)
+        {
+            var t = CheckExpression(literal.Value, of);
+            if (t.IsError || Types.IsError(of))
+            {
+                return Types.Error;
+            }
+
+            if (!Types.Assignable(t.Type, of) || t.Constant is null)
+            {
+                ReportMismatch(t.Type, of, literal.Line, $"`{holds.Name}` takes a constant of `{of.Text}`, not {Types.A(t.Type)}", "T35");
+                return Types.Error;
+            }
+
+            return new ConstantArgument(of, t.Constant);
+        }
+
+        if (argument is NamedType { TypeArguments.Count: 0 } n)
+        {
+            if (BoundConstant(n.Name) is { } bound)
+            {
+                if (bound.Of.Equals(of))
+                {
+                    return bound;
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
+                return Types.Error;
+            }
+
+            var dot = n.Name.LastIndexOf('.');
+            if (dot > 0 && enums.TryGetValue(n.Name[..dot], out var named))
+            {
+                var value = n.Name[(dot + 1)..];
+                var index = named.Values.IndexOf(value);
+                if (index < 0)
+                {
+                    Report(ErrorIds.UnknownName, n.Line, $"`{named.Name}` has no value `{value}` (D12, V10)");
+                    return Types.Error;
+                }
+
+                if (of is EnumType ofEnum && ReferenceEquals(named, ofEnum.Symbol))
+                {
+                    return new ConstantArgument(of, new EnumConstant(index));
+                }
+
+                Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` is a value of `{named.Name}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
+                return Types.Error;
+            }
+        }
+
+        var type = Resolve(argument); // a name that is no type has its own error (E1)
+        if (!Types.IsError(type))
+        {
+            Report(ErrorIds.TypeMismatch, argument.Line, $"the type `{type.Text}` stands where `{holds.Name}` takes a value of `{of.Text}` (T35, T1)");
+        }
+
+        return Types.Error;
     }
 
     /// <summary>Binds the arguments to each candidate, picks one (F13) and checks the arguments against it.</summary>
@@ -2272,6 +2364,7 @@ public sealed partial class Checker
     {
         var map = new Dictionary<TypeParameterSymbol, KurzType>(candidate.Map);
         var direct = candidate.TypeParameters.ToDictionary(p => p, _ => new List<KurzType>());
+        var erred = new HashSet<TypeParameterSymbol>();
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
@@ -2284,6 +2377,12 @@ public sealed partial class Checker
             if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
             {
                 types.Add(ArgumentType(candidate, pres, i));
+            }
+            else if (Types.IsError(ArgumentType(candidate, pres, i)))
+            {
+                // its own error stands in a nested position as in a direct one, the `T` of a `List<T>`: what nothing else gives a type is
+                // inferred as nothing, and no `cannot-infer` is reported beside it (E1; the owner, 2026-11-03, #156, comment 6600034940)
+                erred.UnionWith(candidate.TypeParameters.Where(p => Types.Mentions(slot, p)));
             }
             // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
             // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
@@ -2369,6 +2468,12 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (p.Default is { } constant)
+            {
+                map[p] = constant; // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default
+                continue;
+            }
+
             // literals alone in its positions, the items of a list literal of literals in a `List<T>` among them: the type a constant
             // expression of them has, so that `Pair(1L, [1])` is `long` as `Pick(1, 2L)` is (L10, L17, T27, M11)
             KurzType? fixedType = null;
@@ -2403,7 +2508,7 @@ public sealed partial class Checker
                 }
             }
 
-            if (fixedType is null && (untypable || untypedLists.Contains(p)))
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)))
             {
                 map[p] = Types.Error;
                 continue;
