@@ -300,6 +300,278 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(InFlightFiles, "in-flight-files-open", ["2", "true", "1", "ab", "cd", "3"], grants: ["raw", "native"]);
     }
 
+    private const string InFlightFill = Armed + """
+        static mut int seen = 0
+
+        // the count of the bytes the read's handle holds in its buffer as the read leaves it, which the IR of the fact writes into `seen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void | IoError Fill() {
+            File.WriteAll("in-flight-fill.txt", "abcdef".Bytes)
+            open = File.Open("in-flight-fill.txt")
+            mut bytes = Bytes()
+            print(open.Read(mut bytes, 2))
+            print(Seen())
+
+            f = File.Open("in-flight-fill.txt")
+            File.Delete("in-flight-fill.txt")
+            g = f
+            ArmClose(1)
+            print(f.Read(mut bytes, 2))
+            print(Seen())
+            print(g.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+
+            open.Close()
+        }
+
+        Fill() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// The IR of <paramref name="ir"/>, a program of <see cref="InFlightFill"/>, in which every call in flight writes into <c>seen</c>, as
+    /// it leaves its handle, the count of the bytes read into the handle's buffer, the field 12 bytes into the reader's state, which
+    /// starts 32 bytes into the handle's block (the emitter's <c>ReaderAt</c> and <c>ReaderCount</c>).
+    /// </summary>
+    private static string WithTheCountAtLeave(string ir)
+    {
+        var seen = SeenOf(ir);
+        const string Leave = "call void @\"leave.handle\"(ptr ";
+        Assert.Contains(Leave, ir, StringComparison.Ordinal);
+        return ir.Replace(Leave, "call void @\"test.leave\"(ptr ", StringComparison.Ordinal) + $$"""
+
+            define internal void @"test.leave"(ptr %handle) {
+              %field = getelementptr i8, ptr %handle, i64 44
+              %count = load i32, ptr %field
+              store i32 %count, ptr {{seen}}
+              call void @"leave.handle"(ptr %handle)
+              ret void
+            }
+
+            """;
+    }
+
+    [Fact]
+    public void A_fill_in_flight_that_a_close_meets_keeps_none_of_the_bytes_it_read_in_the_buffer()
+    {
+        // S3, S5: a read of 2 bytes fills the buffer with the file's 6 and gives 2; on a handle no `Close` marked the buffer keeps the 6
+        // for the reads after it, and where a `Close` marks the handle while the fill is in flight, the fill gives its 2 and keeps none,
+        // the count it leaves 0; the copy's read after it is `EBADF`
+        RanWithCloseInFlight(InFlightFill, "in-flight-fill", ["2", "6", "2", "0", "-9"], ["raw"], WithTheCountAtLeave);
+    }
+
+    /// <summary>The global of a program's <c>static mut int seen</c>, which an edit of its IR writes.</summary>
+    private static string SeenOf(string ir)
+    {
+        var seen = System.Text.RegularExpressions.Regex.Match(ir, "^(@\"s\\.[^\"]*\\.seen\") = internal global i32 0$", System.Text.RegularExpressions.RegexOptions.Multiline);
+        Assert.True(seen.Success, "the program's `seen`");
+        return seen.Groups[1].Value;
+    }
+
+    private const string LockAtRead = Armed + """
+        static mut int seen = 0
+
+        // the lock word of the handle a read of the system reads for, as that read starts, which the IR of the fact writes into `seen`;
+        // -1 where no read of the system was made since `Unseen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void Unseen() {
+            raw {
+                seen = -1
+            }
+        }
+
+        void | IoError Reads() {
+            File.WriteAll("lock-at-read.txt", "abcdef".Bytes)
+            f = File.Open("lock-at-read.txt")
+            File.Delete("lock-at-read.txt")
+            mut bytes = Bytes()
+            Unseen()
+            print(f.Read(mut bytes, 1))
+            print(Seen())
+            Unseen()
+            print(f.Read(mut bytes, 10000))
+            print(Seen())
+            print(f.Read(mut bytes, 10000))
+            print(Seen())
+            f.Close()
+        }
+
+        Reads() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// The IR of <paramref name="ir"/>, a program of <see cref="LockAtRead"/>, in which every read of the system writes into <c>seen</c>,
+    /// as it starts, the lock word of the handle the last call in flight entered, the field 16 bytes into the reader's state, which
+    /// starts 32 bytes into the handle's block (the emitter's <c>ReaderAt</c> and <c>ReaderLock</c>): 1 while a read holds the lock, 0
+    /// where none does.
+    /// </summary>
+    private static string WithTheLockAtEveryRead(string ir)
+    {
+        var seen = SeenOf(ir);
+        const string Enter = "call i1 @\"test.enter.close\"(ptr ";
+        Assert.Contains(Enter, ir, StringComparison.Ordinal);
+        var reads = new System.Text.RegularExpressions.Regex("call i64 (@\"[^\"]*\\.ReadFile\\.[^\"]*\")\\(i32 ");
+        Assert.Matches(reads, ir);
+        ir = reads.Replace(ir.Replace(Enter, "call i1 @\"test.enter.note\"(ptr ", StringComparison.Ordinal), "call i64 @\"test.read\"(ptr $1, i32 ");
+        return ir + $$"""
+
+            @"test.handle" = internal global ptr null
+
+            define internal i1 @"test.enter.note"(ptr %handle) {
+              store ptr %handle, ptr @"test.handle"
+              %entered = call i1 @"test.enter.close"(ptr %handle)
+              ret i1 %entered
+            }
+
+            define internal i64 @"test.read"(ptr %read, i32 %fd, ptr %bytes, i64 %count) {
+              %handle = load ptr, ptr @"test.handle"
+              %none = icmp eq ptr %handle, null
+              br i1 %none, label %go, label %note
+            note:
+              %field = getelementptr i8, ptr %handle, i64 48
+              %lock = load atomic i32, ptr %field monotonic, align 4
+              store i32 %lock, ptr {{seen}}
+              br label %go
+            go:
+              %r = call i64 %read(i32 %fd, ptr %bytes, i64 %count)
+              ret i64 %r
+            }
+
+            """;
+    }
+
+    [Fact]
+    public void A_fill_holds_the_lock_while_its_read_waits_and_a_straight_read_lets_it_go()
+    {
+        // S3: a read of 1 byte fills the buffer with the file's 6, its read of the system made with the lock held; a read of 8 KiB or
+        // more then takes the 5 the buffer holds with no read of the system, and the next one, with the buffer empty, reads straight
+        // into the list with the lock let go, and gives 0 at the end of the file
+        RanWithCloseInFlight(LockAtRead, "lock-at-read", ["1", "1", "5", "-1", "0", "0"], ["raw"], WithTheLockAtEveryRead);
+    }
+
+    private const string LockAtFill = Armed + """
+        static mut int seen = 0
+
+        // the lock word of the handle a read of the system reads for, as that read starts, which the IR of the fact writes into `seen`;
+        // -1 where no read of the system was made since `Unseen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void Unseen() {
+            raw {
+                seen = -1
+            }
+        }
+
+        void | IoError Fills() {
+            File.WriteAll("lock-at-fill.txt", "abcdef".Bytes)
+            f = File.Open("lock-at-fill.txt")
+            File.Delete("lock-at-fill.txt")
+            mut bytes = Bytes()
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            f.Consume(6)
+            Unseen()
+            print(f.Fill(mut bytes))
+            print(Seen())
+            f.Close()
+        }
+
+        Fills() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_fill_of_a_buffer_that_holds_bytes_reads_nothing_and_one_of_an_empty_buffer_reads_with_the_lock_held()
+    {
+        // S24: a fill of the empty buffer reads the file's 6 bytes into it with the lock held and appends them; a second fill appends the
+        // 6 the buffer still holds with no read of the system; once they are consumed, a fill at the end of the file reads again, with
+        // the lock held, and gives 0
+        RanWithCloseInFlight(LockAtFill, "lock-at-fill", ["6", "1", "6", "-1", "0", "1"], ["raw"], WithTheLockAtEveryRead);
+    }
+
+    private const string InFlightLook = Armed + """
+        static mut int seen = 0
+
+        // the count of the bytes the fill's handle holds in its buffer as the fill leaves it, which the IR of the fact writes into `seen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void | IoError Look() {
+            File.WriteAll("in-flight-look.txt", "abcdef".Bytes)
+            open = File.Open("in-flight-look.txt")
+            mut bytes = Bytes()
+            print(open.Fill(mut bytes))
+            print(Seen())
+
+            f = File.Open("in-flight-look.txt")
+            File.Delete("in-flight-look.txt")
+            g = f
+            ArmClose(1)
+            print(f.Fill(mut bytes))
+            print(Seen())
+            print(g.Fill(mut bytes) else {
+                IoError e => -e.Code
+            })
+
+            open.Close()
+        }
+
+        Look() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_fill_in_flight_that_a_close_meets_gives_all_it_read_and_keeps_none_in_the_buffer()
+    {
+        // S24, S5: a fill of the empty buffer reads the file's 6 bytes and appends them; on a handle no `Close` marked the buffer keeps
+        // the 6, and where a `Close` marks the handle while the fill is in flight, the fill still appends its 6 and keeps none, the count
+        // it leaves 0; the copy's fill after it is `EBADF`
+        RanWithCloseInFlight(InFlightLook, "in-flight-look", ["6", "6", "6", "0", "-9"], ["raw"], WithTheCountAtLeave);
+    }
+
     private const string InFlightSockets = Armed + DescriptorOpen + """
         void | IoError Take(TcpListener l) {
             s = l.Accept()
