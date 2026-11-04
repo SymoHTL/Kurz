@@ -139,6 +139,8 @@ class MemoryForge(rv.Forge):
         self.labels = []  # labels on the pull request, which a case may preload: pr() answers them, and a run adds to them
         self.refuse_labels = None  # the forge refuses a label write whose name starts with this
         self.read_back = 0  # how often the lows issue was read back after a comment on it failed
+        self.login = "bot"  # the account me() answers and a run's posts are written by: a case sets the CI account or a person
+        self.other_blobs = {}  # a file of the default branch whose id is not this checkout's: its path and that id
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -148,10 +150,15 @@ class MemoryForge(rv.Forge):
                 "labels": [dict(LABEL or {}, name=name) for name in self.labels]}
 
     def me(self):
-        return "bot"
+        return self.login
 
     def default_branch(self):
         return "trunk"
+
+    def blob_id(self, branch, path):
+        # the default branch holds this checkout's reviewer, unless a case says otherwise
+        with open(os.path.join(kit.ROOT, path), "rb") as f:
+            return self.other_blobs.get(path) or rv.blob_id(f.read())
 
     def rules(self, branch):
         self.asked.append(branch)
@@ -179,7 +186,7 @@ class MemoryForge(rv.Forge):
             self.first_write = len(sys.stdout.getvalue())
         if self.refuse_findings and (("kurz-review:findings" in body and path.startswith("pulls/")) or "low findings of pull request" in body):
             raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")  # written by hand: no capture holds this refusal
-        comment = {"id": len(self.notes) + 1, "user": {"login": "bot"}, "body": payload.get("body")}
+        comment = {"id": len(self.notes) + 1, "user": {"login": self.login}, "body": payload.get("body")}
         if method == "PATCH":
             next(c for c in self.notes if str(c["id"]) == path.rsplit("/", 1)[1])["body"] = payload["body"]
         elif path == "issues":
@@ -897,7 +904,8 @@ def suite(case):
     ci_env = {"GITHUB_ACTIONS": "true", "PR_NUMBER": "7"}
     understood = lambda argv, env: rv.arguments(argv, env) or {}
     case("args: a number and a mode are a call", understood(["--pr", "7", "--local"], {}) ==
-         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES)},
+         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES),
+          "passes": None},
          understood(["--pr", "7", "--local"], {}))
     case("args: --plan is a dry run that stops before its first pass, and does not go with --local",
          [understood(["--pr", "7", "--plan"], {}).get(k) for k in ("dry", "plan")] == [True, True]
@@ -1009,6 +1017,77 @@ def suite(case):
          local[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in local[1] and forge.statuses == [] and unused.batches == []
          and planned[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in planned[1] and (plan_forge.notes, plan_forge.statuses) == ([], []),
          (local[0], planned[0], forge.statuses, unused.batches, plan_forge.notes))
+
+    # --- whose state a plan reads (#300). The plan of the run in CI reads the state the CI account stored, as that run
+    # does; a plan with --passes plans a run off the pipeline, which reads its own login's, as every run that posts does.
+    def stored_by(account, labels=()):
+        """A forge on which a run in CI, posting as `account`, converged on every file and stored its state,
+        seen afterwards from a person's login, with `labels` on the pull request."""
+        forge = MemoryForge()
+        forge.login = account
+        run_review(forge, scripted_model({}), ["--pr", "1"], ci=True, credential="x")
+        forge.login, forge.labels = "person", list(labels)
+        return forge
+
+    def under_another_key(forge):
+        """The stored state as if written under another key: the title, the rules or the reviewer changed since."""
+        for c in forge.notes:
+            if "kurz-review:state" in c["body"]:
+                c["body"] = c["body"].replace('"key": "', '"key": "0')
+        return forge
+    at_cap = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]
+    unused = scripted_model(found)
+    code, out = run_review(stored_by(rv.CI_ACCOUNT, at_cap), unused, ["--pr", "1", "--plan"])
+    case("plan: without --passes it plans the run in CI from the state the CI account stored, so at the cap a head that state "
+         "answers whole is 0 batches, not cap",
+         code == 0 and "PLAN: 0 batches, 0 passes" in out and "(cap)" not in out and unused.batches == []
+         and f"4 replayed from the cache {rv.CI_ACCOUNT} stored" in out, (code, out[-400:]))
+    code, out = run_review(stored_by("person", at_cap), scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: the plan of the run in CI does not read the state the person's own login stored, which that run would not read",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap): files of this head the cache does not answer: 4 of 4" in out, (code, out[-300:]))
+    passes = ["--pr", "1", "--plan", "--passes", str(rv.MAX_PASSES)]  # the limit a run without it has: the same key
+    own, theirs = run_review(stored_by("person", at_cap), scripted_model(found), passes), run_review(stored_by(rv.CI_ACCOUNT, at_cap), scripted_model(found), passes)
+    case("plan: with --passes it plans a run off the pipeline from the state its own login stored, and not from the CI account's",
+         understood(passes, {}).get("passes") == rv.MAX_PASSES and own[0] == 0 and "PLAN: 0 batches" in own[1]
+         and "4 replayed from the cache person stored" in own[1] and theirs[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in theirs[1],
+         (own[0], own[1][-300:], theirs[0], theirs[1][-300:]))
+    forge, local = stored_by(rv.CI_ACCOUNT), scripted_model({})
+    code, out = run_review(forge, local, ["--pr", "1", "--local"])
+    forge, again = stored_by(rv.CI_ACCOUNT), scripted_model({})
+    forge.login = rv.CI_ACCOUNT
+    replayed = run_review(forge, again, ["--pr", "1"], ci=True, credential="x")
+    case("run: a run off the pipeline replays nothing from the state the CI account stored, which the run in CI replays whole",
+         code == 0 and "0 replayed from the cache person stored" in out and sorted({p for b in local.batches for p in b}) == ["a.md", "b.md", "e.md", "new.kz"]
+         and replayed[0] == 0 and again.batches == [] and f"4 replayed from the cache {rv.CI_ACCOUNT} stored" in replayed[1],
+         (code, local.batches, replayed[0], again.batches))
+    forge = under_another_key(stored_by(rv.CI_ACCOUNT, at_cap))
+    forge.other_blobs = {"tools/kit.py": "0" * 40}
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where the state of the run in CI has another key and this checkout's reviewer is not the default branch's, the "
+         "plan says NOT CHECKED, exits 1, and says neither cap nor a count",
+         code == 1 and "NOT CHECKED: whether the cache of the run in CI answers this head" in out
+         and "tools/kit.py here is not the default branch's (trunk)" in out and "(cap)" not in out and "PLAN:" not in out, (code, out[-400:]))
+    code, out = run_review(under_another_key(stored_by(rv.CI_ACCOUNT, at_cap)), scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where this checkout's reviewer is the default branch's, a state under another key is the answer of the run in CI: "
+         "at the cap it is cap, not NOT CHECKED",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and "NOT CHECKED" not in out, (code, out[-300:]))
+    saved = kit.gh_json, os.environ.get("GITHUB_ACTIONS")
+
+    def no_user(path):
+        raise kit.Refused("`gh api` exited 1: gh: Resource not accessible by integration (HTTP 403)")  # written by hand: no capture holds it
+    try:
+        kit.gh_json = no_user
+        os.environ["GITHUB_ACTIONS"] = "true"
+        in_ci = attempt(rv.Forge("o/r", 1).me)
+        os.environ["GITHUB_ACTIONS"] = ""
+        outside = attempt(rv.Forge("o/r", 1).me)
+    finally:
+        kit.gh_json = saved[0]
+        os.environ.pop("GITHUB_ACTIONS", None) if saved[1] is None else os.environ.__setitem__("GITHUB_ACTIONS", saved[1])
+    case("forge: in CI, where the job token has no user endpoint, a run posts as github-actions[bot], the account a plan of that "
+         "run reads; outside CI the refusal stands",
+         in_ci == rv.CI_ACCOUNT == "github-actions[bot]" and isinstance(outside, kit.Refused), (in_ci, outside))
+
     forge, unused = MemoryForge(), scripted_model(found)
     forge.refuse_labels = kit.ROUND_LABEL
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")

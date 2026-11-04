@@ -10,9 +10,11 @@ its low findings are collected on one issue and hold nothing.
                                       note instead of the status, so the merge still needs the owner
   review.py --pr N --dry-run          review and print, post nothing
   review.py --pr N --plan             a dry run that stops before its first pass: the batches a run
-                                      would read and the passes that is, so that the bill can be named
+                                      would read and the passes that is, so that the bill can be named.
+                                      It plans the run in CI, from the state the CI account stored
   review.py ... --passes N            with --local, --dry-run or --plan: the caller's limit for this run. A
-                                      batch gets at most N passes, where a run without it gives two to five
+                                      batch gets at most N passes, where a run without it gives two to five.
+                                      A plan with it plans a run off the pipeline, from its own login's state
   review.py --self-test               the unit suite in test_review.py
 
 Trust boundary: the pull request is data. The rules come from the default branch through the API,
@@ -21,7 +23,12 @@ no rules file). The model gets no tools, no MCP servers and an empty working dir
 is JSON checked here, and this script does all the posting. State is read back only from comments
 written by the account this run posts as. In CI that account is the Actions token's, which every
 workflow run of this repository shares, and the status `review` is posted with the same token:
-neither proves that this script wrote it (HAZARD #11).
+neither proves that this script wrote it (HAZARD #11). A plan of the run in CI (`--plan` without
+`--passes`) posts and pays nothing, and reads the state the CI account wrote, CI_ACCOUNT, as that
+run does, so that it counts what that run counts. A forged comment of that account misleads it as it
+misleads the run (HAZARD #11). Where that state's key is not this checkout's, and this checkout's
+review.py or kit.py is not the default branch's, which the run in CI is made of, the plan cannot know
+that run's key: it says NOT CHECKED and exits 1, and never says `cap` (#300).
 
 What this script posts and prints is public. Every text that comes from the model, from an
 exception or from the caller goes through `public`, which replaces a credential-shaped or
@@ -157,6 +164,7 @@ Do not report again what is listed as already reported, not in other words and n
 FINDINGS_MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
 STATE_MARK = re.compile(r"<!-- kurz-review:state (\{.*?\}) -->", re.S)
 NOTE_MARK = re.compile(r"<!-- kurz-review:note (\{.*?\}) -->", re.S)
+CI_ACCOUNT = "github-actions[bot]"  # the account a run in CI posts as, whose job token has no user endpoint; a plan of that run reads its state
 
 
 class ReviewError(Exception):
@@ -655,6 +663,11 @@ def block_hash(block):
     return hashlib.sha256(block.encode()).hexdigest()
 
 
+def blob_id(data):
+    """The id `git hash-object` gives these bytes."""
+    return hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()
+
+
 def replayable(state, key, files):
     """Paths whose diff block is byte-identical to one a converged batch already reviewed under the
     same key. Any doubt about the state means nothing is replayed."""
@@ -802,11 +815,16 @@ class Forge:
             return kit.gh_json("user")["login"]
         except kit.Refused:
             if os.environ.get("GITHUB_ACTIONS") == "true":
-                return "github-actions[bot]"  # the job token has no user endpoint
+                return CI_ACCOUNT  # the job token has no user endpoint
             raise
 
     def default_branch(self):
         return kit.gh_json(f"repos/{self.repo}")["default_branch"]
+
+    def blob_id(self, branch, path):
+        """The id `git hash-object` gives the file at `path` on a branch: what a plan compares this
+        checkout's reviewer with."""
+        return kit.gh_json(f"repos/{self.repo}/contents/{path}?ref={branch}")["sha"]
 
     def rules(self, branch):
         """The rules file on a branch, or None when the branch has none."""
@@ -969,13 +987,14 @@ def fetch_diff(pr, number):
 # --- the run ----------------------------------------------------------------------------------
 
 def arguments(argv, environ):
-    """{pr, local, dry, plan, bootstrap, ci, bounds} of a call, or None when the call is not
+    """{pr, local, dry, plan, bootstrap, ci, bounds, passes} of a call, or None when the call is not
     understood. An option this script does not know is not understood: a mistyped --dry-run must
     not run as a review that posts. Outside CI the mode has to be named. `--plan` is a dry run
     that stops before its first pass. `bounds` is (the least, the most) passes of a batch.
     `--passes N` is the caller's limit for one run: a batch gets at most N passes and counts as
     converged when the last one it may have added nothing above low. It is taken only by a run
-    that posts no status: the status has to mean the same review on every head."""
+    that posts no status: the status has to mean the same review on every head. `passes` is that
+    N, or None without it: a plan with it plans a run off the pipeline, which only such a run takes."""
     got, rest = {}, list(argv)
     while rest:
         arg = rest.pop(0)
@@ -997,7 +1016,8 @@ def arguments(argv, environ):
         if not (local or dry) or got["--passes"] not in [str(n) for n in range(1, MAX_PASSES + 1)]:
             return None
         bounds = (min(MIN_PASSES, int(got["--passes"])), int(got["--passes"]))
-    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
+    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "passes": int(got["--passes"]) if "--passes" in got else None,
+            "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
 
 
 def review(argv):
@@ -1094,10 +1114,25 @@ def review(argv):
         script = parts["review.py"] + parts["kit.py"]
         # the ids `git hash-object` gives these bytes: comparable with `git ls-tree` on the commit the run's
         # checkout held, and on the default branch for the rules; not on the reviewed head, whose code this is not
-        blobs = ", ".join(f"{name} `{hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()[:12]}`" for name, data in parts.items())
+        blobs = ", ".join(f"{name} `{blob_id(data)[:12]}`" for name, data in parts.items())
         key = cache_key(script, rules_text, pr["title"], pr["body"], bounds)
-        states = marked(issue_comments, me, STATE_MARK)
+        # A run reads the state its own account wrote. The plan of the run in CI, without --passes, reads the state
+        # the CI account wrote, as that run does, so that it counts what that run counts (#300).
+        reader = CI_ACCOUNT if call["plan"] and call["passes"] is None else me
+        states = marked(issue_comments, reader, STATE_MARK)
         state_comment, state = states[-1] if states else (None, None)
+        if reader != me and isinstance(state, dict) and state.get("key") != key:
+            # that run's key is made of the default branch's review.py and kit.py: a key that differs from this
+            # checkout's is that run's answer only where this checkout's two files are the default branch's
+            mine = {"tools/review/review.py": parts["review.py"], "tools/kit.py": parts["kit.py"]}
+            other = [path for path, data in mine.items() if forge.blob_id(branch, path) != blob_id(data)]
+            if other:
+                print(f"NOT CHECKED: whether the cache of the run in CI answers this head. Its state (comment "
+                      f"{state_comment['id']}, written by {CI_ACCOUNT}) is stored under another key than this checkout's, and "
+                      f"{' and '.join(other)} here {'is' if len(other) == 1 else 'are'} not the default branch's ({branch}), "
+                      f"which that run's key is made of: what it replays is not known here, so no batch is counted. "
+                      f"Run the plan from a checkout of the default branch")
+                return 1
         replay = replayable(state, key, files)
         todo = [f for f in files if f["path"] not in replay]
         work = batches(todo)
@@ -1108,7 +1143,7 @@ def review(argv):
                     for f in fs if isinstance(f, dict) and isinstance(f.get("file"), str) and isinstance(f.get("title"), str)
                     and isinstance(f.get("severity"), str) and f["severity"] in RANK and a_line(f.get("line"))]
         cut = left_out(todo)
-        print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
+        print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache {reader} stored, "
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}; "
               f"{rounds} review rounds before this run, the cap is {kit.ROUND_CAP}; {cut}")
         for path in sorted(replay):
