@@ -11,11 +11,14 @@
 // | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>|Connection: close||hi /a]
 // | void
 // | [HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 2|Date: <29>||ok]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 0|Date: <29>||HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 2|Date: <29>||ok]
 // rules: W9
 
 // a body the handler did not read is read and dropped up to `MaxDrainSize`, and the next request served; a body past it closes the
 // connection, and so does a request that expects `100-continue` whose body the handler did not read, with no `100 Continue` sent;
-// a chunked body malformed while it is dropped closes the connection without an answer
+// a chunked body malformed while it is dropped closes the connection without an answer; and a response the server holds while the
+// next request stands in the buffer goes out before that request's `100 Continue`
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -110,3 +113,4 @@ Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)

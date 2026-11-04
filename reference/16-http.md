@@ -1148,8 +1148,12 @@ the server's `Date`, as Kestrel writes it; a handler's `Transfer-Encoding` dropp
 HTTP/1.0 and the body framed by its length; the body the handler left read before the response is
 written, so that a body past `MaxDrainSize` is answered with `Connection: close`; the wait for the
 first byte of a request after the first bounded by `KeepAliveTimeout`, and the reads of a request by
-the 5 seconds of a read on a socket; and a connection aborted, reset or refused before `Accept` took it
-passed over, as hyper's loop of accepts passes over it)*
+the 5 seconds of a read on a socket; a connection aborted, reset or refused before `Accept` took it
+passed over, as hyper's loop of accepts passes over it; and the response to a request with no body whose
+next request's head stands whole in the stream's buffer held, up to 64 KiB, and written with the response
+after it in one write, as hyper's `Conn` buffers its writes, so that a client that sends its requests at
+once gets their responses at once and not one segment per wait for its acknowledgement, the responses
+held going out before a refusal, a `100 Continue` and a handler that may read a body)*
 
 Case: [http/serve-keep-alive.kz](../corpus/http/serve-keep-alive.kz)
 ```kurz
@@ -1290,7 +1294,8 @@ Case: [http/serve-close.kz](../corpus/http/serve-close.kz)
 ```kurz
 // a connection closes after the response to a request of HTTP/1.0, to a request or a response that says `Connection: close`, to a
 // `500`, the writer's own among them, and to the last request `MaxRequestsPerConnection` allows, and the server writes
-// `Connection: close` where the handler set none; a request the client sent after it is left unread
+// `Connection: close` where the handler set none; a request the client sent after it is left unread; and the writer's own `500`
+// to the second of two requests sent at once goes out after the response to the first
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -1380,6 +1385,14 @@ closing = (HttpRequest r) => {
 
 failing = (HttpRequest r) => HttpResponse.Empty(500)
 unwritable = (HttpRequest r) => HttpResponse.Text(205, "x")
+partly = (HttpRequest r) => {
+    if r.Path == "/b" {
+        return HttpResponse.Text(205, "x")
+    }
+
+    return HttpResponse.Text(200, "hi {r.Path}")
+}
+
 two = "GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.0\r\n\r\n", hello, HttpLimits())
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\nConnection: keep-alive, Close\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", hello, HttpLimits())
@@ -1387,6 +1400,7 @@ Exchange(two, closing, HttpLimits())
 Exchange(two, failing, HttpLimits())
 Exchange(two, unwritable, HttpLimits())
 Exchange("{two}GET /c HTTP/1.1\r\nHost: h\r\n\r\n", hello, HttpLimits(MaxRequestsPerConnection: 2))
+Exchange(two, partly, HttpLimits())
 ```
 
 Case: [http/serve-refused.kz](../corpus/http/serve-refused.kz)
@@ -1577,7 +1591,8 @@ Case: [http/serve-drain.kz](../corpus/http/serve-drain.kz)
 ```kurz
 // a body the handler did not read is read and dropped up to `MaxDrainSize`, and the next request served; a body past it closes the
 // connection, and so does a request that expects `100-continue` whose body the handler did not read, with no `100 Continue` sent;
-// a chunked body malformed while it is dropped closes the connection without an answer
+// a chunked body malformed while it is dropped closes the connection without an answer; and a response the server holds while the
+// next request stands in the buffer goes out before that request's `100 Continue`
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -1672,6 +1687,7 @@ Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
 ```
 
 Case: [http/serve-limits.kz](../corpus/http/serve-limits.kz)

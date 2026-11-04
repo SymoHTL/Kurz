@@ -5991,6 +5991,10 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
     // The minor version of the request, 0 for HTTP/1.0 and 1 for HTTP/1.1, for the server's loop (F9).
     internal mut int minor = 1
 
+    // Whether the request has no body and the head of the next request stood whole in the stream's buffer after its own, so
+    // that the loop reads the next one without a wait and may hold this one's response until it writes the next (F9).
+    internal mut bool next = false
+
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
     // failure of the network, or the request the server refuses (W5).
     pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
@@ -6042,6 +6046,9 @@ pub class HttpBody {
         b.rate = limits.MinRequestBodyDataRate
         return b
     }
+
+    // Whether the body is empty or read to its end (F9).
+    internal bool Ended => ended
 
     // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
     internal bool AwaitsContinue => expects
@@ -6313,18 +6320,21 @@ pub class HttpResponse {
 
     // Writes the status line, the headers and the body to `stream` (W8).
     pub void | IoError Write(TcpStream stream) {
-        Send(stream, true, "", false, false, null)
+        mut none = HttpNoBytes()
+        Send(stream, true, "", false, false, null, mut none, false)
     }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
     pub void | IoError WriteHead(TcpStream stream) {
-        Send(stream, false, "", false, false, null)
+        mut none = HttpNoBytes()
+        Send(stream, false, "", false, false, null, mut none, false)
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
-    // own `500` in its place, after which the loop closes the connection (F9).
-    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace) => Send(stream, withBody, date, close, plain, pace)
+    // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
+    // write, and where `hold` a response of 64 KiB or less, with them, is held there in place of a write (F9).
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold) => Send(stream, withBody, date, close, plain, pace, mut pending, hold)
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
@@ -6346,13 +6356,13 @@ pub class HttpResponse {
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` with a body or a
     // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
     // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
-    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace) {
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
         bodiless = code < 200 || code == 204 || code == 304
         mut length = 0L
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {
                 IoError e => {
-                    HttpUnwritable(s, date)
+                    HttpUnwritable(s, mut pending, date)
                     return e
                 }
             }
@@ -6364,18 +6374,19 @@ pub class HttpResponse {
         lengths = headers.GetAll("Content-Length")
         chunked = !bodiless && !plain && codings.Count > 0
         if chunked && lengths.Count > 0 {
+            HttpFlush(s, mut pending)
             return IoError(IoKind.InvalidInput, 0, "")
         }
 
         if code == 205 && length > 0 {
-            HttpUnwritable(s, date)
+            HttpUnwritable(s, mut pending, date)
             return false
         }
 
         if !bodiless {
             for text in lengths {
                 if HttpLength(text) != length {
-                    HttpUnwritable(s, date)
+                    HttpUnwritable(s, mut pending, date)
                     return false
                 }
             }
@@ -6411,7 +6422,18 @@ pub class HttpResponse {
         }
 
         out.AddRange("\r\n".Bytes)
+        if pending.Count > 0 {
+            pending.AddRange(out)
+            out = pending
+            pending = HttpNoBytes()
+        }
+
         if !withBody || bodiless {
+            if hold && out.Count <= 65536 {
+                pending = out
+                return true
+            }
+
             HttpPace(s, pace, out.Count)
             s.Write(out)
             return true
@@ -6444,6 +6466,11 @@ pub class HttpResponse {
             out.AddRange("0\r\n\r\n".Bytes)
         }
 
+        if hold && held.Count <= 65536 && out.Count <= 65536 {
+            pending = out
+            return true
+        }
+
         if out.Count > 0 {
             HttpPace(s, pace, out.Count)
             s.Write(out)
@@ -6460,8 +6487,18 @@ Bytes HttpNoBytes() => Bytes()
 long | IoError HttpFileSize(string path) => File.Size(path)
 
 // What the writer answers a response that it cannot write: `500` with no body and a close (W8).
-void | IoError HttpUnwritable(TcpStream s, string date) {
-    s.Write("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+void | IoError HttpUnwritable(TcpStream s, mut Bytes pending, string date) {
+    pending.AddRange("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+    HttpFlush(s, mut pending)
+}
+
+// The responses `pending` holds written, and `pending` emptied.
+void | IoError HttpFlush(TcpStream s, mut Bytes pending) {
+    if pending.Count > 0 {
+        out = pending
+        pending = HttpNoBytes()
+        s.Write(out)
+    }
 }
 
 // The head `out` and then the file at `path` of `length` bytes, in pieces of 64 KiB, each a chunk where `chunked`; a file that
@@ -6730,9 +6767,13 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
     mut served = 0
     mut second = -1L
     mut date = ""
+    mut pending = HttpNoBytes()
+    mut ahead = false
     while true {
-        // the wait for the first byte of a request, `KeepAliveTimeout` after the first, the 5 seconds of a read before it
-        if served > 0 {
+        // the wait for the first byte of a request, `KeepAliveTimeout` after the first, the 5 seconds of a read before it; none
+        // where the head of the next request stands whole in the buffer already, which the `Fill` takes with no call of the system
+        if ahead {
+        } else if served > 0 {
             s.SetReadTimeout(limits.KeepAliveTimeout)
         } else {
             s.SetReadTimeout(5s)
@@ -6763,7 +6804,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
 
         match HttpReadRequest(s, limits, begun + limits.RequestHeadersTimeout) {
             HttpRefused no => {
-                HttpRefuse(s, no.Status, date) else {
+                HttpRefuse(s, mut pending, no.Status, date) else {
                     IoError e => return no.Error
                 }
 
@@ -6771,7 +6812,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
             }
             IoError e => {
                 if e.Kind == IoKind.TimedOut {
-                    HttpRefuse(s, 408, date) else {
+                    HttpRefuse(s, mut pending, 408, date) else {
                         IoError lost => return e
                     }
                 }
@@ -6780,6 +6821,12 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
             }
             HttpRequest r => {
                 served = served + 1
+                if pending.Count > 0 && !r.Body.Ended {
+                    // a handler that reads a body may wait for it, and its first read may send `100 Continue`: the responses
+                    // before it go out first
+                    HttpFlush(s, mut pending)
+                }
+
                 response = handler(r)
                 headers = response.Headers
                 mut keep = r.minor == 1 && served < limits.MaxRequestsPerConnection && response.Status != 500
@@ -6789,7 +6836,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
 
                 body = r.Body
                 if body.TimedOut {
-                    HttpRefuse(s, 408, date) else {
+                    HttpRefuse(s, mut pending, 408, date) else {
                         IoError lost => return IoError(IoKind.TimedOut, 0, "")
                     }
 
@@ -6802,7 +6849,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                     drained = body.Drain(limits.MaxDrainSize) else {
                         IoError e => {
                             if e.Kind == IoKind.TimedOut {
-                                HttpRefuse(s, 408, date) else {
+                                HttpRefuse(s, mut pending, 408, date) else {
                                     IoError lost => return e
                                 }
                             }
@@ -6823,21 +6870,25 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 }
 
                 close = !keep && headers.Get("Connection") == null
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate)
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate, mut pending, keep && r.next)
                 if !keep || !written {
                     return
                 }
+
+                ahead = r.next
             }
         }
     }
 }
 
 // The status line alone that answers a request the server refuses, with an empty body, its `Date` and a close, and nothing where the
-// status is 0 (section 12, "Status line only").
-void | IoError HttpRefuse(TcpStream s, int status, string date) {
+// status is 0 (section 12, "Status line only"), after the responses `pending` holds and in the same write.
+void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string date) {
     if status != 0 {
-        s.Write("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+        pending.AddRange("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
     }
+
+    HttpFlush(s, mut pending)
 }
 
 // Sets the time of the stream's next read to what is left until `deadline`, at most the 5 seconds of a read on a socket, and gives
@@ -7060,6 +7111,7 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
                         HttpHead h => {
                             r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits, deadline != null))
                             r.minor = h.Minor
+                            r.next = !h.Chunked && h.Length == 0 && HttpHeadFollows(head, i + 1)
                             return r
                         }
                         HttpRefused no => return no
@@ -7093,6 +7145,20 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
     }
 
     return HttpBad("incomplete")
+}
+
+// Whether the bytes from `from` on hold the end of a head, a CR LF CR LF.
+bool HttpHeadFollows(Bytes b, int from) {
+    mut i = from
+    while i + 3 < b.Count {
+        if b[i] == 13 && b[i + 1] == 10 && b[i + 2] == 13 && b[i + 3] == 10 {
+            return true
+        }
+
+        i = i + 1
+    }
+
+    return false
 }
 
 // What a head says of its request, for its body and the server's loop.
