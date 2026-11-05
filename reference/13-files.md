@@ -1260,7 +1260,7 @@ the system completes without the accept.
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
 and `File.Modified` (S13 to S15; §12, assumed), and a `Command`'s calls, `Stdin` and `Environment.Exit`
-(S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
+(S17 to S23; §12, assumed), and a log call (P6, proposed there). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 

@@ -3,19 +3,18 @@
 A program logs through `Log`, which every file sees, with C#'s six levels as the names of its
 functions and Kurz's interpolated string as the template, as `ILogger`'s surface reads, and each
 call is a call site with a static record, as Rust's `tracing` gives each of its macros a
-`Callsite` (§12, the owner, 2026-11-04, Q1 (a) and Q2 (a)). Spans, sinks, the settings type's
-`Logging` part, the inspector's levels, a `deploy` block's ceiling, `secret-logged` and the
-instruments of §12 have no rule here.
+`Callsite` (§12, the owner, 2026-11-04, Q1 (a) and Q2 (a)). Spans, sinks, the inspector's levels,
+a `deploy` block's ceiling, `secret-logged` and the instruments of §12 have no rule here.
 
 ### P1 (decided, §12) `Log` and its functions
 
 A log call is a call of a function of `Log`, `Log.Information("Paid {order.Id}")`, named after
 its level: `Log.Trace`, `Log.Debug`, `Log.Information`, `Log.Warning`, `Log.Error` and
-`Log.Critical` (§12, the owner, 2026-11-04, Q1 (a)). A file's own declaration of `Log`, a type, a
-function, a variable or a parameter at any level, is `redeclared` (V9), as of `Environment` (S14),
-and a member of `Log` that names no level is `unknown-name` (V10). A log call gives nothing: it is
-a statement, as a call of `print` is. *(assumed, §12: C#'s six levels with a function named after
-each)*
+`Log.Critical`, and a program's own type named `Log` is `redeclared` (V9) (§12, the owner,
+2026-11-04, Q1 (a)). *(assumed, §12: C#'s six levels with a function named after each)* A file's own
+function, variable or parameter `Log` at any level is `redeclared` too, as of `Environment` (S14), a
+member of `Log` that names no level is `unknown-name` (V10), and a log call gives nothing: it is a
+statement, as a call of `print` is. *(proposed)*
 
 Case: [logging/log-redeclared.kz](../corpus/logging/log-redeclared.kz)
 ```kurz
@@ -31,12 +30,13 @@ Log.Verbose("started")
 
 ### P2 (decided, §12) The template
 
-The one argument of a log call is its template, a string literal, one line or a `"""` block (L6,
-L7, L13): each hole is an expression checked as every hole is, and becomes a field of the line
-named by the text between its braces, the spaces around it left out, `{order.Id}` the field
+The one argument of a log call is its template, a string literal (L6): each hole is an expression
+checked as every hole is, and becomes a field of the line named by its text, `{order.Id}` the field
 `order.Id`, its value kept with its type (§12, the owner, 2026-11-04, Q2 (a)). A template that is
 not a string literal is the compile error `log-template`. *(assumed, §12: a hole that is no name
-and no path, `{a + b}`, gives a field named by its text; `log-template`)*
+and no path, `{a + b}`, gives a field named by its text; `log-template`)* The spaces between a
+hole's braces and its text are no part of the field's name, `{ who }` the field `who`.
+*(proposed)*
 
 Case: [logging/template-not-literal.kz](../corpus/logging/template-not-literal.kz)
 ```kurz
@@ -82,7 +82,8 @@ each prefix of a category, wins where the program declares one (§12, the owner,
 Q9 (c)). An unknown level or a malformed filter refuses the start with `log-filter`.
 *(assumed, §12: `log-filter`)*
 
-No case: a case gives its program no environment, and its header holds no line of standard error.
+No case: a case gives its program no environment and declares no settings type, and its header
+holds no line of standard error.
 
 ### P5 (proposed) `KURZ_LOG`
 
@@ -104,14 +105,18 @@ No case: as P4's.
 ### P6 (decided, §12) The line
 
 By default each event a call site that is on makes is one text line on standard error, with its
-time, level, category, chain ID, message and fields (§12, the owner, 2026-11-04, Q6 (a)). The
+time, level, category, chain ID, message and fields (§12, the owner, 2026-11-04, Q6 (a)); where the
+chain ID and the actor's parts stand in a line, and what a line written outside an actor holds in
+their place, stands open (P8). The
 category of a call is the name of the type whose method holds it, as C#'s `ILogger<T>` names it,
 taken with no container (§12, the owner, 2026-11-04, Q1 (a)), and the category of top-level code
 is its file's. The message is the template with its holes filled as an interpolation fills them
 (L6). A line's time is UTC in the named form of RFC 3339 with milliseconds, and a line break
 inside a value is written as `\n`, so that no value forges a line. Logs build wherever `eprint`
 builds (A17; §12, the owner, 2026-11-04, Q16 (a)).
-*(assumed, §12: the time, the line break, the category of top-level code)*
+*(assumed, §12: the time, the line break, the category of top-level code)* A build for Windows,
+whose runtime gives no clock for a line's time, says `not supported` at a log call (S11).
+*(proposed)*
 
 No case: a case's header holds no line of standard error, and a case that expects output writes
 nothing to it.
@@ -143,7 +148,10 @@ template's, `chain=4bf92f35…`, as Rust's `tracing_subscriber::fmt` writes a sp
 A line that cannot be written is dropped and counted, and the next line written says how many were
 dropped (§12, the owner, 2026-11-04, Q7 (a)). A failed write to the log's stream raises nothing
 and counts as dropped, where a failed `print` raises `print-failed` (A1). *(assumed, §12: a
-failed write)* Which thread writes a line, the caller's or a writer's on the runtime's pool of
-threads, as §12 decides it, does not change what a program prints.
+failed write)* Where §12 has a call put its line into a buffer of its thread and a writer on the
+runtime's pool of threads write the buffers out, the runtime starts no thread: the thread that logs
+writes its line in one call of the system, as `print` writes (A1), and a line is dropped where that
+write fails. Its cost is a call of the system for each line written, in the thread that logs, which
+a slow standard error slows, the cost Q7 (a) set aside. *(proposed)*
 
 No case: as P6's.

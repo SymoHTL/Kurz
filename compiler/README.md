@@ -1026,7 +1026,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
-  `KURZ_LOG` through `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
+  `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
+  `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
   which keeps it, or ends the process with `error: log-filter (<entry>)`, and gives the lowest level
   a call site can be on at, which the global `@kz.log.lowest` holds. A call site has a global `i8` of its
   own, declared at its first emission and kept by its node, so that every copy of its function reads
@@ -1041,7 +1042,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   quotes and the escapes, the category of a method, of a function and of the top level, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
-  the lines dropped while standard error refused its writes; `ProcessTests` the refusal for Windows;
+  the lines dropped while standard error refused its writes, the crash line after a line, and the refusal for Windows;
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
@@ -1493,6 +1494,9 @@ ask about it.
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
   refused writes are counted in the next line.
+- P8: the compiler builds no actor, so every line is written outside an actor, and a line holds no
+  chain ID and none of the actor's parts, nothing standing in their place: P7's layout as it reads.
+  Pinned by `LogTests`, whose lines are held whole.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.

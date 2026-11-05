@@ -3321,6 +3321,19 @@ public sealed class CheckerTests
         Clean(program.Replace(name, "Own", StringComparison.Ordinal)); // the positive control
     }
 
+    [Theory]
+    [InlineData("data Log(int Level)\nprint(1)", 1)]
+    [InlineData("void Log() {\n}\n\nprint(1)", 1)]
+    [InlineData("Log = 3\nprint(Log)", 1)]
+    [InlineData("int Twice(int Log) => Log * 2\n\nprint(Twice(1))", 1)]
+    [InlineData("print(1)\nf = (int Log) => Log + 1\nprint(f(1))", 2)]
+    public void A_files_own_log_is_redeclared_at_any_level(string program, int line)
+    {
+        // P1: a type, a function, a variable or a parameter of the name, as S14 reads a file's own `Environment`
+        Assert.Equal([(ErrorIds.Redeclared, line)], Errors(program));
+        Clean(program.Replace("Log", "Own", StringComparison.Ordinal)); // the positive control
+    }
+
     [Fact]
     public void A_field_takes_x86_arm_vector128_or_vector256_as_a_field_takes_envError() =>
         // R18 as S14 reads a field `EnvError` (the owner, 2026-11-01): a field takes the name, as H1 says

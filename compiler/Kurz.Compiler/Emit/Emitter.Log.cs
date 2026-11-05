@@ -8,6 +8,9 @@ public sealed partial class Emitter
 {
     // ---- logging (chapter 17) ----------------------------------------------------------------------
 
+    /// <summary>What a build for Windows says <c>not supported</c> with at a log call, whose line holds the time of the clock (S11, P6).</summary>
+    internal const string LogNotOnWindows = "a log call, whose line holds the time of the clock, which the runtime of Windows does not give (S11, P6)";
+
     /// <summary>The global of the lowest level a call site may be on at, which the start sets from <c>KURZ_LOG</c>, <c>None</c> until then (P3, P4).</summary>
     private const string LogLowest = "@kz.log.lowest";
 
@@ -47,7 +50,7 @@ public sealed partial class Emitter
     {
         if (target != Target.Linux)
         {
-            throw Unsupported(c.Line, ProcessNotOnWindows);
+            throw Unsupported(c.Line, LogNotOnWindows);
         }
 
         var site = Model.LogSiteOf(c);

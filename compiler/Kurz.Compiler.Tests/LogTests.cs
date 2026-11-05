@@ -10,8 +10,8 @@ namespace Kurz.Compiler.Tests;
 /// <summary>
 /// The lines of a log call on standard error (chapter 17), which no corpus case can hold, its header holding standard output alone: the
 /// layout of a line, its category, the levels and the default, a call site that is off, <c>KURZ_LOG</c>'s entries and its refusals, and
-/// a write the system refuses. Each program is built for Linux and started by <c>/bin/sh</c> after a shell command that sets its
-/// environment or its standard error; a build for Windows says <c>not supported</c> to a log call (<see cref="ProcessTests"/>).
+/// a write the system refuses, and the error line of a crash after a line. Each program is built for Linux and started by <c>/bin/sh</c>
+/// after a shell command that sets its environment or its standard error; on Windows each test holds the build's refusal of a log call.
 /// </summary>
 public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -20,16 +20,18 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
 
     /// <summary>
     /// The program built and run by <c>/bin/sh</c> as <c>exec "$0"</c> after <paramref name="setup"/>, with <c>KURZ_LOG</c> taken away
-    /// and <c>KURZ_TRACE=0</c>: its exit code, its lines and its error stream; null on Windows, which builds no log call.
+    /// and <c>KURZ_TRACE=0</c>: its exit code, its lines and its error stream; null on Windows, where the build is held to its refusal
+    /// of a log call, and a program with none builds and is not run.
     /// </summary>
     private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string setup = "")
     {
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true);
         if (Builder.HostTarget == Target.Windows)
         {
+            Assert.Equal(text.Contains("Log.", StringComparison.Ordinal), compilation.Program is null);
             return null;
         }
 
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, name);
         var (code, output, error) = Processes.Capture("/bin/sh", ["-c", $"{setup}exec \"$0\"", executable], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0", ["KURZ_LOG"] = null });
@@ -196,6 +198,34 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
             Assert.Equal((0, ""), (none.Code, none.Error));
             Assert.Equal(["start"], none.Output);
         }
+    }
+
+    [Fact]
+    public void A_crash_after_a_line_writes_its_error_line_below_the_line_as_it_stands()
+    {
+        // the line is written at its call, so that the crash line of section 6 follows it, unchanged
+        const string text = "n = 0\nLog.Information(\"before\")\nprint(10 / n)\n";
+        var before = DateTime.UtcNow;
+        if (Ran(text, "log-crash") is { } run)
+        {
+            Assert.Equal(1, run.Code);
+            var lines = Toolchain.Lines(run.Error);
+            Assert.Equal(2, lines.Count);
+            Assert.Equal(["Information program: before"], Unstamped(lines[0] + "\n", before, DateTime.UtcNow));
+            Assert.Equal("error: divide-by-zero at program.kz:3", lines[1]);
+        }
+    }
+
+    [Fact]
+    public void A_build_for_windows_says_not_supported_at_a_log_call()
+    {
+        const string text = "print(1)\nLog.Information(\"x\")\n";
+        var refused = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Windows), testBuild: true);
+        Assert.Null(refused.Program);
+        var diagnostic = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((2, Emitter.LogNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.StartsWith("program.kz:2: not supported: a log call", diagnostic.At("program.kz"), StringComparison.Ordinal);
+        Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program); // the positive control
     }
 
     [Theory]

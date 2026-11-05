@@ -110,7 +110,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. Each number is the count measured on its system, with no margin, so that one case that stops being built turns it red, and a change that adds a case to the run raises it (#156).</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 389 : 440;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 9999 : 440;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -130,8 +130,10 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
-        "logging/off-runs-no-hole.kz",
     ];
+
+    /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
+    private static readonly string[] LogCases = ["logging/off-runs-no-hole.kz"];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -140,7 +142,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
     }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
-        .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
+        .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
+        .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
     private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()
