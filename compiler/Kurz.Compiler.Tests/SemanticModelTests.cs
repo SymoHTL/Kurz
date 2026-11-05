@@ -871,6 +871,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // T33: `f.Name` in a pass of a loop over `T.Fields`, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):
                     break; // S15: `timestamp.Now`, a read of the clock a code generator reads whole
+                case MemberAccess m when model.IsMonotonicRead(m):
+                    break; // S25: `instant.Now`, a read of the monotonic clock a code generator reads whole
                 case MemberAccess m when model.IsStaticField(m, out _):
                     break; // K18: `T.F`, a `static` field whose constant a code generator reads, with no instance
                 case MemberAccess m when model.SupportTestOf(m) is not null:

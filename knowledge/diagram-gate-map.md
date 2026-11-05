@@ -21,6 +21,9 @@ flowchart TD
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
+        A call of the tool it does not take, a mistyped --hook among them, is refused through tools/calls.py with exit 2,
+        which denies the call, and says why on stderr, which the session sees; a kit.py or a calls.py that does not import
+        is denied by exit 2 too.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
@@ -51,7 +54,10 @@ flowchart TD
         no longer turns its one named case red; fewer tools than the floor; a ledger written back in
         another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
         a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
-        (KURZ_RED_PROOF_REPLAY), refused before anything is copied. The replay runs each
+        (KURZ_RED_PROOF_REPLAY), refused before anything is copied; a call of the tool other than none,
+        --format or --self-test alone, which it refuses with the usage and exit 2 before anything is copied or run;
+        a tool of tools/calls.py's ROUTED list whose __main__ does not begin by asking calls.refused, which refuses a call
+        the tool does not take with the usage and exit 2 before anything runs (issue 156). The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
@@ -104,11 +110,12 @@ flowchart TD
         for any target, or on a function common/ or std/ calls that a target's directory gives with other parameters
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
-        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
+        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, but for
+        the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
         passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        cases run than RunFloor in RunTests names for Linux and for Windows, and on Linux on a crash whose trace is empty, holds a line that
+        cases run than RunFloor in RunTests names for Linux and for Windows, each the count measured on its system with no margin, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -289,12 +296,14 @@ flowchart TD
         HAZARD issue 11"]
         R7["review rounds, the owner's cap of one (2026-10-22; three from 2026-10-21): a round is a run that labelled the pull request;
         a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
-        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run with a file
+        a round whatever follows, but for a run the usage limit ends before any paid pass, which takes its own label off
+        again and is no round (the owner, 2026-11-02); the count is the highest n (kit.review_rounds); at one every run with a file
         the replay cache does not answer ends
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
         reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
         in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
-        Red: self-tests (the count, the label before the first pass, the end and its status, the run that only replays).
+        Red: self-tests (the count, the label before the first pass, the label taken off at a limit before any paid pass and its
+        refusal, the end and its status, the run that only replays).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
@@ -305,7 +314,7 @@ flowchart TD
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
         a branch behind its base (at the review cap the refusal says, from the review status of the head,
         whether the round converged on every file, and where it did not or the status does not show it,
-        that taking main makes the review of the new head a paid round, and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
+        that taking main makes the review of the new head end as cap before any pass, and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,

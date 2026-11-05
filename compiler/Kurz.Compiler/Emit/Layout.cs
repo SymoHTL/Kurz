@@ -12,10 +12,10 @@ namespace Kurz.Compiler.Emit;
 /// of the language outside <c>raw</c>. A data type in no relation of inheritance that holds no value of its own type is a plain
 /// value, the structure of its fields (section 4: small data values are plain values without counts); a data type with a base or
 /// with a type derived from it, and one that holds a value of its own type through its fields, which no structure of a fixed size
-/// holds, is a pointer to a block that starts with the number of the value's own type, then its fields, the base's first (D7), so
-/// that the block of a derived value reads as a block of its base (D6). A union is its tag, as wide as the largest number among its
-/// cases needs, a byte while those numbers are below 256 (section 5), then room for its largest case, aligned as its most aligned
-/// case; a <c>T?</c> of a list or of a block is the address alone, with an address no value of <c>T</c> has as its <c>null</c>
+/// holds, is a pointer to a block that starts with the count of the values that hold it, then the number of the value's own type,
+/// then its fields, the base's first (D7), so that the block of a derived value reads as a block of its base (D6). A union is its
+/// tag, as wide as the largest number among its cases needs, a byte while those numbers are below 256 (section 5), then room for
+/// its largest case, aligned as its most aligned case; a <c>T?</c> of a list or of a block is the address alone, with an address no value of <c>T</c> has as its <c>null</c>
 /// (<see cref="Niche"/>).
 /// </summary>
 internal sealed class Layout(IrModule module)
@@ -105,8 +105,12 @@ internal sealed class Layout(IrModule module)
     /// <summary>Whether a value of the data type is a pointer to a block: the type has a base or a type derived from it, or holds a value of its own type.</summary>
     public bool IsBlock(DataType type) => blocks.Contains(type.Symbol);
 
-    /// <summary>The data type and every data type derived from it, directly or through others: the types a block of it may hold.</summary>
-    public IReadOnlyList<DataSymbol> Derived(DataSymbol symbol) => blocks.Where(d => Types.HasBaseOrIs(d, symbol)).ToList();
+    /// <summary>
+    /// The data type and every data type derived from it, directly or through others: the types a block of it may hold, among which a
+    /// generic one is not, since it is <c>not supported</c> where it is laid out (<see cref="Refusal"/>), which can be after the code that
+    /// lets go of a block of its base.
+    /// </summary>
+    public IReadOnlyList<DataSymbol> Derived(DataSymbol symbol) => blocks.Where(d => !d.IsGeneric && Types.HasBaseOrIs(d, symbol)).ToList();
 
     /// <summary>The types of a data type's fields, the base's first (D7), with its type arguments put in (T19).</summary>
     public static IReadOnlyList<KurzType> Fields(DataType type)
@@ -145,7 +149,6 @@ internal sealed class Layout(IrModule module)
             {
                 DataType d when d.Symbol.IsGeneric && related.Contains(d.Symbol) => $"a generic data type in a relation of inheritance, `{d}` (D6, T19)",
                 DataType d when d.Symbol.IsGeneric && recursive.Contains(d.Symbol) => $"a generic data type that holds a value of its own type, `{d}` (D1, T19)",
-                DataType d when IsBlock(d) && Fields(d).Any(f => HoldsInstance(f, [])) => $"an instance of a class held by `{d}`, a data value laid out as a block, which is never freed (section 3, R3)",
                 ClassType c => c.Symbol.Fields.Select(f => Inner(type, f.Type)).FirstOrDefault(r => r is not null),
                 WeakRefType w => Refusal(w.Target),
                 DataType d => Fields(d).Select(f => Inner(type, f)).FirstOrDefault(r => r is not null),
@@ -161,17 +164,6 @@ internal sealed class Layout(IrModule module)
             walking.RemoveAt(walking.Count - 1);
         }
     }
-
-    /// <summary>Whether a value of the type holds an instance of a class: the instance itself, or a field, a case, an item, a key or a value that does.</summary>
-    private static bool HoldsInstance(KurzType type, HashSet<DataSymbol> seen) => type switch
-    {
-        ClassType or WeakRefType => true,
-        DataType d => seen.Add(d.Symbol) && Fields(d).Any(f => HoldsInstance(f, seen)),
-        UnionType u => u.Cases.Any(c => HoldsInstance(c, seen)),
-        ListType l => HoldsInstance(l.Element, seen),
-        MapType m => HoldsInstance(m.Key, seen) || HoldsInstance(m.Value, seen),
-        _ => false,
-    };
 
     /// <summary>
     /// The refusal of a part of <paramref name="whole"/>: a vector is a variable's, a parameter's or a result's alone, and the type that
@@ -192,14 +184,38 @@ internal sealed class Layout(IrModule module)
     {
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
+        ClassType { Symbol.Derived: true } => "zeroinitializer", // K6: the pair of the address 0 and no table, as Rust lays out `Option<Rc<dyn Trait>>`
         ClassType => "null",
         CFunctionType => "null",
         FunctionType => "zeroinitializer",
         _ => null,
     };
 
-    /// <summary>The IR type of a union with a <see cref="Niche"/>: the function value's pair for a nullable function value, else an address.</summary>
-    public static string NicheIr(UnionType union) => Types.NonNull(union) is FunctionType ? "%kz.fn" : "ptr";
+    /// <summary>The IR type of a union with a <see cref="Niche"/>: the function value's pair for a nullable function value, the pair of an instance's address and its table for a nullable class that has derived classes, else an address.</summary>
+    public static string NicheIr(UnionType union) => Types.NonNull(union) switch
+    {
+        FunctionType => "%kz.fn",
+        ClassType { Symbol.Derived: true } => "%kz.obj",
+        _ => "ptr",
+    };
+
+    /// <summary>
+    /// K6: whether a value of the class's type is the pair of the instance's address and the table of its class (<c>%kz.obj</c>), as Rust
+    /// lays out an <c>Rc&lt;dyn Trait&gt;</c>: a class that another class derives from, whose value can be an instance of that one. A
+    /// class nothing derives from is the address alone, and its table is known where it is used.
+    /// </summary>
+    public static bool Fat(ClassSymbol symbol) => symbol.Derived;
+
+    /// <summary>The IR type of the pair of an instance's address and its class's table, declared once.</summary>
+    public string Pair()
+    {
+        if (defined.Add("%kz.obj"))
+        {
+            module.Global("%kz.obj = type { ptr, ptr }");
+        }
+
+        return "%kz.obj";
+    }
 
     /// <summary>The IR type of a value: <see cref="Lower.IrType"/>, a data type's structure or <c>ptr</c> for a block, and a union's structure of its tag and its room, or <c>ptr</c> where it has a <see cref="Niche"/>.</summary>
     public string Ir(KurzType type)
@@ -208,10 +224,12 @@ internal sealed class Layout(IrModule module)
         {
             case DataType d when IsBlock(d):
                 return "ptr";
-            case ClassType:
-                return "ptr"; // K2: an instance is the address of its block
+            case ClassType c:
+                return Fat(c.Symbol) ? Pair() : "ptr"; // K2: an instance is the address of its block, K6: with its class's table where a class derives from its type
+            case WeakRefType w when Fat(w.Target.Symbol):
+                return Pair(); // R3 with K6: the address of the target's block and the table of its class
             case UnionType u when Niche(u) is not null:
-                return NicheIr(u);
+                return NicheIr(u) == "%kz.obj" ? Pair() : NicheIr(u);
             case DataType d:
                 {
                     var name = $"%\"d.{Lower.Mangle(d)}\"";
@@ -234,14 +252,18 @@ internal sealed class Layout(IrModule module)
         }
     }
 
-    /// <summary>The IR type of the block of a data type in a relation of inheritance: the number of the value's type, then the fields.</summary>
+    /// <summary>
+    /// The IR type of the block of a data type laid out as a block: the count of the values that hold it, 8 bytes, in front of the
+    /// number of the value's type, as Rust's <c>Rc</c> holds its count in front of its value, then the fields (section 4, assumed, as the
+    /// owner's answer of 2026-11-01, "Implements section 3", issue 180, comment 6561898721, marks the counting of immutable data).
+    /// </summary>
     public string Block(DataSymbol symbol)
     {
         var type = new DataType(symbol, []);
         var name = $"%\"b.{Lower.Mangle(type)}\"";
         if (defined.Add(name))
         {
-            module.Global($"{name} = type {{ i32{string.Concat(Fields(type).Select(f => ", " + Ir(f)))} }}");
+            module.Global($"{name} = type {{ i64, i32{string.Concat(Fields(type).Select(f => ", " + Ir(f)))} }}");
         }
 
         return name;
@@ -278,10 +300,12 @@ internal sealed class Layout(IrModule module)
                 return (0, 1);
             case DataType d when IsBlock(d):
                 return (8, 8);
-            case ClassType:
-                return (8, 8);
+            case ClassType c:
+                return Fat(c.Symbol) ? (16, 8) : (8, 8);
+            case WeakRefType w when Fat(w.Target.Symbol):
+                return (16, 8);
             case UnionType u when Niche(u) is not null:
-                return Types.NonNull(u) is FunctionType ? (16, 8) : (8, 8);
+                return NicheIr(u) == "ptr" ? (8, 8) : (16, 8);
             case DataType d:
                 return Structure(Fields(d).Select(Measure));
             case UnionType u:
