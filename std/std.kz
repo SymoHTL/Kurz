@@ -7748,12 +7748,14 @@ bool HttpHostValid(string host) {
 // The header lines of a head, from `from` to the CR at `end`, each a name, a colon and a value, or the words of what is wrong
 // with the first that is not, which the server puts after `malformed request: ` and the client after `malformed response: `
 // (W5, W12).
+// A header line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse
+// refuses it (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
 HttpHeaders | string HttpParseHeaderLines(Bytes head, int from, int end) {
     headers = HttpHeaders()
     mut lineStart = from
     while lineStart < end {
         mut lineStop = lineStart
-        while head[lineStop] != 13 {
+        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
             lineStop = lineStop + 1
         }
 

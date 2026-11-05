@@ -503,6 +503,7 @@ void | IoError All() {
     Show("GET / HTTP/1.1\r\nHost: h\r\nNoColon\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost : h\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost: h\r\nX: a\u0000b\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\nX: a\rbc: d\r\n\r\n".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +5\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello".Bytes)
