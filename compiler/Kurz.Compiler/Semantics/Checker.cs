@@ -1624,7 +1624,7 @@ public sealed partial class Checker
     /// <summary>
     /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
     /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
-    /// refuses it (CS0412) (section 4, assumed with the build of <c>T.Make</c>).
+    /// refuses it (CS0412) (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
     /// </summary>
     private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
 
