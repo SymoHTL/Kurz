@@ -4657,7 +4657,8 @@ public sealed class CheckerTests
     [InlineData("print(5s.Elapsed)", "unknown-name", 1)]
     public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line)
     {
-        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no
+        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults, and the forms T36 assumes from
+        // the other time types): no sum of two readings, no
         // duration less a reading, no `*`, `/` or `%`, no unary `-`, no wide variant, no mixing with a `timestamp`, a `longtimestamp` or a
         // duration's order, no `null` (N6), no conversion into or out of it from another type, no member but `Elapsed`; the type's name as
         // a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`)
