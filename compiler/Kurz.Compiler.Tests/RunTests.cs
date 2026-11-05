@@ -130,6 +130,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "http/response-transfer-encoding.kz", "http/response-large.kz",
         "http/serve-keep-alive.kz", "http/serve-close.kz", "http/serve-refused.kz", "http/serve-head.kz", "http/serve-drain.kz",
         "http/serve-limits.kz", "http/serve-accept.kz", "http/serve-timeouts.kz",
+        "http/response-stream.kz", "http/serve-stream.kz", "http/serve-stream-timeouts.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>

@@ -45,6 +45,13 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
             print("after")
             """;
         var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows && make.StartsWith("Stream", StringComparison.Ordinal))
+        {
+            // the function writes on a socket, which a build for Windows says `not supported` to (S11)
+            Assert.Null(compilation.Program);
+            return;
+        }
+
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-response-status"));
         Assert.Equal(1, code);
@@ -72,6 +79,13 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
             print("after")
             """;
         var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            // the functions write on a socket, which a build for Windows says `not supported` to (S11)
+            Assert.Null(compilation.Program);
+            return;
+        }
+
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-response-stream-status"));
         Assert.Equal(1, code);
