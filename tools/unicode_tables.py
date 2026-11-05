@@ -11,6 +11,9 @@ Rust's `unicode-table-generator` takes for the tables of `core::unicode::convers
                                  first 40 mappings that differ and counting the rest
   unicode_tables.py --self-test
 
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is fetched or written (tools/calls.py).
+
 The three files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
 before it is read: a file of another hash is refused (FAIL), and a file that cannot be fetched, or
 whose download is cut off, leaves the tables unread (PARTLY, which is red: nothing was compared). A
@@ -45,6 +48,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 VERSION = "17.0.0"
 FILES = {
@@ -536,10 +540,22 @@ def self_test():
 
             code, said = run(["--check"], fetcher=wrong)
             cases.append(("main --check: a refused file fails", code == 1, (code, said)))
+    good = [[], ["--check"], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--chek"], ["tables"], ["--check", "--check"], ["--check", "--self-test"]]
+    cases.append(("call: no argument, --check and --self-test are its calls, each alone; --help, -h, a mistyped --check, a "
+                  "positional argument and two calls together are not, so none of them writes the tables",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"write": (), "check": ("--check",), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/unicode_tables.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     sys.exit(main(sys.argv[1:]))

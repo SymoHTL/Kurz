@@ -25,6 +25,7 @@ public enum Primitive
     Timestamp,
     LongDuration,
     LongTimestamp,
+    Instant,
 }
 
 /// <summary>
@@ -61,6 +62,7 @@ public sealed record PrimitiveType(Primitive Kind) : KurzType
         Primitive.Timestamp => "timestamp",
         Primitive.LongDuration => "longduration",
         Primitive.LongTimestamp => "longtimestamp",
+        Primitive.Instant => "instant",
         _ => Kind.ToString(),
     };
 }
@@ -318,6 +320,7 @@ public static class Types
     public static readonly PrimitiveType Timestamp = new(Primitive.Timestamp);
     public static readonly PrimitiveType LongDuration = new(Primitive.LongDuration);
     public static readonly PrimitiveType LongTimestamp = new(Primitive.LongTimestamp);
+    public static readonly PrimitiveType Instant = new(Primitive.Instant);
     public static readonly VoidType Void = new();
     public static readonly ErrorType Error = new();
     public static readonly NullType Null = new();
@@ -331,6 +334,7 @@ public static class Types
         ["sbyte"] = SByte, ["byte"] = Byte, ["short"] = Short, ["ushort"] = UShort, ["int"] = Int, ["uint"] = UInt, ["long"] = Long, ["ulong"] = ULong,
         ["float"] = Float, ["double"] = Double, ["decimal"] = Decimal, ["bool"] = Bool, ["string"] = String, ["char"] = Char,
         ["duration"] = Duration, ["timestamp"] = Timestamp, ["longduration"] = LongDuration, ["longtimestamp"] = LongTimestamp,
+        ["instant"] = Instant,
     };
 
     public static bool IsError(KurzType type) => type is ErrorType;
@@ -411,13 +415,16 @@ public static class Types
 
     public static bool IsWideTime(KurzType type) => type is PrimitiveType { Kind: Primitive.LongDuration or Primitive.LongTimestamp };
 
+    /// <summary>T36: a reading of the monotonic clock, which has no wide variant.</summary>
+    public static bool IsInstant(KurzType type) => type is PrimitiveType { Kind: Primitive.Instant };
+
     /// <summary>The width of an integer type in bits; of a time type the width of its count (T24, T29).</summary>
     public static int Width(KurzType type) => type is PrimitiveType p ? p.Kind switch
     {
         Primitive.SByte or Primitive.Byte => 8,
         Primitive.Short or Primitive.UShort => 16,
         Primitive.Int or Primitive.UInt => 32,
-        Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp => 64,
+        Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp or Primitive.Instant => 64,
         Primitive.LongDuration or Primitive.LongTimestamp => 128,
         _ => 0,
     } : 0;

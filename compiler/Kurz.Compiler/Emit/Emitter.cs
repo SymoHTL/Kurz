@@ -212,7 +212,7 @@ public sealed partial class Emitter
 
         if (released.Count > 0)
         {
-            EmitDrain(); // K2 with section 3: the work lists of the instances released
+            EmitDrain(); // K2 with section 3: the work lists of the instances and the blocks released
         }
 
         EmitTables(); // K6

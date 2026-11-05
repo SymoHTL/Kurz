@@ -1,0 +1,12 @@
+// expect: throws overflow at 6
+// build: release
+// allow: raw
+// rules: T36
+
+instant Later(instant t, duration d) => t + d
+
+long bits = 9223372036854775807
+raw {
+    instant last = *Ptr<instant>(&bits)
+    print(Later(last, 1ns))
+}
