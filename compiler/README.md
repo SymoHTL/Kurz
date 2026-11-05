@@ -703,6 +703,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
   the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
   in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
+- `const assert(condition, text)`, checked while the program compiles and emitting nothing: its condition and the holes of its
+  text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
+  holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
+  outermost copy with the text, a hole naming a type parameter giving the name of the copy's type; outside a generic function it is
+  checked once where it stands (T37);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1860,12 +1865,15 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is or holds the field's type (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+`match` on `T.Kind`, or with a type argument that is or holds the field's type, the first such chain ending every copy of the
+same outer call (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
-which is read before the overload is picked (T35, F12); and `use` (F10) of any folder but the runtime's `sys`;
+which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the
+program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
+text among them (T37); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item
