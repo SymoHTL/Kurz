@@ -6,7 +6,8 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions` and `Uri`, with `UriError` and `UriKind`, as `std/`
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
 lambda's parameter, a variable in a block, a loop variable or a name an arm of `match` binds, is
@@ -27,8 +28,11 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
-assumptions).
+every `pub` type of `std/` and against a list written in `std/`, 2026-11-03, that `HttpBody` is one of
+them, against a body type no program can name, and 2026-11-03, that `HttpWriter` is another, the writer
+of the streamed response §12 gives, "A response can be streamed"; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
+`HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a)).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -205,18 +209,56 @@ print(e.Text())
 ### W3 (decided, §12) A server's request sent to another actor moves with its body
 
 A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
-connection's socket: the handler keeps neither, and the connection waits for the handler's
-response, as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02,
-issue 110, comment 6573113786, against refusing a server's request that has a body as not
-sendable). The send is written with `move`, as the send of a mutable class instance is (§12, the
-owner, 2026-11-03, issue 110, comment 6600034158). The response is written when the handler
-returns. The moved body stays the other actor's to read to its end: every read gives the body's
-bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
-connection reads its next request only after that, with no new kind of error (§12, the owner,
-2026-11-03, issue 39, comment 6601737306). A request a client builds is sent as any value is (§12).
+connection's socket: the handler keeps neither, and the connection waits for the handler's response,
+as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02, issue 110,
+comment 6573113786, against refusing a server's request that has a body as not sendable). The send
+is written with `move`, as the send of a mutable class instance is (§12, the owner, 2026-11-03,
+issue 110, comment 6600034158), and the handler can send it, since it takes the request as a
+parameter written `move`, `(move HttpRequest r) => HttpResponse` (§12, the owner, 2026-11-04, issue
+156, comment 6643376941). The server calls it with the word at the argument, `handler(move r)`, as
+every call of a parameter written `move` does, an argument of such a parameter without the word
+being section 6's `move-at-call` (§12, the owner, 2026-11-05, issue 156, comment 6657251688, Q3)
+*(assumed, §6: the name `move-at-call`)*. A handler whose parameter is written without `move` fits
+that type and sends nothing of its request, a lambda's parameter whose type is not written takes
+`move` from the type, and a lambda whose parameter is written with `move` fits no type without it,
+with `type-mismatch` (§12, the owner, 2026-11-05, issue 156, comment 6657251688, Q4). The body takes
+the connection's stream with it, so that the server's paths into the stream end at the call, and
+the stream comes back to the server when the body ends, read to its end or drained (§12, the owner,
+2026-11-05, issue 156, comment 6657251688, Q5). The response is written when the handler returns. The moved body stays the
+other actor's to read to its end: every read that keeps to the body's rate gives the body's bytes,
+then `0` at its end. A body left unread is drained when its last owner drops it, and the connection
+reads its next request only after that, with no new kind of error (§12, the owner, 2026-11-03, issue
+39, comment 6601737306). The drain is a read of the server, bounded by the body's rate and the
+drain's 64 KiB, and where either ends it the connection closes, with no error to any reader, while a
+drain under the rate before any response has begun sends the `408`, as any read under the rate does
+(§12) *(assumed, §12: that reading)*. A `move` of the request ends every path into it, `b = r.Body`
+included, by the region check of the record's section 6, and is refused with `move-reachable` where
+section 6 refuses it (§12). Of the bounds of `HttpLimits`, a moved body's reads meet the body's rate
+alone, since the limit of a declared body is checked against `Content-Length` before the handler
+runs (§12) *(assumed, §12: that reading)*. A read of a moved body that falls under the body's rate
+gives `IoError` with `IoKind.TimedOut` and the connection closes; the `408` is sent only while no
+response has begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), and after a `408`
+the response the handler returns is not written, with no error to any program (§12) *(assumed, §12:
+that reading)*. The `TimedOut` of a moved body's read is decided, and its timing is not: how the
+body's rate is timed on the socket of the actor that got the body stands open in §14, a timer in the
+poller's wait or a deadline the scheduler reads at each switch (§12). A send of an `HttpRequest`
+with `copy` is the compile error `copy-server-request`, which names `move`, and a send of it with no
+word is section 6's `send-needs-word` (§12, the owner, 2026-11-03, issue 156, comment 6603205575)
+*(assumed, §12: the error's name, `copy-server-request`; §6: the name `send-needs-word`)*. A send
+with `copy` of a class instance or a list that holds an `HttpRequest` is refused with the same
+error, and so is one of `r.Body`, while `r.Headers` copies (§12) *(assumed, §12: that reading)*. The
+request a client builds is a type of its own, `HttpRequestMessage`, sent as any value is, so that
+the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment 6643376941). It is a
+`data` type with a body of `Bytes`, and a body that streams is given to the call,
+`client.Send(request, body)` (§12, the owner, 2026-11-05, issue 156, comment 6657251688, Q6).
 
-No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
-build, so that the move is not built either.
+No case: the compiler reads neither `copy` nor `move`, the words of a send (§6), so that no case can
+expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a send to another
+actor needs two actors, which the compiler does not build. The id `copy-server-request` stands in
+this rule, and `send-needs-word` and `move-at-call` in the record's section 6, as `move-reachable`
+does, and none of them in
+[12-errors.md](12-errors.md), since no case can expect them (§12, the owner, 2026-11-03, issue 156,
+comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
 
@@ -227,7 +269,11 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 `HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
 list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
 ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*.
+product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
+map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
+`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
+names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz

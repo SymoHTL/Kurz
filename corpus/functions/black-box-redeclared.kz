@@ -1,0 +1,7 @@
+// expect: error redeclared at 5
+// rules: F18
+
+// a hint of the program's own, under a name every file sees
+data Hint(string Text)
+
+print(1)

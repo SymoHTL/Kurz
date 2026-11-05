@@ -735,6 +735,25 @@ d.Items.SortBy(x => d.Restore(x))
 print(d.Items)
 ```
 
+Case: [strings/sortby-key-replaces-instance.kz](../corpus/strings/sortby-key-replaces-instance.kz)
+```kurz
+class Bag(mut List<int> Items)
+
+class Holder(mut Bag B) {
+    pub int Swap(int x) {
+        B = Bag([0])
+        return x
+    }
+}
+
+// a key that gives the field on the way to the list another instance: the instance read has its list sorted, and the new one keeps its own
+h = Holder(Bag([3, 1, 2]))
+old = h.B
+h.B.Items.SortBy(x => h.Swap(x))
+print(old.Items)
+print(h.B.Items)
+```
+
 Case: [strings/sort-of-bools.kz](../corpus/strings/sort-of-bools.kz)
 ```kurz
 mut xs = [true, false]
