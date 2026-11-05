@@ -34,9 +34,13 @@ The probe, on 2026-11-03:
   constant is a reading of the IR and the machine code: no trace of the combiner was run, since a
   release build of LLVM prints none.
 
-Every order of the source measured gives the same time: H and I with a + m + t first, G's terms in
-the other order, and each word of the block read where its step uses it. They took 51.76 to 51.85
-ms (issue 157, comment 6594121046).
+Every order of the source measured gives the same time, and each of them keeps each term added into
+the sum on its own: H and I with a + m + t first, G's terms in the other order, and each word of the
+block read where its step uses it. They took 51.76 to 51.85 ms (issue 157, comment 6594121046). A
+regrouping of the sum, or another form of the round's function, does change the time; the comment
+over `Md5F` in `std/std.kz` gives two such figures (issue 157, 2026-11-03, the best of 9). G's two
+terms added together first, as `op_g` writes them, took 56.43 ms against 51.81, and F's two terms
+added into the sum one at a time took 53.28 ms against the select's 51.76.
 
 A probe hid each constant from LLVM. It joined each constant by an xor with a word LLVM cannot know
 is 0: the top bit of the hasher's count of bytes. In the same run, that took 46.80 ms where the form
@@ -53,15 +57,19 @@ The owner was not asked.
 
 ## What to do
 
-- Do not measure orders of the source against this. A constant in a sum on a hot path is added
-  last by the code generator, whatever the source's order. Read where it lands in the machine code,
+- Do not measure orders of the source against this, where each keeps each term added into the sum
+  on its own. A constant in a sum on a hot path is added last by the code generator, whatever that
+  order. Do measure a regrouping of the sum, or another form of the round's function: `op_g`'s
+  grouping of G cost 4.6 ms of 51.8, and F's terms added one at a time 1.5 ms (above). Read where
+  the constant lands in the machine code,
   not in the IR: the IR adds it first. The same holds for an option of clang
   ([[a-front-end-option-of-clang-does-not-reach-ir]]). `judgment step`: no job runs a benchmark or
   reads the machine code of std.
 - Use an opaque value to keep a constant off the path. The clean way is a value the optimiser
-  cannot see through, such as Rust's `core::hint::black_box`, or an empty `asm` barrier in C.
-  Kurz's std has no such hint. One would be a new surface of std, and so a question to the owner
-  before it is built ([[design-before-build]]). `judgment step`.
+  cannot see through: in Kurz `Hint.BlackBox(t)` (F18), Rust's `core::hint::black_box`, which the
+  owner chose on 2026-11-03 after this probe (issue 157), and in C an empty `asm` barrier. With it
+  at each of MD5's 64 constants, MD5 took 42.60 ms where std's form took 51.78 (issue 157, the best
+  of 15). `judgment step`.
 - Whether std may hide a constant behind a value of the program that LLVM cannot know, such as a
   word of the state or a count, is open. Its correctness rests on the program's state, and its
   speed on what LLVM happens not to see. It was not taken for #258 (above), and the owner has not

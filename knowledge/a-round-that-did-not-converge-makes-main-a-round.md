@@ -44,10 +44,11 @@ of three cases:
 - The round converged on every file. Then a merge of `main` replays from the cache, as no round,
   where `main` changed none of the pull request's files and none of the reviewer's code and rules,
   and the title and the description are as the round read them. Otherwise taking `main` makes the
-  review of the new head a paid round, and the merge needs the owner's choice: a paid round, over
-  red at the new head, or hold. The tool does not read what `main` changed.
-- The round did not converge on N files. Taking `main` makes the review of the new head a paid
-  round, and the merge needs the owner's choice: a paid round, over red at the new head, or hold.
+  review of the new head end as `cap` before any pass, and the merge needs the owner's choice: a
+  paid round, over red at the new head, or hold. The tool does not read what `main` changed.
+- The round did not converge on N files. Taking `main` makes the review of the new head end as
+  `cap` before any pass, and the merge needs the owner's choice: a paid round, over red at the new
+  head, or hold.
   The status gives the count. The files are named in the review's note "Automated review did not
   converge".
 - Whether the round converged is not known: there is no status from the poster, or its state is

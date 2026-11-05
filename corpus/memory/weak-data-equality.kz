@@ -1,0 +1,14 @@
+// expect: output
+// | true
+// | false
+// | true
+// rules: R3
+
+class Owner(string Name)
+data Tag(string Label, weak Owner? Keeper)
+
+o = Owner("Ann")
+print(Tag("x", o) == Tag("x", o))
+print(Tag("x", o) == Tag("x", Owner("Bo")))
+gone = Tag("x", Owner("Cy"))
+print(gone == Tag("x", null))

@@ -19,13 +19,14 @@ the name `N` at line 7". `Bump(mut N)` in a method of `class C(int N)` ended so 
 the same call in `class C(mut int N)`, where M7 lets the call stand (2026-11-02). No case and no test
 of the suite passed a field as `mut`.
 
-Since the fix, `MutArgument` reads a name without a variable as a field of the instance before it
+Since the fix (pull request 213, 2026-11-02), `MutArgument` reads a name without a variable as a
+field of the instance before it
 lets it pass: a field without `mut` is `mut-required`, the same field twice is `mut-at-call`, and
 the emitter gives the call the field's own place. Inside a lambda the field is passed as well, through
 the reference to the instance the lambda holds (F11 with K2: the owner, 2026-11-02, #110, comment
 6579495475); until that answer it was `capture-assign`.
-The assignment (`CheckAssignOrDeclare`) and a `mut` method's receiver already read the field, and
-refuse one without `mut`. The shape to look for is an early return on a name the lookup of
+The assignment (`CheckAssignOrDeclare`) and a `mut` method's receiver read the field before the fix
+too, and refuse one without `mut`. The shape to look for is an early return on a name the lookup of
 variables does not find, on the ground that another reading reports it: that reading may find the
 name as something the return never checks.
 

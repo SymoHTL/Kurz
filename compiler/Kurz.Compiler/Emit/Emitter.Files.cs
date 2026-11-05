@@ -1384,6 +1384,28 @@ public sealed partial class Emitter
         return fn.Value($"load i64, ptr {slot}");
     }
 
+    /// <summary>
+    /// S25: <c>instant.Now</c>, the monotonic clock in nanoseconds; where the runtime cannot map the page the system writes the time
+    /// into, the process ends as an allocation the system refused does, with the bytes of the page (O11), as <see cref="EmitNow"/>.
+    /// </summary>
+    private string EmitMonotonicNow(int line)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(line, ProcessNotOnWindows);
+        }
+
+        var slot = fn.Alloca("i64", "now");
+        var read = fn.Label("now");
+        var refused = fn.Label("now.refused");
+        fn.CondBranch(fn.Value($"call i1 {SysFunction("MonotonicNow")}(ptr {slot})"), read, refused);
+        fn.Block(refused);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
+        fn.Unreachable();
+        fn.Block(read);
+        return fn.Value($"load i64, ptr {slot}");
+    }
+
     /// <summary>S14: in the helper of the text of an <c>EnvError</c> in <c>%a0</c>: the words of its kind in lower case, a colon and the name, <c>not present: HOME</c>.</summary>
     private void EnvErrorText(DataType error)
     {

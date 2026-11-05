@@ -1,0 +1,20 @@
+// expect: output
+// | [1, 2, 3]
+// | [0]
+// rules: X8
+
+class Bag(mut List<int> Items)
+
+class Holder(mut Bag B) {
+    pub int Swap(int x) {
+        B = Bag([0])
+        return x
+    }
+}
+
+// a key that gives the field on the way to the list another instance: the instance read has its list sorted, and the new one keeps its own
+h = Holder(Bag([3, 1, 2]))
+old = h.B
+h.B.Items.SortBy(x => h.Swap(x))
+print(old.Items)
+print(h.B.Items)

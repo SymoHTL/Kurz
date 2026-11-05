@@ -501,9 +501,9 @@ public sealed partial class Checker
 
         if (Types.IsTime(source.Type) && Types.IsTime(target))
         {
-            if (Types.IsDuration(source.Type) != Types.IsDuration(target))
+            if (Types.IsDuration(source.Type) != Types.IsDuration(target) || Types.IsInstant(source.Type) != Types.IsInstant(target)) // T36
             {
-                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` (T13)");
+                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` ({(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
                 return Typed.Error;
             }
 
@@ -521,7 +521,7 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, T13)");
+        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
         return Typed.Error;
     }
 
@@ -913,7 +913,7 @@ public sealed partial class Checker
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
             case ClassType c:
-                return ByFieldsThatCount(c, field => KeyOf(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => KeyOf(held, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -1019,7 +1019,7 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
-                return ByFieldsThatCount(c, field => HeldEquality(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1098,11 +1098,12 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the fields that count, each read by <paramref name="why"/>:
-    /// none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that compares by content. A
-    /// class met again inside its own fields was read where the walk met it first.
+    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
+    /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
+    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
     /// </summary>
-    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<FieldSymbol, (bool Mismatch, string Why)?> why)
+    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
         if (!classesCompared.Add(c.Symbol))
         {
@@ -1113,9 +1114,17 @@ public sealed partial class Checker
         {
             foreach (var field in c.Symbol.FieldsThatCount)
             {
-                if (why(field) is { } refused)
+                if (why(field.Type) is { } refused)
                 {
                     return refused with { Why = $"its field `{field.Name}`: {refused.Why}" };
+                }
+            }
+
+            foreach (var derived in classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)))
+            {
+                if (why(new ClassType(derived)) is { } refused)
+                {
+                    return refused with { Why = $"its derived class `{derived.Name}`: {refused.Why}" };
                 }
             }
 
@@ -1272,6 +1281,11 @@ public sealed partial class Checker
             if (IsHashName(n.Name))
             {
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
+            }
+
+            if (n.Name == "Hint")
+            {
+                return CheckHintFunction(m, c); // F18
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -1693,6 +1707,37 @@ public sealed partial class Checker
         }
 
         return Record(c, CallKind.StringJoin, typed, picked);
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, the value itself, of any type, <c>T BlackBox&lt;T&gt;(T value)</c>, which the optimiser cannot see
+    /// through, as Rust's <c>std::hint::black_box</c> in Kurz's casing (section 12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "any
+    /// value"); any other member of <c>Hint</c> is no name (V10). It takes no type arguments, as <c>string.Join</c> takes none (assumed).
+    /// </summary>
+    private Typed CheckHintFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member != "BlackBox")
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Hint` has no function `{m.Member}` (F18, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Hint.BlackBox`"))
+        {
+            return Typed.Error;
+        }
+
+        var parameter = new TypeParameterSymbol("T", c.Line);
+        var value = new TypeParameterType(parameter);
+        var candidate = new Candidate
+        {
+            Slots = [new Slot("value", value, false, false, true)],
+            TypeParameters = [parameter],
+            Result = value,
+            Form = "T BlackBox<T>(T value)",
+        };
+        return Record(c, CallKind.BlackBox, Call([candidate], c, null, out var picked), picked);
     }
 
     /// <summary>
@@ -2328,6 +2373,7 @@ public sealed partial class Checker
     {
         var map = new Dictionary<TypeParameterSymbol, KurzType>(candidate.Map);
         var direct = candidate.TypeParameters.ToDictionary(p => p, _ => new List<KurzType>());
+        var erred = new HashSet<TypeParameterSymbol>();
         for (var i = 0; i < pres.Count; i++)
         {
             var pre = pres[i];
@@ -2340,6 +2386,12 @@ public sealed partial class Checker
             if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
             {
                 types.Add(ArgumentType(candidate, pres, i));
+            }
+            else if (Types.IsError(ArgumentType(candidate, pres, i)))
+            {
+                // its own error stands in a nested position as in a direct one, the `T` of a `List<T>`: what nothing else gives a type is
+                // inferred as nothing, and no `cannot-infer` is reported beside it (E1; the owner, 2026-11-03, #156, comment 6600034940)
+                erred.UnionWith(candidate.TypeParameters.Where(p => Types.Mentions(slot, p)));
             }
             // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
             // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
@@ -2355,7 +2407,9 @@ public sealed partial class Checker
             var known = types.Where(t => !Types.IsError(t)).ToList();
             if (known.Count == 0)
             {
-                if (types.Count > 0)
+                // an argument with no error of its own that gives `p` nothing in another position, the `5` of a `List<T>`, leaves the
+                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575)
+                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null)
                 {
                     map[p] = Types.Error; // every argument of the position carries its own error: nothing is inferred and nothing more is reported (E1)
                 }
@@ -2465,7 +2519,9 @@ public sealed partial class Checker
                 }
             }
 
-            if (fixedType is null && (untypable || untypedLists.Contains(p)))
+            // as in a direct position, an argument with no error of its own that gives `p` nothing leaves the `cannot-infer` standing (T27;
+            // the owner, 2026-11-03, #156, comment 6603205575)
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null)
             {
                 map[p] = Types.Error;
                 continue;
@@ -2800,7 +2856,15 @@ public sealed partial class Checker
     /// parameter stands, so that it gives that type parameter nothing, a <c>5</c> where a <c>List&lt;T&gt;</c> is required; empty where
     /// every argument gives its type parameters a type, and the types differ or no argument stands in a position.
     /// </summary>
-    private static string GivesNothing(Candidate candidate, List<Pre> pres)
+    private static string GivesNothing(Candidate candidate, List<Pre> pres) => GivingNothing(candidate, pres, null) is { } given
+        ? $": argument {given.Index + 1} is {Types.A(ArgumentType(candidate, pres, given.Index))} where {Types.A(candidate.Slots[candidate.Binding[given.Index]].Type)} is required, and gives `{given.Parameter.Name}` nothing"
+        : "";
+
+    /// <summary>
+    /// T27: the first argument whose type has no part where a type parameter of its parameter stands (<paramref name="only"/>, where it is
+    /// given), and that type parameter, which the argument gives nothing; null where every argument gives its type parameters a type.
+    /// </summary>
+    private static (int Index, TypeParameterSymbol Parameter)? GivingNothing(Candidate candidate, List<Pre> pres, TypeParameterSymbol? only)
     {
         for (var i = 0; i < pres.Count; i++)
         {
@@ -2811,16 +2875,15 @@ public sealed partial class Checker
             }
 
             var slot = candidate.Slots[candidate.Binding[i]].Type;
-            var own = ArgumentType(candidate, pres, i);
             var found = new Dictionary<TypeParameterSymbol, KurzType>();
-            Unify(slot, own, found);
-            if (candidate.TypeParameters.FirstOrDefault(p => Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
+            Unify(slot, ArgumentType(candidate, pres, i), found);
+            if (candidate.TypeParameters.FirstOrDefault(p => (only is null || ReferenceEquals(p, only)) && Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
             {
-                return $": argument {i + 1} is {Types.A(own)} where {Types.A(slot)} is required, and gives `{nothing.Name}` nothing";
+                return (i, nothing);
             }
         }
 
-        return "";
+        return null;
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>

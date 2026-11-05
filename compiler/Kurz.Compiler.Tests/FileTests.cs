@@ -664,6 +664,55 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11"], grants: ["raw", "native"]);
     }
 
+    private const string QueuedConnections = Armed + """
+        void | IoError Take(TcpListener l) {
+            s = l.Accept()
+            print("accepted")
+            s.Close()
+        }
+
+        void | IoError Queued() {
+            mut bytes = Bytes()
+            idle = TcpListener.Bind("127.0.0.1:0")
+            waiting = TcpStream.Connect("127.0.0.1:{idle.Port}")
+            waiting.SetReadTimeout(100ms)
+            idle.Close()
+            print(waiting.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+
+            busy = TcpListener.Bind("127.0.0.1:0")
+            queued = TcpStream.Connect("127.0.0.1:{busy.Port}")
+            queued.SetReadTimeout(100ms)
+            ArmClose(2)
+            Take(busy) else {
+                IoError e => print(e.Code)
+            }
+
+            print(queued.Read(mut bytes, 1) else {
+                IoError e => -e.Code
+            })
+        }
+
+        Queued() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void A_connection_waiting_in_a_listener_s_queue_is_reset_at_the_listener_s_close_with_a_call_in_flight_or_none()
+    {
+        // S9: the close of a listener with no call in flight releases its descriptor, and the client waiting in its queue reads a reset;
+        // the close that meets an `Accept` in flight shuts the listener down, the accept finds it closed, and the client waiting reads a
+        // reset too, the system's behaviour
+        RanWithCloseInFlight(QueuedConnections, "queued-connections", ["-104", "9", "-104"], ["raw"]);
+
+        // the positive control: built as it is and without the first close, the first client's read runs out of its time, and the accept
+        // takes the second client, whose read finds the end of the stream its server closed
+        Ran(QueuedConnections.Replace("    idle.Close()\n", "", StringComparison.Ordinal), "queued-connections-open", ["-11", "accepted", "0"], grants: ["raw"]);
+    }
+
     private const string InFlightShutdown = Armed + """
         static mut int seen = 0
 
