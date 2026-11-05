@@ -873,11 +873,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class Counter(int Count)\n\nint Read(Counter c = Counter(1)) => c.Count\n\nprint(Read())"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("class Counter(int Count)\n\ndata Holder(Counter C)\n\nint Read(Holder h = Holder(Counter(1))) => h.C.Count\n\nprint(Read())"));
 
-        // the owner's own refusal, a variable among the arguments: the parameter before it is no constant
-        Assert.Contains((ErrorIds.DefaultNotConstant, 3), Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
+        // the owner's own refusal, a variable among the arguments: a default is read with no variable in sight, so the parameter before it
+        // is `unknown-name` (V10) beside the default's own error, which is why a corpus case, which expects one error, cannot show it
+        Assert.Equal([(ErrorIds.UnknownName, 3), (ErrorIds.DefaultNotConstant, 3)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
 
         // a generic data type, whose construction is a data value as any other
         Clean("data Box<T>(T Value)\n\nint Get(Box<int> b = Box(1)) => b.Value\n\nprint(Get())");
+
+        // D11: a field's default that is no constant is refused where the field is declared, so a construction that leaves it out
+        // is a constant, and the walk reads no field's default
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 1)], Errors("data H(List<int> Xs = [1])\n\nint F(H h = H()) => h.Xs.Count\n\nprint(F())"));
     }
 
     [Theory]
