@@ -129,8 +129,24 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         class Pairs(Pair One, Pair Two)
         class Limit(A X, File H)
         data Box(() => bool F, Box? Next)
+        class Lists(List<Pair> One, List<Pair> Two)
+        class Tables(Map<string, Pair> One, Map<string, Pair> Two)
+        data Fns(() => bool F, () => bool G, Fns? Next)
 
         () => bool Make(A x, A y) => () => x.Inner == null && y.Inner == null
+
+        () => bool Keep(Pair p) => () => p.X.Inner == null
+
+        Map<string, Pair> Table(Pair p) {
+            mut m = Map<string, Pair>()
+            m["p"] = p
+            return m
+        }
+
+        Lists | IoError Both() {
+            l = [Pair(File.Create("1.txt"), A(File.Create("2.txt"), null))]
+            return Lists(l, l)
+        }
 
         void EndP(P p) {}
         void EndNodes(Nodes n) {}
@@ -139,6 +155,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         void EndPairs(Pairs p) {}
         void EndLimit(Limit l) {}
         void EndBox(Box b) {}
+        void EndLists(Lists l) {}
+        void EndTables(Tables t) {}
+        void EndFns(Fns f) {}
 
         void | IoError Fields() {
             EndP(P(A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), A(File.Create("4.txt"), null))))
@@ -169,6 +188,24 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             EndBox(b)
         }
 
+        void | IoError Containers() {
+            EndLists(Lists([Pair(File.Create("1.txt"), A(File.Create("2.txt"), null)), Pair(File.Create("3.txt"), A(File.Create("4.txt"), null))], [Pair(File.Create("5.txt"), A(File.Create("6.txt"), null))]))
+        }
+
+        void | IoError Maps() {
+            t = Tables(Table(Pair(File.Create("1.txt"), A(File.Create("2.txt"), null))), Table(Pair(File.Create("3.txt"), A(File.Create("4.txt"), null))))
+            EndTables(t)
+        }
+
+        void | IoError Closures() {
+            f = Fns(Keep(Pair(File.Create("1.txt"), A(File.Create("2.txt"), null))), Keep(Pair(File.Create("3.txt"), A(File.Create("4.txt"), null))), null)
+            EndFns(f)
+        }
+
+        void | IoError Twice() {
+            EndLists(Both())
+        }
+
         void | IoError All() {
             Fields()
             Blocks()
@@ -177,6 +214,10 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Plain()
             Last()
             Captures()
+            Containers()
+            Maps()
+            Closures()
+            Twice()
         }
 
         All() else {
@@ -223,9 +264,15 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // list's items in a field and in an argument, and a closure's captures in a block each end 3, 4, 5, 6 or 3, 4, 5, where the
         // last value put on the work list ended first before; two plain values' handles close before the instances they hold, each
         // in the fields' order; and with fields `(a: A, h: File)`, `h` closes before the handle `a` holds, which the section names
-        // as the difference from Rust's order
-        var closes = ListTests.Edited(("runtime/linux/linux.kz", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n        mut byte mark = byte(fd + 48)\n        Write(1, &mark, 1)\n        mark = byte(10)\n        Write(1, &mark, 1)\n"));
-        Ran(Ends, "ends-in-order", ["3", "4", "5", "6", "3", "4", "5", "6", "3", "4", "5", "3", "4", "5", "3", "5", "4", "6", "4", "3", "3", "4", "5"], runtimes: [closes]);
+        // as the difference from Rust's order. Two lists in two fields, whose items each hold a handle and an instance, close the
+        // first list's handles, then the second's, and end the first's instances, then the second's, as two maps and two closures in
+        // two fields do (R1, section 3, the owner, 2026-11-05, pull request 332, comment 6664352637), where the second's handles closed
+        // first before; and one list in two fields of one instance ends once. The same runs on the fenced allocator, which ends the
+        // process on a read of a freed block: a release that freed that list the first time its walk back to front met it would read
+        // it again at the other field
+        (string, string, string) close = ("runtime/linux/linux.kz", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n        mut byte mark = byte(fd + 48)\n        Write(1, &mark, 1)\n        mark = byte(10)\n        Write(1, &mark, 1)\n");
+        var closes = ListTests.Edited(close);
+        Ran(Ends, "ends-in-order", ["3", "4", "5", "6", "3", "4", "5", "6", "3", "4", "5", "3", "4", "5", "3", "5", "4", "6", "4", "3", "3", "4", "5", "3", "5", "7", "4", "6", "8", "3", "5", "4", "6", "3", "5", "4", "6", "3", "4"], runtimes: [closes, ListTests.Edited([.. ListTests.Fence, close])]);
 
         // a map's entries end in the map's order, the order a `for` over it gives, which no test may expect (M10): the keys a `for`
         // prints, each the descriptor of its value's file, are the descriptors closed after them, in the same order, where the

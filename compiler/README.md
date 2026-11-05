@@ -1235,7 +1235,16 @@ do are walked back to front, so that the lists, last in first out, end the value
 fields' order, depth-first (section 3: the owner, 2026-11-05, issue 39, comment 6659239659); a release
 that may run outside one under way, of a list, a map, a closure or a plain value, holds the lists
 while it walks and works them off after, so that its items end in that order too, not each one at its
-last count. No count of an
+last count. A list or a map whose items may hold both a handle and a value that a work list ends, and
+every closure, is split across the walks (section 3: the owner, 2026-11-05, pull request 332, comment
+6664352637): the first lowers its count and, at the last holder, closes its items' handles in order,
+leaving the count at 0; the second, back to front, puts what its items hold on the work lists where
+the count is 0 and lowers the count below 0 each time it meets the block; and a third walk, in the
+fields' order, raises it again and frees the block when it is back at 0, after that walk of the
+items where they hold such containers themselves. One value may hold one block in two fields, so a
+walk that freed the block the first time it met it would read it again; the count below 0 counts
+those meetings, and no memory is taken. A closure's environment takes the walk as an argument of the
+function that lets go of it, 0 for all three. No count of an
 instance is elided. Pinned by `ListTests`: the classes' program under the allocator that makes every
 freed block inaccessible, twenty rounds of instances through every way out of a block there and 3000
 within the sixteen pieces, the same instances all kept not, the same for instances of derived classes
@@ -1247,7 +1256,10 @@ the releases of its fields' classes before its class is among the released. Pinn
 order, with a runtime that writes the descriptor of each file it closes, of an instance's fields, a
 block's, a list's items in a field and in an argument, a closure's captures in a block, a map's entries
 in an instance, in the order a `for` over the map gives, two plain values' handles before the instances
-they hold, and fields `(a: A, h: File)`, whose `h` closes first. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
+they hold, fields `(a: A, h: File)`, whose `h` closes first, two lists, two maps and two closures in
+two fields whose items each hold a handle and an instance, the first one's handles, then the second's,
+then the first one's instances, then the second's, and one list in two fields, ended once, each also
+under the allocator that makes every freed block inaccessible. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is counted as an instance is, by the count in front of its type's number, as
 Rust's `Rc` holds its count in front of its value *(assumed, section 4: the counting of section 3 for

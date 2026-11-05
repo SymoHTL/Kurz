@@ -25,12 +25,15 @@ the next field's, and a list's items, a map's entries and a closure's captures e
 across types they end in the order in which the work lists are worked off, and a value of another
 type is not ordered against them (§3, §4, the owner, 2026-11-05, issue 39, comment 6659239659). It is
 not exactly Rust's order: with fields `(a: A, h: File)`, `h` closes before the handle that `a` holds
-(the same answer). *(assumed, §3, §4: a derived block's base's fields first, a reading from D7 of the
+(the same answer). A list, a map or a closure whose items hold both a handle and a value of a class
+or a block is let go of in parts: its handles close with the fields that end at once, in the fields'
+order, and its values of a class or a block end in the fields' order too, in three walks of the
+fields that need no memory, since the count of the container's block marks it between them and,
+below 0, counts the times a walk meets it (§3, §4, the owner, 2026-11-05, pull request 332, comment
+6664352637). *(assumed, §3, §4: a derived block's base's fields first, a reading from D7 of the
 owner's answer of 2026-11-05, issue 110, comment 6657251329, which recorded it as a reading; a
 derived class's base's fields first, a reading of the same answer, as K6 lays the base's fields out
-first; a list or a map whose items may hold a value of a class or a block, and any closure, let go
-of among the fields that put a value on a work list, so that the handles they hold close in the
-reverse of those fields' order, as built)* No case shows the order: a release runs no code of the
+first)* No case shows the order: a release runs no code of the
 program between two fields, and a handle that closes at its last count (S5) shows it only outside
 the program, where the compiler's tests read it from a runtime that writes the descriptor of each
 file it closes.

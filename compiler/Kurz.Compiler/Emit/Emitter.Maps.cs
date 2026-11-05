@@ -852,40 +852,16 @@ public sealed partial class Emitter
         var kept = fn.Label("kept");
         fn.CondBranch(last, free, kept);
         fn.Block(free);
-        if (Holds(type.Key, true) || Holds(type.Value, true))
+        if (Holds(type.Key, Walk.Listed) || Holds(type.Value, Walk.Listed))
         {
             // R1: the entries' parts that end at once in the order of the slots, then, back to front, the parts that put a value on a
-            // work list, the value's before the key's
+            // work list, then the split containers, freed
             Hold(() =>
             {
-                if (Holds(type.Key, false) || Holds(type.Value, false))
+                foreach (var walk in Walks.Where(w => Holds(type.Key, w) || Holds(type.Value, w)))
                 {
-                    EachEntry("%a0", type, (k, v) =>
-                    {
-                        if (Holds(type.Key, false))
-                        {
-                            ReleasePart(k, type.Key, false);
-                        }
-
-                        if (Holds(type.Value, false))
-                        {
-                            ReleasePart(v, type.Value, false);
-                        }
-                    });
+                    EachEntry("%a0", type, (k, v) => EntryParts(k, v, type, walk), backward: walk == Walk.Listed);
                 }
-
-                EachEntry("%a0", type, (k, v) =>
-                {
-                    if (Holds(type.Value, true))
-                    {
-                        ReleasePart(v, type.Value, true);
-                    }
-
-                    if (Holds(type.Key, true))
-                    {
-                        ReleasePart(k, type.Key, true);
-                    }
-                }, backward: true);
             });
         }
         else if (Counted(type.Key) || Counted(type.Value))
@@ -908,6 +884,16 @@ public sealed partial class Emitter
         fn.Return(null);
         fn.Block(kept);
         fn.Return(null);
+    }
+
+    /// <summary>The parts of a map's entry that the walk lets go of (<see cref="ReleaseWalk"/>): the key's before the value's, and in the walk back to front the value's first.</summary>
+    private void EntryParts(string k, string v, MapType type, Walk walk)
+    {
+        (string Value, KurzType Type)[] parts = walk == Walk.Listed ? [(v, type.Value), (k, type.Key)] : [(k, type.Key), (v, type.Value)];
+        foreach (var (value, partType) in parts.Where(p => Holds(p.Type, walk)))
+        {
+            ReleasePart(value, partType, walk);
+        }
     }
 
     /// <summary>
