@@ -1729,7 +1729,7 @@ parameter as a value known while the program compiles (§4, the owner, 2026-11-0
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
 `enum`)* *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
-`assert(` (T36) and among the words of an `asm`, and a name elsewhere (L18); a
+`assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type, and where a type stands it is
 `unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
@@ -1862,7 +1862,7 @@ d = 3
 print(Both((a < 64), c > (d)))
 ```
 
-### T36 (decided, §4) `const assert`
+### T37 (decided, §4) `const assert`
 
 Generic code stops the build on a fault it finds in a type it reads with `const assert(condition,
 text)`: a condition over values known while the program compiles, a copy's reading of its type

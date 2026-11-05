@@ -212,7 +212,7 @@ public sealed record UseStatement(int Line, string Target) : Statement(Line);
 public sealed record AsmStatement(int Line, IReadOnlyList<AsmTemplate> Templates, IReadOnlyList<AsmOperand> Operands) : Statement(Line);
 
 /// <summary>
-/// <c>const assert(condition, text)</c> (T36): a condition known while the program compiles, checked then, in each copy of a generic
+/// <c>const assert(condition, text)</c> (T37): a condition known while the program compiles, checked then, in each copy of a generic
 /// function; where it is false, the build stops with the text.
 /// </summary>
 public sealed record ConstAssertStatement(int Line, Expression Condition, StringLiteral Text) : Statement(Line);

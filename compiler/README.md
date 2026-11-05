@@ -707,7 +707,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
   holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
   outermost copy with the text, a hole naming a type parameter giving the name of the copy's type; outside a generic function it is
-  checked once where it stands (T36);
+  checked once where it stands (T37);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -1873,7 +1873,7 @@ leaves the function unread, one of a `data` type, and overloads that hold a type
 types, at the place of a type argument a call writes,
 which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the
 program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
-text among them (T36); and `use` (F10) of any folder but the runtime's `sys`;
+text among them (T37); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

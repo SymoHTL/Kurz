@@ -1926,7 +1926,7 @@ public sealed partial class Checker
                 CheckAsm(a, naked: false);
                 return Flow.Completes;
             case ConstAssertStatement c:
-                CheckConstAssert(c); // T36: checked while the program compiles
+                CheckConstAssert(c); // T37: checked while the program compiles
                 return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)

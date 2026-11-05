@@ -575,7 +575,7 @@ public sealed class Parser
         {
             if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen)
             {
-                return ParseConstAssert(); // T36: a statement of its own; `const` and `assert` are names everywhere else (L18)
+                return ParseConstAssert(); // T37: a statement of its own; `const` and `assert` are names everywhere else (L18)
             }
 
             if (Peek().Kind == TokenKind.Assign)
@@ -773,7 +773,7 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// T36: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
+    /// T37: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
     /// *(assumed, §4: as Rust's <c>assert!</c> takes its message as a literal)*.
     /// </summary>
     private ConstAssertStatement ParseConstAssert()

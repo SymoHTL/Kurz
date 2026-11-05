@@ -906,7 +906,7 @@ public sealed class ParserTests
     public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
     {
         // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type, as it is
-        // before `assert(` (T36) and among the words of an `asm`, and a name elsewhere, as `thread` is a word before `static` alone (L18),
+        // before `assert(` (T37) and among the words of an `asm`, and a name elsewhere, as `thread` is a word before `static` alone (L18),
         // so a type parameter named `const` and a variable stand; the
         // call writes the constant among its type arguments; the order of a default is the checker's
         Assert.Equal(tree, Tree(program));
@@ -954,7 +954,7 @@ public sealed class ParserTests
     [InlineData("const assert = 1", "(declare const assert (int 1))")]
     public void A_const_assert_is_a_statement_of_its_own(string program, string tree)
     {
-        // T36: `const assert(condition, text)` at the start of a statement, with newlines inside its parentheses; `assert` is a name
+        // T37: `const assert(condition, text)` at the start of a statement, with newlines inside its parentheses; `assert` is a name
         // elsewhere, and `const assert` with no `(` after it is a declaration whose type is named `const` (L18)
         Assert.Equal(tree, Tree(program));
     }
@@ -967,7 +967,7 @@ public sealed class ParserTests
     [InlineData("const assert(true, \"a\", \"b\")")]
     public void A_const_assert_takes_a_condition_and_a_string_literal(string program)
     {
-        // T36: the text is a string literal, as Rust's `assert!` takes its message as one
+        // T37: the text is a string literal, as Rust's `assert!` takes its message as one
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program).Distinct());
     }
 

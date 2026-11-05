@@ -160,7 +160,7 @@ public sealed partial class Checker
     /// <summary>
     /// The generic functions whose own text reads their type: a member of <see cref="IsTypeMember"/> on the name of one of their type
     /// parameters, a type parameter that holds a constant (T35), which each copy binds to its value, or a <c>const assert</c>, which
-    /// each copy checks (T36).
+    /// each copy checks (T37).
     /// </summary>
     private void FindReaders()
     {

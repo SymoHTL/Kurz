@@ -676,7 +676,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     Block(r.Body);
                     break;
                 case ConstAssertStatement:
-                    break; // T36: checked while the program compiles, and nothing of it is emitted
+                    break; // T37: checked while the program compiles, and nothing of it is emitted
                 case AsmStatement a:
                     foreach (var o in a.Operands)
                     {

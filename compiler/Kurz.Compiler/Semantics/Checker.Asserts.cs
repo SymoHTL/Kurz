@@ -5,7 +5,7 @@ using Kurz.Compiler.Syntax;
 namespace Kurz.Compiler.Semantics;
 
 /// <summary>
-/// T36: <c>const assert(condition, text)</c>, with which generic code stops the build on a fault it finds in a type it reads (section 4,
+/// T37: <c>const assert(condition, text)</c>, with which generic code stops the build on a fault it finds in a type it reads (section 4,
 /// the owner, 2026-11-01, "const assert, as Rust"). It is checked while the program compiles and emits nothing. A generic function that
 /// holds one is checked in each copy a call makes (T33), where the copy's reading of its type and its constant type arguments (T35) are
 /// known; where the condition is false, the build stops at the call that made the outermost copy, with the text.
@@ -18,7 +18,7 @@ public sealed partial class Checker
         SyntaxCopy.Walk(a, e => call ??= e as CallExpression);
         if (call is not null)
         {
-            NotSupported(call.Line, "a call in a `const assert`, which the build does not evaluate while the program compiles (T36)");
+            NotSupported(call.Line, "a call in a `const assert`, which the build does not evaluate while the program compiles (T37)");
             CountNamesRead(a); // what it names counts as read, as in a branch that never runs (E1)
             return;
         }
@@ -39,7 +39,7 @@ public sealed partial class Checker
             var copy = CurrentCopy();
             if (copy is null)
             {
-                Report(ErrorIds.ConstAssertFailed, a.Line, $"{text} (T36)");
+                Report(ErrorIds.ConstAssertFailed, a.Line, $"{text} (T37)");
             }
             else
             {
@@ -47,7 +47,7 @@ public sealed partial class Checker
                 Report( // into the copy's own list, which CheckCopy reports once
                     ErrorIds.ConstAssertFailed,
                     outermost.Origin.Line,
-                    $"`{outermost.Symbol.Name}`: {text} (the `const assert` in `{copy.Original.Name}`, T36)");
+                    $"`{outermost.Symbol.Name}`: {text} (the `const assert` in `{copy.Original.Name}`, T37)");
             }
         }
     }
@@ -117,11 +117,11 @@ public sealed partial class Checker
             variable ??= e is NameExpression n && Lookup(n.Name, capture: false).Variable is not null ? n : null);
         if (variable is not null)
         {
-            Report(ErrorIds.ConstAssertFailed, variable.Line, $"the value of `{variable.Name}` is not known while the program compiles, in {what} of a `const assert` (T36)");
+            Report(ErrorIds.ConstAssertFailed, variable.Line, $"the value of `{variable.Name}` is not known while the program compiles, in {what} of a `const assert` (T37)");
         }
         else
         {
-            NotSupported(part.Line, $"{what} of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T36)");
+            NotSupported(part.Line, $"{what} of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T37)");
         }
     }
 }
