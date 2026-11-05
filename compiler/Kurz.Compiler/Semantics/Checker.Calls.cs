@@ -501,9 +501,9 @@ public sealed partial class Checker
 
         if (Types.IsTime(source.Type) && Types.IsTime(target))
         {
-            if (Types.IsDuration(source.Type) != Types.IsDuration(target))
+            if (Types.IsDuration(source.Type) != Types.IsDuration(target) || Types.IsInstant(source.Type) != Types.IsInstant(target)) // T36
             {
-                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` (T13)");
+                Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is no `{target}` ({(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
                 return Typed.Error;
             }
 
@@ -521,7 +521,7 @@ public sealed partial class Checker
             return new Typed(Types.Long); // R14: the address a pointer holds
         }
 
-        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, T13)");
+        Report(ErrorIds.TypeMismatch, c.Line, $"{Types.A(source.Type)} is not converted to {Types.A(target)} (T10, {(Types.IsInstant(source.Type) || Types.IsInstant(target) ? "T36" : "T13")})");
         return Typed.Error;
     }
 
@@ -2398,7 +2398,9 @@ public sealed partial class Checker
             var known = types.Where(t => !Types.IsError(t)).ToList();
             if (known.Count == 0)
             {
-                if (types.Count > 0)
+                // an argument with no error of its own that gives `p` nothing in another position, the `5` of a `List<T>`, leaves the
+                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575)
+                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null)
                 {
                     map[p] = Types.Error; // every argument of the position carries its own error: nothing is inferred and nothing more is reported (E1)
                 }
@@ -2508,7 +2510,9 @@ public sealed partial class Checker
                 }
             }
 
-            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)))
+            // as in a direct position, an argument with no error of its own that gives `p` nothing leaves the `cannot-infer` standing (T27;
+            // the owner, 2026-11-03, #156, comment 6603205575)
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null)
             {
                 map[p] = Types.Error;
                 continue;
@@ -2843,7 +2847,15 @@ public sealed partial class Checker
     /// parameter stands, so that it gives that type parameter nothing, a <c>5</c> where a <c>List&lt;T&gt;</c> is required; empty where
     /// every argument gives its type parameters a type, and the types differ or no argument stands in a position.
     /// </summary>
-    private static string GivesNothing(Candidate candidate, List<Pre> pres)
+    private static string GivesNothing(Candidate candidate, List<Pre> pres) => GivingNothing(candidate, pres, null) is { } given
+        ? $": argument {given.Index + 1} is {Types.A(ArgumentType(candidate, pres, given.Index))} where {Types.A(candidate.Slots[candidate.Binding[given.Index]].Type)} is required, and gives `{given.Parameter.Name}` nothing"
+        : "";
+
+    /// <summary>
+    /// T27: the first argument whose type has no part where a type parameter of its parameter stands (<paramref name="only"/>, where it is
+    /// given), and that type parameter, which the argument gives nothing; null where every argument gives its type parameters a type.
+    /// </summary>
+    private static (int Index, TypeParameterSymbol Parameter)? GivingNothing(Candidate candidate, List<Pre> pres, TypeParameterSymbol? only)
     {
         for (var i = 0; i < pres.Count; i++)
         {
@@ -2854,16 +2866,15 @@ public sealed partial class Checker
             }
 
             var slot = candidate.Slots[candidate.Binding[i]].Type;
-            var own = ArgumentType(candidate, pres, i);
             var found = new Dictionary<TypeParameterSymbol, KurzType>();
-            Unify(slot, own, found);
-            if (candidate.TypeParameters.FirstOrDefault(p => Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
+            Unify(slot, ArgumentType(candidate, pres, i), found);
+            if (candidate.TypeParameters.FirstOrDefault(p => (only is null || ReferenceEquals(p, only)) && Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
             {
-                return $": argument {i + 1} is {Types.A(own)} where {Types.A(slot)} is required, and gives `{nothing.Name}` nothing";
+                return (i, nothing);
             }
         }
 
-        return "";
+        return null;
     }
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>

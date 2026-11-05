@@ -403,6 +403,26 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_end_of_a_block_and_the_end_of_an_instance_let_go_of_their_fields_in_their_order()
+    {
+        // section 3, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust
+        // drops a value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of
+        // their string before their list
+        const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nprint(p.B)\nprint(t.B)\n";
+        var ir = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        foreach (var name in new[] { "drop.block.Pair", "drop.class.Two" })
+        {
+            var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            var body = ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+            var first = body.IndexOf("call void @\"release.string\"(", StringComparison.Ordinal);
+            var second = body.IndexOf("call void @\"release.List<int>\"(", StringComparison.Ordinal);
+            Assert.True(first >= 0 && second >= 0, $"{name} lets go of no string or of no list");
+            Assert.True(first < second, $"{name} lets go of its list before its string");
+        }
+    }
+
+    [Fact]
     public void A_construct_of_the_runtime_the_emitter_does_not_lay_out_is_the_compilers_defect_and_names_its_file()
     {
         var target = Builder.HostTarget!.Value;
@@ -459,7 +479,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var program = Emit(Program);
         Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
         Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
-        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("type { i64, i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its count, its type's number, `Value` and `Next`
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
     }
