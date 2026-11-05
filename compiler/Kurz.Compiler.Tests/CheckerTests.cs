@@ -4629,41 +4629,49 @@ public sealed class CheckerTests
         Assert.Equal([expected], NotSupported(program));
 
     [Theory]
-    [InlineData("print(instant.Now + instant.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(-instant.Now)", "type-mismatch", 1, "(T18, T22)")]
-    [InlineData("longduration d = 5s\nprint(instant.Now + d)", "type-mismatch", 2, "(T18, T36)")]
-    [InlineData("longduration d = 5s\nprint(instant.Now - d)", "type-mismatch", 2, "(T18, T36)")]
-    [InlineData("print(instant.Now - timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(timestamp.Now - instant.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now < timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now == timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now < 5s)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(long(instant.Now))", "type-mismatch", 1, "(T10, T36)")]
-    [InlineData("print(instant(5))", "type-mismatch", 1, "(T10, T36)")]
-    [InlineData("print(instant(5s))", "type-mismatch", 1, "(T36)")]
-    [InlineData("print(timestamp(instant.Now))", "type-mismatch", 1, "(T36)")]
-    [InlineData("print(duration(instant.Now))", "type-mismatch", 1, "(T36)")]
-    [InlineData("instant t = 5s\nprint(t)", "type-mismatch", 1, "(T1)")]
-    [InlineData("int n = instant.Now\nprint(n)", "type-mismatch", 1, "(T1)")]
-    [InlineData("print(instant.Later)", "unknown-name", 1, "(V10)")]
-    [InlineData("print(5s.Elapsed)", "unknown-name", 1, "(V10)")]
-    public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line, string cites)
+    [InlineData("print(instant.Now + instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(-instant.Now)", "type-mismatch", 1)]
+    [InlineData("longduration d = 5s\nprint(instant.Now + d)", "type-mismatch", 2)]
+    [InlineData("longduration d = 5s\nprint(instant.Now - d)", "type-mismatch", 2)]
+    [InlineData("print(instant.Now - timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(timestamp.Now - instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now < timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now == timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now < 5s)", "type-mismatch", 1)]
+    [InlineData("print(long(instant.Now))", "type-mismatch", 1)]
+    [InlineData("print(instant(5))", "type-mismatch", 1)]
+    [InlineData("print(instant(5s))", "type-mismatch", 1)]
+    [InlineData("print(timestamp(instant.Now))", "type-mismatch", 1)]
+    [InlineData("print(duration(instant.Now))", "type-mismatch", 1)]
+    [InlineData("instant t = 5s\nprint(t)", "type-mismatch", 1)]
+    [InlineData("int n = instant.Now\nprint(n)", "type-mismatch", 1)]
+    [InlineData("print(1s - instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now * 2)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now / 2)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now % 5s)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now / 5s)", "type-mismatch", 1)]
+    [InlineData("longtimestamp w = timestamp.Now\nprint(instant.Now - w)", "type-mismatch", 2)]
+    [InlineData("longtimestamp w = timestamp.Now\nprint(instant.Now < w)", "type-mismatch", 2)]
+    [InlineData("print(instant.Now == null)", "type-mismatch", 1)]
+    [InlineData("print(instant.Later)", "unknown-name", 1)]
+    [InlineData("print(5s.Elapsed)", "unknown-name", 1)]
+    public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line)
     {
-        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no unary
-        // `-`, no wide variant, no mixing with a `timestamp` or a duration's order, no conversion into or out of it, no member but
-        // `Elapsed`; the type's name as a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`). The message
-        // names T36 where an operator or a conversion meets a reading, and the rule of the refusal where the form is not the reading's own
+        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no
+        // duration less a reading, no `*`, `/` or `%`, no unary `-`, no wide variant, no mixing with a `timestamp`, a `longtimestamp` or a
+        // duration's order, no `null` (N6), no conversion into or out of it from another type, no member but `Elapsed`; the type's name as
+        // a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`)
         Assert.Equal([(id, line)], Errors(program));
-        Assert.EndsWith(cites, Assert.Single(Check(program).Diagnostics.Sorted).Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void A_reading_of_the_monotonic_clock_takes_its_differences_sums_comparisons_and_places()
     {
-        // T36: the positive control of the refusals above, with a reading in a `data` value, as a map's key and in a sorted list
-        Clean("instant a = instant.Now\ninstant b = a + 5s - 1ns\nduration d = b - a\ninstant c = 1s + a\n"
+        // T36: the positive control of the refusals above, with a reading in a `data` value, as a map's key, in a sorted list and
+        // converted into its own type
+        Clean("instant a = instant.Now\ninstant b = a + 5s - 1ns\nduration d = b - a\ninstant c = 1s + a\ninstant same = instant(a)\n"
             + "print(d < 5s && a < b && c >= a && a != c && a.Elapsed >= 0s)\ndata Mark(instant At)\nprint(Mark(a) == Mark(b))\n"
-            + "mut seen = Map<instant, int>()\nseen[a] = 1\nmut readings = [b, a]\nreadings.Sort()\nprint(\"{a} {readings} {seen.Count}\")");
+            + "mut seen = Map<instant, int>()\nseen[a] = 1\nmut readings = [b, a]\nreadings.Sort()\nprint(\"{a} {readings} {seen.Count} {same == a}\")");
     }
 
     [Fact]
