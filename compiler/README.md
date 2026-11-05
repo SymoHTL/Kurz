@@ -940,15 +940,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `rehash` helper takes from the key for each entry it places, as hashbrown calls its hasher for a slot, and writes
   into the entry where the map keeps the hash (`MapRehashMark`, `MapRehashPlace`, an entry whose bytes are no
   multiple of 8 changed byte by byte), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
-  count too"; the bound, the lookups of `m[k] = v` and `Remove` and the loop assumed there). Past the bound the lookup
-  hands its probe to a helper out of line (`far`, `noinline` and `cold`) with the block, the key and its hash alone, and
-  gives what it gives: the test, the rehash and the second lookup, or, where the block does not rehash, the probe again
-  from the hash's first group with no bound, which passes again the groups the lookup passed. The lookup so does not
-  call itself, hands the call none of its loop's values and stays small enough for the optimiser to inline where it is
-  called. An insert's own lookup so passes the bound before its search of a free slot can, which leaves the move into a
-  new block to the search of a free slot in a block that grew. A key that is an instance is hashed by its address where
-  `==` compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
-  K5, K12).
+  count too"; the bound and the lookups of `m[k] = v` and `Remove` assumed there; the loop the owner's answer of
+  2026-11-03). Past the bound the lookup hands its probe to a helper out of line (`far`, `noinline` and `cold`) with the
+  block, the key and its hash alone, and gives what it gives: the test, the rehash and the second lookup, or, where the
+  block does not rehash, the probe again from the hash's first group with no bound, which passes again the groups the
+  lookup passed. The lookup so does not call itself, hands the call none of its loop's values and stays small enough for
+  the optimiser to inline where it is called. An insert's own lookup so passes the bound before its search of a free
+  slot can, which leaves the move into a new block to the search of a free slot in a block that grew. A key that is an
+  instance is hashed by its address where `==` compares the addresses, and else, laid out as a `data` value is, by the
+  hashes of the fields `==` compares (K4, K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and

@@ -5191,11 +5191,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_read_inside_a_loop_over_the_map_rehashes_no_block_the_loop_holds()
     {
-        // section 4 (assumed there): a loop over a map walks its block's slots by their index, so a read past the bound inside it leaves
-        // the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The loop's end, a `return`
-        // inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside every loop, rehashes the
-        // block: two runs print one order before it and two after it. A write inside the loop to a map value that shares the block
-        // copies it (M3), and no loop holds the copy, which a read past the bound rehashes
+        // section 4 (the owner, 2026-11-03): a loop over a map walks its block's slots by their index, so a read past the bound
+        // inside it leaves the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The
+        // loop's end, a `return` inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside
+        // every loop, rehashes the block: two runs print one order before it and two after it. A write inside the loop to a map value
+        // that shares the block copies it (M3), and no loop holds the copy, which a read past the bound rehashes
         var keys = SameGroupKeys(521);
         Assert.Equal(521, keys.Count); // the floor: the keys the case takes
         var absent = keys[520].ToString(CultureInfo.InvariantCulture);
