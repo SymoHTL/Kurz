@@ -6,7 +6,8 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions` and `Uri`, with `UriError` and `UriKind`, as `std/`
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
 lambda's parameter, a variable in a block, a loop variable or a name an arm of `match` binds, is
@@ -27,8 +28,9 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
-assumptions).
+every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
+`HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -213,10 +215,18 @@ owner, 2026-11-03, issue 110, comment 6600034158). The response is written when 
 returns. The moved body stays the other actor's to read to its end: every read gives the body's
 bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
 connection reads its next request only after that, with no new kind of error (§12, the owner,
-2026-11-03, issue 39, comment 6601737306). A request a client builds is sent as any value is (§12).
+2026-11-03, issue 39, comment 6601737306). A `move` of the request ends every path into it,
+`b = r.Body` included, by the region check of the record's section 6 (§12). A read of a moved body
+that falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes;
+the `408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
+6603205575). A `copy` of a server's request is the compile error `copy-server-request`, which names
+`move`, and a send of it with no word is section 6's error (§12, the same answer) *(assumed, §12:
+the error's name)*. A request a client builds is sent as any value is (§12).
 
 No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
-build, so that the move is not built either.
+build, so that the move is not built either. No case expects `copy-server-request` for the same
+reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md), whose row
+comes with the case that expects it (§12, the owner, 2026-11-03, issue 156, comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
 
@@ -227,7 +237,11 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 `HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
 list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
 ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*.
+product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
+map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
+`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
+names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
