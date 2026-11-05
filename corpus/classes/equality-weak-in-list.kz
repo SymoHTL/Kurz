@@ -1,0 +1,12 @@
+// expect: output
+// | false
+// | true
+// rules: K4
+
+class Owner(string Name)
+class Club(List<weak Owner?> Members)
+
+o = Owner("Ann")
+a = Club([o])
+print(a == Club([o]))
+print(a == a)

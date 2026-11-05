@@ -4,6 +4,9 @@
   gates.py             in CI: every gate; red when one fails or could not run
   gates.py [--pr N]    locally: the same gates; without --pr the pull-request gates print NOT RUN
 
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before any
+gate runs (tools/calls.py).
+
 A gate ends as PASS, PARTLY, FAIL, BROKEN, NOT RUN or N/A.
 FAIL     the gate found what it exists to find, or its tool crashed or could not be opened: any
          exit but 0 and kit.PARTLY. Red.
@@ -27,6 +30,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 # (name, tool and arguments, where it applies: "always" | "pr" | "local", what turns it red)
 GATES = [
@@ -228,10 +232,24 @@ def self_test():
     cases.append(("every gate has a name of its own and says what turns it red", len(set(names)) == len(names) and all(g[3] for g in GATES), names))
     missing = [g[1][0] for g in GATES if not os.path.isfile(os.path.join(kit.ROOT, g[1][0]))]
     cases.append(("every gate's tool exists", not missing, missing))
+    good = [[], ["--pr", "7"], ["--check-push-hook"], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--slef-test"], ["tools"], ["--pr"], ["--pr", "seven"], ["--pr=7"], ["--pr", "7", "--pr", "8"],
+           ["--pr", "7", "--self-test"], ["--self-test", "--check-push-hook"]]
+    cases.append(("call: no argument, --pr N, --check-push-hook and --self-test are its calls, each alone; --help, -h, a "
+                  "mistyped option, a positional argument, --pr without its number, a glued or a repeated --pr and two calls together are not",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"every gate": (), "with its pull request": ("--pr", calls.Value("N", "the number of the pull request", str.isdigit)),
+         "push hook": ("--check-push-hook",), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/gates.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     if "--check-push-hook" in sys.argv:
