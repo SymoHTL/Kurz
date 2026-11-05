@@ -184,14 +184,38 @@ internal sealed class Layout(IrModule module)
     {
         ListType => "inttoptr (i64 1 to ptr)",
         DataType d when IsBlock(d) => "null",
+        ClassType { Symbol.Derived: true } => "zeroinitializer", // K6: the pair of the address 0 and no table, as Rust lays out `Option<Rc<dyn Trait>>`
         ClassType => "null",
         CFunctionType => "null",
         FunctionType => "zeroinitializer",
         _ => null,
     };
 
-    /// <summary>The IR type of a union with a <see cref="Niche"/>: the function value's pair for a nullable function value, else an address.</summary>
-    public static string NicheIr(UnionType union) => Types.NonNull(union) is FunctionType ? "%kz.fn" : "ptr";
+    /// <summary>The IR type of a union with a <see cref="Niche"/>: the function value's pair for a nullable function value, the pair of an instance's address and its table for a nullable class that has derived classes, else an address.</summary>
+    public static string NicheIr(UnionType union) => Types.NonNull(union) switch
+    {
+        FunctionType => "%kz.fn",
+        ClassType { Symbol.Derived: true } => "%kz.obj",
+        _ => "ptr",
+    };
+
+    /// <summary>
+    /// K6: whether a value of the class's type is the pair of the instance's address and the table of its class (<c>%kz.obj</c>), as Rust
+    /// lays out an <c>Rc&lt;dyn Trait&gt;</c>: a class that another class derives from, whose value can be an instance of that one. A
+    /// class nothing derives from is the address alone, and its table is known where it is used.
+    /// </summary>
+    public static bool Fat(ClassSymbol symbol) => symbol.Derived;
+
+    /// <summary>The IR type of the pair of an instance's address and its class's table, declared once.</summary>
+    public string Pair()
+    {
+        if (defined.Add("%kz.obj"))
+        {
+            module.Global("%kz.obj = type { ptr, ptr }");
+        }
+
+        return "%kz.obj";
+    }
 
     /// <summary>The IR type of a value: <see cref="Lower.IrType"/>, a data type's structure or <c>ptr</c> for a block, and a union's structure of its tag and its room, or <c>ptr</c> where it has a <see cref="Niche"/>.</summary>
     public string Ir(KurzType type)
@@ -200,10 +224,12 @@ internal sealed class Layout(IrModule module)
         {
             case DataType d when IsBlock(d):
                 return "ptr";
-            case ClassType:
-                return "ptr"; // K2: an instance is the address of its block
+            case ClassType c:
+                return Fat(c.Symbol) ? Pair() : "ptr"; // K2: an instance is the address of its block, K6: with its class's table where a class derives from its type
+            case WeakRefType w when Fat(w.Target.Symbol):
+                return Pair(); // R3 with K6: the address of the target's block and the table of its class
             case UnionType u when Niche(u) is not null:
-                return NicheIr(u);
+                return NicheIr(u) == "%kz.obj" ? Pair() : NicheIr(u);
             case DataType d:
                 {
                     var name = $"%\"d.{Lower.Mangle(d)}\"";
@@ -274,10 +300,12 @@ internal sealed class Layout(IrModule module)
                 return (0, 1);
             case DataType d when IsBlock(d):
                 return (8, 8);
-            case ClassType:
-                return (8, 8);
+            case ClassType c:
+                return Fat(c.Symbol) ? (16, 8) : (8, 8);
+            case WeakRefType w when Fat(w.Target.Symbol):
+                return (16, 8);
             case UnionType u when Niche(u) is not null:
-                return Types.NonNull(u) is FunctionType ? (16, 8) : (8, 8);
+                return NicheIr(u) == "ptr" ? (8, 8) : (16, 8);
             case DataType d:
                 return Structure(Fields(d).Select(Measure));
             case UnionType u:
