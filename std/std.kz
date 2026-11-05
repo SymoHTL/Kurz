@@ -6268,7 +6268,7 @@ pub class HttpBody {
 }
 
 // A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, or none (design
-// record, section 12; W8). The functions that make one hold the status to 100 to 599, stopping the program otherwise, as an index
+// record, section 12; W8). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
 // out of range does, since a status is a literal in code, and set the `Content-Type` ASP.NET Core's `Results` sets, which the
 // headers can replace. `Write` writes the response, and `WriteHead` its head alone, for a `HEAD`; neither adds `Date` or
 // `Connection`, which the server's loop adds where the handler set none.
@@ -6279,7 +6279,7 @@ pub class HttpResponse {
     mut Bytes held = HttpNoBytes()
     mut string filePath = ""
 
-    // The status, from 100 to 599.
+    // The status, from 200 to 599.
     pub int Status => code
 
     // The headers, which a handler changes with `Add`, `Set` and `Remove` (W4).
@@ -6331,8 +6331,8 @@ pub class HttpResponse {
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
-        if status < 100 || status > 599 {
-            throw "status {status} is outside 100 to 599"
+        if status < 200 || status > 599 {
+            throw "status {status} is outside 200 to 599"
         }
 
         r = HttpResponse()
@@ -6350,7 +6350,7 @@ pub class HttpResponse {
     // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
     // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
     bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
-        bodiless = code < 200 || code == 204 || code == 304
+        bodiless = code == 204 || code == 304
         mut length = 0L
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {

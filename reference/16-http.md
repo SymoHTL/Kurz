@@ -853,12 +853,13 @@ A response is made by a function for each kind of body, `HttpResponse.Text(200, 
 rest is set through `response.Headers` (W4) (§12, the owner, 2026-11-01, Q1 (a)). Each sets the
 `Content-Type` ASP.NET Core's `Results` sets, `text/plain; charset=utf-8` for `Text`,
 `application/octet-stream` for `Bytes` and `File`, and none for `Empty`, which a handler replaces with
-`Set` (§12, the owner, 2026-11-03). A status outside 100 to 599 stops the program with a run-time
-error (§12, the owner, 2026-11-02, Q5). `response.Write(stream)` writes the status line, the headers
+`Set` (§12, the owner, 2026-11-03). A status outside 200 to 599 stops the program with a run-time
+error (§12, the owner, 2026-11-02, Q5, and 2026-11-05, S2: a `1xx` is interim, and the server alone sends
+`100 Continue`). `response.Write(stream)` writes the status line, the headers
 and the `Content-Length` of the body, which a `File` takes from its size when it is written, and then
 the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
 body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date` or `Connection`,
-which the server's loop adds (§12, assumed). A `1xx`, a `204` and a `304` get no body (§12, assumed),
+which the server's loop adds (§12, assumed). A `204` and a `304` get no body (§12, assumed),
 and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14). A response
 `Write` cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered
 `500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
@@ -870,7 +871,7 @@ being announced and not applied; beside a `Content-Length` it gets no answer (§
 program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
 headers written in the order they were set, the `Content-Type` first, and the `Content-Length` of
 the body after them where the handler set none; a handler's `Content-Length` contradicted when it is
-no number or another number than the body's length; no `Content-Length` for a `1xx`; a file whose
+no number or another number than the body's length; a file whose
 size cannot be read answered with that `500`, `Write` giving the `IoError` of the read; a
 `Transfer-Encoding` beside a `Content-Length` giving an `IoError` of the kind `InvalidInput`, nothing
 written; and a file whose size changes while it is sent giving one of the kind `InvalidData`)*
@@ -953,7 +954,7 @@ All() else {
 
 Case: [http/response-bodiless.kz](../corpus/http/response-bodiless.kz)
 ```kurz
-// a `1xx`, a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
+// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
 // says `Content-Length: 0`
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -975,7 +976,6 @@ void | IoError Wire(HttpResponse r) {
 void | IoError | HttpError All() {
     Wire(HttpResponse.Empty(204))
     Wire(HttpResponse.Text(304, "dropped"))
-    Wire(HttpResponse.Empty(100))
     Wire(HttpResponse.Empty(205))
     coded = HttpResponse.Text(204, "dropped")
     coded.Headers.Set("Transfer-Encoding", "gzip")
