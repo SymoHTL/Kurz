@@ -1283,6 +1283,11 @@ public sealed partial class Checker
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
             }
 
+            if (n.Name == "Hint")
+            {
+                return CheckHintFunction(m, c); // F18
+            }
+
             if (enums.TryGetValue(n.Name, out var enumSymbol))
             {
                 if (m.Member == "From")
@@ -1702,6 +1707,37 @@ public sealed partial class Checker
         }
 
         return Record(c, CallKind.StringJoin, typed, picked);
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, the value itself, of any type, <c>T BlackBox&lt;T&gt;(T value)</c>, which the optimiser cannot see
+    /// through, as Rust's <c>std::hint::black_box</c> in Kurz's casing (section 12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "any
+    /// value"); any other member of <c>Hint</c> is no name (V10). It takes no type arguments, as <c>string.Join</c> takes none (assumed).
+    /// </summary>
+    private Typed CheckHintFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member != "BlackBox")
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Hint` has no function `{m.Member}` (F18, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Hint.BlackBox`"))
+        {
+            return Typed.Error;
+        }
+
+        var parameter = new TypeParameterSymbol("T", c.Line);
+        var value = new TypeParameterType(parameter);
+        var candidate = new Candidate
+        {
+            Slots = [new Slot("value", value, false, false, true)],
+            TypeParameters = [parameter],
+            Result = value,
+            Form = "T BlackBox<T>(T value)",
+        };
+        return Record(c, CallKind.BlackBox, Call([candidate], c, null, out var picked), picked);
     }
 
     /// <summary>
