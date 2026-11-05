@@ -1925,6 +1925,9 @@ public sealed partial class Checker
             case AsmStatement a:
                 CheckAsm(a, naked: false);
                 return Flow.Completes;
+            case ConstAssertStatement c:
+                CheckConstAssert(c); // T37: checked while the program compiles
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {
@@ -2121,6 +2124,13 @@ public sealed partial class Checker
         if (variable is null && ImplicitField(a.Name) is { } implicitField)
         {
             AssignImplicitField(a, implicitField); // K7: the field of `this`
+            return;
+        }
+
+        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        {
+            AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
+            CheckExpression(a.Value, Untyped(a.Value));
             return;
         }
 

@@ -1,0 +1,11 @@
+// expect: error redeclared at 8
+// rules: K7
+
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+    pub int Count(int x) => items.Count + x
+}
+
+print(Bag().Count)

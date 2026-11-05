@@ -1,6 +1,6 @@
 ---
 name: a-legacy-sha-instruction-after-avx-pays-a-transition
-description: The SHA instructions have no VEX form; built for a CPU with AVX, SHA-256 of 48 MiB took 594 ms instead of 19 because LLVM cleans the upper halves of the YMM registers only before a call and a return, and a legacy instruction run while they are dirty pays a transition of the register state (pull request 173, 2026-11-01); the emitter cleans them once before a run that a test of `X86.Sha` guards
+description: The SHA instructions have no VEX form; built for a CPU with AVX, SHA-256 of 48 MiB took 594 ms instead of 19 because LLVM cleans the upper halves of the YMM registers only before a call and a return, and a legacy instruction run while they are dirty pays for them: before Skylake a transition of the register state, from Skylake on, as on the core measured, a dependence on the upper halves and a blend (pull request 173, 2026-11-01); the emitter cleans them once before a run that a test of `X86.Sha` guards
 metadata:
   type: feedback
 ---

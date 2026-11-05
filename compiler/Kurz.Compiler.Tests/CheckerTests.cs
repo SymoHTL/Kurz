@@ -2304,15 +2304,16 @@ public sealed class CheckerTests
     [InlineData("h = HttpHeaders()\nprint(h.names.Count)\n", "a field is visible outside that folder with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.SameName(\"a\", \"A\"))\n", "a method is visible outside that folder with `pub` (F9)")]
     [InlineData("print(1)\nprint(HttpHeaders.Most)\n", "a field is visible outside that folder with `pub` (F9)")]
+    [InlineData("h = HttpHeaders()\nprint(h.Size)\n", "a property is visible outside that folder with `pub` (F9)")]
     public void An_internal_member_of_a_class_of_std_is_visible_to_std_and_to_no_file(string program, string end)
     {
-        // F9 with W1: a member std/ marks `internal`, a field, a `static` method and a `static` field, is visible to std/'s own files, here
-        // a class beside HttpHeaders that reads the fields and calls the method, which the edited std/ checks clean (Edited holds it to no
-        // error), and to no file of a program, which is another folder (the owner, 2026-11-03)
+        // F9 with W1: a member std/ marks `internal`, a field, a `static` method, a `static` field and a property (K7), is visible to std/'s
+        // own files, here a class beside HttpHeaders that reads the fields and the property and calls the method, which the edited std/
+        // checks clean (Edited holds it to no error), and to no file of a program, which is another folder (the owner, 2026-11-03)
         var runtime = ListTests.Edited(
             ("std/std.kz", "    mut List<string> names = List<string>()", "    internal mut List<string> names = List<string>()"),
             ("std/std.kz", "    static bool SameName(string a, string b)", "    internal static bool SameName(string a, string b)"),
-            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100"));
+            ("std/std.kz", "pub class HttpHeaders {", "pub class HeadersProbe {\n    pub static bool Same(HttpHeaders h) => h.names.Count < HttpHeaders.Most && h.Size < HttpHeaders.Most && HttpHeaders.SameName(\"a\", \"A\")\n}\n\npub class HttpHeaders {\n    internal static int Most = 100\n    internal int Size => names.Count"));
         var error = Assert.Single(CheckSeeingStd(program, runtime).Diagnostics.Items);
         Assert.Equal((ErrorIds.NotVisible, 2), (error.Id, error.Line));
         Assert.Contains("is `internal` to the folder that declares its class", error.Message);
@@ -4021,6 +4022,234 @@ public sealed class CheckerTests
         Assert.Equal([expected], NotSupported(program));
     }
 
+    // ---- properties (K7: section 4, the owner, 2026-11-03) -----------------------------------------------------------
+
+    // K7: a class with a read-only property in nine lines and a blank one, so that the program after it starts at line 11
+    private const string PropertyBag = "class Bag {\n    mut List<int> items = []\n\n    pub int Count => items.Count\n\n    pub void Add(int x) {\n        items.Add(x)\n    }\n}\n\n";
+
+    [Fact]
+    public void A_property_is_read_without_a_call_and_gives_its_type()
+    {
+        // K7 (section 4: the owner, 2026-11-03): `b.Count` runs the property's expression and gives its type, through an instance and
+        // through `this`
+        Assert.Equal("int", TypeOf(PropertyBag + "b = Bag()\nn = b.Count\nprint(n)\n", "n"));
+        Clean("class C {\n    pub int One => 1\n\n    pub int Two() => this.One + 1\n}\n\nprint(C().Two())\n");
+
+        // the positive control: a method of the same shape is no property, and named without its call it is a method as a value
+        Assert.Equal(["5: a method as a value, named without a call (K7, F11)"], NotSupported("class C {\n    pub int One() => 1\n}\n\nn = C().One\nprint(n)\n"));
+    }
+
+    [Theory]
+    [InlineData("b = Bag()\nb.Count = 3\nprint(b.Count)\n", 12)]
+    [InlineData("b = Bag()\nb.Add(1)\nprint(b.Count)\n", 0)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        this.Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub string? Name => null\n\n    pub void Reset() {\n        Name = null\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub string? Name => null\n\n    pub void Reset() {\n        this.Name = null\n    }\n}\n\nC().Reset()\n", 5)]
+    public void A_property_has_no_setter(string program, int line)
+    {
+        // K7: a property is read-only, through an instance, through `this` and by its name inside its class: `assign-immutable` (the
+        // product pass's question 1, at its default); the second row is the positive control, a change of the field the property reads;
+        // the value assigned is read as the instance path reads it, by the name alone too, so a `null` adds no error of its own
+        List<(string Id, int Line)> expected = line == 0 ? [] : [(ErrorIds.AssignImmutable, line)];
+        Assert.Equal(expected, Errors(program.StartsWith("class", StringComparison.Ordinal) ? program : PropertyBag + program));
+    }
+
+    [Theory]
+    [InlineData("b = Bag()\nprint(b.Count())\n", 12)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub int Twice() => Count() * 2\n}\n\nprint(C().Twice())\n", 4)]
+    public void A_property_called_calls_the_value_it_gives(string program, int line)
+    {
+        // K7, F11: `b.Count()` calls the `int` the property gives, as a field's value is called (the product pass's question 2, at its
+        // default)
+        Assert.Equal([(ErrorIds.TypeMismatch, line)], Errors(program.StartsWith("class", StringComparison.Ordinal) ? program : PropertyBag + program));
+
+        // the positive control: the value of a property of a function type is called, through an instance and by the name alone
+        Clean("class C(int N) {\n    pub (int) => int Adder => (int x) => x + N\n\n    pub int Three() => Adder(2)\n}\n\nprint(C(1).Adder(2))\nprint(C(1).Three())\n");
+    }
+
+    [Fact]
+    public void A_property_without_pub_is_private_to_its_class()
+    {
+        // F9 with K7: a property without `pub` is read inside its class alone; outside it is `not-visible`
+        var program = "class C {\n    int Hidden => 1\n\n    pub int Shown() => Hidden + 1\n}\n\n";
+        Assert.Equal([(ErrorIds.NotVisible, 7)], Errors(program + "print(C().Hidden)\n"));
+
+        // the positive control: the read inside the class, by its name; and a property marked `internal` is read by the files of its
+        // folder (F9, the owner, 2026-11-03), here its own file
+        Clean(program + "print(C().Shown())\n");
+        Clean(program.Replace("    int Hidden", "    internal int Hidden") + "print(C().Hidden)\n");
+    }
+
+    [Theory]
+    [InlineData("class C {\n    int Count = 2\n    pub int Count => 1\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C(int Count) {\n    pub int Count => 1\n}\n\nprint(1)\n", 2)]
+    [InlineData("class C {\n    pub int Count => 1\n    pub int Count(int x) => x\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C {\n    pub int Count(int x) => x\n    pub int Count => 1\n}\n\nprint(1)\n", 3)]
+    [InlineData("class C {\n    pub int Count => 1\n    pub int Count => 2\n}\n\nprint(1)\n", 3)]
+    public void A_property_and_a_member_of_its_name_are_redeclared(string program, int line)
+    {
+        // K7, V9: a property is the one member of its name, as a field is; a method of that name is no overload of it, and two
+        // properties of one name are `redeclared`, not `duplicate-function`
+        Assert.Equal([(ErrorIds.Redeclared, line)], Errors(program));
+
+        // the positive control: names that differ in their case are two members
+        Clean("class C {\n    int count = 2\n\n    pub int Count => count\n}\n\nprint(C().Count)\n");
+    }
+
+    [Fact]
+    public void A_property_is_read_by_its_name_in_a_method_and_not_in_a_field_default()
+    {
+        // K7: inside its class a property stands by its name in a method and in another property, as a field does (the product pass's
+        // question 4, at its default)
+        Clean("class C {\n    pub int One => 1\n    pub int Two => One + One\n\n    pub int Three() => Two + One\n}\n\nprint(C().Three())\n");
+
+        // in a field's default it is a member of the instance, `unknown-name` as a method of the instance is there (C#'s CS0236)
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C {\n    pub int One => 1\n    int two = One + 1\n\n    pub int Two() => two\n}\n\nprint(C().Two())\n"));
+    }
+
+    [Fact]
+    public void A_test_of_a_property_narrows_no_read_of_it()
+    {
+        // N9 with K7: a read of a property is a call, so a test of one read narrows no other (the product pass's readings)
+        var program = "class C(string? N) {\n    pub string? Name => N\n}\n\nc = C(\"a\")\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 7)], Errors(program + "if c.Name != null {\n    print(c.Name.Bytes.Count)\n}\n"));
+
+        // the positive control: the same test of the field narrows its read (N3)
+        Clean(program + "if c.N != null {\n    print(c.N.Bytes.Count)\n}\n");
+    }
+
+    [Fact]
+    public void A_read_of_a_property_ends_what_a_test_showed_of_a_mut_field()
+    {
+        // N9 with K7: a read of a property is a call, whose body can assign a `mut` field through another reference (K2), so it ends
+        // what a test showed of a path through one, by the property's name inside its class (line 13) and through an instance (line 21);
+        // each read stands alone in a statement, since a call around it, `print(Drop)`, would end the narrowing by itself
+        var program = "class C {\n    pub mut string? F = \"a\"\n    pub int Drop => Clear()\n\n    int Clear() {\n        F = null\n        return 0\n    }\n\n    pub void Show() {\n        if F != null {\n            n = Drop\n            print(F.Bytes.Count + n)\n        }\n    }\n}\n\nc = C()\nif c.F != null {\n    m = c.Drop\n    print(c.F.Bytes.Count + m)\n}\nc.Show()\n";
+        Assert.Equal([(ErrorIds.NullableUnchecked, 13), (ErrorIds.NullableUnchecked, 21)], Errors(program));
+
+        // the positive control: without the reads the tests hold
+        Clean(program.Replace("n = Drop", "n = 1").Replace("m = c.Drop", "m = 2"));
+    }
+
+    [Theory]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nprint(C.Count)\n", 5)]
+    [InlineData("class C {\n    pub int Count => 1\n\n    pub static int Twice() => Count * 2\n}\n\nprint(C.Twice())\n", 4)]
+    public void A_property_is_a_member_of_an_instance(string program, int line)
+    {
+        // K7, K19: a property belongs to an instance, so it is read neither through the class's name nor by its name alone in a
+        // `static` member, which has no instance: `static-mismatch`
+        Assert.Equal([(ErrorIds.StaticMismatch, line)], Errors(program));
+
+        // the positive control: the read through an instance
+        Clean("class C {\n    pub int Count => 1\n}\n\nprint(C().Count)\n");
+    }
+
+    [Theory]
+    [InlineData("    pub void Run() {\n        Bump(mut Count)\n    }\n", ErrorIds.MutAtCall)]
+    [InlineData("    pub void Run() {\n        Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
+    [InlineData("    pub void Run() {\n        this.Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
+    [InlineData("    pub void Run() {\n        Bump(mut this.Count)\n    }\n", ErrorIds.MutAtCall)]
+    [InlineData("    pub void Run() {\n        c = C()\n        Bump(mut c.Count)\n    }\n", ErrorIds.MutAtCall)]
+    public void A_property_is_no_place_a_change_reaches(string method, string id)
+    {
+        // K7, M5, M7: the value of a property is a call's, so it is neither passed as `mut` nor changed by a `mut` method, by the name
+        // alone, through `this` or through an instance; the rows of the name alone are the trap of a name without a variable, which the
+        // emitter would find no place for
+        var program = "void Bump(mut int n) {\n    n = n + 1\n}\n\nclass C {\n    mut List<int> items = []\n    mut int count = 0\n\n    pub List<int> Items => items\n    pub int Count => count\n\n" + method + "}\n\nC().Run()\n";
+        Assert.Equal([(id, method.Contains("c = C()") ? 14 : 13)], Errors(program));
+
+        // the positive control: the fields themselves are changed
+        Clean(program.Replace("c = C()\n        Bump(mut c.Count)", "Bump(mut count)").Replace("mut this.Count", "mut count").Replace("mut Count", "mut count").Replace("Items.Add", "items.Add"));
+    }
+
+    [Fact]
+    public void A_property_named_Text_gives_an_instance_no_text()
+    {
+        // A5: an instance's text is its class's method `Text()`, and a property of that name is no such method
+        Assert.Equal([(ErrorIds.NoText, 5)], Errors("class C {\n    pub string Text => \"c\"\n}\n\nprint(C())\n"));
+
+        // the positive control: the method gives it
+        Clean("class C {\n    pub string Text() => \"c\"\n}\n\nprint(C())\n");
+    }
+
+    [Fact]
+    public void A_property_takes_no_mut_marker()
+    {
+        // K7, K9: a property has no setter, and its body assigns the `mut` fields of its instance without a marker, as a method's does
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub mut int Count => 1\n}\n\nprint(C().Count)\n"));
+    }
+
+    [Theory]
+    [InlineData("class C {\n    pub static int Count => 1\n}\n\nprint(1)\n", "2: a `static` property (K7, K19)")]
+    [InlineData("class C {\n    pub virtual int Count => 1\n}\n\nprint(1)\n", "2: the modifier `virtual` of a property, which section 14 leaves open (K7)")]
+    [InlineData("class C {\n    pub override int Count => 1\n}\n\nprint(1)\n", "2: the modifier `override` of a property, which section 14 leaves open (K7)")]
+    [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property, which section 14 leaves open (K7)")]
+    [InlineData("class C {\n    pub extern \"C\" int Count => 1\n}\n\nprint(1)\n", "2: the modifier `extern` of a property (K7, R16)")]
+    [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "1: an interface (K6, K10)")]
+    [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: the body of a data type (D16)")]
+    [InlineData("class C {\n    pub void Say => print(1)\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
+    [InlineData("class C {\n    pub int | IoError Count => 1\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nC? Find() => null\n\nprint(Find()?.Count ?? 0)\n", "7: a property read after `?.` (K7, N5)")]
+    [InlineData("class C {\n    pub int Count => 1\n}\n\nc = C()\np = &c.Count\nprint(1)\n", "6: a property read where the checker reads a field alone (K7)")]
+    public void A_property_the_checker_does_not_read_is_not_supported(string program, string expected)
+    {
+        // K7: a `static`, `virtual`, `override` or `prot` property, one in an interface or in the body of a `data` type, and one of `void`
+        // or of a type that lists cases are open (section 14, the product pass's questions 6 and 7 and #39's readings, at their defaults),
+        // and `extern` is not supported on a property as on a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
+        // this checker does not take for a property; an interface and a `data` type's body are not supported whatever they hold
+        Assert.Equal([expected], NotSupported(program));
+    }
+
+    [Fact]
+    public void A_property_of_a_base_is_read_through_a_derived_instance()
+    {
+        // K7, K6 (assumed, #39's readings): an inherited property is read as C# reads one, through an instance of the derived class, through a
+        // reference of the base's type and by its name alone in the derived class's methods
+        Clean("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Twice() => Count * 2\n}\n\nd = D(1, 2)\nB b = d\nprint(d.Count + b.Count + d.Twice())\n");
+
+        // one without `pub` is private to the base (F9): the derived class reads it neither by its name alone nor through an instance,
+        // and the text names a property
+        var hidden = Check("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Twice() => Count * 2\n}\n\nprint(D(1, 2).Twice())\n").Diagnostics.Sorted.Single();
+        Assert.Equal((ErrorIds.NotVisible, 6), (hidden.Id, hidden.Line));
+        Assert.Equal("`Count` of `B` is private to its class: a property is visible outside it with `pub` (F9)", hidden.Message);
+        Assert.Equal([(ErrorIds.NotVisible, 8)], Errors("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B\n\nd = D(1, 2)\nprint(d.Count)\n"));
+    }
+
+    [Theory]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n", 6)]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count(int y) => y\n}\n\nprint(D(1, 2).Count(2))\n", 6)]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Count) : B\n\nprint(D(1, 2).X)\n", 5)]
+    [InlineData("class B(int X) {\n    pub int Count(int y) => y\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n", 6)]
+    [InlineData("class A(int X) {\n    pub int Count => X\n}\n\nclass B(int Y) : A\n\nclass D(int Z) : B {\n    pub int Count() => 2\n}\n\nprint(D(1, 2, 3).Count())\n", 8)]
+    public void A_member_of_a_derived_class_takes_no_name_of_a_property_it_inherits(string program, int line)
+    {
+        // K7 (the owner, 2026-11-05, #110, comment 6659026217): a property has no override, so a derived class gives no member of its own
+        // the name of a property of a base it sees, a property, a method whatever its parameters or a field, two classes up the chain
+        // too, and gives no property the name of a method of such a base: `hides-member`, at the member
+        Assert.Equal([(ErrorIds.HidesMember, line)], Errors(program));
+
+        // a property with the name of a field of a base is `redeclared` (assumed: the id of that case), the base's fields being the class's
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("class B(int Count)\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Y)\n"));
+
+        // the positive controls: a property of a base without `pub`, which the derived class does not see, is hidden by nothing (F9), by
+        // a property, by a method, which the call on a derived instance picks, and by a field, which the read through one reads
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n");
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count() => 2\n}\n\nprint(D(1, 2).Count())\n");
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Count) : B\n\nprint(D(1, 2).Count)\n");
+    }
+
+    [Fact]
+    public void A_property_of_a_base_named_Text_gives_an_instance_no_text()
+    {
+        // A5, A9: the text of an instance is a method `Text()` of its class or of the nearest base, and a property of that name up the
+        // chain is no such method
+        Assert.Equal([(ErrorIds.NoText, 7)], Errors("class B {\n    pub string Text => \"b\"\n}\n\nclass D : B\n\nprint(D())\n"));
+
+        // the positive control: the base's method gives it
+        Clean("class B {\n    pub string Text() => \"b\"\n}\n\nclass D : B\n\nprint(D())\n");
+    }
+
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
@@ -4565,6 +4794,17 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public async Task A_chain_of_copies_that_branches_ends_at_the_bound_with_its_one_diagnostic()
+    {
+        // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
+        // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains
+        const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
+            + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
+        var bound = await Task.Run(() => NotSupported(Branching)).WaitAsync(TimeSpan.FromSeconds(20)); // a `TimeoutException` where it does not end
+        Assert.Equal(["12: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"], bound);
+    }
+
+    [Fact]
     public void A_chain_of_as_many_copies_as_the_build_reads_is_read_and_one_more_is_not_supported()
     {
         // T33: the bound the text names is the one the build keeps: a chain of 64 readers, each calling the next with its type, is read
@@ -4884,7 +5124,7 @@ public sealed class CheckerTests
     {
         // T35: the call writes the constant among its type arguments, a call that leaves it out takes its default, the body reads it as a
         // value of its enum, in a `match`, a lambda and a hole, a copy passes its own constant on, overloads that hold a constant of one
-        // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name elsewhere (L18)
+        // enum at a place are read as one, and a variable of the parameter's name is that variable; `const` is a name where L18 makes it no word
         Clean(Modes + "void Say<const Mode M>(string text) {\n    match M {\n        Mode.Plain => print(text)\n        Mode.Loud => print(\"{text}!\")\n    }\n}\n\n" +
             "void Twice<T, const Mode M = Mode.Plain>(T value) {\n    f = () => M\n    Say<M>(\"{value} {f()}\")\n}\n\nSay<Mode.Loud>(\"a\")\nTwice(1)\nTwice<string, Mode.Loud>(\"b\")\nTwice<bool>(true)\nprint(Color.Red)");
         Clean(Modes + "void Pick<const Mode M>() {\n    print(M)\n}\n\nvoid Pick<const Mode M>(int x) {\n    print(x)\n}\n\nPick<Mode.Plain>()\nPick<Mode.Loud>(1)");
@@ -4951,6 +5191,65 @@ public sealed class CheckerTests
         // no part of the build, and a call's type argument is read before an overload is picked (F12), so a parameter of another type,
         // and overloads that hold a type and a constant at one place, or constants of two types, are not read
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
+    }
+
+    // ---- const assert (T37) -----------------------------------------------------------------------
+
+    [Fact]
+    public void A_const_assert_that_holds_is_clean()
+    {
+        // T37: a copy's `T.Kind`, its constant type argument and `f.Name` of a pass are known in each copy, and literals and operators
+        // outside one; a generic function that no call reaches is checked in no copy; `assert` is a name elsewhere (L18)
+        Clean(Modes + "data Point(int X, int Y)\n\nvoid Names<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n    for f in T.Fields {\n" +
+            "        const assert(f.Name != \"Id\", \"{f.Name}\")\n    }\n}\n\nvoid Say<const Mode M>() {\n    const assert(M == Mode.Plain, \"{M}\")\n}\n\n" +
+            "void Never<T>(T value) {\n    const assert(false, \"never\")\n}\n\nconst assert(-(2) < 0 && !false, \"two\")\nNames(Point(1, 2))\nSay<Mode.Plain>()\nassert = 1\nprint(assert)");
+    }
+
+    [Theory]
+    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T} is no data type\")\n}\n\nNeed(1)", "8: const-assert-failed: `Need<int>`: int is no data type (the `const assert` in `Need`, T37)")]
+    [InlineData("void Say<const Mode M>() {\n    const assert(M == Mode.Plain, \"not {M}\")\n}\n\nSay<Mode.Plain>()\nSay<Mode.Loud>()", "9: const-assert-failed: `Say<Mode.Loud>`: not Loud (the `const assert` in `Say`, T37)")]
+    [InlineData("void Buffer<const int N>() {\n    const assert(N > 0 && N <= 4096, \"a buffer of {N} items\")\n}\n\nBuffer<64>()\nBuffer<0>()", "9: const-assert-failed: `Buffer<0>`: a buffer of 0 items (the `const assert` in `Buffer`, T37)")]
+    [InlineData("void Mark<const char C, const bool B>() {\n    const assert(B || C != 'x', \"{C} {B}\")\n}\n\nMark<'y', false>()\nMark<'x', true>()\nMark<'x', false>()", "10: const-assert-failed: `Mark<'x', false>`: x false (the `const assert` in `Mark`, T37)")]
+    [InlineData("void Need<T>(T value) {\n    const assert(T.Kind == TypeKind.Data, \"{T}\")\n}\n\nvoid Outer<T>(T value) {\n    Need(value)\n}\n\nOuter(1)", "12: const-assert-failed: `Outer<int>`: int (the `const assert` in `Need`, T37)")]
+    [InlineData("data Bad(int Id)\n\nvoid NoId<T>(T value) {\n    for f in T.Fields {\n        const assert(f.Name != \"Id\", \"{T}.{f.Name}\")\n    }\n}\n\nNoId(Bad(1))", "12: const-assert-failed: `NoId<Bad>`: Bad.Id (the `const assert` in `NoId`, T37)")]
+    [InlineData("void Later<T>(T value) {\n    check = () => {\n        const assert(T.Kind != TypeKind.Int, \"no {T}\")\n    }\n\n    check()\n}\n\nLater(\"a\")\nLater(1)", "13: const-assert-failed: `Later<int>`: no int (the `const assert` in `Later`, T37)")]
+    [InlineData("const assert(1 + 1 == 3, \"{1 + 1} {'x'} {true} {\"s\"} {Mode.Loud}\")", "4: const-assert-failed: 2 x true s Loud (T37)")]
+    [InlineData("void Plain() {\n    const assert(false, \"plain\")\n}", "5: const-assert-failed: plain (T37)")]
+    [InlineData("n = 2\nconst assert(n > 1, \"{n}\")", "5: const-assert-failed: the value of `n` is not known while the program compiles, in a condition of a `const assert` (T37)|5: const-assert-failed: the value of `n` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
+    [InlineData("void Need<T>(T value) {\n    const assert(value == value, \"x\")\n}\n\nNeed(1)", "5: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T37)")]
+    [InlineData("data Point(int X)\n\nvoid Show<T>(T value) {\n    for f in T.Fields {\n        const assert(true, \"{f.Get(value)}\")\n        const assert(f.Get(value) > 0, \"x\")\n    }\n}\n\nShow(Point(1))", "8: const-assert-failed: the value of `value` is not known while the program compiles, in a hole of the text of a `const assert` (T37)|9: const-assert-failed: the value of `value` is not known while the program compiles, in a condition of a `const assert` (T37)")]
+    [InlineData("const assert(1, \"one\")", "4: type-mismatch: a condition is a `bool`, not an `int` (C3)")]
+    [InlineData("const assert(nope > 1, \"{nope > 1}\")\nconst assert(false, \"{nope}\")", "4: unknown-name: no `nope` is visible here (V10)|4: unknown-name: no `nope` is visible here (V10)|5: unknown-name: no `nope` is visible here (V10)")]
+    [InlineData("x = nope\nconst assert(x, \"a\")\nconst assert(true, \"{x}\")", "4: unknown-name: no `nope` is visible here (V10)")]
+    [InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "7: const-assert-failed: the value of `T` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
+    public void A_const_assert_stops_the_build_where_its_condition_is_false(string program, string expected)
+    {
+        // T37: a false one in a copy stops the build at the call that made the outermost copy, naming it and the function that holds
+        // the `const assert`, with the text, its holes filled: a type parameter with the copy's type, a constant with its text (A2, A4);
+        // outside a copy, at the statement, in a function no call reaches too; a variable or a parameter is not known while the program
+        // compiles (Rust's E0435), a variable of a type parameter's name among them, and `f.Get(value)` in a pass reads `value`, in the
+        // condition and in a hole; the condition is a `bool` (C3), and a part's own
+        // error is its one (E1), a variable whose type was reported included
+        Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Theory]
+    [InlineData("bool Check() => true\n\nconst assert(Check(), \"x\")", "6: a call in a `const assert`, which the build does not evaluate while the program compiles (T37)")]
+    [InlineData("const assert([1, 2] == [1, 2], \"x\")", "4: a condition of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T37)")]
+    [InlineData("const assert(true, \"{1.5}\")", "4: a hole of the text of a `const assert` beyond what the build evaluates while the program compiles: literals, constants, operators on them, `T.Kind`, `f.Name` and constant type arguments (T37)")]
+    public void A_const_assert_beyond_what_the_build_evaluates_is_not_supported(string program, string expected)
+    {
+        // T37: the build evaluates no call while the program compiles, and of the other values those the checker folds alone
+        Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
+    }
+
+    [Fact]
+    public void What_a_const_assert_with_a_call_names_counts_as_read()
+    {
+        // T37 with V5: a name in a `const assert` that the build does not evaluate is read, as in a branch that never runs (E1)
+        var program = Modes + "bool Check(int x) => true\n\nn = 1\nconst assert(Check(n), \"x\")";
+        Assert.Equal(["7: a call in a `const assert`, which the build does not evaluate while the program compiles (T37)"], NotSupported(program));
+        Assert.Equal([(ErrorIds.UnusedVariable, 6)], Errors(program.Replace("Check(n)", "true")));
     }
 
     // ---- T.Make (T33) -------------------------------------------------------------------------------
