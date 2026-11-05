@@ -873,11 +873,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class Counter(int Count)\n\nint Read(Counter c = Counter(1)) => c.Count\n\nprint(Read())"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("class Counter(int Count)\n\ndata Holder(Counter C)\n\nint Read(Holder h = Holder(Counter(1))) => h.C.Count\n\nprint(Read())"));
 
-        // the owner's own refusal, a variable among the arguments: the parameter before it is no constant
-        Assert.Contains((ErrorIds.DefaultNotConstant, 3), Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
+        // the owner's own refusal, a variable among the arguments: a default is read with no variable in sight, so the parameter before it
+        // is `unknown-name` (V10) beside the default's own error, which is why a corpus case, which expects one error, cannot show it
+        Assert.Equal([(ErrorIds.UnknownName, 3), (ErrorIds.DefaultNotConstant, 3)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
 
         // a generic data type, whose construction is a data value as any other
         Clean("data Box<T>(T Value)\n\nint Get(Box<int> b = Box(1)) => b.Value\n\nprint(Get())");
+
+        // D11: a field's default that is no constant is refused where the field is declared, so a construction that leaves it out
+        // is a constant, and the walk reads no field's default
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 1)], Errors("data H(List<int> Xs = [1])\n\nint F(H h = H()) => h.Xs.Count\n\nprint(F())"));
     }
 
     [Theory]
@@ -1980,6 +1985,31 @@ public sealed class CheckerTests
         Assert.Equal(["1: `thread static` before a function, which R13 states before state alone (R13)"], NotSupported("thread static void F() {\n}\n\nF()", grants: "raw"));
     }
 
+    [Fact]
+    public void Inside_its_class_a_member_hides_the_state_of_its_name()
+    {
+        // the reading on R13 with K7 (README): inside its class a field, a `static` field or a method hides the state of its name, as a
+        // method hides a top-level function there (section 4): in a method, inside `raw` and outside it, in a lambda inside one, in a
+        // default of the class body and in the initial value of a `static` field
+        const string State = "thread static mut long left = 7\n\n";
+        Clean(State + "class C(long left) {\n    pub long Get() => left\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(mut long left) {\n    pub void Set() {\n        left = 5\n    }\n\n    pub long Get() => left\n}\n\nc = C(3)\nc.Set()\nprint(c.Get())", grants: "raw");
+        Clean(State + "class C(string left) {\n    pub string Get() {\n        raw {\n            return left\n        }\n    }\n}\n\nprint(C(\"f\").Get())", grants: "raw"); // the field's type, not the state's
+        Clean(State + "class C(long V) {\n    pub static long left = 3\n\n    pub static long Get() => left\n}\n\nprint(C.Get())", grants: "raw");
+        Clean(State + "class C(long V) {\n    pub long left() => 3\n\n    pub long Get() => left()\n}\n\nprint(C(1).Get())", grants: "raw");
+        Clean(State + "class C(long left) {\n    pub long Get() {\n        f = () => left\n        return f()\n    }\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(long left) {\n    long Twice = left * 2\n\n    pub long Get() => Twice\n}\n\nprint(C(3).Get())", grants: "raw");
+        Clean(State + "class C(long V) {\n    pub static long left = 3\n    pub static long Twice = left * 2\n}\n\nprint(C.Twice)", grants: "raw"); // a constant's read (K18)
+        // in a `static` method a field of the instance of that name is `static-mismatch`, as every such read there is (K19)
+        Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors(State + "class C(long left) {\n    pub static long Get() => left\n}\n\nprint(C.Get())", grants: "raw"));
+        // outside the class, and in a class with no member of the name, the state is reached as before: inside `raw` alone (R13), and a
+        // variable named as it is `redeclared` (V9)
+        Assert.Equal([(ErrorIds.RawRequired, 7)], Errors(State + "class C(long left) {\n    pub long Get() => left\n}\n\nlong F() => left\n\nprint(C(1).Get() + F())", grants: "raw"));
+        Assert.Equal([(ErrorIds.RawRequired, 4)], Errors(State + "class C(long V) {\n    pub long Get() => left\n}\n\nprint(C(1).Get())", grants: "raw"));
+        Clean(State + "class C(long V) {\n    pub long Get() {\n        raw {\n            return left\n        }\n    }\n}\n\nprint(C(1).Get())", grants: "raw");
+        Assert.Equal([(ErrorIds.Redeclared, 5)], Errors(State + "class C(long V) {\n    pub long Get() {\n        long left = 3\n        return left\n    }\n}\n\nprint(C(1).Get())", grants: "raw"));
+    }
+
     [Theory]
     [InlineData("static mut long t = 0\nprint(1)", "", "grant")]
     [InlineData("pub static mut string s = \"\"\nprint(1)", "raw", "counted reference")]
@@ -2227,6 +2257,23 @@ public sealed class CheckerTests
 
         // the positive control: a checker given no std/ does not see the class
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("h = HttpHeaders()"));
+    }
+
+    [Fact]
+    public void A_class_of_std_that_the_prelude_names_is_no_base_of_a_class_of_the_file()
+    {
+        // K6 with W1: std/'s checker judged the class with no class derived from it, so a class of the file that names it after `:` is
+        // not supported, and std/'s symbol is left as it is
+        var runtime = StdRuntime.Value;
+        var stdHeaders = runtime.StdChecker.Model.ClassOf(runtime.Std.Statements.OfType<TypeDeclaration>().Single(t => t.Name == "HttpHeaders"));
+        var (diagnostics, _) = CheckSeeingStd("class Mine : HttpHeaders {\n    pub int Size() => 1\n}\n\nprint(Mine().Size())\n");
+        Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
+        Assert.Equal(["1: `HttpHeaders` after `:`, a class of `std/` the prelude brings into the file (K6, W1)"], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        Assert.False(stdHeaders.Derived);
+
+        // the positive control: a class of the file after `:` is read, with std/ seen
+        var (own, _) = CheckSeeingStd("class Headers {\n    pub int Size() => 0\n}\nclass Mine : Headers {\n    pub int Count() => 1\n}\n\nprint(Mine().Count())\n");
+        Assert.Empty(own.Items);
     }
 
     [Fact]
@@ -3609,6 +3656,67 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_class_takes_the_fields_and_methods_of_its_base_and_overrides_what_the_base_marks_virtual()
+    {
+        // K6, K10: the short form takes the base's parameters first, the explicit form computes them; K11: a parameter with a base
+        // field's name and type is that field; the base's methods are the class's, a `prot` one inside it (F9); a value of the class
+        // stands where its base is required, a `weak` one too (R3), and `==` takes the two (K13)
+        Clean("class User(string Name)\nclass Admin(int Level) : User\nclass Guest(int Number) : User(\"guest {Number}\")\nclass Owner(string Name, int Level) : User(Name)\n\nUser a = Admin(\"Ann\", 3)\nprint(a.Name)\nprint(Guest(7).Name)\nprint(Owner(\"Bo\", 1).Name)\nprint(a == Admin(\"Ann\", 3))");
+        Clean("class User(string Name, string Mail)\nclass Admin(string Name, int Level) : User\n\nprint(Admin(\"a\", \"m\", 1).Level)");
+        Clean("class Shape {\n    pub virtual int Area() => 0\n    prot int Twice(int x) => x * 2\n}\nclass Square(int Side) : Shape() {\n    pub override int Area() => Twice(Side * Side)\n}\n\nShape s = Square(2)\nprint(s.Area())");
+        Clean("class A(int N)\nclass B(int M) : A\nclass Keep(weak A? W)\n\nb = B(1, 2)\nweak B? wb = b\nk = Keep(wb)\nA? a = k.W\nprint(a == b)");
+        // a base method the class cannot see is hidden by nothing, and `override` can be overridden again (K7, assumed in the reference)
+        Clean("class A {\n    int Get() => 1\n\n    pub int Use() => Get()\n}\nclass B : A {\n    pub int Get() => 2\n}\n\nprint(B().Get() + B().Use())");
+        Clean("class A {\n    pub virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\nclass C : B {\n    pub override int Get() => 3\n}\n\nA x = C()\nprint(x.Get())");
+        // T1: a base's value is no derived class's; F9: a `prot` method outside the classes that derive from its class is `not-visible`
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class A(int N)\nclass B(int M) : A\n\nB b = A(1)\nprint(b.M)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class A(int N)\nclass B(int M)\n\nprint(A(1) == B(1))"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class A {\n    prot int Get() => 1\n}\n\nprint(A().Get())"));
+        // K16, K17: the errors of the two forms, each once, and no second error where the class is used
+        Assert.Equal([(ErrorIds.BaseFieldClash, 2)], Errors("class User(string Name)\nclass Admin(int Name) : User(\"x\")\n\nprint(Admin(1).Name)"));
+        Assert.Equal([(ErrorIds.BaseFieldClash, 2)], Errors("class User(string Name)\nclass Admin(string Name, int Level) : User(\"guest\")\n\nprint(Admin(\"a\", 1).Name)"));
+        Assert.Equal([(ErrorIds.BaseFieldClash, 2)], Errors("class User(string Name)\nclass Admin(int Name) : User\n\nprint(Admin(\"Ann\", 1).Name)"));
+        Assert.Equal([(ErrorIds.BaseFieldClash, 2)], Errors("class User(string Name, string Mail)\nclass Admin(string Mail, int Level) : User\n\nprint(Admin(\"a\", \"m\", 1).Level)"));
+        Assert.Equal([(ErrorIds.BaseFieldClash, 3)], Errors("class User(string Name)\nclass Guest(int Number) : User(\"guest\")\nclass Admin(string Name, int Level) : Guest\n\nprint(Admin(7, \"a\", 1).Level)"));
+        Assert.Equal([(ErrorIds.NoPrimaryConstructor, 4)], Errors("class Animal {\n    pub int Legs() => 4\n}\nclass Dog(string Name) : Animal\n\nprint(Dog(\"Rex\").Name)"));
+        Clean("class Animal {\n    pub int Legs() => 4\n}\nclass Dog(string Name) : Animal()\n\nprint(Dog(\"Rex\").Legs())");
+        // K7: an override without its marks, one of nothing or of a private method, and one of another return type, at the method
+        const string animal = "class Animal {\n    pub virtual string Sound() => \"quiet\"\n    pub string Name() => \"animal\"\n    string Secret() => \"s\"\n}\n";
+        Assert.Equal([(ErrorIds.HidesMember, 7)], Errors(animal + "class Dog : Animal {\n    pub string Sound() => \"woof\"\n}\n\nprint(Dog().Sound())"));
+        Assert.Equal([(ErrorIds.HidesMember, 7)], Errors(animal + "class Dog : Animal {\n    pub string Name() => \"dog\"\n}\n\nprint(Dog().Name())"));
+        // F9 with K7: a base method marked `internal` is one the derived class sees in its folder, so a method of its name and parameters hides it
+        const string quiet = "class Animal {\n    internal string Quiet() => \"q\"\n}\n";
+        Assert.Equal([(ErrorIds.HidesMember, 5)], Errors(quiet + "class Dog : Animal {\n    pub string Quiet() => \"d\"\n}\n\nprint(Dog().Quiet())"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 5)], Errors(quiet + "class Dog : Animal {\n    pub override string Quiet() => \"d\"\n}\n\nprint(Dog().Quiet())"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Name() => \"dog\"\n}\n\nprint(Dog().Name())"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Run() => \"run\"\n}\n\nprint(Dog().Run())"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 7)], Errors(animal + "class Dog : Animal {\n    pub override string Secret() => \"d\"\n}\n\nprint(Dog().Secret())"));
+        Assert.Equal([(ErrorIds.OverrideReturnType, 7)], Errors(animal + "class Dog : Animal {\n    pub override int Sound() => 1\n}\n\nprint(Dog().Sound())"));
+        Clean(animal + "class Dog : Animal {\n    pub override string Sound() => \"woof\"\n    pub string Name(int n) => \"dog\"\n    pub string Secret() => \"d\"\n}\n\nprint(Dog().Sound())\nprint(Dog().Name(1))\nprint(Dog().Secret())");
+        // K7 with F9 (the owner, 2026-11-02, #110, "allowed as written"): an override is as visible as it writes; one without `pub` is
+        // private to its class, reached by a call through the base and inside the class, and `not-visible` on the derived type outside
+        // it; a `prot` one is `prot`, and a `pub` override of a `prot` method is `pub`; a class derived from the one with the private
+        // override takes it as the method of that name *(assumed)*, and its own `pub` override is `pub`
+        const string bare = "class Dog : Animal {\n    override string Sound() => \"woof\"\n    pub string Bark() => Sound()\n}\n";
+        Clean(animal + bare + "\nAnimal a = Dog()\nprint(a.Sound())\nprint(Dog().Bark())");
+        Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "\nprint(Dog().Sound())"));
+        Assert.Equal([(ErrorIds.NotVisible, 10)], Errors(animal + "class Dog : Animal {\n    prot override string Sound() => \"woof\"\n}\n\nprint(Dog().Sound())"));
+        Clean("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nprint(B().Get())");
+        Assert.Equal([(ErrorIds.NotVisible, 9)], Errors("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nA x = B()\nprint(x.Get())"));
+        Assert.Equal([(ErrorIds.NotVisible, 12)], Errors(animal + bare + "class Puppy : Dog\n\nprint(Puppy().Sound())"));
+        Clean(animal + bare + "class Puppy : Dog {\n    pub override string Sound() => \"yip\"\n}\n\nAnimal p = Puppy()\nprint(p.Sound())\nprint(Puppy().Sound())");
+        // K13: `==` on a base reads its derived classes, a field without `==` among them as D3 reads a data type's (`type-mismatch`)
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("class A(int N)\nclass B(Map<string, int> M) : A\n\nx = A(1)\nprint(x == x)"));
+        Clean("class A(mut int N)\nclass B(Map<string, int> M) : A\n\nx = A(1)\nprint(x == x)");
+        // R2, R4: a field of a base's type reaches every class derived from it *(assumed)*
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors("class A(mut Item? Next)\nclass Item(int V)\nclass Wrap(A Inner) : Item\n\nprint(1)"));
+        Clean("class A(mut Item? Next)\nclass Item(int V)\nclass Wrap(A Inner)\n\nprint(1)");
+        // C4, O5: an arm of the class that is the case, of a base class and of a class nothing derives from, is read; an arm of a
+        // class derived from a case tests the instance's class at run time, `not supported` (the theory)
+        Clean("class A\nclass B : A\nclass C\n\nint | A | C Pick(int n) {\n    if n > 0 {\n        return n\n    }\n    return B()\n}\n\nprint(match Pick(1) {\n    int n => n\n    A => 0\n    C => 1\n})\nx = Pick(0) else {\n    A => 2\n    C => 3\n}\nprint(x)");
+    }
+
+    [Fact]
     public void A_mut_marker_on_a_method_of_a_class_is_syntax()
     {
         // K9 gives the marker to the methods of values (M5); a method of a class changes its instance without one (E4)
@@ -3796,6 +3904,12 @@ public sealed class CheckerTests
         Clean("class User(int Id, mut string Name, Map<string, int> Seen) equal by Id\n\nmut m = Map<User, int>()\nm[User(1, \"a\", Map<string, int>())] = 1\nprint(m.Count)");
         Clean("class Tag(mut string Name, mut Map<string, int> Seen) equal by Name\n\nprint(Tag(\"a\", Map<string, int>()) == Tag(\"a\", Map<string, int>()))");
         Clean("class Box(mut Map<string, int> Seen)\n\nb = Box(Map<string, int>())\nprint(b == b)");
+        // K4: a field whose type reaches a `weak` reference, in a list, a map, a nullable or a `data` value, makes the class compare
+        // by identity and hash by its address, as a `weak` field does (the owner, 2026-11-02, #110, comment 6580085338); a class
+        // in between compares as its own class does, so a `weak` behind it does not count
+        Clean("class Owner(string Name)\nclass Club(List<weak Owner?> Members)\n\no = Owner(\"Ann\")\na = Club([o])\nprint(a == Club([o]))\nmut m = Map<Club, int>()\nm[a] = 1\nprint(m.Count)");
+        Clean("class Owner(string Name)\ndata Tag(string Label, weak Owner? Keeper)\nclass Shelf(Tag T, Map<string, int> Seen)\n\ns = Shelf(Tag(\"x\", null), Map<string, int>())\nprint(s == s)");
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("class Owner(string Name)\nclass Pet(weak Owner? Keeper)\nclass Home(Pet P, Map<string, int> Seen)\n\nh = Home(Pet(null), Map<string, int>())\nprint(h == h)")); // a `weak` behind a class does not count
         // the text ends with the rules that make the field count: K4 where the class compares by content, K5 where its clause names
         // the field, and neither for a data value, the control
         foreach (var (source, rules) in new[]
@@ -3833,8 +3947,8 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("class Box<T>(T Item)\n\nprint(1)", "1: a generic class (T19, chapter 7)")]
-    [InlineData("class A\nclass B : A\n\nprint(1)", "2: a base class or an interface after `:` (K6, K10)")]
-    [InlineData("class Owner(string Name)\nclass Pet(string Name, weak Owner? Keeper) equal by Keeper\n\nprint(1)", "2: `equal by` that names the `weak` field `Keeper`, which section 14 of the record leaves open (K8, R3)")]
+    [InlineData("class Owner(string Name)\nclass Pet(string Name, weak Owner? Keeper) equal by Keeper\n\nprint(1)", "2: `equal by` that names `Keeper`, a field that holds a `weak` reference, which the record makes the error `equal-by-weak` (K8, R3)")]
+    [InlineData("class Owner(string Name)\nclass Club(string Name, List<weak Owner?> Members) equal by Members\n\nprint(1)", "2: `equal by` that names `Members`, a field that holds a `weak` reference, which the record makes the error `equal-by-weak` (K8, R3)")]
     [InlineData("class C {\n    prot static int Step = 1\n}\n\nprint(1)", "2: the modifier `prot` of a `static` field (K7, K18, R13)")]
     [InlineData("class C {\n    pub static List<int> Steps = []\n}\n\nprint(1)", "2: a `static` field of type `List<int>`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)")]
 
@@ -3843,10 +3957,7 @@ public sealed class CheckerTests
     [InlineData("class C {\n    prot int n = 0\n}\n\nprint(1)", "2: the modifier `prot` of a field (K7, F9)")]
     [InlineData("class C(int V) {\n    int a = 1\n\n    pub C() : this(0) { }\n}\n\nprint(1)", "4: a constructor declared in the body of a class (K14)")]
     [InlineData("class C(int N) {\n    pub C() : this(0) { }\n}\n\nprint(1)", "2: a constructor declared in the body of a class (K14)")]
-    [InlineData("class C(int N) {\n    pub virtual int Get() => N\n}\n\nprint(C(1).Get())", "2: the modifier `virtual` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub static int Make() => 1\n}\n\nf = C.Make\nprint(f())", "5: a method as a value, named without a call (K7, F11)")]
-    [InlineData("class C(int N) {\n    pub override string Text() => \"c\"\n}\n\nprint(1)", "2: the modifier `override` of a method (K7, R16)")]
-    [InlineData("class C(int N) {\n    prot int Get() => N\n}\n\nprint(1)", "2: the modifier `prot` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    extern \"C\" long Twice(long x) {\n        return x * 2\n    }\n}\n\nprint(1)", "2: the modifier `extern` of a method (K7, R16)")]
     [InlineData("class C(int N) {\n    pub T Same<T>(T x) => x\n}\n\nprint(C(1).Same(2))", "2: a method with type parameters of its own (section 4, T19)")]
     [InlineData("class Owner(string Name)\ndata Box<T>(T V)\nclass Pet(Box<weak Owner?> B)\n\nprint(1)", "3: a `weak` reference as a type argument of a data type (R3)")]
@@ -3855,6 +3966,10 @@ public sealed class CheckerTests
     [InlineData("class A(int N)\nclass B(int N)\nclass Pet(weak (A | B)? Keeper)\n\nprint(1)", "3: `weak` before `A | B`, which the checker does not read as a class (R5, T19, D9)")]
     [InlineData("class Owner(string Name)\nclass Pet(mut (weak Owner?) => void Call)\n\nprint(1)", "2: a `weak` reference as a parameter or the result of a function type (R3)")]
     [InlineData("class Owner(string Name)\n\nm = Map<string, weak Owner?>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<weak Owner?, int>()\nprint(m.Count)", "3: a `weak` reference as a key or a value of a map (R3)")]
+    [InlineData("class Owner(string Name)\ndata Tag(string Label, weak Owner? Keeper)\n\nm = Map<Tag, int>()\nprint(m.Count)", "4: a map with keys of type `Tag`: its field `Keeper`: a `weak Owner?` is no key the checker reads (M9)")]
+    [InlineData("class Owner(string Name)\n\nm = Map<List<weak Owner?>, int>()\nprint(m.Count)", "3: a map with keys of type `List<weak Owner?>`: its items: a `weak Owner?` is no key the checker reads (M9)")]
+    [InlineData("class Owner(string Name)\ndata Tag(string Label, weak Owner? Keeper)\n\nprint(Tag(\"x\", null) == Tag(\"x\", null))", "4: `==` on a `Tag`: its field `Keeper`: `==` on a `weak Owner?` is not read (D3, M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\ndata K(Tag Item)\n\nm = Map<K, int>()\nprint(m.Count)", "4: a map with keys of type `K`: its field `Item`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<Tag?, int>()\nprint(m.Count)", "3: a map with keys of type `Tag?`: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     [InlineData("class Tag(mut string Name) equal by Name\n\nm = Map<List<Tag>, int>()\nprint(m.Count)", "3: a map with keys of type `List<Tag>`: its items: `Tag` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
@@ -3866,14 +3981,41 @@ public sealed class CheckerTests
     [InlineData("data Bag(List<int> Items)\nclass P(mut Bag B) {\n    pub void Go() {\n        B.Items.Add(1)\n    }\n}\n\nP(Bag([1])).Go()", "4: a `mut` method on a value held by a field of an instance (K2, M5)")]
     [InlineData("class C(int N) {\n    data Inner(int X)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
     [InlineData("class C(int N) {\n    class D(int M)\n}\n\nprint(C(1).N)", "2: a type declared in the body of a class (K7)")]
+    [InlineData("interface Shape {\n    int Area()\n}\nclass Dot : Shape {\n    pub int Area() => 1\n}\n\nprint(1)", "1: an interface (K6, K10)")]
+    [InlineData("data D(int X)\nclass A : D\n\nprint(1)", "2: `D` after `:`, where a class names its base class and its interfaces (K6, K7)")]
+    [InlineData("class A\nclass B\nclass C : A, B\n\nprint(1)", "3: a second base class, `B`, where a class inherits from one class (K6)")]
+    [InlineData("class A : B\nclass B : A\n\nprint(1)", "2: the base `A`, which closes a cycle of bases (K6)")]
+    [InlineData("class A : A\n\nprint(1)", "1: the base `A`, which closes a cycle of bases (K6)")]
+    [InlineData("class A(int N) {\n    int m = 1\n}\nclass B(int N) : A\n\nprint(1)", "2: a field in the body or a `static` member of `A`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A(int N) {\n    pub static int Step = 1\n}\nclass B(int N) : A\n\nprint(1)", "2: a field in the body or a `static` member of `A`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A(int N)\nclass B(int N) : A {\n    pub static int Make() => 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A(int N)\nclass B(int N) : A {\n    mut int m = 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A(int N)\nclass B : A\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
+    [InlineData("class A\nclass B : A()\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
+    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
+    [InlineData("class A(string Name = \"a\")\nclass B(string Name = \"b\", int L) : A\n\nprint(1)", "2: a default on `Name`, which in the short form is the field of the base `A` with the base's default (K16)")]
+    [InlineData("class A(int Id)\nclass B(int X) : A equal by X\n\nprint(1)", "2: `equal by` on a class whose base `A` has fields and no clause, where K13 does not say whether the base's fields count")]
+    [InlineData("class A {\n    virtual int Get() => 1\n}\n\nprint(1)", "2: `virtual` on a private method, which no derived class sees (K7, F9)")]
+    [InlineData("class A {\n    pub virtual int Get() => 1\n}\nclass B : A {\n    pub virtual override int Get() => 2\n}\n\nprint(1)", "5: `virtual` and `override` on one method (K7)")]
+    [InlineData("class A {\n    prot int Get() => 1\n}\nclass B : A {\n    pub int Peek(A other) => other.Get()\n}\n\nprint(1)", "5: the `prot` method `Get` called through an `A`, which is not the calling class or derived from it (F9)")]
+    [InlineData("class A\nclass B : A\n\nA x = B()\nprint(match x {\n    B b => 1\n    else => 2\n})", "6: an arm of `B`, a class derived from a case of `A`, which tests the instance's class at run time (C4, K6)")]
+    [InlineData("class A\nclass B : A\n\nint | A Pick(int n) {\n    if n > 0 {\n        return n\n    }\n    return A()\n}\n\nx = Pick(1) else {\n    B => 0\n}\nprint(x)", "12: an arm of `B`, a class derived from a case the call can return, which tests the instance's class at run time (O5, K6)")]
+    [InlineData("class Tag(int Id) equal by Id\nclass Sub(mut string Name) : Tag equal by Name\n\nm = Map<Tag, int>()\nprint(m.Count)", "4: a map with keys of type `Tag`: its derived class `Sub`: `Sub` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14) (M9)")]
     public void A_part_of_a_class_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
-        // generic classes (T19), bases and interfaces (K6, K10), constructors in the body (K14), a field there without
-        // a written type or of another modifier than `pub` and `mut` (K7), a `static` field of another modifier, of another type, or with
-        // an initial value that is no constant (K18), a method that is `virtual`, `override`, `prot` or `extern`, or has type parameters,
+        // generic classes (T19), interfaces (K6, K10), constructors in the body (K14), a field there without a written type or of another
+        // modifier than `pub` and `mut` (K7), a `static` field of another modifier, of another type, or with an initial value that is no
+        // constant (K18), a field in the body or a `static` member of a class in a chain (K6, K7, K18), a base that is no class, a
+        // second one and a cycle of bases (K6), the arguments of a base for a class without a primary constructor (K10, K14), a passed-on
+        // parameter whose `mut` or, in the short form, whose default differs from the base's field (K11, K16), `equal by` over a base with
+        // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, a `prot`
+        // method through a reference of a base's type (K7, F9), an arm of a derived class (C4), a key type whose derived class names a `mut`
+        // field in its clause (K12), a method that is `extern`, or has type parameters,
         // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
-        // case of a union, whose nullable cases are open (section 14), `equal by` that names a `weak` field and a key type that holds a class whose `equal by`
-        // names a `mut` field, both open (section 14; K8, K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
+        // case of a union, whose nullable cases are open (section 14), a `weak` reference as a map's key or in a key type that compares
+        // by content, `weak-key` in the record, and `==` on a `data` value whose field is `weak`, by its target's identity in the record (R3),
+        // `equal by` that names a `weak` field, `equal-by-weak` in the record (K8, R3), a key type that holds a class whose `equal by`
+        // names a `mut` field, open (section 14; K12), a method as a value, a field of function type, whose cycle R9 judges by the lambdas of
         // the program, an assignment or a `mut` method into a value a field of an instance holds (K2, M4, M5), the field named alone
         // inside a method among them, and a type declared in the body (K7)
         Assert.Equal([expected], NotSupported(program));
@@ -4152,7 +4294,7 @@ public sealed class CheckerTests
     {
         // E1: one defect, one diagnostic; the fields and members of an instance of a class the checker does not read are its chapter's business; a
         // list, a function or a data type with an error inside it is the error type as a whole, so one unknown element type is one error
-        var (diagnostics, _) = Check("class Counter(mut int Count) {\n    pub virtual void Add() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nc.Count = 2\nc.Add()\nprint(c.Count)");
+        var (diagnostics, _) = Check("class Counter(mut int Count) {\n    pub void Add<T>() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nc.Count = 2\nc.Add()\nprint(c.Count)");
         Assert.DoesNotContain(diagnostics.Items, d => d.IsError);
         Assert.Single(diagnostics.Items, d => !d.IsError);
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("xs = List<Nope>()\nList<int> ys = xs\nprint(ys.Count)"));
@@ -4497,6 +4639,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "", "")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)", "Deep(Box(1), 3)", "")));
 
+        // a refused call inside the value of `f.Get`, which a pass of a copy reads as the field, is copied with its origin, so the
+        // chain stops at it too and the bound of T33 does not report it
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors("data Box<T>(T A)\n\nT Deep<T>(T x, int n) {\n    for f in T.Fields {\n        if n > 0 {\n"
+            + "            f.Type part = f.Get(Deep(Box(x), n - 1).A)\n            print(\"{part}\")\n        }\n    }\n    return x\n}\n\nDeep(Box(1), 3)"));
+
         const string Other = "int y = \"a\"\n        ";
         Assert.Equal([(ErrorIds.TypeMismatch, 5), (ErrorIds.UnusedVariable, 5), (ErrorIds.GrowingTypeArgument, 7)],
             Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)", Other)));
@@ -4517,7 +4664,7 @@ public sealed class CheckerTests
     public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
     {
         // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,
-        // inside a loop over `T.Fields` as outside it (the owner, 2026-11-03, comment 6603481343 on issue 156): an arm no copy takes is
+        // the `match` inside a loop over `T.Fields` as outside it (the owner, 2026-11-03, comment 6603481343 on issue 156): an arm no copy takes is
         // clean, and one a copy takes that grows ends at the bound of T33, at the outer call; the same call outside the arm is refused
         const string Deep = "data Box(int A)\ndata Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n{0}\n    }}\n}}\n\nDeep(Box(1), 3)";
         const string Arm = "        match T.Kind {{\n            TypeKind.{0} => Deep(Wrap(x), n - 1)\n            else => print(n)\n        }}";
@@ -4526,6 +4673,10 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+
+        // a loop over `T.Fields` opened inside such an arm is read as a loop's calls are, and a cycle that grows there is refused at its call
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors("data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n"
+            + "            for f in T.Fields {\n                Deep(Wrap(x), n - 1)\n            }\n        }\n        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)"));
     }
 
     [Fact]
@@ -4880,5 +5031,27 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("string RegexError = \"a\"\nprint(RegexError)"));
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("void Show(int Match) {\n    print(Match)\n}\n\nShow(1)"));
         Assert.Empty(Errors("data Found(int Match)\n\nprint(Found(1).Match)"));
+    }
+
+    [Fact]
+    public void Hint_BlackBox_gives_back_a_value_of_its_arguments_type_and_takes_no_type_arguments()
+    {
+        // F18: `T BlackBox<T>(T value)`, any value, `T` inferred from the argument (section 12, the owner, 2026-11-03, "Any value, as
+        // Rust's"); type arguments are refused, as `string.Join` refuses them (assumed); `Hint` is a name every file sees, so a file's own
+        // is `redeclared`, and a member of it other than `BlackBox` is no name (V10)
+        Assert.Equal("int", TypeOf("n = Hint.BlackBox(1)\nprint(n)", "n"));
+        Assert.Equal("byte", TypeOf("byte b = 3\nc = Hint.BlackBox(b)\nprint(c)", "c"));
+        Assert.Equal("string", TypeOf("s = Hint.BlackBox(\"a\")\nprint(s)", "s"));
+        Assert.Equal("List<int>", TypeOf("xs = Hint.BlackBox([1, 2])\nprint(xs)", "xs"));
+        Assert.Equal("int?", TypeOf("int? x = null\ny = Hint.BlackBox(x)\nprint(y)", "y"));
+        Assert.Equal("Point", TypeOf("data Point(int X, int Y)\n\np = Hint.BlackBox(Point(1, 2))\nprint(p.X)", "p"));
+        Assert.Empty(Errors("n = Hint.BlackBox(value: 1)\nprint(n)"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("print(Hint.BlackBox<int>(1))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(Hint.BlackBox(1, 2))"));
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 1)], Errors("print(Hint.BlackBox())"));
+        Assert.Equal([(ErrorIds.CannotInfer, 1)], Errors("print(Hint.BlackBox([]))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(Hint.Opaque(1))"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int Hint(int x) => x\nprint(Hint(1))"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("Hint = 1\nprint(Hint)"));
     }
 }

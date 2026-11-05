@@ -592,7 +592,7 @@ def run_gate(gate, repo, number, get=None, pages=None):
         print(LIMIT)
         return (findings_errors(threads, changed, moved, rounds >= kit.ROUND_CAP),
                 f"{len(threads)} threads, {len(finding_threads(threads))} with findings, {rounds} review rounds (the cap is {kit.ROUND_CAP})")
-    raise kit.Refused(f"unknown gate {gate!r}: title, breadth, findings or resolve")
+    raise kit.Refused(f"unknown gate {gate!r}: title, breadth, findings, resolve or cap")
 
 
 def fixture_threads():
@@ -1124,6 +1124,9 @@ def self_test():
                   type(out) is tuple and any("Blast radius" in e for e in out[0]) and out[1] == "1 files", repr(out)))
     out = got(lambda: run_gate("spelling", "o/n", 1, lambda path: pr, listed([commit], [changed])))
     cases.append(("a gate this tool does not have is refused", type(out) is kit.Refused and "unknown gate" in str(out), repr(out)))
+    cases.append(("the refusal of a gate this tool does not have ends in the fixed list of its gates and commands, cap among them; "
+                  "the list is written out, not read from run_gate",
+                  type(out) is kit.Refused and str(out).endswith("title, breadth, findings, resolve or cap"), repr(out)))
     numbers = (got(lambda: pr_number(["title", "--pr", "7"], {})), got(lambda: pr_number(["title"], {"PR_NUMBER": "9"})))
     cases.append(("number: --pr and PR_NUMBER are read", numbers == (7, 9), repr(numbers)))
     refused = [got(lambda: pr_number(["title"], {})), got(lambda: pr_number(["title", "--pr"], {"PR_NUMBER": "9"})),

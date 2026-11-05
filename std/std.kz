@@ -1898,6 +1898,10 @@ pub byte* Replace(byte* bytes, long n, byte* old, long m, byte* replacement, lon
         return ReplaceByte(bytes, n, old, replacement, mut made, mut asked)
     }
 
+    if m == 1 && k <= 8 {
+        return ReplaceOne(bytes, n, old, replacement, k, mut made, mut asked)
+    }
+
     mut long count = 0
     raw {
         mut long at = 0
@@ -1990,6 +1994,155 @@ byte* ReplaceByte(byte* bytes, long n, byte* old, byte* replacement, mut long ma
 
     StringTakeOver(text, n)
     made = n
+    return text
+}
+
+// `Replace` of one byte by 0 or 2 to 8 bytes: the first match found by `Find`, the matches from it counted,
+// with SSE2 (R18) 16 bytes at a time, each lane up to 255 before it is added, the block asked for once, the
+// bytes before the first match copied, and the rest written as the matches stand. Where they stand 256 bytes
+// or more apart on average, each run between two of them is found by `Find` and copied whole, as Rust's
+// `replace` copies each piece and the replacement, and as the general path of `Replace` does; else 8 bytes at a
+// time: a word that holds no match, tested as `Find` tests one, is written whole, and each byte of one that
+// does is written as a word, the byte itself or the replacement's bytes, with the place moved on by 1 or by
+// the replacement's count, so that the next write starts where the replacement ends. The words need room for
+// 8 writes of a word before the end of the string; the bytes after them are written one at a time. On the
+// commas of 200k words joined by commas, a match every 7.5 bytes, replaced by `é` 20 times, the general path
+// took 48.60 ms, Rust's `replace` 57.49 and this one 11.25 (.NET 10.62, on UTF-16, where `é` is one unit);
+// on matches 750 bytes apart, a new line replaced by two bytes, 3.48 ms, Rust 11.05, this one 2.79, where the
+// runs alone took 2.72 and the words alone 3.02; on matches 150 bytes apart, 7.50 ms, the words 4.14 to 4.74
+// and the runs 5.44 (issue #157, 2026-11-04, best of 7).
+byte* ReplaceOne(byte* bytes, long n, byte* old, byte* replacement, long k, mut long made, mut long asked) {
+    long found = Find(bytes, n, old, 1)
+    if found < 0 {
+        return null
+    }
+
+    mut long count = 0
+    mut long i = found
+    if X86.Sse2.IsSupported {
+        raw {
+            Vector128<byte> wanted = Vector128.Create(old[0])
+            Vector128<byte> one = Vector128.Create(byte(1))
+            while i + 16 <= n {
+                mut Vector128<byte> sum = Vector128.Create(byte(0))
+                mut int step = 0
+                while step < 255 && i + 16 <= n {
+                    sum = X86.Sse2.Add(sum, X86.Sse2.And(X86.Sse2.CompareEqual(X86.Sse2.LoadVector128(bytes + i), wanted), one))
+                    i = i + 16
+                    step = step + 1
+                }
+
+                mut int lane = 0
+                while lane < 16 {
+                    count = count + long(sum.GetElement(lane))
+                    lane = lane + 1
+                }
+            }
+        }
+    }
+
+    raw {
+        byte from = old[0]
+        while i < n {
+            if bytes[i] == from {
+                count = count + 1
+            }
+
+            i = i + 1
+        }
+    }
+
+    long size = n + count * (k - 1)
+    if size > 2147483647 {
+        asked = size
+        return null
+    }
+
+    if size == 0 {
+        made = 0
+        return null
+    }
+
+    byte* text = StringBlock(size)
+    if text == null {
+        asked = 16 + size
+        return null
+    }
+
+    raw {
+        Copy(text, bytes, found)
+        mut long at = found
+        mut long to = found
+        if count * 256 <= n {
+            while at < n {
+                Copy(text + to, replacement, k)
+                to = to + k
+                at = at + 1
+                mut long run = Find(bytes + at, n - at, old, 1)
+                if run < 0 {
+                    run = n - at
+                }
+
+                Copy(text + to, bytes + at, run)
+                to = to + run
+                at = at + run
+            }
+        } else {
+            byte from = old[0]
+            mut ulong word = 0
+            mut long j = 0
+            while j < k {
+                word = word | ulong(replacement[j]) << (int(j) * 8)
+                j = j + 1
+            }
+
+            ulong low = 0x0101010101010101UL
+            ulong high = 0x8080808080808080UL
+            ulong repeated = ulong(from) *% low
+            long room = 8 * k + 16
+            while at + 8 <= n && to + room <= size {
+                ulong w = WordAt(bytes + at)
+                ulong x = w ^ repeated
+                if ((x -% low) & ~x & high) == 0UL {
+                    PutWordAt(text + to, w)
+                    to = to + 8
+                } else {
+                    mut long b = 0
+                    while b < 8 {
+                        byte c = bytes[at + b]
+                        mut ulong put = ulong(c)
+                        mut long step = 1
+                        if c == from {
+                            put = word
+                            step = k
+                        }
+
+                        PutWordAt(text + to, put)
+                        to = to + step
+                        b = b + 1
+                    }
+                }
+
+                at = at + 8
+            }
+
+            while at < n {
+                byte c = bytes[at]
+                if c == from {
+                    Copy(text + to, replacement, k)
+                    to = to + k
+                } else {
+                    text[to] = c
+                    to = to + 1
+                }
+
+                at = at + 1
+            }
+        }
+    }
+
+    StringTakeOver(text, size)
+    made = size
     return text
 }
 
