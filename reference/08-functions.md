@@ -186,20 +186,43 @@ through the folder too, `json.Json`; a function at the top of the folder is reac
 folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives the folder another
 name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
 name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
-agree are `redeclared` at the second `use` line (§8, §13, the owner, 2026-11-01, "By kind of name",
-"Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
+agree are `redeclared` at the second `use` line, which `as` fixes, `use b/util as butil` (§8, §13,
+the owner, 2026-11-01, "By kind of name", "Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
 project and a line of `project.kz`, `use json` beside a folder `json`, is `ambiguous-name` at that
 line, in every file of the project, those of the folder `json` included, and with `as` too,
-`use json as j` (§8, the owner, 2026-11-02). *(assumed, §8, §13: the two ids; a type of the file's own
+`use json as j` (§8, the owner, 2026-11-02). The reading reads a project's files: the runtime's `use sys` and `use std`
+stand as §2 makes them, and in a program's file they are paths like any other, which a folder at
+the top or a line of `project.kz` of that name answers, `unknown-name` where the project has neither
+(§8, the owner, 2026-11-03, "the runtime's names only"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
-the folder's name as its qualifier in the file, the old name there being `unknown-name`; the names
-`redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
+the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
+nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
 the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
-and a path that holds `.` or `..` are `unknown-name` at the `use` line)*
+and a path that holds `.` or `..` are `unknown-name` at the `use` line; a longer
+path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
+`ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
+folder of the project, so that `use json` beside it names the line)*
 
-No case: it takes several files, and a case of the corpus is a single file.
+Case: [functions/use-names-nothing.kz](../corpus/functions/use-names-nothing.kz)
+```kurz
+use nothing_here
+
+print(1)
+```
+
+Case: [functions/use-sys-in-a-program.kz](../corpus/functions/use-sys-in-a-program.kz)
+```kurz
+use sys
+
+print(1)
+```
+
+No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
+file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
+before the checker reads it.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
@@ -210,9 +233,10 @@ and a class instance is no part of the copy: the lambda holds a reference to the
 every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
 from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
 such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
-record speaks of assigning)* A path reaches an instance only where an instance holds the field it
-assigns or the item it writes: `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field
-`Item` holds an instance, assigns a field of the copy and is `capture-assign`. An instance changes through every reference (K2), so the lambda may
+record speaks of assigning)* A path reaches an instance where a field of an instance lies on it, the
+field it assigns or one whose list or map it writes into: `() => { b.Xs[0] = 2 }` reaches the instance
+`b`, while `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field `Item` holds an
+instance, assigns a field of the copy and is `capture-assign` *(proposed: as the sentence before)*. An instance changes through every reference (K2), so the lambda may
 change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
 value `d` stay `capture-assign` (§4, the owner, 2026-11-01, #110, comment 6562487754, "Both allowed", against a method call
@@ -220,7 +244,7 @@ alone and against neither). It may also write into the list or the map that a `m
 instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
 write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786), and pass a `mut` field of the
 instance as a `mut` argument, `() => Fill(mut Items)` inside a method (M7; §4, the owner, 2026-11-02, #110, comment
-6579495475). A field without `mut` changes in a lambda no more than outside it: assigning it is
+6579495475). A field without `mut` of a class instance changes in a lambda no more than outside it: assigning it is
 `assign-immutable` (K1), and writing into what it holds, a `mut` method on it and passing it as `mut`
 by its name inside a method are `mut-required` (M5, M7, K1). An instance that a captured `data` value holds is one the lambda may
 change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
@@ -340,14 +364,17 @@ evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
 folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
-`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, as C# takes
-`new S()` for a value type, while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, which goes
+beyond C#, where `new S()` is a default only for a value type `S` and only without arguments
+(CS1736), while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
 2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
 one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
-default, and an instance of a class being no such value)* (C# also takes `default`, which the record
+default (D11), which this rule holds to a constant where the field is declared, an instance of a
+class being no such value, and the cost, that such a value is made at each call that leaves the
+argument out)* (C# also takes `default`, which the record
 does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
-2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
@@ -374,18 +401,43 @@ Greet("Ann")
 
 Case: [functions/default-data-of-constants.kz](../corpus/functions/default-data-of-constants.kz)
 ```kurz
-data Rate(int BytesPerSecond, duration Grace)
+data Rate(int BytesPerSecond, int GraceSeconds)
 
-data Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s))
+data Limits(int MaxLine = 8192, Rate BodyRate = Rate(240, 5))
 
-int PerSecond(Rate r = Rate(BytesPerSecond: 1, Grace: 1s)) => r.BytesPerSecond
+data Pair(Rate First, Rate Second)
+
+int PerSecond(Rate r = Rate(1, 1)) => r.BytesPerSecond
+
+int Sum(Pair p = Pair(Rate(1, 1), Rate(2, 2))) => p.First.BytesPerSecond + p.Second.BytesPerSecond
 
 a = Limits()
-print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.Grace}")
-b = Limits(MaxLine: 1000)
-print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.Grace}")
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.GraceSeconds}")
+b = Limits(1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.GraceSeconds}")
 print(PerSecond())
-print(PerSecond(Rate(7, 2s)))
+print(PerSecond(Rate(7, 2)))
+print(Sum())
+```
+
+Case: [functions/default-data-call-argument.kz](../corpus/functions/default-data-call-argument.kz)
+```kurz
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+int One() => 1
+
+int PerSecond(Rate r = Rate(One(), 1)) => r.BytesPerSecond
+
+print(PerSecond())
+```
+
+Case: [functions/default-class-instance.kz](../corpus/functions/default-class-instance.kz)
+```kurz
+class Counter(int Count)
+
+int Read(Counter c = Counter(1)) => c.Count
+
+print(Read())
 ```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
@@ -830,4 +882,48 @@ print("a")
 if args.Count == 0 {
     return "stop"
 }
+```
+
+### F18 (decided, §12) `Hint.BlackBox`
+
+`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)`, as
+Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "Any value,
+as Rust's"). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`.
+Every program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
+the call, as best effort, the way Rust's does, with no promise of constant time (§12, the owner,
+2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments are refused, as
+`string.Join` refuses them, and a member of `Hint` other than `BlackBox` is `unknown-name` (V10), as
+a function `Sha256` lacks is)*
+
+No case for what the optimiser sees: a case sees only the value the call gives back.
+
+Case: [functions/black-box.kz](../corpus/functions/black-box.kz)
+```kurz
+data Point(int X, int Y)
+
+n = Hint.BlackBox(1000)
+print(n + 1)
+hay = Hint.BlackBox("a haystack of {n}")
+print(hay)
+xs = Hint.BlackBox([3, 1, 2])
+mut ys = Hint.BlackBox(xs)    // the list the variable holds, which the change of `ys` leaves as it is (M3)
+ys.Add(4)
+print(xs.Count)
+print(ys.Count)
+p = Hint.BlackBox(Point(1, 2))
+print(p.X + p.Y)
+```
+
+Case: [functions/black-box-redeclared.kz](../corpus/functions/black-box-redeclared.kz)
+```kurz
+// a hint of the program's own, under a name every file sees
+data Hint(string Text)
+
+print(1)
+```
+
+Case: [functions/black-box-unknown-member.kz](../corpus/functions/black-box-unknown-member.kz)
+```kurz
+x = Hint.Opaque(1)
+print(x)
 ```

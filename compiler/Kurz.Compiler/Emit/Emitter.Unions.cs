@@ -23,8 +23,8 @@ public sealed partial class Emitter
         }
 
         var bits = Number(layout.TagBits(type));
-        var isNull = Types.NonNull(type) is FunctionType
-            ? fn.Value($"icmp eq ptr {fn.Value($"extractvalue %kz.fn {union}, 0")}, null") // N1: no code is the function value's `null`
+        var isNull = Layout.NicheIr(type) is var pair && pair != "ptr"
+            ? fn.Value($"icmp eq ptr {fn.Value($"extractvalue {pair} {union}, 0")}, null") // N1: no code is the function value's `null`, and K6: no address an instance's
             : fn.Value($"icmp eq ptr {union}, {niche}");
         return fn.Value($"select i1 {isNull}, i{bits} {Number(layout.Number(Types.Null))}, i{bits} {Number(layout.Number(Types.NonNull(type)!))}");
     }
