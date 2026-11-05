@@ -2167,6 +2167,15 @@ listener = TcpListener.Bind("127.0.0.1:0") else {
     }
 }
 
+// the listener's `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by
+// itself and does not hold the output the suite reads
+listener.SetAcceptTimeout(10s) else {
+    IoError e => {
+        print(e)
+        return
+    }
+}
+
 mut child = 0
 raw {
     child = fork()
@@ -2238,9 +2247,18 @@ HttpResponse Answer(int number, HttpRequest r) {
     return response
 }
 
-// a server started in a child on a port of its own, and the client's part run against it, and the child ended
+// a server started in a child on a port of its own, and the client's part run against it, and the child ended; the listener's
+// `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by itself and does not
+// hold the output the suite reads
 void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf8 part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2463,9 +2481,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2637,9 +2664,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2784,9 +2820,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2962,9 +3007,18 @@ HttpResponse Answer(int port, int number, HttpRequest r) {
     return HttpResponse.Empty(302)
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against((int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
