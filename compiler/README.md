@@ -2247,6 +2247,14 @@ round can ask about it by the rule's id.
   that error is the value's one, with no `raw-required` beside it (E1). State whose name is
   `redeclared` is read with its diagnostics dropped, and its name then stands for state of the
   error type, where no other state has it (E1).
+- R13 with K7 and K18: inside its class a field of the instance, a `static` field and a method of
+  the class hide the state of their name, as a method of the class hides a top-level function of its
+  name there (section 4), and as C# finds a member of the class before a name outside it. That holds in
+  a method, inside `raw` and outside it, in a lambda inside a method, in the default of a field of the
+  class body and in the initial value of a `static` field: the name reads and assigns the member, and
+  in a `static` method a field of the instance is `static-mismatch` (K19). Outside the class, and in a
+  class with no member of the name, the state is reached as R13 says, and a variable or a parameter
+  named as it is still `redeclared` (V9), while `x = v` assigns it (V8).
 - R14 with R15 and T1: `void` has no size, so `SizeOf<void>()`, `List<void>.FromRaw(p, n)` and
   `List<void>.Allocate(n)`, which count elements of that size, are `type-mismatch`, as R14 says of `p + n`, `p - n` and
   `p - q` of a `void*`. `Ptr<T>(x)` takes a pointer, a `long` or an integer that widens into one (T8, T23),
