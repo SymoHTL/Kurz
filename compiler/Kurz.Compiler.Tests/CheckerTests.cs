@@ -625,7 +625,20 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.CannotInfer, 5)], Errors(two + "print(Two([], 5))"));
         Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.ConstantOverflow, 5)], Errors(two + "print(Three(99999999999999999999, 5))"));
         Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, nothing))"));
-        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))")); // a lambda has no type of its own before the pick (F11)
+        // T27 with F11 and E1: beside an argument with its own error, a lambda that fits no function type its parameter could be keeps the
+        // `cannot-infer`, which names no argument; one that could fit leaves the own error alone (the owner, 2026-11-05, #156, comment
+        // 6659026667), also under a bare `T`, which can be a function type (assumed, #156, comment 6659124253)
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))"));
+        Assert.Equal(notInferable + " (T27)", Check(two + "print(Two(nothing, x => x))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Three(nothing, x => x))")); // the own error direct
+        Assert.Equal([(ErrorIds.TypeMismatch, 3), (ErrorIds.UnknownName, 3)], Errors("int Size<T>(List<T> xs, int n) => 1\n\nprint(Size(nothing, x => x))")); // no `T` there: T1
+        var apply = "void Apply<T>(List<T> xs, (T) => void f) {\n    print(xs.Count)\n}\n\nvoid Apply2<T>(List<T> xs, (T, T) => void f) {\n    print(xs.Count)\n}\n\n"
+            + "void ApplyN<T>(List<T> xs, ((T) => void)? f) {\n    print(xs.Count)\n}\n\nT Pick<T>(T a, T b) => a\n\n";
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "Apply(nothing, x => print(x))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 15), (ErrorIds.UnknownName, 15)], Errors(apply + "Apply(nothing, (a, b) => print(a))")); // another count
+        Assert.Equal([(ErrorIds.CannotInfer, 15), (ErrorIds.UnknownName, 15)], Errors(apply + "Apply2(nothing, x => print(x))"));
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "ApplyN(nothing, x => print(x))")); // a nullable function type
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "print(Pick(nothing, x => x))"));
         Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(two + "List<int> xs = [1]\nprint(Two(xs, nothing))")); // `xs` gives `T` its type
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(5, [1]))")); // and so does the list literal
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");

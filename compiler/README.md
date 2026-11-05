@@ -2003,7 +2003,14 @@ round can ask about it by the rule's id.
   text names that argument, also where an argument with an error of its own stands in another of its
   positions, nested, direct, a `[]` or a literal's own error (`Two(5, nothing)` for
   `int Two<T>(List<T> a, List<T> b)`: the `cannot-infer` naming argument 1, and the `unknown-name`)
-  (the owner, 2026-11-03, #156, comment 6603205575).
+  (the owner, 2026-11-03, #156, comment 6603205575). A lambda keeps the `cannot-infer` when it fits no
+  function type its parameter could be, one where a `List<T>` is required or one with another count of
+  parameters, and the text names no argument, since a lambda has no type of its own before the pick
+  (F11): `Two(nothing, x => x)` is the `unknown-name` and that `cannot-infer`. A lambda that fits its
+  parameter's function type is no such argument, so `Apply(nothing, x => print(x))` for
+  `void Apply<T>(List<T> xs, (T) => void f)` reports the `unknown-name` alone (the owner, 2026-11-05,
+  #156, comment 6659026667), and nor is one where a bare `T` is required, since `T` can be a function
+  type (assumed, #156, comment 6659124253).
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a

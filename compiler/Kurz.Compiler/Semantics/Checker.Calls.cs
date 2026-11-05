@@ -2420,8 +2420,9 @@ public sealed partial class Checker
             if (known.Count == 0)
             {
                 // an argument with no error of its own that gives `p` nothing in another position, the `5` of a `List<T>`, leaves the
-                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575)
-                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null)
+                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575), and so does a lambda
+                // that fits no function type its parameter could be (the owner, 2026-11-05, #156, comment 6659026667)
+                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null && !FitsNoFunction(candidate, pres, p))
                 {
                     map[p] = Types.Error; // every argument of the position carries its own error: nothing is inferred and nothing more is reported (E1)
                 }
@@ -2534,8 +2535,9 @@ public sealed partial class Checker
             }
 
             // as in a direct position, an argument with no error of its own that gives `p` nothing leaves the `cannot-infer` standing (T27;
-            // the owner, 2026-11-03, #156, comment 6603205575)
-            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null)
+            // the owner, 2026-11-03, #156, comment 6603205575), and so does a lambda that fits no function type its parameter could be
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null
+                && !FitsNoFunction(candidate, pres, p))
             {
                 map[p] = Types.Error;
                 continue;
@@ -2902,6 +2904,23 @@ public sealed partial class Checker
 
         return null;
     }
+
+    /// <summary>
+    /// T27 with F11: whether a lambda stands where <paramref name="p"/> stands in its parameter and fits no function type that parameter
+    /// could be, one where a <c>List&lt;T&gt;</c> is required or one with another count of parameters, as <see cref="Fit"/> reads it: such a
+    /// lambda is wrong whatever <paramref name="p"/> is, so beside another argument's own error the <c>cannot-infer</c> stands, and it names
+    /// no argument, since a lambda has no type of its own before the pick. A lambda that could fit, under a function type with as many
+    /// parameters, leaves the own error alone (E1; the owner, 2026-11-05, #156, comment 6659026667), and so does one under a type
+    /// parameter, which can be a function type (assumed, #156, comment 6659124253).
+    /// </summary>
+    private static bool FitsNoFunction(Candidate candidate, List<Pre> pres, TypeParameterSymbol p) => pres.Where((pre, i) => pre.Lambda is { } lambda
+        && candidate.Slots[candidate.Binding[i]].Type is var slot && Types.Mentions(slot, p)
+        && (Types.NonNull(slot) ?? slot) switch
+        {
+            FunctionType f => f.Parameters.Count != lambda.Parameters.Count,
+            TypeParameterType => false,
+            _ => true,
+        }).Any();
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>
     private bool Commit(Candidate candidate, List<Pre> pres)
