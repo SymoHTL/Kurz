@@ -7840,15 +7840,15 @@ HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
 
             while p[at] != 58 {
                 c = p[at]
-                if c == 13 && p[at + 1] == 10 {
-                    return "header without a colon"
-                }
-
-                if c == 32 || c == 9 {
-                    return "space before a header's colon"
-                }
-
                 if !HttpTokenByte(c) {
+                    if c == 13 && p[at + 1] == 10 {
+                        return "header without a colon"
+                    }
+
+                    if c == 32 || c == 9 {
+                        return "space before a header's colon"
+                    }
+
                     return "bad header name"
                 }
 
