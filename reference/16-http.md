@@ -255,9 +255,10 @@ counts its bytes against `MaxRequestBodySize` as it is read, as Kestrel counts t
 giving `HttpError(TooLarge, "request body over limit")` (§12) *(assumed, §12: that reading)*. A read
 of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
 as a handler's read does, and the connection closes; the `408` is sent only while no response has
-begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575, and 2026-11-04, Q12 (b)), and
-after a `408` the response the handler returns is not written, with no error to any program (§12)
-*(assumed, §12: that reading)*. The rate also runs between reads: a moved body held unread past the
+begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the error
+`request timed out`, read from Q12 (b) of 2026-11-04 and from Q8)*, and after a `408` the response
+the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
+reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
 owner, 2026-11-05, issue 156, comment 6666386552, Q8). The timeout of a moved body's read is
 decided, and its timing is not: how the body's rate is timed on the socket of the actor that got the
@@ -280,7 +281,9 @@ gives `HttpError(Protocol, "request has two bodies")` before any byte is sent (�
 
 No case: the compiler reads no `copy` and no `move`, at a send, on a parameter or at a call (§6), so
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
-send to another actor needs two actors, which the compiler does not build. The id
+send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
+server or client of §12, which the halves of the stream, the rate between reads, the count of a
+body without a declared length and the two bodies of a client's call need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
 section 6, as `move-reachable` does, and none of them in [12-errors.md](12-errors.md), since no case
 can expect them (§12, the owner, 2026-11-03, issue 156, comment 6603359338) *(assumed, §6: that
