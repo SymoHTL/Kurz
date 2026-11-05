@@ -1715,7 +1715,12 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        // O10: under a result whose first case is `void`, `void | IoError`, a call with a `void` success is the body its block
+                        // form `() => { print(x) }` already is, and the lambda gives that case (the owner, 2026-11-05, #110, comment 6659026217)
+                        if (!SuccessIsVoid(result))
+                        {
+                            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        }
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
