@@ -31,7 +31,8 @@ the list, against
 every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
 `HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions,
-and so is `HttpResponseMessage`, the response a client gets (W14; issue 110, comment 6645213502, C2)).
+and `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
+issue 110, comment 6657251329, C2)).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -2056,15 +2057,18 @@ one, each connection carrying one request at a time, as hyper's client `conn` ca
 response whose body is open holds its connection, so that two responses read side by side use two
 (§12, the owner, 2026-10-31, "Full pool"). The pool takes .NET's defaults, no limit on the connections
 to one host, an idle connection evicted after 1 minute and no bound on a connection's life, each set
-by `HttpClientOptions` (§12, the owner, 2026-11-01, Q5 (a)). While the compiler builds no actors, the
+by `HttpClientOptions` (§12, the owner, 2026-11-01, Q5 (a)). A call that finds `MaxConnectionsPerServer`
+connections to its host and port held by open bodies gives `HttpError(TooLarge, "too many connections to
+the host")` at once, since in a program of one actor no other actor gives one back (C3); a scheme other
+than `http` and `https` gives `HttpError(Unsupported, "unsupported scheme")`, before any connect (C4);
+and the reads and writes of a connection are bounded by no time and its connect by the 5 seconds of
+`Connect`, while `std/` holds no bound of the call's 100 seconds, so that a server that accepts and
+never answers holds the call (C1) (§12, the owner, 2026-11-05, issue 110, comment 6657251329). While
+the compiler builds no actors, the
 pool lives in the program's one actor (§12, assumed). *(assumed, §12: the options with .NET's names,
 `MaxConnectionsPerServer = 2147483647`, .NET's `int.MaxValue`, `PooledConnectionIdleTimeout = 1min`,
 `PooledConnectionLifetime` the largest `duration`, since no member of `HttpLimits` turns off (W7),
-`MaxAutomaticRedirections = 5` (W15) and `Limits = HttpLimits()` (W14); a call that finds
-`MaxConnectionsPerServer` connections to its host and port held by open bodies giving
-`HttpError(TooLarge, "too many connections to the host")` at once, since in a program of one actor no
-other actor gives one back (issue 110, comment 6645213502, C3); a scheme other than `http` and `https`
-`HttpError(Unsupported, "unsupported scheme")`, before any connect (C4); a pool with no timer, which at
+`MaxAutomaticRedirections = 5` (W15) and `Limits = HttpLimits()` (W14); a pool with no timer, which at
 each call takes back each connection whose body ended, closes each whose response said
 `Connection: close`, was of HTTP/1.0 without `Connection: keep-alive`, was read to the close or failed,
 and each whose body was let go of unread, then closes each connection idle longer than
@@ -2073,9 +2077,7 @@ hyper-util's pool passes over expired connections at its checkout, and takes the
 host and port that went idle last, as hyper-util's `pop()` takes it; a request on a connection of the
 pool that cannot be written, or whose connection ends before the first byte of a response, sent once
 more on a new connection, as .NET sends a request again on a connection the server shut down, and a
-new connection given no second try; the reads and writes of a connection bounded by no time and its
-connect by the 5 seconds of `Connect` (C1), while `std/` holds no bound of the call's 100 seconds (§12), so that
-a server that accepts and never answers holds the call; the request a `GET` with `Host`, the port in it
+new connection given no second try; the request a `GET` with `Host`, the port in it
 where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
 the path of a call of `Get` needs `allow network` (S12); and the pool's times read from `instant.Now` (S25), as the server's
 bounds read theirs)*
@@ -2591,16 +2593,17 @@ malformed response is `HttpError(Protocol, "malformed response: <what>")`, and a
 A status of `404` or `500` is a response like any other: `response.IsSuccess` holds from 200 to 299,
 and `response.EnsureSuccess()` gives `void | HttpError`, of the kind `Status` for a status that is no
 success (§12, the owner, 2026-10-31, "Never, a value", and 2026-11-01, Q6 (a), the range assumed).
-*(assumed, §12: the type `HttpResponseMessage`, as .NET names it, with `Status`, `Headers` and `Body`,
-as the client's request is an `HttpRequestMessage` (issue 110, comment 6645213502, C2); the texts of the
-server for a request with `response` in its place (C4), `malformed response: no status line` for a
+The response is an `HttpResponseMessage`, as .NET names it, with `Status`, `Headers` and `Body`, as the
+client's request is an `HttpRequestMessage` (C2), and its failures take the texts of the server for a
+request with `response` in their place (C4) (§12, the owner, 2026-11-05, issue 110, comment
+6657251329): `malformed response: no status line` for a
 connection that ends before the first byte of a response, `incomplete` for one that ends inside the
 head, `bad status line`, `line not ended by CR LF`, the server's words for a header line, `bad
 Content-Length` and `Content-Length beside Transfer-Encoding`, `unexpected end of body`, `bad chunk`
 and `bad chunk size`, `unexpected 101` for a `101`, `HttpError(Unsupported, "unsupported HTTP
 version")` for a version other than 1.0 and 1.1 and `HttpError(Unsupported, "unsupported transfer
 encoding")` for a coding other than `chunked`, and `HttpError(Status, "response status 404")` from
-`EnsureSuccess()`, the status in it; a status line of `HTTP/1.0` or `HTTP/1.1`, three digits from 100
+`EnsureSuccess()`, the status in it. *(assumed, §12: a status line of `HTTP/1.0` or `HTTP/1.1`, three digits from 100
 and a reason that may be left out, as httparse reads it; a `1xx` other than `101` read past, as hyper
 reads past it; no body for a `1xx`, a `204` and a `304`, chunks where `Transfer-Encoding` is
 `chunked`, the length of `Content-Length`, and otherwise the bytes up to the close (RFC 9112, section
