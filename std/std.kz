@@ -7076,14 +7076,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                         return
                     }
 
+                    // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), with no `408`, since the
+                    // head has gone out
                     drained = body.Drain(limits.MaxDrainSize) else {
-                        IoError e => {
-                            if e.Kind == IoKind.TimedOut {
-                                return HttpTimedOut()
-                            }
-
-                            return e
-                        }
+                        IoError e => return e
                         HttpError e => return e
                     }
 
