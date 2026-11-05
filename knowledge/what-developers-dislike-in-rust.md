@@ -64,7 +64,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "Things have to be Send all the time, some things can't live across an await"; Stabilizing async fn in traits in 2023 (https://blog.rust-lang.org/inside-rust/2023/05/03/stabilizing-async-fn-in-trait/): "Send bounds are verbose, especially for traits with lots of methods".
 - Since: Announcing `async fn` and return-position `impl Trait` in traits (https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits/) points to the `trait_variant` crate: "This creates two versions of your trait: LocalHttpService for single-threaded executors and HttpService for multithreaded work-stealing executors."
-- Kurz: REPEATED in part: a generic function's limit is inferred, "Inferred limit, as Send", but a parameter that a function sends is written `move`, as Swift writes `sending`, and the word climbs a chain of calls as a `Send` bound does, named as its cost in section 6 of the record (the owner, 2026-11-04). Before the answers: OPEN.
+- Kurz: REPEATED in part: a generic function's limit is inferred, "Inferred limit, as Send", but a parameter that a function sends is written `move`, as Swift writes `sending` (Swift's proposal SE-0430, "`sending` parameter and result values", implemented in Swift 6.0: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0430-transferring-parameters-and-results.md, checked 2026-11-05), and the word climbs a chain of calls as a `Send` bound does, named as its cost in section 6 of the record (the owner, 2026-11-04). Before the answers: OPEN.
 
 ## 9. Error handling needs two crates and a choice in every crate
 

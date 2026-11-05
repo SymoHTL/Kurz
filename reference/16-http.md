@@ -220,26 +220,32 @@ other actor's to read to its end: every read that keeps to the body's rate gives
 then `0` at its end. A body left unread is drained when its last owner drops it, and the connection
 reads its next request only after that, with no new kind of error (§12, the owner, 2026-11-03, issue
 39, comment 6601737306). The drain is a read of the server, bounded by the body's rate and the
-drain's 64 KiB, and where either ends it the connection closes, with no error to any reader (§12)
-*(assumed, §12: that reading)*. A `move` of the request ends every path into it, `b = r.Body`
+drain's 64 KiB, and where either ends it the connection closes, with no error to any reader, while a
+drain under the rate before any response has begun sends the `408`, as any read under the rate does
+(§12) *(assumed, §12: that reading)*. A `move` of the request ends every path into it, `b = r.Body`
 included, by the region check of the record's section 6, and is refused with `move-reachable` where
 section 6 refuses it (§12). Of the bounds of `HttpLimits`, a moved body's reads meet the body's rate
-and the limit of a declared body (§12) *(assumed, §12: that reading)*. A read of a moved body that
-falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes; the
-`408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
-6603205575), and after a `408` the response the handler returns is not written, with no error to any
-program (§12) *(assumed, §12: that reading)*. How the body's rate is timed on the socket of the
-actor that got the body stands open in §14 (§12). A `copy` of an `HttpRequest` is the compile error
-`copy-server-request`, which names `move`, and a send of it with no word is section 6's
-`send-needs-word` (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the
-error's name, `copy-server-request`; §6: the name `send-needs-word`)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any
-value is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
-6643376941).
+alone, since the limit of a declared body is checked against `Content-Length` before the handler
+runs (§12) *(assumed, §12: that reading)*. A read of a moved body that falls under the body's rate
+gives `IoError` with `IoKind.TimedOut` and the connection closes; the `408` is sent only while no
+response has begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), and after a `408`
+the response the handler returns is not written, with no error to any program (§12) *(assumed, §12:
+that reading)*. The `TimedOut` of a moved body's read is decided, and its timing is not: how the
+body's rate is timed on the socket of the actor that got the body stands open in §14, a timer in the
+poller's wait or a deadline the scheduler reads at each switch (§12). A send of an `HttpRequest`
+with `copy` is the compile error `copy-server-request`, which names `move`, and a send of it with no
+word is section 6's `send-needs-word` (§12, the owner, 2026-11-03, issue 156, comment 6603205575)
+*(assumed, §12: the error's name, `copy-server-request`; §6: the name `send-needs-word`)*. A send
+with `copy` of a class instance or a list that holds an `HttpRequest` is refused with the same
+error, and so is one of `r.Body`, while `r.Headers` copies (§12) *(assumed, §12: that reading)*. The
+request a client builds is a type of its own, `HttpRequestMessage`, sent as any value is, so that
+the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment 6643376941).
 
-No case: the compiler reads no `copy` or `move` of a send, so that no case can expect the move,
-`copy-server-request` or `send-needs-word`, and a send to another actor needs two actors, which the
-compiler does not build. The id `copy-server-request` stands in this rule and not in
-[12-errors.md](12-errors.md), since no case can expect it (§12, the owner, 2026-11-03, issue 156,
+No case: the compiler reads neither `copy` nor `move`, the words of a send (§6), so that no case can
+expect the move, `copy-server-request` or `send-needs-word`, and a send to another actor needs two
+actors, which the compiler does not build. The id `copy-server-request` stands in this rule, and
+`send-needs-word` in the record's section 6, as `move-reachable` does, and neither in
+[12-errors.md](12-errors.md), since no case can expect them (§12, the owner, 2026-11-03, issue 156,
 comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
