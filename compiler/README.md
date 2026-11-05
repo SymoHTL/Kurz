@@ -1217,7 +1217,8 @@ its own, a temporary of the region, since a call can assign a `mut` field throug
 while the expression still uses what it read (K2, K9), which neither M7 nor a parameter's borrow sees; a
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
 and so is `this`. The last count lets go of the fields in their order, as Rust drops them (section 3:
-the owner, 2026-11-04, issue 156, comment 6643376941), then of the
+the owner, 2026-11-04, issue 156, comment 6643376941), a derived class's base's fields first, as they
+come first in its `Fields` *(assumed, section 3: a reading of the answer of 2026-11-05)*, then of the
 weak count all the strong ones held, whose last gives the block back to `Free`, as Rust's `Rc` and
 `Weak` do. A `weak` reference takes a weak count where it is stored and lets go of it where a strong one
 lets go of its count, so the block of an instance whose strong count ended stays while a `weak`
