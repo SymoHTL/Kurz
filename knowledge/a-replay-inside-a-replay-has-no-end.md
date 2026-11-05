@@ -37,7 +37,8 @@ that had held such an entry would have done the same on the runner.
   otherwise start a real, unmarked replay inside a replay, whose mutated self-test clears the mark
   again (the round of #205). That case alone has stand-ins for both. The evidence tool's self-test
   puts its stand-in in place of `red_proof.replay` itself, and a mutation of that stand-in reaches
-  the real `replay()`, where the mark refuses it (above). How another such case is written is a
+  the real `replay()`, where the mark refuses it (above). Another case whose mutation would reach
+  `replay()` reaches a stand-in or the mark's refusal, as the evidence tool's stand-in does: a
   `judgment step` of the rule in `CLAUDE.md`.
 - A proof script outside the replay runs each mutated self-test with the mark set, in a process
   group of its own, under a timeout that ends the whole group: a `judgment step` of the rule in

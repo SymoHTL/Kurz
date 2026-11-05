@@ -340,14 +340,17 @@ evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
 folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
-`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, as C# takes
-`new S()` for a value type, while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, which goes
+beyond C#, where `new S()` is a default only for a value type `S` and only without arguments
+(CS1736), while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
 2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
 one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
-default, and an instance of a class being no such value)* (C# also takes `default`, which the record
+default (D11), which this rule holds to a constant where the field is declared, an instance of a
+class being no such value, and the cost, that such a value is made at each call that leaves the
+argument out)* (C# also takes `default`, which the record
 does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
-2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
@@ -374,18 +377,43 @@ Greet("Ann")
 
 Case: [functions/default-data-of-constants.kz](../corpus/functions/default-data-of-constants.kz)
 ```kurz
-data Rate(int BytesPerSecond, duration Grace)
+data Rate(int BytesPerSecond, int GraceSeconds)
 
-data Limits(int MaxLine = 8kb, Rate BodyRate = Rate(240, 5s))
+data Limits(int MaxLine = 8192, Rate BodyRate = Rate(240, 5))
 
-int PerSecond(Rate r = Rate(BytesPerSecond: 1, Grace: 1s)) => r.BytesPerSecond
+data Pair(Rate First, Rate Second)
+
+int PerSecond(Rate r = Rate(1, 1)) => r.BytesPerSecond
+
+int Sum(Pair p = Pair(Rate(1, 1), Rate(2, 2))) => p.First.BytesPerSecond + p.Second.BytesPerSecond
 
 a = Limits()
-print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.Grace}")
-b = Limits(MaxLine: 1000)
-print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.Grace}")
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.GraceSeconds}")
+b = Limits(1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.GraceSeconds}")
 print(PerSecond())
-print(PerSecond(Rate(7, 2s)))
+print(PerSecond(Rate(7, 2)))
+print(Sum())
+```
+
+Case: [functions/default-data-call-argument.kz](../corpus/functions/default-data-call-argument.kz)
+```kurz
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+int One() => 1
+
+int PerSecond(Rate r = Rate(One(), 1)) => r.BytesPerSecond
+
+print(PerSecond())
+```
+
+Case: [functions/default-class-instance.kz](../corpus/functions/default-class-instance.kz)
+```kurz
+class Counter(int Count)
+
+int Read(Counter c = Counter(1)) => c.Count
+
+print(Read())
 ```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)

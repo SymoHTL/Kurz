@@ -873,11 +873,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class Counter(int Count)\n\nint Read(Counter c = Counter(1)) => c.Count\n\nprint(Read())"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 5)], Errors("class Counter(int Count)\n\ndata Holder(Counter C)\n\nint Read(Holder h = Holder(Counter(1))) => h.C.Count\n\nprint(Read())"));
 
-        // the owner's own refusal, a variable among the arguments: the parameter before it is no constant
-        Assert.Contains((ErrorIds.DefaultNotConstant, 3), Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
+        // the owner's own refusal, a variable among the arguments: a default is read with no variable in sight, so the parameter before it
+        // is `unknown-name` (V10) beside the default's own error, which is why a corpus case, which expects one error, cannot show it
+        Assert.Equal([(ErrorIds.UnknownName, 3), (ErrorIds.DefaultNotConstant, 3)], Errors("data Rate(int BytesPerSecond, duration Grace)\n\nint PerSecond(int n, Rate r = Rate(n, 1s)) => r.BytesPerSecond\n\nprint(PerSecond(1))"));
 
         // a generic data type, whose construction is a data value as any other
         Clean("data Box<T>(T Value)\n\nint Get(Box<int> b = Box(1)) => b.Value\n\nprint(Get())");
+
+        // D11: a field's default that is no constant is refused where the field is declared, so a construction that leaves it out
+        // is a constant, and the walk reads no field's default
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 1)], Errors("data H(List<int> Xs = [1])\n\nint F(H h = H()) => h.Xs.Count\n\nprint(F())"));
     }
 
     [Theory]
@@ -4257,6 +4262,44 @@ public sealed class CheckerTests
         // and at a member's call, in the copy the call makes (E1)
         Assert.Equal([expected], NotSupported(program));
 
+    [Theory]
+    [InlineData("print(instant.Now + instant.Now)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(-instant.Now)", "type-mismatch", 1, "(T18, T22)")]
+    [InlineData("longduration d = 5s\nprint(instant.Now + d)", "type-mismatch", 2, "(T18, T36)")]
+    [InlineData("longduration d = 5s\nprint(instant.Now - d)", "type-mismatch", 2, "(T18, T36)")]
+    [InlineData("print(instant.Now - timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(timestamp.Now - instant.Now)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(instant.Now < timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(instant.Now == timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(instant.Now < 5s)", "type-mismatch", 1, "(T18, T36)")]
+    [InlineData("print(long(instant.Now))", "type-mismatch", 1, "(T10, T36)")]
+    [InlineData("print(instant(5))", "type-mismatch", 1, "(T10, T36)")]
+    [InlineData("print(instant(5s))", "type-mismatch", 1, "(T36)")]
+    [InlineData("print(timestamp(instant.Now))", "type-mismatch", 1, "(T36)")]
+    [InlineData("print(duration(instant.Now))", "type-mismatch", 1, "(T36)")]
+    [InlineData("instant t = 5s\nprint(t)", "type-mismatch", 1, "(T1)")]
+    [InlineData("int n = instant.Now\nprint(n)", "type-mismatch", 1, "(T1)")]
+    [InlineData("print(instant.Later)", "unknown-name", 1, "(V10)")]
+    [InlineData("print(5s.Elapsed)", "unknown-name", 1, "(V10)")]
+    public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line, string cites)
+    {
+        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no unary
+        // `-`, no wide variant, no mixing with a `timestamp` or a duration's order, no conversion into or out of it, no member but
+        // `Elapsed`; the type's name as a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`). The message
+        // names T36 where an operator or a conversion meets a reading, and the rule of the refusal where the form is not the reading's own
+        Assert.Equal([(id, line)], Errors(program));
+        Assert.EndsWith(cites, Assert.Single(Check(program).Diagnostics.Sorted).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_reading_of_the_monotonic_clock_takes_its_differences_sums_comparisons_and_places()
+    {
+        // T36: the positive control of the refusals above, with a reading in a `data` value, as a map's key and in a sorted list
+        Clean("instant a = instant.Now\ninstant b = a + 5s - 1ns\nduration d = b - a\ninstant c = 1s + a\n"
+            + "print(d < 5s && a < b && c >= a && a != c && a.Elapsed >= 0s)\ndata Mark(instant At)\nprint(Mark(a) == Mark(b))\n"
+            + "mut seen = Map<instant, int>()\nseen[a] = 1\nmut readings = [b, a]\nreadings.Sort()\nprint(\"{a} {readings} {seen.Count}\")");
+    }
+
     [Fact]
     public void TypeKind_is_a_type_every_file_sees()
     {
@@ -4299,6 +4342,7 @@ public sealed class CheckerTests
     [InlineData("timestamp", "Timestamp")]
     [InlineData("longduration", "LongDuration")]
     [InlineData("longtimestamp", "LongTimestamp")]
+    [InlineData("instant", "Instant")]
     [InlineData("File", "Class")]
     [InlineData("TcpListener", "Class")]
     [InlineData("TcpStream", "Class")]
@@ -4461,6 +4505,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "", "")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "Deep<List<T>>([x], n - 1)", "Deep(Box(1), 3)", "")));
 
+        // a refused call inside the value of `f.Get`, which a pass of a copy reads as the field, is copied with its origin, so the
+        // chain stops at it too and the bound of T33 does not report it
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors("data Box<T>(T A)\n\nT Deep<T>(T x, int n) {\n    for f in T.Fields {\n        if n > 0 {\n"
+            + "            f.Type part = f.Get(Deep(Box(x), n - 1).A)\n            print(\"{part}\")\n        }\n    }\n    return x\n}\n\nDeep(Box(1), 3)"));
+
         const string Other = "int y = \"a\"\n        ";
         Assert.Equal([(ErrorIds.TypeMismatch, 5), (ErrorIds.UnusedVariable, 5), (ErrorIds.GrowingTypeArgument, 7)],
             Errors(string.Format(Deep, "Deep(Box(x), n - 1)", "Deep(Box(1), 3)", Other)));
@@ -4481,7 +4530,7 @@ public sealed class CheckerTests
     public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
     {
         // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,
-        // inside a loop over `T.Fields` as outside it (the owner, 2026-11-03, comment 6603481343 on issue 156): an arm no copy takes is
+        // the `match` inside a loop over `T.Fields` as outside it (the owner, 2026-11-03, comment 6603481343 on issue 156): an arm no copy takes is
         // clean, and one a copy takes that grows ends at the bound of T33, at the outer call; the same call outside the arm is refused
         const string Deep = "data Box(int A)\ndata Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n{0}\n    }}\n}}\n\nDeep(Box(1), 3)";
         const string Arm = "        match T.Kind {{\n            TypeKind.{0} => Deep(Wrap(x), n - 1)\n            else => print(n)\n        }}";
@@ -4490,6 +4539,10 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+
+        // a loop over `T.Fields` opened inside such an arm is read as a loop's calls are, and a cycle that grows there is refused at its call
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors("data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n"
+            + "            for f in T.Fields {\n                Deep(Wrap(x), n - 1)\n            }\n        }\n        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)"));
     }
 
     [Fact]
