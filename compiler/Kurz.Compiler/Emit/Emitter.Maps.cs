@@ -302,8 +302,8 @@ public sealed partial class Emitter
         fn.Return("ptr null");
     });
 
-    /// <summary><paramref name="each"/> for the key and the value of every entry of the map's block, in the order of its slots (M10).</summary>
-    private void EachEntry(string block, MapType type, Action<string, string> each)
+    /// <summary><paramref name="each"/> for the key and the value of every entry of the map's block, in the order of its slots (M10) or <paramref name="backward"/>.</summary>
+    private void EachEntry(string block, MapType type, Action<string, string> each, bool backward = false)
     {
         var entry = EntryType(type);
         var next = fn.Label("slot.next");
@@ -313,7 +313,7 @@ public sealed partial class Emitter
             var key = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");
             var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, slot)}");
             each(key, value);
-        });
+        }, backward);
         fn.Block(done);
     }
 
@@ -323,18 +323,19 @@ public sealed partial class Emitter
     /// with an entry, whose bytes have the high bit clear, marked as hashbrown's <c>match_full</c> marks them, and taken lowest
     /// first by counting trailing zeros, each mark cleared before <paramref name="body"/> runs with the slot's address.
     /// <paramref name="onward"/>, where the body goes on to the next slot, is started here after the body; the walk ends at
-    /// <paramref name="done"/>, which the caller starts.
+    /// <paramref name="done"/>, which the caller starts. <paramref name="backward"/> walks the same slots in the reverse order: the
+    /// groups from the last, and a group's slots highest first, by counting leading zeros.
     /// </summary>
-    private void EachSlot(string block, string entry, string onward, string done, Action<string> body)
+    private void EachSlot(string block, string entry, string onward, string done, Action<string> body, bool backward = false)
     {
         const string highs = "-9187201950435737472"; // 0x8080808080808080
-        module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
+        module.Declare(backward ? "declare i64 @llvm.ctlz.i64(i64, i1)" : "declare i64 @llvm.cttz.i64(i64, i1)");
         var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {block})")} to i64");
         var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {block})");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {block})");
         var group = fn.Alloca("i64", "group");
         var marks = fn.Alloca("i64", "full");
-        fn.Emit($"store i64 -8, ptr {group}");
+        fn.Emit($"store i64 {(backward ? fn.Value($"and i64 {fn.Value($"add i64 {room}, 7")}, -8") : "-8")}, ptr {group}"); // past the last group the forward walk reads
         fn.Emit($"store i64 0, ptr {marks}");
         var check = fn.Label("full");
         var load = fn.Label("group.next");
@@ -344,16 +345,27 @@ public sealed partial class Emitter
         var left = fn.Value($"load i64, ptr {marks}");
         fn.CondBranch(fn.Value($"icmp eq i64 {left}, 0"), load, take);
         fn.Block(load);
-        var at = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, 8");
+        var at = fn.Value($"{(backward ? "sub" : "add")} i64 {fn.Value($"load i64, ptr {group}")}, 8");
         fn.Emit($"store i64 {at}, ptr {group}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {at}, {room}"), read, done);
+        fn.CondBranch(fn.Value(backward ? $"icmp sge i64 {at}, 0" : $"icmp slt i64 {at}, {room}"), read, done);
         fn.Block(read);
         var word = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {at}")}");
         fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"xor i64 {word}, -1")}, {highs}")}, ptr {marks}"); // 255 and 128 hold none
         fn.Branch(check);
         fn.Block(take);
-        var i = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
-        fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
+        string i;
+        if (backward)
+        {
+            var high = fn.Value($"sub i64 63, {fn.Value($"call i64 @llvm.ctlz.i64(i64 {left}, i1 true)")}");
+            i = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, {fn.Value($"lshr i64 {high}, 3")}");
+            fn.Emit($"store i64 {fn.Value($"xor i64 {left}, {fn.Value($"shl i64 1, {high}")}")}, ptr {marks}");
+        }
+        else
+        {
+            i = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
+            fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
+        }
+
         body(fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}"));
         fn.Block(onward);
         fn.Branch(check);
@@ -840,7 +852,43 @@ public sealed partial class Emitter
         var kept = fn.Label("kept");
         fn.CondBranch(last, free, kept);
         fn.Block(free);
-        if (Counted(type.Key) || Counted(type.Value))
+        if (Holds(type.Key, true) || Holds(type.Value, true))
+        {
+            // R1: the entries' parts that end at once in the order of the slots, then, back to front, the parts that put a value on a
+            // work list, the value's before the key's
+            Hold(() =>
+            {
+                if (Holds(type.Key, false) || Holds(type.Value, false))
+                {
+                    EachEntry("%a0", type, (k, v) =>
+                    {
+                        if (Holds(type.Key, false))
+                        {
+                            ReleasePart(k, type.Key, false);
+                        }
+
+                        if (Holds(type.Value, false))
+                        {
+                            ReleasePart(v, type.Value, false);
+                        }
+                    });
+                }
+
+                EachEntry("%a0", type, (k, v) =>
+                {
+                    if (Holds(type.Value, true))
+                    {
+                        ReleasePart(v, type.Value, true);
+                    }
+
+                    if (Holds(type.Key, true))
+                    {
+                        ReleasePart(k, type.Key, true);
+                    }
+                }, backward: true);
+            });
+        }
+        else if (Counted(type.Key) || Counted(type.Value))
         {
             EachEntry("%a0", type, (k, v) =>
             {

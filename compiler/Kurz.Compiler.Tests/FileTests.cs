@@ -119,6 +119,76 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(held, "file-rounds-held", ["other (os error 24): probe.txt"], setup: "ulimit -n 32");
     }
 
+    private const string Ends = """
+        class A(File H, A? Inner)
+        class P(A First, A Second)
+        data Node(File H, Node? Next)
+        class Nodes(Node First, Node Second)
+        class Holder(List<A> Items)
+        data Pair(File H, A X)
+        class Pairs(Pair One, Pair Two)
+        class Limit(A X, File H)
+
+        void EndP(P p) {}
+        void EndNodes(Nodes n) {}
+        void EndHolder(Holder h) {}
+        void EndList(List<A> l) {}
+        void EndPairs(Pairs p) {}
+        void EndLimit(Limit l) {}
+
+        void | IoError Fields() {
+            EndP(P(A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), A(File.Create("4.txt"), null))))
+        }
+
+        void | IoError Blocks() {
+            EndNodes(Nodes(Node(File.Create("1.txt"), Node(File.Create("2.txt"), null)), Node(File.Create("3.txt"), Node(File.Create("4.txt"), null))))
+        }
+
+        void | IoError Items() {
+            EndHolder(Holder([A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), null)]))
+        }
+
+        void | IoError Loose() {
+            EndList([A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), null)])
+        }
+
+        void | IoError Plain() {
+            EndPairs(Pairs(Pair(File.Create("1.txt"), A(File.Create("2.txt"), null)), Pair(File.Create("3.txt"), A(File.Create("4.txt"), null))))
+        }
+
+        void | IoError Last() {
+            EndLimit(Limit(A(File.Create("1.txt"), null), File.Create("2.txt")))
+        }
+
+        void | IoError All() {
+            Fields()
+            Blocks()
+            Items()
+            Loose()
+            Plain()
+            Last()
+        }
+
+        All() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    [Fact]
+    public void Values_of_one_type_end_in_the_order_of_the_fields_that_held_them_each_one_s_nested_values_before_the_next_field_s()
+    {
+        // R1 and section 4, the owner, 2026-11-05 (issue 39, comment 6659239659): values of one type that one release frees end in
+        // the fields' order, depth-first, and what a field holds that ends at once ends in the fields' order before them. A handle
+        // shows the order where it closes: this runtime writes the descriptor of each file it closes, and each function's files are
+        // created in the order of the fields, so their descriptors, from 3 up, count that order. An instance's fields, a block's, a
+        // list's items in a field and in an argument each end 3, 4, 5, 6 or 3, 4, 5, where the last value put on the work list ended
+        // first before; two plain values' handles close before the instances they hold, each in the fields' order; and with fields
+        // `(a: A, h: File)`, `h` closes before the handle `a` holds, which the section names as the difference from Rust's order
+        var closes = ListTests.Edited(("runtime/linux/linux.kz", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n        mut byte mark = byte(fd + 48)\n        Write(1, &mark, 1)\n        mark = byte(10)\n        Write(1, &mark, 1)\n"));
+        Ran(Ends, "ends-in-order", ["3", "4", "5", "6", "3", "4", "5", "6", "3", "4", "5", "3", "4", "5", "3", "5", "4", "6", "4", "3"], runtimes: [closes]);
+    }
+
     private const string Shared = """
         void | IoError Shared() {
             f = File.Create("shared.txt")

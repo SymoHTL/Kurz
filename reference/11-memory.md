@@ -18,15 +18,22 @@ Goose's data stacks).
 
 The end of an instance or of a block lets go of what its fields hold in the order of the fields, as
 Rust drops a value's fields (§3, §4, the owner, 2026-11-04, issue 156, comment 6643376941), a derived
-block's base's fields first (§4, the owner, 2026-11-05, issue 110, comment 6657251329, recorded as a
-reading of that answer from D7), an instance of a derived class its base's fields first too, and a
-value whose last count a field held ends after the value that held it, from the work list.
-*(assumed, §3, §4: the end after its holder, a reading of the owner's answer on classes of
-2026-11-01, "Iterative, never crashes", issue 110, comment 6560107950; a derived class's base's
-fields first, a reading of the answer of 2026-11-05, given for a derived block, as K6 lays the
-base's fields out first)* No case shows the
-order: a release runs no code of the program between two fields, and a handle that closes at its
-last count (S5) shows it only outside the program.
+block and an instance of a derived class their base's fields first, and a block or an instance whose last count a field held ends after the value that held it, from the work
+list, after the walk of all its fields. Values of one type that one release frees end in Rust's
+order, the fields' order, depth-first, so that a field's own nested values of that type end before
+the next field's, and a list's items, a map's entries and a closure's captures end in their order;
+across types they end in the order in which the work lists are worked off, and a value of another
+type is not ordered against them (§3, §4, the owner, 2026-11-05, issue 39, comment 6659239659). It is
+not exactly Rust's order: with fields `(a: A, h: File)`, `h` closes before the handle that `a` holds
+(the same answer). *(assumed, §3, §4: a derived block's base's fields first, a reading from D7 of the
+owner's answer of 2026-11-05, issue 110, comment 6657251329, which recorded it as a reading; a
+derived class's base's fields first, a reading of the same answer, as K6 lays the base's fields out
+first; a list or a map whose items may hold a value of a class or a block, and any closure, let go
+of among the fields that put a value on a work list, so that the handles they hold close in the
+reverse of those fields' order, as built)* No case shows the order: a release runs no code of the
+program between two fields, and a handle that closes at its last count (S5) shows it only outside
+the program, where the compiler's tests read it from a runtime that writes the descriptor of each
+file it closes.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz

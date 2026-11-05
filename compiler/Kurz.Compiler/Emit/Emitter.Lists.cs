@@ -41,6 +41,75 @@ public sealed partial class Emitter
         _ => false,
     };
 
+    /// <summary>
+    /// Whether letting go of a value of the type may put a value on a work list (<see cref="Enlist"/>): an instance, a block, a function
+    /// value, whose environment may hold either, and a list, a map, a plain data value or a union that holds one of them.
+    /// </summary>
+    private bool Listed(KurzType type) => Listed(type, []);
+
+    private bool Listed(KurzType type, HashSet<string> seen) => type switch
+    {
+        ClassType or FunctionType => true,
+        DataType d when layout.IsBlock(d) => true,
+        ListType l => Listed(l.Element, seen),
+        MapType m => Listed(m.Key, seen) || Listed(m.Value, seen),
+        DataType d => seen.Add(Lower.Mangle(d)) && Layout.Fields(d).Any(f => Listed(f, seen)),
+        UnionType u => u.Cases.Any(c => Listed(c, seen)),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether a value of the type holds a counted part that puts a value on a work list (<paramref name="listed"/>) or one that ends at
+    /// once: a plain data value's fields and a union's cases are its parts, and any other counted value is one part.
+    /// </summary>
+    private bool Holds(KurzType type, bool listed) => type switch
+    {
+        DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(f => Holds(f, listed)),
+        UnionType u => u.Cases.Any(c => c is not VoidType && Holds(c, listed)),
+        _ => Counted(type) && Listed(type) == listed,
+    };
+
+    /// <summary>
+    /// The counted parts of a value let go of in two walks (R1, section 4, the owner, 2026-11-05, issue 39, comment 6659239659): in
+    /// their order the parts that end at once, then in the reverse order the parts that put a value on a work list, which, last in
+    /// first out, ends those values in the parts' order, each one's nested values of its type before the next part's.
+    /// </summary>
+    private void ReleaseInOrder(IReadOnlyList<KurzType> types, Func<int, string> load)
+    {
+        for (var i = 0; i < types.Count; i++)
+        {
+            if (Holds(types[i], false))
+            {
+                ReleasePart(load(i), types[i], false);
+            }
+        }
+
+        for (var i = types.Count - 1; i >= 0; i--)
+        {
+            if (Holds(types[i], true))
+            {
+                ReleasePart(load(i), types[i], true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The parts of the value that one walk of <see cref="ReleaseInOrder"/> lets go of: of a plain data value or a union that holds a
+    /// part of each kind, those of the walk's kind, by a helper of their own; any other value whole.
+    /// </summary>
+    private void ReleasePart(string value, KurzType type, bool listed)
+    {
+        if ((type is UnionType || type is DataType d && !layout.IsBlock(d)) && Holds(type, true))
+        {
+            var name = Helper($"release.{(listed ? "listed" : "ends")}.{Lower.Mangle(type)}", "void", [Ir(type)], () =>
+                EachHeld("%a0", type, (v, t) => ReleasePart(v, t, listed), t => Holds(t, listed), backward: listed));
+            fn.Emit($"call void {name}({Ir(type)} {value})");
+            return;
+        }
+
+        Release(value, type);
+    }
+
     /// <summary>The IR name of a <c>pub</c> function of the standard library, which the emitted code calls by its name.</summary>
     private string StdFunction(string name) => Instance(
         std.Tree.Statements.OfType<FunctionDeclaration>()
@@ -311,7 +380,20 @@ public sealed partial class Emitter
                 var held = fn.Label("held");
                 fn.CondBranch(last, free, held);
                 fn.Block(free);
-                if (Counted(list.Element))
+                if (Holds(list.Element, true))
+                {
+                    // R1: the items' parts that end at once in their order, then, back to front, the parts that put a value on a work list
+                    Hold(() =>
+                    {
+                        if (Holds(list.Element, false))
+                        {
+                            EachItem("%a0", list.Element, item => ReleasePart(item, list.Element, false));
+                        }
+
+                        EachItem("%a0", list.Element, item => ReleasePart(item, list.Element, true), backward: true);
+                    });
+                }
+                else if (Counted(list.Element))
                 {
                     EachItem("%a0", list.Element, item => Release(item, list.Element));
                 }
@@ -319,6 +401,22 @@ public sealed partial class Emitter
                 fn.Emit($"call void {StdFunction("ListFree")}(ptr %a0, i64 {ItemSize(list.Element)})");
                 fn.Return(null);
                 fn.Block(held);
+                fn.Return(null);
+                return;
+            }
+
+            if (Holds(type, true))
+            {
+                // R1: the parts that end at once in their order, then, in the reverse order, the parts that put a value on a work list
+                Hold(() =>
+                {
+                    if (Holds(type, false))
+                    {
+                        ReleasePart("%a0", type, false);
+                    }
+
+                    ReleasePart("%a0", type, true);
+                });
                 fn.Return(null);
                 return;
             }
@@ -360,17 +458,23 @@ public sealed partial class Emitter
         fn.Return(null);
     });
 
-    /// <summary>In a helper over a plain data value or a union: <paramref name="each"/> for each counted field, or for the case value when its case is counted; then the return.</summary>
-    private void EachHeld(string value, KurzType type, Action<string, KurzType> each)
+    /// <summary>
+    /// In a helper over a plain data value or a union: <paramref name="each"/> for each field <paramref name="which"/> takes, by default
+    /// each counted one, in their order or <paramref name="backward"/>, or for the case value when <paramref name="which"/> takes its
+    /// case; then the return.
+    /// </summary>
+    private void EachHeld(string value, KurzType type, Action<string, KurzType> each, Func<KurzType, bool>? which = null, bool backward = false)
     {
+        which ??= Counted;
         switch (type)
         {
             case DataType d:
                 {
                     var fields = Layout.Fields(d);
-                    for (var i = 0; i < fields.Count; i++)
+                    for (var n = 0; n < fields.Count; n++)
                     {
-                        if (Counted(fields[i]))
+                        var i = backward ? fields.Count - 1 - n : n;
+                        if (which(fields[i]))
                         {
                             each(fn.Value($"extractvalue {Ir(d)} {value}, {Number(i)}"), fields[i]);
                         }
@@ -383,7 +487,7 @@ public sealed partial class Emitter
             case UnionType u:
                 ByCase(Tag(value, u), u, u.Cases, c =>
                 {
-                    if (c is not VoidType && Counted(c))
+                    if (c is not VoidType && which(c))
                     {
                         each(Payload(value, u, c), c);
                     }
@@ -434,23 +538,23 @@ public sealed partial class Emitter
     /// <summary>The count of a list's items, an <c>int</c>.</summary>
     private string ListCount(string list) => fn.Value($"call i32 {StdFunction("ListCount")}(ptr {list})");
 
-    /// <summary><paramref name="each"/> for every item of the list, in order, read as the type of its items.</summary>
-    private void EachItem(string list, KurzType element, Action<string> each)
+    /// <summary><paramref name="each"/> for every item of the list, in order or <paramref name="backward"/>, read as the type of its items.</summary>
+    private void EachItem(string list, KurzType element, Action<string> each, bool backward = false)
     {
         var count = ListCount(list);
         var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
         var counter = fn.Alloca("i32", "item");
-        fn.Emit($"store i32 0, ptr {counter}");
+        fn.Emit($"store i32 {(backward ? fn.Value($"sub i32 {count}, 1") : "0")}, ptr {counter}");
         var check = fn.Label("items");
         var body = fn.Label("item");
         var done = fn.Label("items.done");
         fn.Block(check);
         var i = fn.Value($"load i32, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), body, done);
+        fn.CondBranch(fn.Value(backward ? $"icmp sge i32 {i}, 0" : $"icmp slt i32 {i}, {count}"), body, done);
         fn.Block(body);
         var wide = fn.Value($"sext i32 {i} to i64");
         each(fn.Value($"load {Ir(element)}, ptr {fn.Value($"getelementptr {Ir(element)}, ptr {items}, i64 {wide}")}"));
-        fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
+        fn.Emit($"store i32 {fn.Value($"{(backward ? "sub" : "add")} i32 {i}, 1")}, ptr {counter}");
         fn.Branch(check);
         fn.Block(done);
     }

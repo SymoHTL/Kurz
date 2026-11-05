@@ -57,12 +57,14 @@ public sealed partial class Emitter
         lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features });
         var drop = Helper($"drop.{key}", "void", ["ptr"], () =>
         {
-            for (var i = 0; i < types.Count; i++)
+            // R1: the captures that end at once in their order, then, back to front, those that put a value on a work list
+            if (types.Any(t => Holds(t, true)))
             {
-                if (Counted(types[i]))
-                {
-                    Release(fn.Value($"load {Ir(types[i])}, ptr {Capture(environment, "%a0", i)}"), types[i]);
-                }
+                Hold(() => ReleaseInOrder(types, i => fn.Value($"load {Ir(types[i])}, ptr {Capture(environment, "%a0", i)}")));
+            }
+            else
+            {
+                ReleaseInOrder(types, i => fn.Value($"load {Ir(types[i])}, ptr {Capture(environment, "%a0", i)}"));
             }
 
             var end = fn.Value($"getelementptr {environment}, ptr null, i32 1");

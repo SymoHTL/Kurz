@@ -1228,7 +1228,14 @@ works the lists off before it returns, so that a chain of any length is freed wi
 the nesting of the types in it and nothing allocated (the owner, 2026-11-01, "Iterative, never
 crashes"); the lists and the flag of a release under way are the thread's own, since an instance is
 reached from its actor's thread alone (section 3). So the fields of one instance are let go of in their
-order, and an instance one of them held last is freed after it, not in the middle of it. No count of an
+order, and an instance one of them held last is freed after it, not in the middle of it. The fields
+that put a value on a work list are let go of after the others and in the reverse order, a plain data
+value's parts split the same way, and a list's items, a map's entries and a closure's captures that
+do are walked back to front, so that the lists, last in first out, end the values of one type in the
+fields' order, depth-first (section 3: the owner, 2026-11-05, issue 39, comment 6659239659); a release
+that may run outside one under way, of a list, a map, a closure or a plain value, holds the lists
+while it walks and works them off after, so that its items end in that order too, not each one at its
+last count. No count of an
 instance is elided. Pinned by `ListTests`: the classes' program under the allocator that makes every
 freed block inaccessible, twenty rounds of instances through every way out of a block there and 3000
 within the sixteen pieces, the same instances all kept not, the same for instances of derived classes
@@ -1236,14 +1243,17 @@ held as their base, which the table of the instance's class lets go of, a chain 
 where a function that walks it by calling itself overflows the stack, and a program whose first
 released class holds a field of another class, built and run: the flag of a release under way is
 declared once, with the function that works the lists off, since the first class release builds
-the releases of its fields' classes before its class is among the released. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
+the releases of its fields' classes before its class is among the released. Pinned by `FileTests`: the
+order, with a runtime that writes the descriptor of each file it closes, of an instance's fields, a
+block's, a list's items in a field and in an argument, two plain values' handles before the instances
+they hold, and fields `(a: A, h: File)`, whose `h` closes first. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is counted as an instance is, by the count in front of its type's number, as
 Rust's `Rc` holds its count in front of its value *(assumed, section 4: the counting of section 3 for
 immutable data, as the owner's answer of 2026-11-01, "Implements section 3", issue 180, comment
 6561898721, marks it)*. Its last count lets go of the counted values in its fields in their order, as
 Rust drops a value's fields (section 4: the owner, 2026-11-04, as an instance's), by the number of the type the block holds, so that a derived value lets go of its own
-fields too, after its base's (section 4: the owner, 2026-11-05, as a reading of D7), and gives the block back to `Free` with that type's size. A block whose last count another
+fields too, after its base's *(assumed, section 4: a reading of the owner's answer of 2026-11-05 from D7)*, and gives the block back to `Free` with that type's size. A block whose last count another
 release lets go of waits on the work list of its family, the type at the top of its relation of
 inheritance, as an instance waits on its class's, and the same release works it off, so that a chain
 of any length is freed with no stack deeper than the nesting of the types in it (a reading of the
