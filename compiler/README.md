@@ -1860,7 +1860,8 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is or holds the field's type (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+`match` on `T.Kind`, or with a type argument that is or holds the field's type, the first such chain ending every copy of the
+same outer call (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
