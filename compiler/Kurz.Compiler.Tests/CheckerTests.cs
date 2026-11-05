@@ -570,9 +570,9 @@ public sealed class CheckerTests
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
         // with two type parameters the argument named gives the one that failed nothing, never one that gives the other nothing where
         // another argument gives the other its type (#156, comment 6620467625), whether the inference ended where nothing gives it a type,
-        // where its direct arguments differ, where a nested position contradicts the type an argument before bound, or where its list
-        // literals differ; where every argument gives the one that failed a type, the text names no argument (assumed, #156, comment
-        // 6620690774)
+        // where its direct arguments differ, where a nested position contradicts the type an argument before bound (assumed, #156, comment
+        // 6620846564), or where its list literals differ; where every argument gives the one that failed a type, the text names no
+        // argument (the owner, 2026-11-04, #156, comment 6643376941)
         var pair = "int F<T, U>(List<U> a, U d, T b, List<T> c) => 1\n\nint G<T, U>(List<U> a, U d, List<T> c) => 1\n\n"
             + "int H<T, U>(T a, T b, List<U> c) => 1\n\nint P<T, U>(List<U> e, T a, T b, List<T> c) => 1\n\n"
             + "int K<T, U>(List<U> e, List<T> a, List<T> b, List<T> c) => 1\n\n";

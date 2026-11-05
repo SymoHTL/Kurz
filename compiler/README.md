@@ -1985,10 +1985,11 @@ round can ask about it by the rule's id.
   (`Count(5)` for a `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T`
   nothing"). With two type parameters, `G(5, 1, 6)` for `int G<T, U>(List<U> a, U d, List<T> c)` names
   argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
-  comment 6620467625); the type parameter that failed is the one at which the inference ended, in a
-  nested position the one whose type an argument before bound and that position contradicts (assumed,
-  #156, comment 6620690774). Where every argument gives that type parameter a type and they differ, or
-  no argument stands in a position, it names none (assumed, #156, comment 6620690774). The id stays
+  comment 6620467625); the type parameter that failed is the one at which the inference ended (the
+  owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  gives that type parameter a type and they differ, or no argument stands in a position, it names none
+  (the owner, 2026-11-04, #156, comment 6643376941). The id stays
   T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
