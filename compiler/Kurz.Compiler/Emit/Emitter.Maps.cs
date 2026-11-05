@@ -240,8 +240,8 @@ public sealed partial class Emitter
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
     /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 64 groups without a slot of 255, in a block on
     /// the fast hash that no loop over a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
-    /// new hash (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto SipHash-1-3 past the bound"): past the
-    /// bound the lookup gives what <see cref="FarEntry"/> gives.
+    /// new hash (section 4, the owner, 2026-11-02, "lookups count too"): past the bound the lookup gives what
+    /// <see cref="FarEntry"/> gives.
     /// </summary>
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: false));
 

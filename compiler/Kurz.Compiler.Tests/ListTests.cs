@@ -5132,12 +5132,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_map_whose_read_passes_more_than_512_slots_rehashes_in_place_onto_SipHash_1_3_and_keeps_every_entry()
     {
-        // section 4 (the owner, 2026-11-02, "lookups count too, rehash in place onto SipHash-1-3 past the bound"; the bound assumed
-        // there): 520 keys whose fast hash starts their probe at the first group fill 65 groups of a block of 1024 slots, and the 520th
-        // insert passes 64, 512 slots, so the map stays on the fast hash and two runs print one order. A read of a 521st such key, which
-        // the map does not hold, passes all 65 groups, 520 slots, and rehashes the block in place onto SipHash-1-3 under the keys the
-        // system gives each process, so that two runs print two orders after it; the map gives every entry after the read, and 1000
-        // keys more grow it, the slots entries can take counted again from its capacity
+        // section 4 (the owner, 2026-11-02, "lookups count too"; the bound assumed there): 520 keys whose fast hash starts their probe
+        // at the first group fill 65 groups of a block of 1024 slots, and the 520th insert passes 64, 512 slots, so the map stays on
+        // the fast hash and two runs print one order. A read of a 521st such key, which the map does not hold, passes all 65 groups,
+        // 520 slots, and rehashes the block in place onto SipHash-1-3 under the keys the system gives each process, so that two runs
+        // print two orders after it; the map gives every entry after the read, and 1000 keys more grow it, the slots entries can take
+        // counted again from its capacity
         var keys = SameGroupKeys(521);
         Assert.Equal(521, keys.Count); // the floor: the keys the cases take
         var held = keys.Take(520).ToList();
@@ -5191,11 +5191,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_read_inside_a_loop_over_the_map_rehashes_no_block_the_loop_holds()
     {
-        // section 4 (the owner, 2026-11-03): a loop over a map walks its block's slots by their index, so a read past the bound
-        // inside it leaves the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The
-        // loop's end, a `return` inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside
-        // every loop, rehashes the block: two runs print one order before it and two after it. A write inside the loop to a map value
-        // that shares the block copies it (M3), and no loop holds the copy, which a read past the bound rehashes
+        // section 4 (the owner, 2026-11-03): a loop over a map walks its block's slots by their index, so a read past the bound inside
+        // it leaves the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The loop's end, a
+        // `return` inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside every loop,
+        // rehashes the block: two runs print one order before it and two after it. A write inside the loop to a map value that shares
+        // the block copies it (M3), and no loop holds the copy, which a read past the bound rehashes. A loop over a map with no block
+        // yet counts nothing. The program runs under the allocator that makes every freed block inaccessible.
         var keys = SameGroupKeys(521);
         Assert.Equal(521, keys.Count); // the floor: the keys the case takes
         var absent = keys[520].ToString(CultureInfo.InvariantCulture);
@@ -5204,17 +5205,18 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             $"    x = m[{absent}] ?? -1\n    seen = seen + 1\n    sum = sum + v + x + 1\n}}\nprint(seen)\nprint(sum)\nprint(m)\n" +
             "print(First(m))\nmut broke = 0\nfor k, v in m {\n    broke = broke + 1\n    break\n}\nprint(broke)\n" +
             $"mut twin = m\nfor k, v in m {{\n    twin[-7] = -7\n}}\nprint(twin[{absent}] ?? -1)\nprint(twin)\nprint(twin.Count)\n" +
-            $"print(m[{absent}] ?? -1)\nprint(m)\n\nint First(Map<int, int> fm) {{\n    for k, v in fm {{\n        return v\n    }}\n\n    return -1\n}}\n";
-        var (first, second) = RunTwice(text, toolchain.Runtime, "map-read-in-loop");
+            $"print(m[{absent}] ?? -1)\nprint(m)\nmut none = Map<int, int>()\nfor k, v in none {{\n    print(k)\n}}\nprint(none.Count)\n\nint First(Map<int, int> fm) {{\n    for k, v in fm {{\n        return v\n    }}\n\n    return -1\n}}\n";
+        var (first, second) = RunTwice(text, Fenced, "map-read-in-loop-fenced");
         Assert.Equal(["520", "134940"], first.Take(2));
         Assert.Equal(first.Take(4), second.Take(4));
-        Assert.Equal(10, first.Count);
+        Assert.Equal(11, first.Count);
         Assert.Equal("1", first[4]);
         Assert.Equal(["-1", "521", "-1"], new[] { first[5], first[7], first[8] });
         Assert.NotEqual(first[6], second[6]);
         Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Append("-7: -7").Order(), first[6].Trim('[', ']').Split(", ").Order());
         Assert.NotEqual(first[9], second[9]);
         Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Order(), first[9].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("0", first[10]); // the loop over the map with no block
     }
 
     /// <summary>The lookup's rehash turned off, which leaves every map that no insert moved on the fast hash.</summary>
