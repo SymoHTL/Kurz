@@ -3822,6 +3822,19 @@ public sealed class CheckerTests
         const string hold = "T Hold<T>(T x) {\n    f = () => x\n    return f()\n}\n\n";
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + hold + "print(Hold(Button(\"ok\", () => print(1))).Name)"));
         Clean(button + hold + "print(Hold(1))");
+        // R9a (the owner, 2026-11-02, #110): a `weak` reference a lambda captures reaches no class, as a `weak` field reaches none (R3);
+        // a lambda that captures one beside a strong reference still reaches the strong one's class
+        Clean(button + "b = Button(\"ok\", () => print(\"x\"))\nweak Button? w = b\nb.OnClick = () => print(w?.Name ?? \"gone\")\nb.OnClick()");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + "b = Button(\"ok\", () => print(\"x\"))\nweak Button? w = b\nc = Button(\"c\", () => print(\"y\"))\nb.OnClick = () => print(\"{w?.Name ?? \"gone\"} {c.Name}\")\nb.OnClick()"));
+        // R9b (the same answer): the type argument a call writes, a generic caller's type parameter, which reaches those of its own
+        // calls, a type parameter inside a data value, and a call of the function itself, whose type parameter is read once
+        const string made = "b = Button(\"ok\", () => print(\"x\"))\nb.OnClick()\n";
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + hold + made + "print(Hold<Button>(b).Name)"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + hold + "U Wrap<U>(U y) => Hold(y)\n\n" + made + "print(Wrap(b).Name)"));
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + "data Box<T>(T V)\n\nT Open<T>(Box<T> bx) {\n    f = () => bx.V\n    return f()\n}\n\n" + made + "print(Open(Box(b)).Name)"));
+        const string deep = "int Deep<T>(T x, int n) {\n    f = () => x\n    if n > 0 {\n        return Deep(f(), n - 1)\n    }\n\n    return 0\n}\n\n";
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + deep + made + "print(Deep(b, 2))"));
+        Clean(button + deep + made + "print(Deep(1, 2))");
     }
 
     [Fact]
