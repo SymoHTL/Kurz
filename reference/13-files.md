@@ -1484,15 +1484,16 @@ Rust's `Instant::now()` and .NET's `Stopwatch` read it there, and `start.Elapsed
 measures the time since `start` (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the
 monotonic clock, Q1 (a) and Q5 (a)). In a test, `instant.Now` reads the runtime's clock, which
 `advance` moves (§11, the same answer, Q7 (a)); the reference has no rule for `advance` or for a
-test, so no case reads that clock. A reading's text is its time since the clock's zero in the text of a duration (A12), and
-a `data` value that holds one shows it so (§12, the same answer, Q4 (a)). `instant.Now` is `not
-supported` in a build for Windows, as `timestamp.Now` is, and so is `t.Elapsed`, which reads the
-clock (S11; §12, the same answer, Q6 (a)). *(assumed, §12: the defaults of that round, not objected
-to: `t.Elapsed` is `instant.Now - t`; two readings may be equal, since the clock need not move
-between two reads; the zero is one the record does not name, on Linux the boot; and `instant.Now`
-reads the runtime's one monotonic clock, which the bounds of `Connect` read too.)* `t.Elapsed`
-reads its target and then the clock, as Rust's `t.elapsed()` evaluates `t` before it reads
-`Instant::now()` *(assumed: the record names no order)*.
+test, so no case reads that clock. A reading's text is its time since the clock's zero in the text
+of a duration (A12), and a `data` value that holds one shows it so (§12, the same answer, Q4 (a)).
+`instant.Now` is `not supported` in a build for Windows, as `timestamp.Now` is, and so is
+`t.Elapsed`, which reads the clock (S11; §12, the same answer, Q6 (a)). *(assumed, §12: the defaults
+of that round, not objected to: `t.Elapsed` is `instant.Now - t` in its value, the order of its
+reads being the next sentence's; two readings may be equal, since the clock need not move between
+two reads; the zero is one the record does not name, on Linux the boot; and `instant.Now` reads the
+runtime's one monotonic clock, which the bounds of `Connect` read too.)* `t.Elapsed` reads its
+target and then the clock, as Rust's `t.elapsed()` evaluates `t` before it reads `Instant::now()`
+*(assumed: the record names no order)*.
 
 Case: [system/monotonic-clock.kz](../corpus/system/monotonic-clock.kz)
 ```kurz

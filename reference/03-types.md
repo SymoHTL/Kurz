@@ -760,8 +760,9 @@ print(Negate(-9223372036854775808ns)) // one constant: the parameter's type take
 `instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), and a
 core word (L19) (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock,
 Q1 (a)). It is a time type with rules of its own: a rule that names the time types names a reading
-too, but for T29's widening and its conversions, which take none *(assumed, §12: a reading has no
-wide variant, a default of that round, below)*. `b - a` of two readings is a `duration`, negative
+too, but for T29's widening and its conversions and T31's unary `-`, which take none *(assumed,
+§12: a reading has no wide variant, a default of that round, below, and the round gives a negated
+reading no meaning)*. `b - a` of two readings is a `duration`, negative
 where `a` is the later (§12, the same answer, Q2 (a)), and it raises `overflow` (E3) where the
 difference leaves the range of a `duration`, in every build, as T31 says of the time types (§12,
 the same answer, "the check of section 4 on the subtraction"). A reading plus or less a `duration`
@@ -787,8 +788,9 @@ reading beside the wide pair is refused, since a reading has no wide variant to 
 unary `-` of a reading is refused, since the round gives a negated reading no meaning.)*
 
 A conversion written into `instant` from another type is `type-mismatch`, as one from a `duration`
-into a `timestamp` is (T13), and `instant(t)` of a reading is that reading, as a conversion of a
-time value into its own type is *(assumed, §12: a reading that only the clock makes)*. A `raw`
+into a `timestamp` is (T13) *(assumed, §12: a reading that no conversion makes)*, and `instant(t)`
+of a reading is that reading, as every time type converts into itself *(assumed, §12: from the
+forms of the other time types)*. A `raw`
 block reads a reading's bits through a pointer as it reads any value's (R10), and the bits are the
 nanoseconds since the clock's zero *(assumed, §12: the 64 bits of nanoseconds of that round's
 default)*.
