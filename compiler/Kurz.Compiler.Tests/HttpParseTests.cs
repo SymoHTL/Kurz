@@ -88,12 +88,15 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
     /// <summary>The places of a value of 20 bytes whose byte is changed: its first and last, those of its first and second word of eight, and its tail after them.</summary>
     private static readonly int[] Places = [0, 3, 7, 8, 12, 15, 16, 19];
 
-    /// <summary>What a value of <see cref="Value"/> with the byte at <paramref name="place"/> made <paramref name="b"/> gives: the value, or the words of what is wrong.</summary>
-    private static (bool Ok, string Text) ValueWith(int place, int b)
+    /// <summary>The places of the last byte of a value of 1, 4 and 7 bytes on a line before another, whose CR stands in the value's one word of eight.</summary>
+    private static readonly int[] ShortPlaces = [0, 3, 6];
+
+    /// <summary>What the value <paramref name="of"/> with the byte at <paramref name="place"/> made <paramref name="b"/> gives: the value, or the words of what is wrong.</summary>
+    private static (bool Ok, string Text) ValueWith(string of, int place, int b)
     {
         if (b == 9 || b >= 32 && b < 127)
         {
-            var value = Value[..place] + (char)b + Value[(place + 1)..];
+            var value = of[..place] + (char)b + of[(place + 1)..];
             return (true, b is 9 or 32 ? value.Trim(' ', '\t') : value);
         }
 
@@ -112,7 +115,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
     public void Every_byte_of_a_name_and_of_a_value_is_read_as_before_by_the_server_and_by_the_client()
     {
         // the bytes 10 and 13 end a line, which the reader finds before the parse; every other byte stands in the name, and at each
-        // place of a value of 20 bytes, of the server's head and of the client's
+        // place of a value of 20 bytes, and last in a short value on a line before another, of the server's head and of the client's
         var bytes = Enumerable.Range(0, 256).Where(b => b is not 10 and not 13).ToList();
         var program = $$"""
             Bytes With(string before, int value, string after) {
@@ -137,6 +140,8 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
             Sweep({{Literal("GET / HTTP/1.1\r\nHost: h\r\nX")}}, {{Literal("Y: v\r\n\r\n")}}, false)
             {{string.Concat(Places.Select(p => $"Sweep({Literal("GET / HTTP/1.1\r\nHost: h\r\nX: " + Value[..p])}, {Literal(Value[(p + 1)..] + "\r\n\r\n")}, false)\n"))}}
             {{string.Concat(Places.Select(p => $"Sweep({Literal("HTTP/1.1 200 OK\r\nX: " + Value[..p])}, {Literal(Value[(p + 1)..] + "\r\n\r\n")}, true)\n"))}}
+            {{string.Concat(ShortPlaces.Select(p => $"Sweep({Literal("GET / HTTP/1.1\r\nHost: h\r\nX: " + Value[..p])}, {Literal("\r\nY: " + Value + "\r\n\r\n")}, false)\n"))}}
+            {{string.Concat(ShortPlaces.Select(p => $"Sweep({Literal("HTTP/1.1 200 OK\r\nX: " + Value[..p])}, {Literal("\r\nY: " + Value + "\r\n\r\n")}, true)\n"))}}
             """;
         var expected = new List<string>();
         foreach (var b in bytes)
@@ -149,12 +154,22 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
 
         foreach (var place in Places)
         {
-            expected.AddRange(bytes.Select(b => ValueWith(place, b)).Select(r => r.Ok ? $"ok GET|/||1|0|false|false|Host=h|X={r.Text}" : $"400 malformed request: {r.Text}"));
+            expected.AddRange(bytes.Select(b => ValueWith(Value, place, b)).Select(r => r.Ok ? $"ok GET|/||1|0|false|false|Host=h|X={r.Text}" : $"400 malformed request: {r.Text}"));
         }
 
         foreach (var place in Places)
         {
-            expected.AddRange(bytes.Select(b => ValueWith(place, b)).Select(r => r.Ok ? $"ok 200|0|false|true|false|X={r.Text}" : $"malformed response: {r.Text}"));
+            expected.AddRange(bytes.Select(b => ValueWith(Value, place, b)).Select(r => r.Ok ? $"ok 200|0|false|true|false|X={r.Text}" : $"malformed response: {r.Text}"));
+        }
+
+        foreach (var place in ShortPlaces)
+        {
+            expected.AddRange(bytes.Select(b => ValueWith(Value[..(place + 1)], place, b)).Select(r => r.Ok ? $"ok GET|/||1|0|false|false|Host=h|X={r.Text}|Y={Value}" : $"400 malformed request: {r.Text}"));
+        }
+
+        foreach (var place in ShortPlaces)
+        {
+            expected.AddRange(bytes.Select(b => ValueWith(Value[..(place + 1)], place, b)).Select(r => r.Ok ? $"ok 200|0|false|true|false|X={r.Text}|Y={Value}" : $"malformed response: {r.Text}"));
         }
 
         var (code, output, error) = Run(program, "http-parse-bytes");
@@ -187,6 +202,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
             (R + "Host: h\r\nX:\r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X="),
             (R + "Host: h\r\nX: \t \r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X="),
             (R + "Host: h\r\nX: é\r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X=é"),
+            (R + "Host: h\r\nX: é\r\nY: abcdefgh\r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X=é|Y=abcdefgh"),
             (R + "Host: h\r\nX: abcdefgé\u007f\r\n\r\n", "400 malformed request: control byte in a header"),
             // a fault of a header line wins over every fault of the headers judged after them
             (R + "X\u0001: v\r\n\r\n", "400 malformed request: bad header name"),
@@ -273,6 +289,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
         [
             ("HTTP/1.1 200 OK\r\nX\u0001: v\r\nContent-Length: x\r\n\r\n", "malformed response: bad header name"),
             ("HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n", "ok 200|5|false|false|true|content-length=5"),
+            ("HTTP/1.1 200 OK\r\nX: é\r\nContent-Length: 0\r\n\r\n", "ok 200|0|false|false|true|X=é|Content-Length=0"),
             ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX: \u0001\r\n\r\n", "malformed response: control byte in a header"),
             ("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n", "ok 204|0|false|false|false|Connection=close"),
         ];

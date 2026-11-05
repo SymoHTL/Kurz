@@ -7806,9 +7806,11 @@ HttpHeaders | string HttpParseHeaderLines(Bytes head, int from, int end) {
 // and how many the lines have (W5).
 data HttpLines(HttpHeaders Headers, int Host, int Hosts, int Length, int Lengths, int Coding, int Codings, int Expect)
 
-// The header lines of a head, as `HttpParseHeaderLines` gives them, each line read once, as httparse 1.10.1's
-// `parse_headers_iter` reads a line, each fault named where the line first shows it: a line that starts with a space or a tab
-// is folded; the name's bytes are tokens up to the colon, a space or a tab before it its own fault, and a CR before it a line
+// The header lines of a head, as `HttpParseHeaderLines` gives them, each line read once with the mechanism of httparse 1.10.1's
+// `parse_headers_iter`, a table of tokens for the name and eight bytes at a time for the value; the faults, their words and their
+// order, and where a line ends are this parser's own, as they were before. Each fault is named where the line first shows it: a
+// line that starts with a space or a tab is folded; the name's bytes are tokens up to the colon, a space or a tab before it its
+// own fault, and a CR before it a line
 // with none; the spaces and tabs after the colon are skipped; and the value's bytes up to the CR are read eight at a time while
 // eight are left before `end`, as httparse's `match_header_value_char_8_swar` (`src/simd/swar.rs`) tests them, a byte below
 // 0x20 or 0x7F ending the words, a tab among them taken and the words going on, and any other a control byte; the spaces and
