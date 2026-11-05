@@ -6,8 +6,9 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage` and `Uri`, with `UriError` and
-`UriKind`, as `std/` declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`UriKind` and `HttpRate`, as `std/`
+declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
 lambda's parameter, a variable in a block, a loop variable or a name an arm of `match` binds, is
 `redeclared` (V9), whether `std/` declares that type or not, so that no program stops building when
@@ -27,8 +28,11 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`; the two of `Uri` are the record's
-assumptions; `HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a)).
+every `pub` type of `std/` and against a list written in `std/`, 2026-11-03, that `HttpBody` is one of
+them, against a body type no program can name, and 2026-11-03, that `HttpWriter` is another, the writer
+of the streamed response §12 gives, "A response can be streamed"; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
+`HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a)).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -247,7 +251,11 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 `HeaderMap` and ASP.NET Core's `IHeaderDictionary` keep them (§12, the owner, 2026-10-31, "Ordered
 list type"). `GetAll` gives a `List<string>`, `Set` replaces every value of the name by one, as
 ASP.NET Core's indexer does, and `Remove` removes every value of it *(assumed, §12: proposed with the
-product pass and not put to the owner)*.
+product pass and not put to the owner)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
+map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
+`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
+names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
