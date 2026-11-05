@@ -5985,8 +5985,8 @@ pub data HttpLimits(
     int MaxChunkSizeLine = 4096)
 
 // A request a server reads from a stream: its method, its target split at the first `?`, its headers and its body, each as the
-// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`, and
-// `HttpRequest.Read(stream, limits)` with others (W7).
+// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`, and a
+// server's loop with the limits it is given (W7).
 pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Headers, HttpBody Body) {
     // The minor version of the request, 0 for HTTP/1.0 and 1 for HTTP/1.1, for the server's loop (F9).
     internal mut int minor = 1
@@ -5996,14 +5996,10 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
     internal mut bool next = false
 
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
-    // failure of the network, or the request the server refuses (W5).
+    // failure of the network, or the request the server refuses (W5), read under the limits of `HttpLimits()`: the limits a server
+    // is given reach the parser through `HttpReadRequest`, which no program calls, with no second public form (W7; section 12, Q3).
     pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
-        return Read(stream, HttpLimits())
-    }
-
-    // The same, held to `limits` (W7).
-    pub static HttpRequest | IoError | HttpError Read(TcpStream stream, HttpLimits limits) {
-        match HttpReadRequest(stream, limits) {
+        match HttpReadRequest(stream, HttpLimits()) {
             HttpRequest r => return r
             IoError e => return e
             HttpRefused no => return no.Error
@@ -6090,7 +6086,8 @@ pub class HttpBody {
         }
 
         // the rate, as Kestrel holds `MinRequestBodyDataRate`: after the grace, the bytes that arrived over the time the reads
-        // waited, so that a read may wait until that falls under the rate, and at most the 5 seconds of a read on a socket
+        // waited, so that a read may wait until that falls under the rate (section 12, Q11 (a)); below it the read gives the
+        // server's own `request timed out` (Q12 (b))
         bound = HttpNanosAt(arrived, rate.BytesPerSecond)
         mut allowed = HttpNanosOf(rate.Grace)
         if bound > allowed {
@@ -6100,21 +6097,17 @@ pub class HttpBody {
         spare = allowed - waited
         if spare <= 0 {
             timedOut = true
-            return IoError(IoKind.TimedOut, 0, "")
+            return HttpTimedOut()
         }
 
-        if spare < 5_000_000_000 {
-            s.SetReadTimeout(HttpNanos(spare))
-        } else {
-            s.SetReadTimeout(5s)
-        }
-
-        start = timestamp.Now
+        s.SetReadTimeout(HttpNanos(spare))
+        start = instant.Now
         n = Take(mut into, max) else {
             IoError e => {
-                waited = waited + HttpNanosOf(timestamp.Now - start)
+                waited = waited + HttpNanosOf(instant.Now - start)
                 if e.Kind == IoKind.TimedOut {
                     timedOut = true
+                    return HttpTimedOut()
                 }
 
                 return e
@@ -6122,7 +6115,7 @@ pub class HttpBody {
             HttpError e => return e
         }
 
-        waited = waited + HttpNanosOf(timestamp.Now - start)
+        waited = waited + HttpNanosOf(instant.Now - start)
         arrived = arrived + n
         return n
     }
@@ -6783,13 +6776,11 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
     mut pending = HttpNoBytes()
     mut ahead = false
     while true {
-        // the wait for the first byte of a request, `KeepAliveTimeout` after the first, the 5 seconds of a read before it; none
-        // where the head of the next request stands whole in the buffer already, which the `Fill` takes with no call of the system
-        if ahead {
-        } else if served > 0 {
+        // the wait for the first byte of each request, the first of the connection among them, `KeepAliveTimeout`, as Kestrel
+        // arms it (section 12); none where the head of the next request stands whole in the buffer already, which the `Fill` takes
+        // with no call of the system
+        if !ahead {
             s.SetReadTimeout(limits.KeepAliveTimeout)
-        } else {
-            s.SetReadTimeout(5s)
         }
 
         mut first = Bytes()
@@ -6807,9 +6798,9 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
             return
         }
 
-        s.SetReadTimeout(5s)
-        begun = timestamp.Now
-        now = HttpSecondOf(begun)
+        // the head's time counts from its first byte, by the monotonic clock, and the `Date` reads the civil one
+        begun = instant.Now
+        now = HttpSecondOf(timestamp.Now)
         if now != second {
             second = now
             date = "Date: {HttpDate(now)}\r\n"
@@ -6862,8 +6853,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                     keep = false
                 } else if keep {
                     drained = body.Drain(limits.MaxDrainSize) else {
-                        IoError e => {
-                            if e.Kind == IoKind.TimedOut {
+                        IoError e => return e
+                        HttpError e => {
+                            // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), answered `408`
+                            if body.TimedOut {
                                 HttpRefuse(s, mut pending, 408, date) else {
                                     IoError lost => return HttpTimedOut()
                                 }
@@ -6873,7 +6866,6 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
 
                             return e
                         }
-                        HttpError e => return e
                     }
 
                     if !drained {
@@ -6912,19 +6904,15 @@ void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string dat
 // `Protocol` (W10; section 12, the owner, 2026-11-03, "The server's error texts mirror the client's").
 HttpError HttpTimedOut() => HttpError(HttpKind.Protocol, "request timed out")
 
-// Sets the time of the stream's next read to what is left until `deadline`, at most the 5 seconds of a read on a socket, and gives
-// `TimedOut` where nothing is left (W10).
-void | IoError HttpWaitUntil(TcpStream s, timestamp deadline) {
-    spare = deadline - timestamp.Now
+// Sets the time of the stream's next read to what is left until `deadline`, the head's time alone, with no 5 seconds of a read on a
+// socket inside the server (section 12, Q10 (b)), and gives `TimedOut` where nothing is left, with no call of the system (W10).
+void | IoError HttpWaitUntil(TcpStream s, instant deadline) {
+    spare = deadline - instant.Now
     if spare <= 0s {
         return IoError(IoKind.TimedOut, 0, "")
     }
 
-    if spare < 5s {
-        s.SetReadTimeout(spare)
-    } else {
-        s.SetReadTimeout(5s)
-    }
+    s.SetReadTimeout(spare)
 }
 
 // Sets the time of the stream's next write to the longer of the grace of `pace` and the time `count` bytes take at its rate, as
@@ -7088,10 +7076,9 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
 
 // The same, and where a `deadline` is given, as the server's loop reads: the head by the deadline, which the loop sets
 // `RequestHeadersTimeout` after the request's first byte, each read of it after the first, which takes the bytes the loop's wait
-// for that byte left in the buffer, waiting the smaller of the 5 seconds of a read on a socket and what is left, and the body held
-// to its rate (W10). Without one it reads the clock nowhere, so that a call on the socket is the first thing a build for Windows
+// for that byte left in the buffer, waiting what is left, and the body held to its rate (W10). Without one it reads the clock nowhere, so that a call on the socket is the first thing a build for Windows
 // says `not supported` to.
-HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits, timestamp? deadline) {
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits, instant? deadline) {
     mut head = Bytes()
     mut lineStart = 0
     mut firstEnd = -1
