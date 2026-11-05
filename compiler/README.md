@@ -302,9 +302,13 @@ ask about it.
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
 - A program that a run captures, clang, a built case or the command in the tests, has its streams
-  waited for within what remains of the run's limit. On Linux each process that still holds them
-  then, a child the program left running, is ended, and the run answers -1 with its pid. Pinned by
-  `CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`.
+  waited for within what remains of the run's limit. On Linux each process that still holds the write
+  end of one of them then, a child the program left running, is ended while its start is still the one
+  it was found with, and the run answers -1 with its pid. A process that holds only a read end is no
+  holder. Pinned by
+  `CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`,
+  `CaptureTests.Only_a_process_that_holds_the_write_end_of_a_pipe_of_the_run_is_its_holder` and
+  `CaptureTests.A_holder_whose_id_another_process_took_since_is_not_ended`.
 - `build` takes its options before or after the file, each once, `--cpu` with the word after it as
   its name, and nothing else; the words of its own failures are this directory's, in the record's
   form, but for those of the CPU's question, which are the owner's. Pinned by `CommandTests`.
