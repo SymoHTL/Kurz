@@ -1,0 +1,21 @@
+// expect: output
+// | 0ms
+// | 2h 5min 5s 123ms 456us 789ns
+// | -1ns
+// | Mark { At = 1s }
+// allow: raw
+// rules: S25
+
+data Mark(instant At)
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+print(Reading(0))
+print(Reading(7505123456789))
+print(Reading(-1))
+print(Mark(Reading(1000000000)))

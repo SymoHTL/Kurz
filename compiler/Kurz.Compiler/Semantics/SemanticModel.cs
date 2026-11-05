@@ -306,6 +306,7 @@ public sealed class SemanticModel
     // K7: a read of a property, `h.Count` or `Count` inside its class, by the call of its method that the read is
     private readonly Dictionary<Expression, CallExpression> propertyReads = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<MemberAccess> monotonicReads = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
@@ -428,6 +429,11 @@ public sealed class SemanticModel
     public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
+
+    /// <summary>Whether the member is <c>instant.Now</c>, the read of the monotonic clock (S25).</summary>
+    public bool IsMonotonicRead(MemberAccess access) => monotonicReads.Contains(access);
+
+    internal void RecordMonotonicRead(MemberAccess access) => monotonicReads.Add(access);
 
     /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
     public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);

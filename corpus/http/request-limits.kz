@@ -8,31 +8,34 @@
 // | TooLarge: request body over limit
 // rules: W7
 
-// a request read with limits of the program's own: a request line of at most 19 bytes with its CR LF, at most 2 header lines of at
-// most 40 bytes in all with their CR LFs, and a body of at most 5 bytes, declared or in chunks
+// a request served with limits of the program's own, which `ServeConnection` takes, since `HttpRequest.Read` reads under those of
+// `HttpLimits()` alone: a request line of at most 19 bytes with its CR LF, at most 2 header lines of at most 40 bytes in all with
+// their CR LFs, and a body of at most 5 bytes, declared or in chunks
 void | IoError Show(string request) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.Write(request.Bytes)
     client.ShutdownWrite()
-    small = HttpLimits(MaxRequestLineSize: 19, MaxRequestHeadersTotalSize: 40, MaxRequestHeaderCount: 2, MaxRequestBodySize: 5)
-    match HttpRequest.Read(server, small) {
-        HttpRequest r => {
-            match r.Body.ReadAll(100) {
-                Bytes b => {
-                    if b.Count > 0 {
-                        print("{r.Method} {r.Path}: {b.Count}")
-                    } else {
-                        print("{r.Method} {r.Path}")
-                    }
+    shown = (HttpRequest r) => {
+        match r.Body.ReadAll(100) {
+            Bytes b => {
+                if b.Count > 0 {
+                    print("{r.Method} {r.Path}: {b.Count}")
+                } else {
+                    print("{r.Method} {r.Path}")
                 }
-
-                IoError e => print(e)
-                HttpError e => print("{e.Kind}: {e.Detail}")
             }
+
+            IoError e => print(e)
+            HttpError e => print("{e.Kind}: {e.Detail}")
         }
 
+        return HttpResponse.Empty(204)
+    }
+
+    small = HttpLimits(MaxRequestLineSize: 19, MaxRequestHeadersTotalSize: 40, MaxRequestHeaderCount: 2, MaxRequestBodySize: 5)
+    HttpServer.ServeConnection(server, shown, small) else {
         IoError e => print(e)
         HttpError e => print("{e.Kind}: {e.Detail}")
     }

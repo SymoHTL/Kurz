@@ -3493,6 +3493,61 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
+    /// <summary>D5, K2: <c>with</c> on a block read from a field of an instance through its path, while a method gives the field another block.</summary>
+    private const string WithFieldPath = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.B with { Xs = h.Change() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, K7: <c>with</c> on a block read from a field by its name alone in a method, while a method gives the field another block.</summary>
+    private const string WithFieldName = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+
+            pub Big Copy() => B with { Xs = Change() }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.Copy()
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, F11: <c>with</c> on a block read from a field of an instance through its path, while a lambda gives the field another block.</summary>
+    private const string WithFieldLambda = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B)
+
+        h = Holder(Big([1, 2, 3], null))
+        f = () => {
+            h.B = Big([9], null)
+            return [7]
+        }
+        b = h.B with { Xs = f() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
     private const string HandleTarget = """
         class Log(mut File Out) {
             pub int Swap(File next) {
@@ -3660,6 +3715,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
         }
+
+        // `with` on a block read from a field of a class instance, while a replaced value gives the field another block: through the
+        // instance's path by a method, by the field's name alone in a method (K7), and through the path by a lambda that assigns it
+        // (F11); the read takes a count held to the statement's end (K2), so the copy reads the block the field held when the `with`
+        // began, and the field keeps the new one (D5)
+        Ran(BuildAndRun(WithFieldPath, fenced, "with-field-path-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldName, fenced, "with-field-name-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldLambda, fenced, "with-field-lambda-fenced"), 0, ["[7]", "[9]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
