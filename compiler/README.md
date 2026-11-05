@@ -1951,7 +1951,12 @@ round can ask about it by the rule's id.
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
   type whose result is not `void`, which F11 makes `type-mismatch` at the lambda where the result's
-  first case is not `void`, and takes as the lambda's body where it is (O10); `Name()` on a
+  first case is not `void`, and takes as the lambda's body where it is (O10), the `type-mismatch`
+  naming O10, and a function value whose result is `void`, passed there by its name, gets T1's
+  `type-mismatch` with the lambda that fits written at the call, `Run(() => say())` (the owner, 2026-11-05,
+  #110, comment 6664353093), its parameters named by the first of `x`, `y`, `z`, `x1`, ... that
+  nothing in scope takes and the call's other arguments as F13's message writes a default
+  (assumed); `Name()` on a
   data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
