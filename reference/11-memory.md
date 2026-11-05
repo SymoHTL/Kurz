@@ -1074,8 +1074,7 @@ of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (�
 2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
 types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
 and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`; one for a
-parameter that names a lane, the `index` of `X86.Sse41.Extract`, the one such parameter of the intrinsics the
-compiler builds, that fits and lies past the lanes
+parameter that names a lane, the `index` of `X86.Sse41.Extract`, that fits and lies past the lanes
 is the compile error `lane-out-of-range` at its line, whose text names the lane and the count of the
 lanes, so `X86.Sse41.Extract(v, 255)` of four lanes builds nothing (§13, the owner, 2026-11-02); any
 other constant is read as the instruction reads it, a count of 32 bytes or more giving 0 in
@@ -1175,8 +1174,9 @@ A trace and the line tables name the function a guarded block is compiled
 into after the function it stands in, `<function>.guarded`, `Pick.guarded` for a block in `Pick`, in the
 pattern of a lambda's `main.lambda` (§13, the owner, 2026-11-02). The function is the one written in the
 source: a block in the method `Twice` of `Doubler` is `Doubler.Twice.guarded`, one in a lambda written in
-`main` is `main.lambda.guarded`, one in a guarded block of `Pick` is `Pick.guarded` again, and a lambda
-written in a guarded block of `main` is `main.lambda`, as outside it *(assumed: as §13 marks them)*.
+`main` is `main.lambda.guarded`, and a lambda written in a guarded block of `main` is `main.lambda`, as
+outside it *(assumed: as §13 marks them)*. A guarded block written in a guarded block adds its own mark:
+one in a guarded block of `Pick` is `Pick.guarded.guarded` (§13, the owner, 2026-11-03).
 
 Case: [memory/intrinsic-guarded.kz](../corpus/memory/intrinsic-guarded.kz)
 ```kurz
