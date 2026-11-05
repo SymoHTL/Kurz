@@ -635,9 +635,10 @@ print(SizeOf)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which T29 marks
-as assumed, accepted by the rule's id on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
-first fourteen, which are keywords there; the four time types C# does not reserve. The owner chose
+`duration`, `timestamp`, `longduration`, `longtimestamp` and `instant`; `longduration` and `longtimestamp` are T29's
+names, which T29 marks as assumed, accepted by the rule's id on 2026-10-09, and `instant` is T36's, the built-in type of
+the monotonic clock (§12, the owner, 2026-11-04, the monotonic clock, Q1 (a)). Using one as a name is `reserved-word`
+(L12), as it is in C# for the first fourteen, which are keywords there; the five time types C# does not reserve. The owner chose
 this on 2026-10-04, against ordinary names that a declaration hides in its block, under which
 `long(x)` (T10) would have two readings in one program; the cost is that nothing can be called
 `string`, and that a ported program with a local called `duration` or `timestamp` has to rename it.
@@ -646,6 +647,12 @@ Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
 ```kurz
 int = 1
 print(1)
+```
+
+Case: [source/instant-as-name.kz](../corpus/source/instant-as-name.kz)
+```kurz
+int instant = 1
+print(instant)
 ```
 
 ### L13 (decided, §8) A string over several lines

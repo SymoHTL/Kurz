@@ -38,13 +38,14 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   `--self-test` dispatch made its self-test fall through to the recompute that `--print` runs, which
   replays the ledger ([knowledge/a-replay-inside-a-replay-has-no-end.md](knowledge/a-replay-inside-a-replay-has-no-end.md)).
   `tools/red_proof.py` marks every self-test it starts with `KURZ_RED_PROOF_REPLAY`, and a replay
-  that finds the mark refuses before it copies anything. A case whose mutation would reach
-  `replay()` reaches stand-ins for the copy and the check, and the case of `tools/red_proof.py` that
-  calls it with the mark cleared runs it only while both stand-ins are in place. Gate: `self-tests`
-  (the cases of the refusal, of the mark and of the stand-ins, and their red proofs). A mutation
-  proved by hand, outside the ledger, runs with the mark set, in a process group of its own, under
-  a timeout that ends the group; and no self-test calls `check()`, which runs the self-tests in the
-  tree it is given and has no such guard, on the real tree: `judgment step`.
+  that finds the mark refuses before it copies anything. The case of `tools/red_proof.py` that calls
+  `replay()` with the mark cleared runs it only while its stand-ins for the copy and the check are
+  both in place. Gate: `self-tests` (the cases of the refusal, of the mark and of the stand-ins, and
+  their red proofs). A mutation proved by hand, outside the ledger, runs with the mark set, in a
+  process group of its own, under a timeout that ends the group; no self-test calls `check()`, which
+  runs the self-tests in the tree it is given and has no such guard, on the real tree; and another
+  case whose mutation would reach `replay()` reaches a stand-in or the mark's refusal, as the evidence
+  tool's stand-in for `red_proof.replay` does: `judgment step`.
 - `cd compiler && dotnet test Kurz.sln -c Release -p:RestoreLockedMode=true --disable-build-servers`
   builds the compiler and runs its unit tests, with the SDK that `compiler/global.json` pins (the
   dotnet host reads it from the working directory, so the command runs inside `compiler/`) and the
@@ -502,8 +503,8 @@ Gate: review rule "rules for sessions".
   [knowledge/a-round-that-did-not-converge-makes-main-a-round.md](knowledge/a-round-that-did-not-converge-makes-main-a-round.md)).
   The merge tool's refusal of a branch behind `main` at the cap says whether the round converged on
   every file of the head, from the head's `review` status. Where it did not, or where the status does
-  not show it, the refusal says that taking `main` makes the review of the new head a paid round and
-  that the merge needs the owner's choice. Gate: `self-tests` (the count, the label before
+  not show it, the refusal says that taking `main` makes the review of the new head end as `cap`
+  before any pass and that the merge needs the owner's choice. Gate: `self-tests` (the count, the label before
   the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
   `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a

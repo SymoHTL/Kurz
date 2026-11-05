@@ -226,6 +226,22 @@ public sealed class TimeTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         """;
 
+    private const string Readings = """
+        instant Plus(instant t, duration d) => t + d
+        instant Minus(instant t, duration d) => t - d
+        instant After(duration d, instant t) => d + t
+        duration Gap(instant b, instant a) => b - a
+
+        instant Reading(long n) {
+            long bits = n
+            raw {
+                return *Ptr<instant>(&bits)
+            }
+        }
+
+
+        """;
+
     /// <summary>A file name of a call's letters and digits, a `-` as `M`.</summary>
     private static string Name(string call) => new(call.Select(c => c == '-' ? 'M' : c).Where(char.IsLetterOrDigit).ToArray());
 
@@ -275,6 +291,52 @@ public sealed class TimeTests(Toolchain toolchain) : IClassFixture<Toolchain>
             DurationText(Narrow - 1), DurationText(-Narrow), DurationText(Narrow - 1), DurationText(Wide - 1), DurationText(Wide - 1),
             DurationText(Narrow - 1), DurationText(-Narrow), TimestampText(Narrow - 1), DurationText(Narrow - 1), DurationText(-Narrow),
             TimestampText(-Narrow),
+        ], "");
+    }
+
+    [Theory]
+    [InlineData("Plus(Reading(9223372036854775807), 1ns)", 1)]
+    [InlineData("Plus(Reading(1), 9223372036854775807ns)", 1)]
+    [InlineData("Minus(Reading(-9223372036854775808), 1ns)", 2)]
+    [InlineData("After(1ns, Reading(9223372036854775807))", 3)]
+    [InlineData("Gap(Reading(9223372036854775807), Reading(-1))", 4)]
+    [InlineData("Gap(Reading(-9223372036854775808), Reading(1))", 4)]
+    public void A_reading_of_the_monotonic_clock_beyond_the_range_raises_in_every_build(string call, int line)
+    {
+        // T36 (section 12, the owner, 2026-11-04, the monotonic clock, Q2 (a) and Q3 (a)): as on the other time types (T31), at the line of
+        // the operation, a release build as well; a reading made of its bits, which no reading of the clock reaches in a test's time
+        var text = Readings + $"print({call})\n";
+        var name = "instant-raise-" + Name(call);
+        Ran(BuildAndRun(text, name + "-test"), 1, [], $"error: overflow at program.kz:{line}\n");
+        Ran(BuildAndRun(text, name + "-release", testBuild: false), 1, [], $"error: overflow at program.kz:{line}\n");
+    }
+
+    [Fact]
+    public void A_reading_at_the_edges_keeps_its_value_and_shows_the_text_of_a_duration()
+    {
+        // T36, S25 (Q4 (a)): the difference signed, negative where the first is the earlier, and the text of a reading that of its
+        // nanoseconds as a duration, for 1000 values of the xorshift sequence and the narrow edges
+        var values = Values(1000, 63).Concat(DurationEdges).Where(v => v >= -Narrow && v < Narrow).ToList();
+        var text = new StringBuilder(Readings + """
+            print(Plus(Reading(9223372036854775806), 1ns))
+            print(Minus(Reading(-9223372036854775807), 1ns))
+            print(After(1ns, Reading(9223372036854775806)))
+            print(Gap(Reading(9223372036854775807), Reading(0)))
+            print(Gap(Reading(-1), Reading(9223372036854775807)))
+            print(Gap(Reading(0), Reading(5)))
+            print(Reading(1) > Reading(-1))
+            print(Reading(5) == Plus(Reading(0), 5ns))
+
+            """);
+        foreach (var value in values)
+        {
+            text.Append("print(Reading(").Append(value.ToString(Invariant)).Append("))\n");
+        }
+
+        Ran(BuildAndRun(text.ToString(), "instant-edges", testBuild: false), 0,
+        [
+            DurationText(Narrow - 1), DurationText(-Narrow), DurationText(Narrow - 1), DurationText(Narrow - 1), DurationText(-Narrow), "-5ns",
+            "true", "true", .. values.Select(DurationText),
         ], "");
     }
 

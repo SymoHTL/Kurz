@@ -21,6 +21,9 @@ flowchart TD
         the gate could not judge; inside or outside the repository is decided by the file system's
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
+        A call of the tool it does not take, a mistyped --hook among them, is refused through tools/calls.py with exit 2,
+        which denies the call, and says why on stderr, which the session sees; a kit.py or a calls.py that does not import
+        is denied by exit 2 too.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
@@ -51,7 +54,10 @@ flowchart TD
         no longer turns its one named case red; fewer tools than the floor; a ledger written back in
         another form than its one (one entry per line, two spaces in, text as it is; --format writes it);
         a replay started inside a self-test that a replay runs, which every self-test it starts is marked for
-        (KURZ_RED_PROOF_REPLAY), refused before anything is copied. The replay runs each
+        (KURZ_RED_PROOF_REPLAY), refused before anything is copied; a call of the tool other than none,
+        --format or --self-test alone, which it refuses with the usage and exit 2 before anything is copied or run;
+        a tool of tools/calls.py's ROUTED list whose __main__ does not begin by asking calls.refused, which refuses a call
+        the tool does not take with the usage and exit 2 before anything runs (issue 156). The replay runs each
         self-test, green and mutated, in a copy of the tree, with its temporary files beside that copy,
         outside the tree a suite reads; both go when the check is done; a copy that could not be removed is named.
         Not seen: a decision that has no case. Node R5, rule tools"]
@@ -108,7 +114,7 @@ flowchart TD
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
         passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
-        cases run than RunFloor in RunTests names for Linux and for Windows, and on Linux on a crash whose trace is empty, holds a line that
+        cases run than RunFloor in RunTests names for Linux and for Windows, each the count measured on its system with no margin, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
         at the error line's place; TraceTests, red on a trace
         other than the one each Linux program pins: its frames, names and lines, the cut and its count, the
@@ -305,7 +311,7 @@ flowchart TD
         M2["merge_pr.py: refuses a head other than the one named, a Draft,
         a branch behind its base (at the review cap the refusal says, from the review status of the head,
         whether the round converged on every file, and where it did not or the status does not show it,
-        that taking main makes the review of the new head a paid round, and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
+        that taking main makes the review of the new head end as cap before any pass, and the owner's choice), armed auto-merge, an unanswered finding (at the review cap a finding
         moved to the collection ticket is answered, R7 and G8),
         a required check that is not success from the app the ruleset pins,
         live merge rules that differ from tools/ruleset.json or that it could not read in full,

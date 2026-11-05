@@ -646,6 +646,12 @@ public sealed partial class Checker
                 return new Typed(Types.Timestamp);
             }
 
+            if (n.Name == "instant" && m.Member == "Now")
+            {
+                model.RecordMonotonicRead(m); // S25: the monotonic clock (section 12, the owner, 2026-11-04, the monotonic clock, Q1 (a))
+                return new Typed(Types.Instant);
+            }
+
             if (IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
@@ -731,6 +737,8 @@ public sealed partial class Checker
                 }
 
                 break;
+            case PrimitiveType { Kind: Primitive.Instant } when member == "Elapsed":
+                return new Typed(Types.Duration); // S25: `instant.Now - t` (section 12, assumed with the monotonic clock)
             case MapType when member == "Count":
                 return new Typed(Types.Int); // M9: the count of its entries, as C#'s `Dictionary.Count` (section 4, the owner, 2026-10-30)
             case DataType d:
@@ -1281,7 +1289,7 @@ public sealed partial class Checker
 
         if (type is null)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, T13)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "T13")})");
             return Typed.Error;
         }
 
@@ -1388,6 +1396,18 @@ public sealed partial class Checker
     {
         var wide = Types.IsWideTime(l) || Types.IsWideTime(r);
         var (ld, rd) = (Types.IsDuration(l), Types.IsDuration(r));
+        if (Types.IsInstant(l) || Types.IsInstant(r))
+        {
+            // T36: two readings give their signed difference, and a reading and a narrow duration a reading; a reading has no wide variant
+            return (op, Types.IsInstant(l), Types.IsInstant(r)) switch
+            {
+                (TokenKind.Minus, true, true) => Types.Duration,
+                (TokenKind.Plus or TokenKind.Minus, true, false) when rd && !wide => Types.Instant,
+                (TokenKind.Plus, false, true) when ld && !wide => Types.Instant,
+                _ => null,
+            };
+        }
+
         return (op, ld, rd) switch
         {
             (TokenKind.Plus, true, true) or (TokenKind.Minus, true, true) => wide ? Types.LongDuration : Types.Duration,
@@ -1448,7 +1468,7 @@ public sealed partial class Checker
         }
         else if (Types.IsTime(left.Type) && Types.IsTime(right.Type))
         {
-            ok = Types.IsDuration(left.Type) == Types.IsDuration(right.Type);
+            ok = Types.IsDuration(left.Type) == Types.IsDuration(right.Type) && Types.IsInstant(left.Type) == Types.IsInstant(right.Type); // T36: a reading beside a reading alone
         }
         else if (left.Type is PrimitiveType { Kind: Primitive.Char } && right.Type is PrimitiveType { Kind: Primitive.Char })
         {
@@ -1510,7 +1530,7 @@ public sealed partial class Checker
 
         if (!ok)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, D3)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "D3")})");
             return new Typed(Types.Bool);
         }
 
