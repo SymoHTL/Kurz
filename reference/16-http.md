@@ -251,9 +251,14 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 hyper's `HeaderMap` keeps the values of a name apart and in their order but lowercases the name, and
 ASP.NET Core's `IHeaderDictionary` holds the values of a name as one `StringValues`, so that neither
 keeps one list of every name and value with each name's spelling (§12). `GetAll` gives a
-`List<string>`, `Set` replaces every value of the name by one, as ASP.NET Core's indexer does, and
-`Remove` removes every value of it *(assumed, §12: proposed with the product pass and not put to the
-owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, since a header's
+new `List<string>`, so that a change to it changes nothing in the headers; `Set` of a name the
+headers hold puts the value in the place of the name's first header, which keeps its spelling, and
+takes out the name's other headers, as hyper's `HeaderMap::insert` keeps the entry, and `Set` of a
+name they do not hold puts it after every header they hold; a name they do not hold gives `null`
+from `Get` and an empty list from `GetAll`, and its `Remove` changes nothing (§12, the owner,
+2026-11-02, the headers' pass, Q3 to Q7 at their defaults, #110, comment 6573113786, the questions
+in comment 6567534197). `Remove` removes every value of the name *(assumed, §12: proposed with the
+product pass and not put to the owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, since a header's
 value often comes from outside input, and a CR or a LF in the name or the value is
 `HttpError(Protocol, "invalid header: CR or LF")`, refused where it is set, as Rust's `HeaderValue`
 and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110, comment
@@ -263,19 +268,24 @@ and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110
 is made by `HttpHeaders()`, which holds no header; its members are `string? Get(string name)`,
 `List<string> GetAll(string name)`, `void | HttpError Add(string name, string value)`,
 `void | HttpError Set(string name, string value)` and `void Remove(string name)`; a refused `Add` or
-`Set` changes nothing, `Set` checking before it removes; `Set` puts its value after every value the
-headers hold, as a `Remove` and then an `Add`; `Remove` of a name the headers do not hold changes
-nothing; an empty value is taken; a name is written back as it was spelled in the head that
+`Set` changes nothing, `Set` checking before it changes a header; an empty value is taken; a name is written back as it was spelled in the head that
 a writer of a request or a response writes; and `print(h)` gives the text of a class without a
 `Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
-empty start and the result of `Remove` among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+empty start among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
 `h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
 map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
 `GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
 names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
+The compiler does not build this walk: it refuses `for name, value in h` with `type-mismatch`, as
+two names over any class, so the cases walk the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`.
 `h.Count` is the read-only property `int Count` (K7), and `h.NameAt(i)` and `h.ValueAt(i)` give a
 `string` and, with `i` outside 0 to `Count - 1`, stop the program with `index-out-of-range`, as a
 list's index does (T14) (§12, the owner, 2026-11-03, #110, comment 6615254370).
+The error line of that stop names `std/std.kz` and the line of the read inside it, and the trace
+below it names the program's call, as §6 gives every exception the file and the line that raised it
+*(assumed, §12: the default (a) parked on #110, comment 6616414692, against the program's line, as
+Rust's `#[track_caller]` gives it)*.
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
@@ -387,17 +397,21 @@ Case: [http/http-headers-set-order.kz](../corpus/http/http-headers-set-order.kz)
 void | HttpError Fill(HttpHeaders headers) {
     headers.Add("Host", "a")
     headers.Add("Accept", "text/plain")
+    headers.Add("HOST", "c")
     headers.Set("host", "b")
+    headers.Set("X-Id", "1")
 }
 
 h = HttpHeaders()
 Fill(h) else {
     HttpError e => print(e.Detail)
 }
-// `Set` takes out every value of the name and puts its value after every value the headers hold
-print(h.NameAt(0))
-print(h.NameAt(1))
-print(h.ValueAt(1))
+// `Set` puts its value in the place of the name's first header, which keeps its spelling, takes out the name's
+// other headers, and puts a name the headers do not hold after every header they hold
+print(h.Count)
+for i in 0..<h.Count {
+    print("{h.NameAt(i)}: {h.ValueAt(i)}")
+}
 ```
 
 Case: [http/http-headers-empty-name.kz](../corpus/http/http-headers-empty-name.kz)
@@ -874,9 +888,12 @@ and the `Content-Length` of the body, which a `File` takes from its size when it
 the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
 body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date` or `Connection`,
 which the server's loop adds (§12, assumed). A `204` and a `304` get no body (§12, assumed),
-and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14). A response
-`Write` cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered
-`500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
+and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
+`HttpResponse.Text` and `HttpResponse.Bytes` given a `205` and a body that is not empty stop the
+program with the run-time error `status 205 takes no body`, as a status outside the range does,
+since they see the status and the body (§12, assumed: the reading said back with Q14). A response
+`Write` cannot write, a `File` of `205` whose file holds bytes or a `Content-Length` its body
+contradicts, is answered `500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
 owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
 added as its last coding where it does not end in it, and the body is chunked, a coding it names
 being announced and not applied; beside a `Content-Length` it gets no answer (§12, the owner,
@@ -1004,8 +1021,8 @@ All() else {
 
 Case: [http/response-unwritable.kz](../corpus/http/response-unwritable.kz)
 ```kurz
-// a response the writer cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered `500` with no
-// body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
+// a response the writer cannot write, a `205` whose file holds bytes or a `Content-Length` its body contradicts, is answered `500`
+// with no body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
 // failure
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -1028,7 +1045,9 @@ void | IoError Wire(HttpResponse r) {
 }
 
 void | IoError | HttpError All() {
-    Wire(HttpResponse.Text(205, "x"))
+    File.WriteAll("response-unwritable-205.txt", "x".Bytes)
+    Wire(HttpResponse.File(205, "response-unwritable-205.txt"))
+    File.Delete("response-unwritable-205.txt")
     cut = HttpResponse.Text(200, "hello")
     cut.Headers.Set("Content-Length", "4")
     Wire(cut)
@@ -1422,7 +1441,17 @@ string Wire(TcpStream client) {
     return "[{shown}]{after}"
 }
 
-hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+// a response the writer cannot write: its `Content-Length` contradicts its body
+HttpResponse Unwritable() {
+    response = HttpResponse.Text(200, "x")
+    response.Headers.Set("Content-Length", "2") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+hello =(HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
 closing = (HttpRequest r) => {
     response = HttpResponse.Text(200, "bye")
     response.Headers.Set("Connection", "close") else {
@@ -1433,10 +1462,10 @@ closing = (HttpRequest r) => {
 }
 
 failing = (HttpRequest r) => HttpResponse.Empty(500)
-unwritable = (HttpRequest r) => HttpResponse.Text(205, "x")
+unwritable = (HttpRequest r) => Unwritable()
 partly = (HttpRequest r) => {
     if r.Path == "/b" {
-        return HttpResponse.Text(205, "x")
+        return Unwritable()
     }
 
     return HttpResponse.Text(200, "hi {r.Path}")

@@ -6047,15 +6047,35 @@ pub class HttpHeaders {
         values.Add(value)
     }
 
-    // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them,
-    // and the value goes after every value the headers hold. A refused value takes out nothing.
+    // The one value of the name, as hyper's `HeaderMap::insert` keeps the entry and its key (section 12: the owner,
+    // 2026-11-02, the headers' pass, Q4 (a), Q5 and Q6 (b), at their defaults): the value takes the place of the name's
+    // first header, which keeps its spelling, and the name's other headers are taken out; a name the headers do not
+    // hold goes after every value they hold. A refused value changes nothing.
     pub void | HttpError Set(string name, string value) {
         if Breaks(name) || Breaks(value) {
             return Refused()
         }
 
-        Remove(name)
-        Add(name, value)
+        mut first = -1
+        mut i = 0
+        while i < names.Count {
+            if !SameName(names[i], name) {
+                i = i + 1
+            } else if first < 0 {
+                first = i
+                i = i + 1
+            } else {
+                names.RemoveAt(i)
+                values.RemoveAt(i)
+            }
+        }
+
+        if first < 0 {
+            names.Add(name)
+            values.Add(value)
+        } else {
+            values[first] = value
+        }
     }
 
     // Takes out every value of the name.
@@ -6447,6 +6467,7 @@ pub class HttpResponse {
     pub static HttpResponse Text(int status, string text) {
         r = Of(status, "text/plain; charset=utf-8")
         r.held = text.Bytes
+        r.NoBodyOn205()
         return r
     }
 
@@ -6454,6 +6475,7 @@ pub class HttpResponse {
     pub static HttpResponse Bytes(int status, Bytes bytes) {
         r = Of(status, "application/octet-stream")
         r.held = bytes
+        r.NoBodyOn205()
         return r
     }
 
@@ -6504,8 +6526,17 @@ pub class HttpResponse {
         return r
     }
 
-    // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` with a body or a
-    // `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
+    // A `205` given a body stops the program, as a status outside the range does: the function that makes the response sees the
+    // status and the body (design record, section 12: the owner, 2026-11-02, the writer's pass, Q14, and the reading said back with
+    // it, assumed). A `File`'s length is taken when it is written, so a `205` whose file holds bytes reaches `Send`'s `500`.
+    void NoBodyOn205() {
+        if code == 205 && held.Count > 0 {
+            throw "status 205 takes no body"
+        }
+    }
+
+    // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` whose file holds
+    // bytes or a `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
     // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
     bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
         bodiless = code == 204 || code == 304

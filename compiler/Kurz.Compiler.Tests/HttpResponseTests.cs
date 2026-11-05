@@ -7,7 +7,8 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The decisions of the server's writer of responses (W8; design record, section 12) that no corpus case pins: a status outside
-/// 200 to 599 stops the program, a `1xx` among them, which a case cannot hold since the error line names the line of std/ that throws; a file whose
+/// 200 to 599 stops the program, a `1xx` among them, and so does a `205` given a body by <c>Text</c> or <c>Bytes</c>, which a case cannot
+/// hold since the error line names the line of std/ that throws; a file whose
 /// size changes between the head and the body, which a program cannot time, read through a function an edited std/ adds; and a
 /// build for Windows, whose runtime gives no socket, says <c>not supported</c> at the line of the program whose write reaches the
 /// socket through std/.
@@ -52,6 +53,32 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
         var lines = error.Split('\n');
         Assert.StartsWith("error: thrown at std/std.kz:", lines[0], StringComparison.Ordinal);
         Assert.Equal([$"status {status} is outside 200 to 599", ""], lines[1..]);
+    }
+
+    [Theory]
+    [InlineData("Text(205, \"x\")")]
+    [InlineData("Bytes(205, \"x\".Bytes)")]
+    public void A_205_given_a_body_by_Text_or_Bytes_stops_the_program_with_its_text(string make)
+    {
+        // an empty 205 from each of the four functions, a file's among them, whose length is taken when it is written, makes a
+        // response, the positive control; a body given with it is thrown from std/ (design record, section 12: the owner,
+        // 2026-11-02, Q14, and the reading said back with it, assumed), and nothing after it runs
+        var text = $"""
+            print(HttpResponse.Text(205, "").Status)
+            print(HttpResponse.Bytes(205, Bytes()).Status)
+            print(HttpResponse.Empty(205).Status)
+            print(HttpResponse.File(205, "none.txt").Status)
+            HttpResponse.{make}
+            print("after")
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-response-205"));
+        Assert.Equal(1, code);
+        Assert.Equal(["205", "205", "205", "205"], output);
+        var lines = error.Split('\n');
+        Assert.StartsWith("error: thrown at std/std.kz:", lines[0], StringComparison.Ordinal);
+        Assert.Equal(["status 205 takes no body", ""], lines[1..]);
     }
 
     [Fact]
