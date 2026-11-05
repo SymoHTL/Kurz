@@ -2546,7 +2546,7 @@ string Show(HttpClient client, int port) {
 
 void Responses(int port) {
     client = HttpClient()
-    for i in 0..<18 {
+    for i in 0..<19 {
         print(Show(client, port))
     }
 }
@@ -2562,6 +2562,7 @@ Against([
     "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX: a\rbc: d\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
