@@ -22,8 +22,9 @@ flowchart TD
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
         A call of the tool it does not take, a mistyped --hook among them, is refused through tools/calls.py with exit 2,
-        which denies the call, and says why on stderr, which the session sees; a kit.py or a calls.py that does not import
-        is denied by exit 2 too.
+        which denies the call, and says why on stderr, which the harness gives the session as the reason of the block
+        (the hooks page, read 2026-11-05, in a-hook-denies-by-exit-2-or-by-its-json); a kit.py or a calls.py that does not
+        import, and an exception nothing caught, calls.refused's among them, are denied by exit 2 too.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
