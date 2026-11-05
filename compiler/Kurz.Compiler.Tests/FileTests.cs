@@ -128,6 +128,9 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         data Pair(File H, A X)
         class Pairs(Pair One, Pair Two)
         class Limit(A X, File H)
+        data Box(() => bool F, Box? Next)
+
+        () => bool Make(A x, A y) => () => x.Inner == null && y.Inner == null
 
         void EndP(P p) {}
         void EndNodes(Nodes n) {}
@@ -135,6 +138,7 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         void EndList(List<A> l) {}
         void EndPairs(Pairs p) {}
         void EndLimit(Limit l) {}
+        void EndBox(Box b) {}
 
         void | IoError Fields() {
             EndP(P(A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), A(File.Create("4.txt"), null))))
@@ -160,6 +164,11 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             EndLimit(Limit(A(File.Create("1.txt"), null), File.Create("2.txt")))
         }
 
+        void | IoError Captures() {
+            b = Box(Make(A(File.Create("1.txt"), A(File.Create("2.txt"), null)), A(File.Create("3.txt"), null)), null)
+            EndBox(b)
+        }
+
         void | IoError All() {
             Fields()
             Blocks()
@@ -167,9 +176,38 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Loose()
             Plain()
             Last()
+            Captures()
         }
 
         All() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    private const string Entries = """
+        class A(File H, A? Inner)
+        class Table(Map<string, A> M)
+
+        Map<string, A> Fill(A a, A b, A c, A d) {
+            mut m = Map<string, A>()
+            m["3"] = a
+            m["4"] = b
+            m["5"] = c
+            m["6"] = d
+            return m
+        }
+
+        void | IoError Run() {
+            t = Table(Fill(A(File.Create("1.txt"), null), A(File.Create("2.txt"), null), A(File.Create("3.txt"), null), A(File.Create("4.txt"), null)))
+            for k, v in t.M {
+                if v.Inner == null {
+                    print(k)
+                }
+            }
+        }
+
+        Run() else {
             IoError e => print(e)
         }
 
@@ -182,11 +220,28 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // the fields' order, depth-first, and what a field holds that ends at once ends in the fields' order before them. A handle
         // shows the order where it closes: this runtime writes the descriptor of each file it closes, and each function's files are
         // created in the order of the fields, so their descriptors, from 3 up, count that order. An instance's fields, a block's, a
-        // list's items in a field and in an argument each end 3, 4, 5, 6 or 3, 4, 5, where the last value put on the work list ended
-        // first before; two plain values' handles close before the instances they hold, each in the fields' order; and with fields
-        // `(a: A, h: File)`, `h` closes before the handle `a` holds, which the section names as the difference from Rust's order
+        // list's items in a field and in an argument, and a closure's captures in a block each end 3, 4, 5, 6 or 3, 4, 5, where the
+        // last value put on the work list ended first before; two plain values' handles close before the instances they hold, each
+        // in the fields' order; and with fields `(a: A, h: File)`, `h` closes before the handle `a` holds, which the section names
+        // as the difference from Rust's order
         var closes = ListTests.Edited(("runtime/linux/linux.kz", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n", "pub long CloseFile(int fd) {\n    mut long result = 0\n    raw {\n        mut byte mark = byte(fd + 48)\n        Write(1, &mark, 1)\n        mark = byte(10)\n        Write(1, &mark, 1)\n"));
-        Ran(Ends, "ends-in-order", ["3", "4", "5", "6", "3", "4", "5", "6", "3", "4", "5", "3", "4", "5", "3", "5", "4", "6", "4", "3"], runtimes: [closes]);
+        Ran(Ends, "ends-in-order", ["3", "4", "5", "6", "3", "4", "5", "6", "3", "4", "5", "3", "4", "5", "3", "5", "4", "6", "4", "3", "3", "4", "5"], runtimes: [closes]);
+
+        // a map's entries end in the map's order, the order a `for` over it gives, which no test may expect (M10): the keys a `for`
+        // prints, each the descriptor of its value's file, are the descriptors closed after them, in the same order, where the
+        // reverse of it closed them before
+        if (Builder.HostTarget == Target.Windows)
+        {
+            RefusedOnWindows(Compile(Entries, toolchain.Runtime));
+            return;
+        }
+
+        var compilation = Compile(Entries, closes);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var run = Toolchain.Run(toolchain.Build(compilation.Program, "ends-in-map-order"));
+        Assert.Equal((0, ""), (run.Code, run.Error));
+        Assert.Equal(["3", "4", "5", "6"], run.Output.Take(4).Order());
+        Assert.Equal(run.Output.Take(4), run.Output.Skip(4));
     }
 
     private const string Shared = """

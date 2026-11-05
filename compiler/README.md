@@ -1245,7 +1245,8 @@ released class holds a field of another class, built and run: the flag of a rele
 declared once, with the function that works the lists off, since the first class release builds
 the releases of its fields' classes before its class is among the released. Pinned by `FileTests`: the
 order, with a runtime that writes the descriptor of each file it closes, of an instance's fields, a
-block's, a list's items in a field and in an argument, two plain values' handles before the instances
+block's, a list's items in a field and in an argument, a closure's captures in a block, a map's entries
+in an instance, in the order a `for` over the map gives, two plain values' handles before the instances
 they hold, and fields `(a: A, h: File)`, whose `h` closes first. A `throw`, which no `else` catches, since an `else` takes the cases a call returns (O5),
 and a raise end the process with their error line, and no count is lowered there.
 A value of a block type is counted as an instance is, by the count in front of its type's number, as
