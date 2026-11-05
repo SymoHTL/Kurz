@@ -883,3 +883,47 @@ if args.Count == 0 {
     return "stop"
 }
 ```
+
+### F18 (decided, §12) `Hint.BlackBox`
+
+`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)`, as
+Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "Any value,
+as Rust's"). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`.
+Every program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
+the call, as best effort, the way Rust's does, with no promise of constant time (§12, the owner,
+2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments are refused, as
+`string.Join` refuses them, and a member of `Hint` other than `BlackBox` is `unknown-name` (V10), as
+a function `Sha256` lacks is)*
+
+No case for what the optimiser sees: a case sees only the value the call gives back.
+
+Case: [functions/black-box.kz](../corpus/functions/black-box.kz)
+```kurz
+data Point(int X, int Y)
+
+n = Hint.BlackBox(1000)
+print(n + 1)
+hay = Hint.BlackBox("a haystack of {n}")
+print(hay)
+xs = Hint.BlackBox([3, 1, 2])
+mut ys = Hint.BlackBox(xs)    // the list the variable holds, which the change of `ys` leaves as it is (M3)
+ys.Add(4)
+print(xs.Count)
+print(ys.Count)
+p = Hint.BlackBox(Point(1, 2))
+print(p.X + p.Y)
+```
+
+Case: [functions/black-box-redeclared.kz](../corpus/functions/black-box-redeclared.kz)
+```kurz
+// a hint of the program's own, under a name every file sees
+data Hint(string Text)
+
+print(1)
+```
+
+Case: [functions/black-box-unknown-member.kz](../corpus/functions/black-box-unknown-member.kz)
+```kurz
+x = Hint.Opaque(1)
+print(x)
+```

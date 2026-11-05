@@ -98,6 +98,47 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_value_through_Hint_BlackBox_is_stored_hidden_by_an_empty_asm_and_read_back_and_no_constant_to_the_optimiser()
+    {
+        // F18, lowered as rustc lowers Rust's `black_box` (section 12, the owner, 2026-11-03, "The defaults of the round stand"): the value
+        // goes to a slot, an empty `asm sideeffect` takes the slot's address and clobbers memory, and the value is read back. In the IR
+        // clang optimises as a release build is optimised, 7340032 is stored to a slot, the asm takes that slot, a load reads it after
+        // the asm and the sum adds 1 to what it read, so the sum is nowhere a constant; the same program without the hint folds the
+        // sum, and its text, into the digits it writes, so that 7340032 is nowhere in its IR (the positive control); both builds print
+        // the sum
+        const string hinted = "n = Hint.BlackBox(7340032)\nprint(n + 1)\n";
+        const string plain = "n = 7340032\nprint(n + 1)\n";
+        string Optimised(string text, string name)
+        {
+            var program = Compile(text, toolchain.Runtime, testBuild: false).Program!;
+            Ran(Toolchain.Run(toolchain.Build(program, name)), 0, ["7340033"], "");
+            var directory = Path.Combine(toolchain.Directory, name);
+            Directory.CreateDirectory(directory);
+            var input = Path.Combine(directory, "program.ll");
+            var output = Path.Combine(directory, "optimised.ll");
+            File.WriteAllText(input, program.Ir);
+            List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+            if (program.CpuFlag is { } cpu)
+            {
+                arguments.Add(cpu);
+            }
+
+            var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+            Assert.True(code == 0, error);
+            return File.ReadAllText(output);
+        }
+
+        var ir = Optimised(hinted, "hint-black-box");
+        Assert.Matches(
+            new Regex("""store i32 7340032, ptr (%[\w.]+).*call void asm sideeffect "", "r,~\{memory\}"\(ptr (nonnull )?\1\).*(%[\w.]+) = load i32, ptr \1\b.*= add (nsw )?i32 \3, 1\b""", RegexOptions.Singleline),
+            ir);
+        Assert.DoesNotContain("7340033", ir, StringComparison.Ordinal);
+        var control = Optimised(plain, "hint-black-box-control");
+        Assert.DoesNotContain("7340032", control, StringComparison.Ordinal);
+        Assert.DoesNotContain("asm sideeffect \"\", \"r,~{memory}\"", control, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_test_build_and_a_release_build_with_lines_carry_line_tables_under_the_names_a_trace_shows_and_a_release_build_does_not()
     {
         const string text = "T Max<T>(T a, T b) => a\n\nint Apply((int) => int f, int n) => f(n)\n\nint Twice(int n) => Apply(x => x * 2, n)\n\n"
