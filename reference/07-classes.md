@@ -384,6 +384,10 @@ reaches and a call on the derived type is refused). A class derived from the one
 override takes it as the method of that name, so a call of it on that class is `not-visible` too, inside
 that class as outside it, since both are outside the class that wrote the override, and its own override
 is as visible as it writes, `pub` where it writes `pub` *(assumed: the nearest override stands for the method it overrides, as F13's candidates are read)*.
+That `override` finds the nearest method of its name and parameters that its class sees, so a
+private override between hides nothing, and the method it overrides is the base's `virtual` one
+*(assumed: a private method is private to its type, F9, so no class derived from it sees it to
+override or to hide)*.
 A read-only property is written as C#'s expression-bodied property, `pub int Count => names.Count`: a type,
 a name, `=>` and one expression. It is read as `h.Count`, as a list's `xs.Count` is (M9), without a call,
 and has no setter (§4, the owner, 2026-11-03, #110, comment 6615254370, against a method `h.Count()`,
@@ -606,6 +610,15 @@ class Greeter {
 }
 
 Greeter.Greet("Ann")
+```
+
+Case: [classes/method-default-field.kz](../corpus/classes/method-default-field.kz)
+```kurz
+class Counter(int Start) {
+    pub int Next(int from = Start) => from + 1
+}
+
+print(Counter(1).Next(2))
 ```
 
 Case: [classes/field-weak.kz](../corpus/classes/field-weak.kz)

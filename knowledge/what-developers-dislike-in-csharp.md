@@ -8,14 +8,15 @@ metadata:
 # What developers dislike about C#, and where Kurz stands
 
 Sources read on 2026-10-30. Each verdict was read against the design record (`kurz-design.md`) and the
-reference that day, and is written as it stands after the owner's answers of the same day.
+reference that day, and is written as it stands after the owner's answers of the same day. Finding 24
+was read on 2026-11-05, with the owner's answer of that day.
 
 Surveys: the JetBrains page "The State of .NET 2025" (https://lp.jetbrains.com/the-state-of-dotnet-2025/)
 names no complaint about the C# language by topic, and no other survey read gives one. The Stack
 Overflow survey was not read. So the order below rests on how much space the language team's own
 pages give a pitfall, not on survey numbers, and no finding carries a survey figure.
 
-Summary: 23 findings: 11 avoided; 12 answered and recorded.
+Summary: 24 findings: 11 avoided; 13 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -137,3 +138,8 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence (an article, the last resort): "What’s coming in C# 12? Devs debate whether it's too much or not enough" (https://www.devclass.com/development/2023/05/30/whats-coming-in-c-12-devs-debate-whether-its-too-much-or-not-enough/1630606): "Another common complaint is that C# risks becoming too complex, or may already be."
 - Kurz: answered: "Printed counts", section 1 of the record, and "Grant for keywords", section 9. Before the answers: OPEN.
+
+## 24. A virtual method's default comes from the variable's type
+
+- Evidence: "Optional argument corner cases, part four" (archived C# compiler team blog, https://learn.microsoft.com/en-us/archive/blogs/ericlippert/optional-argument-corner-cases-part-four): "In fact, the default value is baked in to the caller; the code on the callee side is untouched". Part one of the same series (https://learn.microsoft.com/en-us/archive/blogs/ericlippert/optional-argument-corner-cases-part-one): "The optional parameters on the interface implementation only come into effect when calling via the interface". "Code inspection: Mismatch of optional parameter value in overridden method" (ReSharper, https://www.jetbrains.com/help/resharper/OptionalParameterHierarchyMismatch.html): "This inspection reports a method override or implementation whose optional parameter does not match the base member."
+- Kurz: answered: "as C#, as built" (the owner, 2026-11-05, issue 156, comment 6659240390), section 8 of the record. A call of a `virtual` method or of its override takes the default of the method its receiver's static type names, so Kurz repeats the trap, and the record names it as the cost: one object's call passes different values by the type of the variable it is read through. Before the answer: REPEATED, as built and not yet decided.
