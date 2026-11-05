@@ -1620,10 +1620,10 @@ public sealed partial class Checker
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
     /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4), and
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), and <c>Log</c> (P1).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Log" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256";
 
     /// <summary>

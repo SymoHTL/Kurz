@@ -2185,7 +2185,7 @@ public sealed class Parser
                 throw new ParseError(inner.Current.Line, $"an interpolation holds one expression; found {inner.Current}"); // E1: the line of that token
             }
 
-            segments.Add(new HoleSegment(expression));
+            segments.Add(new HoleSegment(expression, hole.Source));
         }
 
         return new StringLiteral(token.Line, segments);

@@ -351,14 +351,14 @@ does not name); one that is not is the compile error `default-not-constant`, at 
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
-int Log(string s, int v) {
+int Show(string s, int v) {
     print(s)
     return v
 }
 
 int Add(int a, int b) => a + b
 
-print(Add(b: Log("b", 2), a: Log("a", 1)))
+print(Add(b: Show("b", 2), a: Show("a", 1)))
 ```
 
 Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)

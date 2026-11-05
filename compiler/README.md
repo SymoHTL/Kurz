@@ -1025,6 +1025,23 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
+- logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
+  `KURZ_LOG` through `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
+  which keeps it, or ends the process with `error: log-filter (<entry>)`, and gives the lowest level
+  a call site can be on at, which the global `@kz.log.lowest` holds. A call site has a global `i8` of its
+  own, declared at its first emission and kept by its node, so that every copy of its function reads
+  the one global: 0 before its first reading, 1 off and 2 on. A level below the lowest is a load and a
+  branch; past it, a load of the site's global and a switch, and the first reading calls `LogEnabled`
+  with the category and the level and stores what it said. A site that is on runs its holes in a region
+  of its own, each once, and makes the message as an interpolation makes it (L6) and the fields,
+  ` name=value` each, a `string` through `LogQuoted`, then reads `Now` and calls `LogLine`, which puts
+  the line together in a buffer of its thread and hands it to one write call on standard error, the
+  line of the lines dropped before it in the same write; a refused write counts the line as dropped.
+  `LogTests` pins what no case can: the layout of a line and its time against the test's, a string's
+  quotes and the escapes, the category of a method, of a function and of the top level, the levels and
+  the default, a site that is off and one that is on, reached twice, a generic function emitted for two
+  types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
+  the lines dropped while standard error refused its writes; `ProcessTests` the refusal for Windows;
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
@@ -1392,8 +1409,8 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
-command line, the environment or the clock in a build for Windows (S11), a vector held in a list, a
+(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
+command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and a construct of the other chapters the checker does not read. The line
@@ -1472,6 +1489,10 @@ ask about it.
 
 - A `print` hands its line to one write call, called again for what a call did not take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
+- P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
+  in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
+  record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
+  refused writes are counted in the next line.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
@@ -1675,7 +1696,8 @@ and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError` and `HttpHeaders`, which a program checked with `std/`'s
 checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an `HttpError`, and W4; the other names of W1 are no types of `std/`, and a
-file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
+file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
+of P3 and its category of P6), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those

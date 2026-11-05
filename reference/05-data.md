@@ -105,9 +105,9 @@ print(b == b)
 
 Case: [data/equality-holds-file.kz](../corpus/data/equality-holds-file.kz)
 ```kurz
-data Log(File Out)
+data Journal(File Out)
 
-void Same(Log a, Log b) {
+void Same(Journal a, Journal b) {
     print(a == b)
 }
 
@@ -755,14 +755,14 @@ arguments, and a parameter without a default that gets none are the compile erro
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
-int Log(string s, int v) {
+int Show(string s, int v) {
     print(s)
     return v
 }
 
 int Add(int a, int b) => a + b
 
-print(Add(b: Log("b", 2), a: Log("a", 1)))
+print(Add(b: Show("b", 2), a: Show("a", 1)))
 ```
 
 Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)
