@@ -7433,7 +7433,9 @@ bool HttpHostValid(string host) {
     return true
 }
 
-// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5).
+// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5). A header
+// line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse refuses it
+// (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
 HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimits limits) {
     if head[0] == 32 {
         return HttpBad("empty method")
@@ -7500,7 +7502,7 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
     mut lineStart = lineEnd + 2
     while lineStart < end {
         mut lineStop = lineStart
-        while head[lineStop] != 13 {
+        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
             lineStop = lineStop + 1
         }
 
