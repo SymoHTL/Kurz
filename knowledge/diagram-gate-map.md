@@ -295,12 +295,14 @@ flowchart TD
         HAZARD issue 11"]
         R7["review rounds, the owner's cap of one (2026-10-22; three from 2026-10-21): a round is a run that labelled the pull request;
         a run with files to review, in CI or off the pipeline, puts review-round-n on before its first pass,
-        a round whatever follows, and the count is the highest n (kit.review_rounds); at one every run with a file
+        a round whatever follows, but for a run the usage limit ends before any paid pass, which takes its own label off
+        again and is no round (the owner, 2026-11-02); the count is the highest n (kit.review_rounds); at one every run with a file
         the replay cache does not answer ends
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
         reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
         in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
-        Red: self-tests (the count, the label before the first pass, the end and its status, the run that only replays).
+        Red: self-tests (the count, the label before the first pass, the label taken off at a limit before any paid pass and its
+        refusal, the end and its status, the run that only replays).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
