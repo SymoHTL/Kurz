@@ -67,9 +67,10 @@ The owner was not asked.
   ([[a-front-end-option-of-clang-does-not-reach-ir]]). `judgment step`: no job runs a benchmark or
   reads the machine code of std.
 - Use an opaque value to keep a constant off the path. The clean way is a value the optimiser
-  cannot see through, such as Rust's `core::hint::black_box`, or an empty `asm` barrier in C.
-  Kurz's std has no such hint. One would be a new surface of std, and so a question to the owner
-  before it is built ([[design-before-build]]). `judgment step`.
+  cannot see through: in Kurz `Hint.BlackBox(t)` (F18), Rust's `core::hint::black_box`, which the
+  owner chose on 2026-11-03 after this probe (issue 157), and in C an empty `asm` barrier. With it
+  at each of MD5's 64 constants, MD5 took 42.60 ms where std's form took 51.78 (issue 157, the best
+  of 15). `judgment step`.
 - Whether std may hide a constant behind a value of the program that LLVM cannot know, such as a
   word of the state or a count, is open. Its correctness rests on the program's state, and its
   speed on what LLVM happens not to see. It was not taken for #258 (above), and the owner has not
