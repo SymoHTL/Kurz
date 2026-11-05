@@ -13,7 +13,7 @@ namespace Kurz.Compiler.Tests;
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
 /// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
 /// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the integer an enum's value is stored in (D12;
-/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the runtime of every target emitted, and a
+/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the reference to an instance of a class (K6), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -441,5 +441,64 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("type { i64, i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its count, its type's number, `Value` and `Next`
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
+    }
+
+    [Fact]
+    public void A_class_nothing_derives_from_is_the_one_word_of_its_address_and_a_base_class_adds_the_table_of_the_instance()
+    {
+        // K6, laid out as "faster wins" picks it: a reference whose class has derived classes is the address of the instance's block and
+        // the table of its class, as Rust lays out `Rc<dyn Trait>`, its `null` the pair of the address 0 (N1, as Rust's
+        // `Option<Rc<dyn Trait>>`) and its `weak` the same two words (R3); a class nothing derives from, a derived one among them, stays
+        // the one word of its address, so that a class with no derived class never pays for the table, and no block holds a table
+        const string Program = """
+            class Base(int N) {
+                pub virtual int Get() => N
+            }
+
+            class Mid(int M) : Base {
+                pub override int Get() => M
+            }
+
+            class Leaf(int K)
+            class Holder(weak Leaf? A, weak Base? B, Leaf? C, Base? D)
+
+            int Leaves(Leaf x, Leaf? y) {
+                if y == null {
+                    return x.K
+                }
+
+                return x.K + y.K
+            }
+
+            int Bases(Base x, Base? y) {
+                if y == null {
+                    return x.Get()
+                }
+
+                return x.Get() + y.Get()
+            }
+
+            int Mids(Mid x) => x.Get()
+
+            l = Leaf(1)
+            m = Mid(2, 3)
+            h = Holder(l, m, null, null)
+            print(Leaves(l, null))
+            print(Leaves(l, Leaf(4)))
+            print(Bases(m, null))
+            print(Bases(Base(5), m))
+            print(Mids(m))
+            print(h.D == null)
+            """;
+        var program = Emit(Program);
+        string Parameters(string name) =>
+            Regex.Match(program.Ir, $@"^define [^@\n]*@""[^""]*\.{name}\.[0-9]+""\(([^)]*)\)", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal("ptr %p0, ptr %p1", Parameters("Leaves"));
+        Assert.Equal("%kz.obj %p0, %kz.obj %p1", Parameters("Bases"));
+        Assert.Equal("ptr %p0", Parameters("Mids"));
+        Assert.Contains("%kz.obj = type { ptr, ptr }", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("%\"c.Holder\" = type { i64, i64, ptr, %kz.obj, ptr, %kz.obj }", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("%\"c.Mid\" = type { i64, i64, i32, i32 }", program.Ir, StringComparison.Ordinal); // the counts, the base's `N`, then `M`
+        Ran(Toolchain.Run(toolchain.Build(program, "class-layout")), 0, ["1", "5", "3", "8", "3", "true"], string.Empty);
     }
 }

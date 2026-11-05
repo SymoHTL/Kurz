@@ -316,6 +316,8 @@ public sealed partial class Checker
             ResolveClass(symbol); // K1
         }
 
+        RefuseChainMembers(); // K6, K7, K18: once every base is known
+
         CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
