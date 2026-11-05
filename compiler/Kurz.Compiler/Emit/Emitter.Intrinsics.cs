@@ -14,6 +14,12 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed record Cpu(string? Name, IReadOnlyList<string> Classes, IReadOnlyList<string> Features, bool X86 = true)
 {
+    /// <summary>
+    /// The sets the CPU has beyond the target's baseline, which a build for it checks at its start (section 2, the owner, 2026-11-02):
+    /// on x86-64 the macros clang defines for them, <see cref="CpuSets"/>; none for the baseline and for a build that names no CPU.
+    /// </summary>
+    public IReadOnlyList<string> Sets { get; init; } = [];
+
     /// <summary>x86-64's baseline, which every x86-64 CPU has: SSE and SSE2.</summary>
     public static readonly Cpu Baseline = new(null, ["X86.X86Base", "X86.Sse", "X86.Sse2"], []);
 
@@ -32,7 +38,8 @@ public sealed record Cpu(string? Name, IReadOnlyList<string> Classes, IReadOnlyL
 /// value is not copied (the owner, 2026-11-01, "Copied per feature", and the answer of the same day that the copy reaches every
 /// function called from it). A block whose test the CPU or the sets answer is compiled alone, the branch the test skips left out; a
 /// run guarded by a class the target cannot have is never reached. An intrinsic where the function being emitted lacks its set,
-/// in a <c>raw</c> block, is a call of a function compiled for the set, as Rust's intrinsics are functions with their features.
+/// in a <c>raw</c> block, is a call of a function compiled for the set, as Rust's intrinsics are functions with their features, and on an
+/// Arm machine, which can have no set under <c>X86</c>, <c>not supported</c>.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -190,7 +197,10 @@ public sealed partial class Emitter
         {
             features = compiled;
             outline = context;
-            Trace(parentDisplay, key, line); // the trace names the block's function as the function it stands in
+            // the line tables name the block's function as the trace does, from its symbol: `<function>.guarded` (section 13, the owner,
+            // 2026-11-02); a lambda or a guarded block written in the block is named after the function the block stands in, as its symbol is
+            Trace($"{parentDisplay}.guarded", key, line);
+            display = parentDisplay;
             if (hasResult)
             {
                 parameters.Add("ptr %result");
@@ -332,31 +342,6 @@ public sealed partial class Emitter
     /// <summary>The suffix of the IR name of a function compiled for the classes beyond the CPU's.</summary>
     private static string FeatureSuffix(ImmutableSortedSet<string> classes) => classes.Count == 0 ? string.Empty : ".for." + string.Join("+", classes);
 
-    /// <summary>The module's read of the CPU's word, when a test reads it: a global, and the function <c>main</c> calls before the runtime starts.</summary>
-    private string? CpuRead()
-    {
-        if (!cpuRead)
-        {
-            return null;
-        }
-
-        module.Global("@kz.cpu = internal global i64 0");
-        var read = new IrFunction("internal void @kz.cpu.read()");
-        const string Cpuid = "call { i32, i32, i32, i32 } asm \"cpuid\", \"={ax},={bx},={cx},={dx},{ax},{cx}\"";
-        var top = read.Value($"extractvalue {{ i32, i32, i32, i32 }} {read.Value($"{Cpuid}(i32 0, i32 0)")}, 0");
-        var leaf1 = read.Value($"zext i32 {read.Value($"extractvalue {{ i32, i32, i32, i32 }} {read.Value($"{Cpuid}(i32 1, i32 0)")}, 2")} to i64");
-        read.Emit($"store i64 {leaf1}, ptr @kz.cpu");
-        read.CondBranch(read.Value($"icmp uge i32 {top}, 7"), "leaf7", "done");
-        read.Block("leaf7");
-        var leaf7 = read.Value($"zext i32 {read.Value($"extractvalue {{ i32, i32, i32, i32 }} {read.Value($"{Cpuid}(i32 7, i32 0)")}, 1")} to i64");
-        read.Emit($"store i64 {read.Value($"or i64 {leaf1}, {read.Value($"shl i64 {leaf7}, 32")}")}, ptr @kz.cpu");
-        read.Branch("done");
-        read.Block("done");
-        read.Return(null);
-        module.Add(read);
-        return "@kz.cpu.read";
-    }
-
     // ---- intrinsics and lane operations ----------------------------------------------------------
 
     /// <summary>A call of an intrinsic or a lane operation: its arguments in the order they are written, then the operation, in place or, where the function lacks its class's set, through a function compiled for it.</summary>
@@ -393,7 +378,7 @@ public sealed partial class Emitter
             return Operation(intrinsic, arguments, immediates, c.Line);
         }
 
-        if (!cls.IsX86)
+        if (!cls.IsX86 || !cpu.X86)
         {
             throw Unsupported(c.Line, $"`{cls.Name}.{intrinsic.Name}` outside a test of `{cls.Name}.IsSupported`, which the target does not have (R18)");
         }
@@ -517,7 +502,7 @@ public sealed partial class Emitter
             case "extract":
                 {
                     var vector = (VectorType)first!;
-                    return fn.Value($"extractelement {Ir(vector)} {a[0]}, i32 {Number(immediate & (vector.Count - 1))}"); // the instruction reads the immediate's low bits
+                    return fn.Value($"extractelement {Ir(vector)} {a[0]}, i32 {Number(immediate)}"); // the checker refused a lane past the lanes (R18)
                 }
 
             case "pblendw":

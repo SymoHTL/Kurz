@@ -10,7 +10,8 @@ namespace Kurz.Compiler.Emit;
 /// leave an empty map that holds its block); the block's functions are the standard library's (<c>std/std.kz</c>), a control byte of
 /// it says whether a slot holds an entry, 255 where it holds none and a probe ends at its group, never filled or emptied in a group
 /// that holds a 255 still, and 128 where its entry was removed in a group with no 255, which a probe passes, and a slot holds an
-/// entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value. A
+/// entry as <c>{ i64, K, V }</c>, the hash of its key, the key and the value, or as <c>{ K, V }</c> for a key of one word
+/// (<see cref="KeepsHash"/>). A
 /// key's hash is the fast hash, or SipHash-1-3 under the keys of the map's block once an insert's probe passed the bound and the map
 /// switched (section 4, the owner, 2026-11-01, "Switch, as .NET"; <see cref="SwitchBody"/>): of a string's UTF-8 bytes, of a time of 128 bits its 16 bytes, of a
 /// <c>double</c> or a <c>float</c> the bits of its <c>double</c>, every NaN as one NaN and -0.0 as 0.0, of any other key of one value
@@ -21,17 +22,51 @@ public sealed partial class Emitter
     // the IR types of the entries defined in the module
     private readonly HashSet<string> entries = new(StringComparer.Ordinal);
 
-    /// <summary>The IR type of an entry in a slot of the map's block.</summary>
+    /// <summary>
+    /// The IR type of an entry in a slot of the map's block: the hash of its key, the key and the value where the map keeps the hash
+    /// (<see cref="KeepsHash"/>), else the key and the value.
+    /// </summary>
     private string EntryType(MapType type)
     {
         var name = $"%\"entry.{Lower.Mangle(type)}\"";
         if (entries.Add(name))
         {
-            module.Global($"{name} = type {{ i64, {Ir(type.Key)}, {Ir(type.Value)} }}");
+            module.Global(KeepsHash(type.Key) ? $"{name} = type {{ i64, {Ir(type.Key)}, {Ir(type.Value)} }}" : $"{name} = type {{ {Ir(type.Key)}, {Ir(type.Value)} }}");
         }
 
         return name;
     }
+
+    /// <summary>
+    /// Whether a map of the key type keeps each entry's hash in its slot, the one definition every layout of an entry, every lookup
+    /// and every move of an entry follows. A key of a kind whose hash can read more than one word keeps it, as .NET's
+    /// <c>Dictionary</c> keeps each entry's hash code, so that a growth does not hash the key again: a string's bytes, a time of 128
+    /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that does not compare by
+    /// identity, by its content (K4) or by the fields it names (K5); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
+    /// word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an instance
+    /// that compares by identity, whose hash is the fast hash of the one word, its address for the instance, or SipHash-1-3 under the
+    /// block's keys after the map switched (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it
+    /// again. Measured on issue 157 (item 14): without the hash a <c>Map&lt;int, int&gt;</c> of 1,000,000 entries took its million
+    /// <c>Remove</c>s in half the time and its walk in three quarters, while maps of 200,000 keys of a <c>data</c> value of two strings and
+    /// of a list of 4 <c>int</c>s grew 36% and 31% slower (the owner, 2026-11-02, answer (a) on pull request 210, comment 6573116036: the
+    /// bytes <c>allocation-failed</c> names for a map's block follow the layout, under "Allow, faster wins"; they are the one place a
+    /// program sees it, <c>compiler/README.md</c>).
+    /// </summary>
+    internal static bool KeepsHash(KurzType key) => key switch
+    {
+        PrimitiveType { Kind: Primitive.String } => true,
+        ClassType c => !c.Symbol.ComparesByIdentity, // K4: an instance that compares by identity is hashed by its address
+        DataType or ListType or UnionType => true,
+        _ => Lower.IrType(key) == "i128",
+    };
+
+    /// <summary>The address of the key of the entry in <paramref name="slot"/>.</summary>
+    private string KeyAt(MapType type, string slot) =>
+        fn.Value($"getelementptr {EntryType(type)}, ptr {slot}, i32 0, i32 {(KeepsHash(type.Key) ? 1 : 0)}");
+
+    /// <summary>The address of the value of the entry in <paramref name="slot"/>.</summary>
+    private string ValueAt(MapType type, string slot) =>
+        fn.Value($"getelementptr {EntryType(type)}, ptr {slot}, i32 0, i32 {(KeepsHash(type.Key) ? 2 : 1)}");
 
     /// <summary>The bytes a slot of the map's block takes, as LLVM lays out its entry.</summary>
     private string EntrySize(MapType type)
@@ -56,7 +91,15 @@ public sealed partial class Emitter
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {bytes}, i64 {count})");
                 }
 
-            case DataType or ListType or UnionType:
+            case ClassType c when c.Symbol.ComparesByIdentity:
+                {
+                    // K4: an instance that compares by identity hashes its address, which its count keeps while it is a key
+                    var slot = fn.Alloca("i64", "key");
+                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {key} to i64")}, ptr {slot}");
+                    return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
+                }
+
+            case DataType or ListType or UnionType or ClassType:
                 {
                     var name = Helper($"hash.{Lower.Mangle(type)}", "i64", ["ptr", Ir(type)], () => HashBody(type));
                     return fn.Value($"call i64 {name}(ptr {block}, {Ir(type)} {key})");
@@ -100,9 +143,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// The helper of the hash of a <c>data</c> value, a list or a union, the map's block in <c>%a0</c> and the value in <c>%a1</c>: the
-    /// SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag and its value's hash, and first the number of
-    /// the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15).
+    /// The helper of the hash of a <c>data</c> value, a list, a union or an instance that compares by its fields, the map's block in
+    /// <c>%a0</c> and the value in <c>%a1</c>: the SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag
+    /// and its value's hash, and first the number of the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15, K5).
     /// </summary>
     private void HashBody(KurzType type)
     {
@@ -134,7 +177,7 @@ public sealed partial class Emitter
 
             case DataType d when layout.IsBlock(d):
                 {
-                    Add(fn.Value($"zext i32 {fn.Value("load i32, ptr %a1")} to i64"));
+                    Add(fn.Value($"zext i32 {BlockNumber("%a1", d.Symbol)} to i64"));
                     ByNumber("%a1", d.Symbol, held =>
                     {
                         var block = layout.Block(held);
@@ -159,6 +202,16 @@ public sealed partial class Emitter
 
                     break;
                 }
+
+            case ClassType c:
+                foreach (var field in c.Symbol.FieldsThatCount)
+                {
+                    // K5: the hash of the fields that count, so that two instances equal by them have one hash
+                    var pointer = InstanceFieldPointer(c.Symbol, "%a1", c.Symbol.Fields.IndexOf(field));
+                    Add(KeyHash("%a0", fn.Value($"load {Ir(field.Type)}, ptr {pointer}"), field.Type));
+                }
+
+                break;
         }
 
         fn.Return($"i64 {End()}");
@@ -208,9 +261,17 @@ public sealed partial class Emitter
         var i = fn.Value($"add i64 {position}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
         fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
         var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        fn.CondBranch(fn.Value($"icmp eq i64 {fn.Value($"load i64, ptr {slot}")}, %a2"), same, check);
+        if (KeepsHash(type.Key))
+        {
+            fn.CondBranch(fn.Value($"icmp eq i64 {fn.Value($"load i64, ptr {slot}")}, %a2"), same, check);
+        }
+        else
+        {
+            fn.Branch(same); // the key compared where its byte matches, as hashbrown compares it
+        }
+
         fn.Block(same);
-        var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
+        var key = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");
         var equal = Equal(key, "%a1", type.Key, 0);
         var hit = fn.Label("hit");
         fn.CondBranch(equal, hit, check);
@@ -232,32 +293,57 @@ public sealed partial class Emitter
     private void EachEntry(string block, MapType type, Action<string, string> each)
     {
         var entry = EntryType(type);
+        var next = fn.Label("slot.next");
+        var done = fn.Label("slots.done");
+        EachSlot(block, entry, next, done, slot =>
+        {
+            var key = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");
+            var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, slot)}");
+            each(key, value);
+        });
+        fn.Block(done);
+    }
+
+    /// <summary>
+    /// The walk of the slots with an entry of a map's block, of entries of the IR type <paramref name="entry"/>, in the order of
+    /// its slots (M10), as hashbrown's <c>RawIterRange</c> walks them: a group's 8 control bytes read as one word, its slots
+    /// with an entry, whose bytes have the high bit clear, marked as hashbrown's <c>match_full</c> marks them, and taken lowest
+    /// first by counting trailing zeros, each mark cleared before <paramref name="body"/> runs with the slot's address.
+    /// <paramref name="onward"/>, where the body goes on to the next slot, is started here after the body; the walk ends at
+    /// <paramref name="done"/>, which the caller starts.
+    /// </summary>
+    private void EachSlot(string block, string entry, string onward, string done, Action<string> body)
+    {
+        const string highs = "-9187201950435737472"; // 0x8080808080808080
+        module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
         var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {block})")} to i64");
         var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {block})");
         var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {block})");
-        var counter = fn.Alloca("i64", "slot");
-        fn.Emit($"store i64 0, ptr {counter}");
-        var check = fn.Label("slots");
-        var body = fn.Label("slot");
-        var held = fn.Label("entry");
-        var next = fn.Label("slot.next");
-        var done = fn.Label("slots.done");
+        var group = fn.Alloca("i64", "group");
+        var marks = fn.Alloca("i64", "full");
+        fn.Emit($"store i64 -8, ptr {group}");
+        fn.Emit($"store i64 0, ptr {marks}");
+        var check = fn.Label("full");
+        var load = fn.Label("group.next");
+        var read = fn.Label("group");
+        var take = fn.Label("slot");
         fn.Block(check);
-        var i = fn.Value($"load i64, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
-        fn.Block(body);
-        var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
-        fn.CondBranch(fn.Value($"icmp sge i8 {mark}, 0"), held, next); // 255 and 128 hold none
-        fn.Block(held);
-        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
-        var key = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-        each(key, value);
-        fn.Branch(next);
-        fn.Block(next);
-        fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {counter}");
+        var left = fn.Value($"load i64, ptr {marks}");
+        fn.CondBranch(fn.Value($"icmp eq i64 {left}, 0"), load, take);
+        fn.Block(load);
+        var at = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, 8");
+        fn.Emit($"store i64 {at}, ptr {group}");
+        fn.CondBranch(fn.Value($"icmp slt i64 {at}, {room}"), read, done);
+        fn.Block(read);
+        var word = fn.Value($"load i64, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {at}")}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"xor i64 {word}, -1")}, {highs}")}, ptr {marks}"); // 255 and 128 hold none
         fn.Branch(check);
-        fn.Block(done);
+        fn.Block(take);
+        var i = fn.Value($"add i64 {fn.Value($"load i64, ptr {group}")}, {fn.Value($"lshr i64 {fn.Value($"call i64 @llvm.cttz.i64(i64 {left}, i1 true)")}, 3")}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {left}, {fn.Value($"sub i64 {left}, 1")}")}, ptr {marks}");
+        body(fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}"));
+        fn.Block(onward);
+        fn.Branch(check);
     }
 
     /// <summary>
@@ -273,7 +359,6 @@ public sealed partial class Emitter
         var result = Types.Nullable(type.Value);
         var get = Helper($"get.{Lower.Mangle(type)}", Ir(result), ["ptr", Ir(type.Key)], () =>
         {
-            var entry = EntryType(type);
             var look = fn.Label("look");
             var absent = fn.Label("absent");
             var present = fn.Label("present");
@@ -282,7 +367,7 @@ public sealed partial class Emitter
             var slot = fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})");
             fn.CondBranch(fn.Value($"icmp eq ptr {slot}, null"), absent, present);
             fn.Block(present);
-            var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
+            var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, slot)}");
             fn.Return($"{Ir(result)} {AsResult(result, type.Value, Retained(value, type.Value), index.Line)}");
             fn.Block(absent);
             fn.Return($"{Ir(result)} {MakeUnion(result, Types.Null, "zeroinitializer")}");
@@ -322,7 +407,6 @@ public sealed partial class Emitter
     /// <summary>The helper of <c>map[key] = value</c>: the place of the map in <c>%a0</c>, the key in <c>%a1</c> and the value in <c>%a2</c>, both of which the map takes over.</summary>
     private void SetBody(MapType type)
     {
-        var entry = EntryType(type);
         var size = EntrySize(type);
         var asked = fn.Alloca("i64", "asked");
         fn.Emit($"store i64 0, ptr {asked}");
@@ -381,7 +465,7 @@ public sealed partial class Emitter
         var absent = fn.Label("absent");
         fn.CondBranch(fn.Value($"icmp eq ptr {slot}, null"), absent, found);
         fn.Block(found);
-        Store("%a2", type.Value, fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2"));
+        Store("%a2", type.Value, ValueAt(type, slot));
         if (Counted(type.Key))
         {
             Release("%a1", type.Key); // the entry keeps its own key
@@ -396,7 +480,9 @@ public sealed partial class Emitter
         fn.Emit($"store ptr {taken}, ptr {at}");
         fn.CondBranch(fn.Value($"icmp eq ptr {taken}, null"), grow, add);
         fn.Block(grow);
-        var grown = fn.Value($"call ptr {StdFunction("MapGrow")}(ptr {current}, i64 {size}, ptr {asked})");
+        var grown = KeepsHash(type.Key)
+            ? fn.Value($"call ptr {StdFunction("MapGrow")}(ptr {current}, i64 {size}, ptr {asked})")
+            : fn.Value($"call ptr {Helper($"grow.{Lower.Mangle(type)}", "ptr", ["ptr", "ptr"], () => GrowBody(type))}(ptr {current}, ptr {asked})");
         var keepGrown = fn.Label("grown");
         fn.CondBranch(fn.Value($"icmp eq ptr {grown}, null"), failed, keepGrown);
         fn.Block(keepGrown);
@@ -406,9 +492,7 @@ public sealed partial class Emitter
         fn.Block(add);
         var target = fn.Value("load ptr, ptr %a0");
         var empty = fn.Value($"load ptr, ptr {at}");
-        fn.Emit($"store i64 {hash}, ptr {empty}");
-        fn.Emit($"store {Ir(type.Key)} %a1, ptr {fn.Value($"getelementptr {entry}, ptr {empty}, i32 0, i32 1")}");
-        fn.Emit($"store {Ir(type.Value)} %a2, ptr {fn.Value($"getelementptr {entry}, ptr {empty}, i32 0, i32 2")}");
+        Put(type, empty, hash, "%a1", "%a2");
         fn.Emit($"call void {StdFunction("MapAdded")}(ptr {target})");
         var tripped = fn.Label("tripped");
         var done = fn.Label("done");
@@ -432,7 +516,6 @@ public sealed partial class Emitter
     /// </summary>
     private void SwitchBody(MapType type)
     {
-        var entry = EntryType(type);
         var size = EntrySize(type);
         var asked = fn.Alloca("i64", "asked");
         fn.Emit($"store i64 0, ptr {asked}");
@@ -442,20 +525,59 @@ public sealed partial class Emitter
         var failed = fn.Label("failed");
         fn.CondBranch(fn.Value($"icmp eq ptr {made}, null"), failed, move);
         fn.Block(move);
-        EachEntry(block, type, (key, value) =>
-        {
-            var hash = KeyHash(made, key, type.Key);
-            var slot = fn.Value($"call ptr {StdFunction("MapEmpty")}(ptr {made}, i64 {hash}, i64 {size})"); // never null: the block has the slots the entries had
-            fn.Emit($"store i64 {hash}, ptr {slot}");
-            fn.Emit($"store {Ir(type.Key)} {key}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-            fn.Emit($"store {Ir(type.Value)} {value}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-        });
-        fn.Emit($"call void {StdFunction("MapFree")}(ptr {block}, i64 {size})");
+        MoveEntries(type, block, made);
         fn.Emit($"store ptr {made}, ptr %a0");
         fn.Return(null);
         fn.Block(failed);
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 {fn.Value($"load i64, ptr {asked}")})");
         fn.Unreachable();
+    }
+
+    /// <summary>
+    /// The helper of a growth of a map that keeps no hash (<see cref="KeepsHash"/>), the block in <c>%a0</c> and the place of the bytes
+    /// asked for in <c>%a1</c>: the block <c>MapGrown</c> makes, every entry moved into it under its key's hash taken again, as
+    /// hashbrown's <c>reserve_rehash</c> hashes every key again, and the old block freed; null where the system refuses.
+    /// </summary>
+    private void GrowBody(MapType type)
+    {
+        var made = fn.Value($"call ptr {StdFunction("MapGrown")}(ptr %a0, i64 {EntrySize(type)}, ptr %a1)");
+        var move = fn.Label("move");
+        var failed = fn.Label("failed");
+        fn.CondBranch(fn.Value($"icmp eq ptr {made}, null"), failed, move);
+        fn.Block(move);
+        MoveEntries(type, "%a0", made);
+        fn.Return($"ptr {made}");
+        fn.Block(failed);
+        fn.Return("ptr null");
+    }
+
+    /// <summary>
+    /// Every entry of the block <paramref name="from"/> moved into the block <paramref name="made"/>, which has room for them all, under
+    /// its key's hash in that block, and <paramref name="from"/> freed without letting go of what the entries hold, which
+    /// <paramref name="made"/> holds now: the move of a switch and of a growth that hashes its keys again.
+    /// </summary>
+    private void MoveEntries(MapType type, string from, string made)
+    {
+        var size = EntrySize(type);
+        EachEntry(from, type, (key, value) =>
+        {
+            var hash = KeyHash(made, key, type.Key);
+            var slot = fn.Value($"call ptr {StdFunction("MapEmpty")}(ptr {made}, i64 {hash}, i64 {size})"); // never null: the block has the slots the entries need
+            Put(type, slot, hash, key, value);
+        });
+        fn.Emit($"call void {StdFunction("MapFree")}(ptr {from}, i64 {size})");
+    }
+
+    /// <summary>The entry of <paramref name="key"/> and <paramref name="value"/> written into <paramref name="slot"/>, with its hash where the map keeps it.</summary>
+    private void Put(MapType type, string slot, string hash, string key, string value)
+    {
+        if (KeepsHash(type.Key))
+        {
+            fn.Emit($"store i64 {hash}, ptr {slot}");
+        }
+
+        fn.Emit($"store {Ir(type.Key)} {key}, ptr {KeyAt(type, slot)}");
+        fn.Emit($"store {Ir(type.Value)} {value}, ptr {ValueAt(type, slot)}");
     }
 
     /// <summary>
@@ -525,7 +647,6 @@ public sealed partial class Emitter
         var result = Types.Nullable(type.Value);
         var remove = Helper($"remove.{Lower.Mangle(type)}", Ir(result), ["ptr", Ir(type.Key)], () =>
         {
-            var entry = EntryType(type);
             var asked = fn.Alloca("i64", "asked");
             fn.Emit($"store i64 0, ptr {asked}");
             var block = fn.Value("load ptr, ptr %a0");
@@ -540,11 +661,19 @@ public sealed partial class Emitter
             fn.Block(found);
             OwnBlock(type, asked);
             var current = fn.Value("load ptr, ptr %a0");
-            var own = fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})"); // the same slot of a copy
-            var value = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {own}, i32 0, i32 2")}");
+            var copied = fn.Label("in.copy");
+            var take = fn.Label("take");
+            var at = fn.Alloca("ptr", "own");
+            fn.Emit($"store ptr {slot}, ptr {at}");
+            fn.CondBranch(fn.Value($"icmp eq ptr {current}, {block}"), take, copied); // the block found in, where no other value held it
+            fn.Block(copied);
+            fn.Emit($"store ptr {fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})")}, ptr {at}"); // the same slot of the copy
+            fn.Block(take);
+            var own = fn.Value($"load ptr, ptr {at}");
+            var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, own)}");
             if (Counted(type.Key))
             {
-                Release(fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {own}, i32 0, i32 1")}"), type.Key);
+                Release(fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, own)}"), type.Key);
             }
 
             fn.Emit($"call void {StdFunction("MapErase")}(ptr {current}, ptr {own}, i64 {EntrySize(type)})");
@@ -662,47 +791,31 @@ public sealed partial class Emitter
 
         var entry = EntryType(type);
         var walk = fn.Label("walk");
-        var check = fn.Label("check");
-        var mark = fn.Label("slot");
         var body = fn.Label("for");
         var onward = fn.Label("onward");
         var exit = fn.Label("endfor");
         fn.CondBranch(fn.Value($"icmp eq ptr {map}, null"), exit, walk);
         fn.Block(walk);
-        var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr {map})")} to i64");
-        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr {map})");
-        var entries = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr {map})");
-        var counter = fn.Alloca("i64", "slot");
-        fn.Emit($"store i64 0, ptr {counter}");
-        fn.Block(check);
-        var i = fn.Value($"load i64, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), mark, exit);
-        fn.Block(mark);
-        var held = fn.Value($"icmp sge i8 {fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}")}, 0"); // 255 and 128 hold none
-        var full = fn.Label("entry");
-        fn.CondBranch(held, full, onward);
-        fn.Block(full);
-        var slot = fn.Value($"getelementptr {entry}, ptr {entries}, i64 {i}");
-        var k = fn.Value($"load {Ir(type.Key)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 1")}");
-        var v = fn.Value($"load {Ir(type.Value)}, ptr {fn.Value($"getelementptr {entry}, ptr {slot}, i32 0, i32 2")}");
-        if (whole is null)
+        EachSlot(map, entry, onward, exit, slot =>
         {
-            fn.Emit($"store {Ir(type.Key)} {k}, ptr {key}");
-            fn.Emit($"store {Ir(type.Value)} {v}, ptr {value}");
-        }
-        else
-        {
-            var pair = fn.Value($"insertvalue {Ir(whole)} {fn.Value($"insertvalue {Ir(whole)} poison, {Ir(type.Key)} {k}, 0")}, {Ir(type.Value)} {v}, 1");
-            fn.Emit($"store {Ir(whole)} {pair}, ptr {slots[Model.DeclarationOf(f)]}");
-        }
-        fn.Branch(body);
-        fn.Block(body);
-        loops.Push((exit, onward, regions.Count, scopes.Count));
-        EmitBlock(f.Body);
-        loops.Pop();
-        fn.Block(onward);
-        fn.Emit($"store i64 {fn.Value($"add i64 {fn.Value($"load i64, ptr {counter}")}, 1")}, ptr {counter}");
-        fn.Branch(check);
+            var k = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");
+            var v = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, slot)}");
+            if (whole is null)
+            {
+                fn.Emit($"store {Ir(type.Key)} {k}, ptr {key}");
+                fn.Emit($"store {Ir(type.Value)} {v}, ptr {value}");
+            }
+            else
+            {
+                var pair = fn.Value($"insertvalue {Ir(whole)} {fn.Value($"insertvalue {Ir(whole)} poison, {Ir(type.Key)} {k}, 0")}, {Ir(type.Value)} {v}, 1");
+                fn.Emit($"store {Ir(whole)} {pair}, ptr {slots[Model.DeclarationOf(f)]}");
+            }
+            fn.Branch(body);
+            fn.Block(body);
+            loops.Push((exit, onward, regions.Count, scopes.Count));
+            EmitBlock(f.Body);
+            loops.Pop();
+        });
         fn.Block(exit);
     }
 

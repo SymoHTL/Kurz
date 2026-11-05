@@ -134,6 +134,12 @@ exposes it; `prot` exposes a member to inheriting types. The fields of a primary
 are the exception (D14). Using a member that is not visible from where it is used is the compile
 error `not-visible` *(proposed id)*.
 
+A member marked `internal` is visible to the files of its folder and to nothing outside it, as
+C#'s `internal` is visible in its assembly and Rust's `pub(crate)` in its crate (§8, the owner,
+2026-11-02 and 2026-11-03). *(assumed, §8: `internal` is a core word (L18); `pub` and `internal`
+before one declaration are `syntax`, as C# refuses two access modifiers; before a top-level type or
+function `internal` says what no modifier says.)*
+
 Case: [classes/private-member.kz](../corpus/classes/private-member.kz)
 ```kurz
 class Counter {
@@ -148,29 +154,99 @@ c = Counter()
 c.Add()
 ```
 
-No case shows the folder part: it takes several folders, and a case of the corpus is a single
-file.
+Case: [classes/internal-member.kz](../corpus/classes/internal-member.kz)
+```kurz
+class Counter {
+    internal mut int count = 0
+
+    internal void Add() {
+        count = count + 1
+    }
+
+    internal static int Twice(int n) => n * 2
+}
+
+c = Counter()
+c.Add()
+c.Add()
+print(c.count)
+print(Counter.Twice(5))
+```
+
+No case shows the folder part, a member without `pub` or one marked `internal` used from another
+folder: it takes several folders, and a case of the corpus is a single file.
 
 ### F10 (decided, §8, §13) Folders and `use`
 
 A folder is a namespace; there is no `namespace` line. Files in one folder see each other
-without imports. `use` brings in another folder or a package. A type it holds is visible
-unqualified, `Json.Parse<T>(text)`, and a function at the top of the folder is reached through the
-folder's name, `sys.Write(...)`; two folders a file uses that both hold a type of one name are the
-compile error `ambiguous-name` at the bare use of that name (§13, the owner, 2026-11-01, "By kind of
-name"). *(assumed, §13: the id)*
+without imports. `use` brings in another folder or a package: a folder of the project by its path
+from the folder of `project.kz`, `use a/util`, and a package by the name of its line in
+`project.kz`, `use json`. A type it holds is visible unqualified, `Json.Parse<T>(text)`, and is named
+through the folder too, `json.Json`; a function at the top of the folder is reached through the
+folder's last name, `util.Trim(s)`, `sys.Write(...)`; `use fastjson as fj` gives the folder another
+name in the file, `fj.Json`, `fj.Parse(text)`. Two folders a file uses that both hold a type of one
+name are the compile error `ambiguous-name` at the bare use of that name, and two whose last names
+agree are `redeclared` at the second `use` line, which `as` fixes, `use b/util as butil` (§8, §13,
+the owner, 2026-11-01, "By kind of name", "Both forms", "Root path, last name"). A `use` line whose name is both a folder at the top of the
+project and a line of `project.kz`, `use json` beside a folder `json`, is `ambiguous-name` at that
+line, in every file of the project, those of the folder `json` included, and with `as` too,
+`use json as j` (§8, the owner, 2026-11-02). The reading reads a project's files: the runtime's `use sys` and `use std`
+stand as §2 makes them, and in a program's file they are paths like any other, which a folder at
+the top or a line of `project.kz` of that name answers, `unknown-name` where the project has neither
+(§8, the owner, 2026-11-03, "the runtime's names only"). *(assumed, §8, §13: the two ids; a type of the file's own
+folder is the one its bare name means; every name at the top of a folder that is no type is reached
+through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
+the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
+nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
+top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
+the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
+and a path that holds `.` or `..` are `unknown-name` at the `use` line; a longer
+path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
+`ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
+folder of the project, so that `use json` beside it names the line)*
 
-No case: it takes several files, and a case of the corpus is a single file.
+Case: [functions/use-names-nothing.kz](../corpus/functions/use-names-nothing.kz)
+```kurz
+use nothing_here
+
+print(1)
+```
+
+Case: [functions/use-sys-in-a-program.kz](../corpus/functions/use-sys-in-a-program.kz)
+```kurz
+use sys
+
+print(1)
+```
+
+No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
+file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
+before the checker reads it.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
 The type of a function value is written with an arrow: the parameter types between brackets, `=>`,
 and the result type, as in `(int) => bool`. A lambda reads the variables around it and cannot assign
-them: assigning one is the compile error `capture-assign`. So is every change of a captured
-variable: an assignment into a path from it (M4), a `mut` method called on it or on a path from it
-(M5), and passing it as a `mut` argument (M7); the lambda holds a copy (F15), and a change to the
-copy would be lost or, through a class instance on the path, would not be a change of the copy at
-all. *(proposed: the record speaks of assigning)* The result type of a function type may be `void`,
+them: assigning one is the compile error `capture-assign`. The lambda holds a copy of each (F15),
+and a class instance is no part of the copy: the lambda holds a reference to the same instance. So
+every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
+from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
+such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
+record speaks of assigning)* A path reaches an instance only where an instance holds the field it
+assigns or the item it writes: `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field
+`Item` holds an instance, assigns a field of the copy and is `capture-assign`. An instance changes through every reference (K2), so the lambda may
+change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
+or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
+value `d` stay `capture-assign` (§4, the owner, 2026-11-01, #110, comment 6562487754, "Both allowed", against a method call
+alone and against neither). It may also write into the list or the map that a `mut` field of the
+instance holds, `() => { b.Xs[0] = 2 }` and `() => b.Xs.Add(3)`, as M5's reading of K2 takes the same
+write outside a lambda (§4, the owner, 2026-11-02, #110, comment 6573113786), and pass a `mut` field of the
+instance as a `mut` argument, `() => Fill(mut Items)` inside a method (M7; §4, the owner, 2026-11-02, #110, comment
+6579495475). A field without `mut` changes in a lambda no more than outside it: assigning it is
+`assign-immutable` (K1), and writing into what it holds, a `mut` method on it and passing it as `mut`
+by its name inside a method are `mut-required` (M5, M7, K1). An instance that a captured `data` value holds is one the lambda may
+change too, `() => { d.Item.Count = 1 }` *(assumed, as §4 marks it)*. The result type of a function type may be `void`,
 `(int) => void` (C#'s `Action<int>`); `(int) => int?` is a function that returns an `int?`, and a
 nullable function type is written `((int) => int)?`. *(assumed: proposed on 2026-10-09 and not
 objected to)* A lambda whose body is a call with a `void` success, `x => print(x)`, is a lambda with
@@ -211,6 +287,60 @@ print(big.Count)
 print(total)
 ```
 
+Case: [functions/capture-changes-instance.kz](../corpus/functions/capture-changes-instance.kz)
+```kurz
+class Counter(mut int Count) {
+    pub void Add(int n) {
+        Count = Count + n
+    }
+}
+
+c = Counter(0)
+bump = () => c.Add(1)
+bump()
+bump()
+print(c.Count)
+reset = () => { c.Count = 5 }
+reset()
+print(c.Count)
+```
+
+Case: [functions/capture-calls-field-method.kz](../corpus/functions/capture-calls-field-method.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+more = () => b.Items.Add(3)
+more()
+print(b.Items)
+```
+
+Case: [functions/capture-passes-field-mut.kz](../corpus/functions/capture-passes-field-mut.kz)
+```kurz
+void Fill(mut List<int> xs) {
+    xs.Add(xs.Count)
+}
+
+class Box(mut List<int> Items) {
+    pub () => void Filler() => () => Fill(mut Items)
+}
+
+b = Box([1, 0])
+fill = b.Filler()
+fill()
+print(b.Items.Count)
+```
+
+Case: [functions/capture-writes-field.kz](../corpus/functions/capture-writes-field.kz)
+```kurz
+class Box(mut List<int> Items)
+
+b = Box([1, 0])
+first = () => { b.Items[0] = 2 }
+first()
+print(b.Items)
+```
+
 Case: [functions/function-type-void.kz](../corpus/functions/function-type-void.kz)
 ```kurz
 void Run((int) => void f) {
@@ -232,10 +362,18 @@ call picks when more than one fits is F13. *(proposed: what "differ" is, and the
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
 order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
-folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14) (C# also takes `default` and `new S()` for a value type `S`, which the record does not
-name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
+folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
+`data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, which goes
+beyond C#, where `new S()` is a default only for a value type `S` and only without arguments
+(CS1736), while `Rate(n, 1s)` with a variable `n` stays no constant (§8, the owner,
+2026-11-03, against any expression evaluated at each call that leaves it out, as Kotlin evaluates
+one) *(assumed, §8: such a value as an argument of another, a field it leaves out taking its own
+default (D11), which this rule holds to a constant where the field is declared, an instance of a
+class being no such value, and the cost, that such a value is made at each call that leaves the
+argument out)* (C# also takes `default`, which the record
+does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
-2026-10-10, after the owner's choice)*). A field's default may be any expression (K7).
+2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
@@ -258,6 +396,47 @@ void Greet(string name, string word = Pick()) {
 }
 
 Greet("Ann")
+```
+
+Case: [functions/default-data-of-constants.kz](../corpus/functions/default-data-of-constants.kz)
+```kurz
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+data Limits(int MaxLine = 8192, Rate BodyRate = Rate(240, 5))
+
+data Pair(Rate First, Rate Second)
+
+int PerSecond(Rate r = Rate(1, 1)) => r.BytesPerSecond
+
+int Sum(Pair p = Pair(Rate(1, 1), Rate(2, 2))) => p.First.BytesPerSecond + p.Second.BytesPerSecond
+
+a = Limits()
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.GraceSeconds}")
+b = Limits(1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.GraceSeconds}")
+print(PerSecond())
+print(PerSecond(Rate(7, 2)))
+print(Sum())
+```
+
+Case: [functions/default-data-call-argument.kz](../corpus/functions/default-data-call-argument.kz)
+```kurz
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+int One() => 1
+
+int PerSecond(Rate r = Rate(One(), 1)) => r.BytesPerSecond
+
+print(PerSecond())
+```
+
+Case: [functions/default-class-instance.kz](../corpus/functions/default-class-instance.kz)
+```kurz
+class Counter(int Count)
+
+int Read(Counter c = Counter(1)) => c.Count
+
+print(Read())
 ```
 
 Case: [functions/duplicate-function.kz](../corpus/functions/duplicate-function.kz)
@@ -372,6 +551,35 @@ long big = 5
 Show(big)
 ```
 
+A call of a name that has one function, with an argument of a type its parameter does not take, is
+`type-mismatch` (T1), a value of one type where another is required, and not `argument-mismatch`,
+and so is a call of such a name whose argument is a call with a case the parameter's union does not
+list (O4) *(assumed, §5: as the outcomes chapter reads both)*.
+
+Case: [outcomes/keep-argument-partial.kz](../corpus/outcomes/keep-argument-partial.kz)
+```kurz
+data NotFound
+
+// `Invalid` is the case of an enum's `From` that every file sees without declaring it (D18)
+int | NotFound | Invalid Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    if id == 2 {
+        return Invalid
+    }
+    return NotFound
+}
+
+void Report(int | NotFound found) {
+    print(found)
+}
+
+// the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
+Report(Find(1))
+```
+
 Case: [outcomes/keep-argument-exact-fit-first.kz](../corpus/outcomes/keep-argument-exact-fit-first.kz)
 ```kurz
 data NotFound
@@ -431,6 +639,37 @@ void Show(long | NotFound x) {
 int | NotFound Run() {
     Show(Find(1))
     return 0
+}
+```
+
+Case: [outcomes/keep-items-the-union-one.kz](../corpus/outcomes/keep-items-the-union-one.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+void Show(List<int> xs) {
+    print("the items")
+}
+
+void Show(List<int | NotFound> xs) {
+    print("the union")
+}
+
+int | NotFound Run() {
+    // a list literal of calls is read as such a call: the function whose item type keeps the cases fits it exactly, and wins
+    Show([Find(1)])
+    return 1
+}
+
+match Run() {
+    int n => print(n)
+    NotFound => print("none")
 }
 ```
 
@@ -609,7 +848,9 @@ A `return` with a value among the top-level statements, `return 2`, ends the pro
 its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
 0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
 return n + Exit" and "0, silently"). The value is an `int`, and a value of another type is
-`type-mismatch`. *(assumed, §12: the type)*
+`type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
+for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
+`Environment.Exit`. *(assumed, §12: the type, the low 8 bits and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 

@@ -1,0 +1,25 @@
+// expect: output
+// | 8192 240 5
+// | 1000 240 5
+// | 1
+// | 7
+// | 3
+// rules: F12
+
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+data Limits(int MaxLine = 8192, Rate BodyRate = Rate(240, 5))
+
+data Pair(Rate First, Rate Second)
+
+int PerSecond(Rate r = Rate(1, 1)) => r.BytesPerSecond
+
+int Sum(Pair p = Pair(Rate(1, 1), Rate(2, 2))) => p.First.BytesPerSecond + p.Second.BytesPerSecond
+
+a = Limits()
+print("{a.MaxLine} {a.BodyRate.BytesPerSecond} {a.BodyRate.GraceSeconds}")
+b = Limits(1000)
+print("{b.MaxLine} {b.BodyRate.BytesPerSecond} {b.BodyRate.GraceSeconds}")
+print(PerSecond())
+print(PerSecond(Rate(7, 2)))
+print(Sum())

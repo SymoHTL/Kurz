@@ -25,6 +25,7 @@ public enum Primitive
     Timestamp,
     LongDuration,
     LongTimestamp,
+    Instant,
 }
 
 /// <summary>
@@ -61,6 +62,7 @@ public sealed record PrimitiveType(Primitive Kind) : KurzType
         Primitive.Timestamp => "timestamp",
         Primitive.LongDuration => "longduration",
         Primitive.LongTimestamp => "longtimestamp",
+        Primitive.Instant => "instant",
         _ => Kind.ToString(),
     };
 }
@@ -126,6 +128,16 @@ public sealed record ClassType(ClassSymbol Symbol) : KurzType
     public bool Equals(ClassType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
 
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
+/// <summary>
+/// R3, R5: <c>weak T?</c>, a reference to an instance of the class <c>T</c> that does not keep it alive, null once the instance is
+/// freed. It is the type of a place, a variable, a parameter, a result, a field or a list's item, which takes a <c>T</c>, a
+/// <c>T?</c> or <c>null</c>; a read of the place gives a strong <c>T?</c> (<see cref="Types.Read"/>).
+/// </summary>
+public sealed record WeakRefType(ClassType Target) : KurzType
+{
+    public override string Text => $"weak {Target.Text}?";
 }
 
 /// <summary>An <c>enum</c> (D12), one type per declaration.</summary>
@@ -255,6 +267,23 @@ public sealed record TypeParameterType(TypeParameterSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// T35: the constant a call gives a type parameter that holds one, of the parameter's type: a value of an <c>enum</c> by its place
+/// among the enum's values, an integer, a <c>bool</c> or a <c>char</c>; it stands in a copy's list of type arguments beside the
+/// types, and is never the type of a value.
+/// </summary>
+public sealed record ConstantArgument(KurzType Of, Constant Value) : KurzType
+{
+    public override string Text => Value switch
+    {
+        EnumConstant e when Of is EnumType en => $"{en.Symbol.Name}.{en.Symbol.Values[e.Index]}",
+        IntegerConstant i => i.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        BoolConstant b => b.Value ? "true" : "false",
+        CharConstant c => $"'{char.ConvertFromUtf32(c.Value)}'",
+        _ => throw new InvalidOperationException($"a constant argument of `{Of.Text}`"),
+    };
+}
+
 /// <summary>The one instance of each built-in type, and what the chapters say about them.</summary>
 public static class Types
 {
@@ -276,6 +305,7 @@ public static class Types
     public static readonly PrimitiveType Timestamp = new(Primitive.Timestamp);
     public static readonly PrimitiveType LongDuration = new(Primitive.LongDuration);
     public static readonly PrimitiveType LongTimestamp = new(Primitive.LongTimestamp);
+    public static readonly PrimitiveType Instant = new(Primitive.Instant);
     public static readonly VoidType Void = new();
     public static readonly ErrorType Error = new();
     public static readonly NullType Null = new();
@@ -289,11 +319,18 @@ public static class Types
         ["sbyte"] = SByte, ["byte"] = Byte, ["short"] = Short, ["ushort"] = UShort, ["int"] = Int, ["uint"] = UInt, ["long"] = Long, ["ulong"] = ULong,
         ["float"] = Float, ["double"] = Double, ["decimal"] = Decimal, ["bool"] = Bool, ["string"] = String, ["char"] = Char,
         ["duration"] = Duration, ["timestamp"] = Timestamp, ["longduration"] = LongDuration, ["longtimestamp"] = LongTimestamp,
+        ["instant"] = Instant,
     };
 
     public static bool IsError(KurzType type) => type is ErrorType;
 
     public static bool IsVoid(KurzType type) => type is VoidType;
+
+    /// <summary>
+    /// The type a read of a place of the type gives: a strong <c>T?</c> for a <c>weak T?</c>, held at least to the end of its statement
+    /// (R3, the owner, 2026-11-01, "A strong T?, held"); the type itself for any other.
+    /// </summary>
+    public static KurzType Read(KurzType type) => type is WeakRefType weak ? Nullable(weak.Target) : type;
 
     /// <summary>
     /// N1: the type a nullable type makes nullable, the cases of a union beside its <c>null</c>: the one case of <c>T | null</c>, and the
@@ -363,13 +400,16 @@ public static class Types
 
     public static bool IsWideTime(KurzType type) => type is PrimitiveType { Kind: Primitive.LongDuration or Primitive.LongTimestamp };
 
+    /// <summary>T36: a reading of the monotonic clock, which has no wide variant.</summary>
+    public static bool IsInstant(KurzType type) => type is PrimitiveType { Kind: Primitive.Instant };
+
     /// <summary>The width of an integer type in bits; of a time type the width of its count (T24, T29).</summary>
     public static int Width(KurzType type) => type is PrimitiveType p ? p.Kind switch
     {
         Primitive.SByte or Primitive.Byte => 8,
         Primitive.Short or Primitive.UShort => 16,
         Primitive.Int or Primitive.UInt => 32,
-        Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp => 64,
+        Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp or Primitive.Instant => 64,
         Primitive.LongDuration or Primitive.LongTimestamp => 128,
         _ => 0,
     } : 0;
@@ -430,6 +470,7 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
@@ -503,6 +544,11 @@ public static class Types
         if (from is ErrorType || to is ErrorType || Same(from, to))
         {
             return true;
+        }
+
+        if (to is WeakRefType weak)
+        {
+            return from is NullType || Assignable(from, Read(weak)); // R3: a `T`, a `T?` or `null` where a `weak T?` stands
         }
 
         if (from is UnionType fu)

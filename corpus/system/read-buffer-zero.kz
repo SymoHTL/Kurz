@@ -1,0 +1,25 @@
+// expect: output
+// | 0
+// | 0
+// | 2
+// rules: S3, S9
+
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a `max` of 0 reads nothing and waits for no byte, where a read that waited would run out of time
+    print(server.Read(mut got, 0))
+
+    // and it reads nothing where the stream holds bytes, which the next read takes
+    client.Write("ab".Bytes)
+    print(server.Read(mut got, 0))
+    print(server.Read(mut got, 2))
+}
+
+Show() else {
+    IoError e => print(e)
+}

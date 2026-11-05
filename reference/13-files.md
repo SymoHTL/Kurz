@@ -92,6 +92,26 @@ peer closed, reads no bytes and returns 0. `into` grows as `Add` grows a list (M
 A `max` below 0 raises `index-out-of-range`. `into.Clear()` empties a list and keeps its room (M9).
 *(assumed, §12: the room before the read and a `max` below 0)*
 
+A read goes through a buffer of 8 KiB that the handle keeps, a `File`'s and a `TcpStream`'s alike
+(§12, the owner, 2026-11-02, "the stream keeps a read buffer", 8 KiB "as Rust's `BufReader`", and a
+`File` too, against the stream alone). It reads as Rust's `BufReader::read` reads: the bytes the
+buffer holds go first, at most `max` of them, with no system call; where it holds none, a `max` of
+8 KiB or more is read straight into `into`, past the buffer, and a smaller one fills the buffer with
+one read of the system and takes at most `max` of what that read gave (§12, the owner, 2026-11-03,
+issue 39, comment 6605104107). A `max` of 0 goes straight, so that it reads nothing and
+waits for no byte, as it did before the buffer. `Read`, a `File`'s `Lines()` (S16), and `Fill` and
+`Consume` (S24) are the ways to the buffered bytes. The buffer is
+made at the handle's first read that fills it, and every holder shares it (S5), under the handle's
+lock: a fill holds the lock while its read waits, so that a read or a pull through another holder
+waits behind it, and a read that goes straight lets it go before it waits. A read that fails, or
+whose time runs out (S9), stores nothing in the buffer. A `Write` after buffered reads of one handle
+would land where the program's reads ended, the position moved back over the bytes read ahead, as
+C#'s `FileStream` moves it, which no handle reaches, since `File.Open` opens a file to read and
+`File.Create` to write (S2) and a stream has no position; a second `File.Open` of a file has its own
+descriptor, position and buffer. *(assumed, §12: the `max` of 0, the buffer made at the first fill,
+every holder sharing it under the lock, the read that fails storing nothing, the write after
+buffered reads and the second handle)*
+
 Case: [system/read-appends.kz](../corpus/system/read-appends.kz)
 ```kurz
 void | IoError Chunks() {
@@ -131,6 +151,468 @@ Negative() else {
 }
 ```
 
+Case: [system/read-buffer-fill.kz](../corpus/system/read-buffer-fill.kz)
+```kurz
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`, and -1 where it has none
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+// whether the reads between `before` and `after` were at least one and fewer than 100, where a read of the system for each byte makes
+// 3000, and a count that could not be read, -1 at both ends, makes none
+bool Few(long before, long after) => before > 0 && after - before >= 1 && after - before < 100
+
+void | IoError Show() {
+    mut small = Bytes()
+    for i in 0..<3000 {
+        small.Add(byte(i % 251))
+    }
+
+    // 3000 bytes read one at a time from a stream: a read of the system fills the buffer of 8 KiB with what the stream holds, and the
+    // reads after it take their byte from the buffer
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(small)
+    mut got = Bytes()
+    before = Reads()
+    for i in 0..<3000 {
+        server.Read(mut got, 1)
+    }
+
+    after = Reads()
+    print("{got.Count} {got == small} {Few(before, after)}")
+
+    // the same from a file
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-fill.txt", sent)
+    f = File.Open("read-buffer-fill.txt")
+    mut read = Bytes()
+    start = Reads()
+    for i in 0..<3000 {
+        f.Read(mut read, 1)
+    }
+
+    end = Reads()
+    print("{read.Count} {read == small} {Few(start, end)}")
+
+    // a second handle on the file has its own position and buffer
+    h = File.Open("read-buffer-fill.txt")
+    File.Delete("read-buffer-fill.txt")
+    mut first = Bytes()
+    h.Read(mut first, 1)
+    print(first[0])
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-straight.kz](../corpus/system/read-buffer-straight.kz)
+```kurz
+void | IoError Show() {
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-straight.txt", sent)
+    g = File.Open("read-buffer-straight.txt")
+    File.Delete("read-buffer-straight.txt")
+
+    // a read of 8 KiB or more into an empty buffer goes straight to the list
+    mut large = Bytes()
+    print(g.Read(mut large, 10000))
+
+    // a smaller one fills the buffer with 8192 bytes and takes one; a read of 8 KiB or more then takes the 8191 the buffer holds and
+    // no more, with no system call, and the next one, with the buffer empty, goes straight to the list again
+    one = g.Read(mut large, 1)
+    rest = g.Read(mut large, 10000)
+    print("{one} {rest}")
+    print(g.Read(mut large, 10000))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-zero.kz](../corpus/system/read-buffer-zero.kz)
+```kurz
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a `max` of 0 reads nothing and waits for no byte, where a read that waited would run out of time
+    print(server.Read(mut got, 0))
+
+    // and it reads nothing where the stream holds bytes, which the next read takes
+    client.Write("ab".Bytes)
+    print(server.Read(mut got, 0))
+    print(server.Read(mut got, 2))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
+```kurz
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+
+    // a read that would fill the buffer, and one that goes straight to the list, each run out of time with nothing sent: each stores
+    // nothing and lets the next read in
+    match server.Read(mut got, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    match server.Read(mut got, 10000) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Read(mut got, 1)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
+```kurz
+void | IoError Show() {
+    // a read of one byte fills the file's buffer with the 20 bytes the file holds; its close drops the 19 no read took, and a read
+    // after it is S5's error and takes none of them
+    File.WriteAll("read-buffer-close.txt", "abcdefghijklmnopqrst".Bytes)
+    f = File.Open("read-buffer-close.txt")
+    File.Delete("read-buffer-close.txt")
+    mut read = Bytes()
+    print(f.Read(mut read, 1))
+    f.Close()
+    match f.Read(mut read, 1) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    // a read of one byte fills the stream's buffer with the 10 bytes of one write, which leaves the system's queue empty; the close
+    // drops the 9 the buffer holds, and the peer reads the end of the stream, where bytes left in the queue would have reset it
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("abcdefghij".Bytes)
+    mut got = Bytes()
+    print(server.Read(mut got, 1))
+    server.Close()
+    mut last = Bytes()
+    print(client.Read(mut last, 16))
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+### S24 (decided, §12) Looking into the read buffer
+
+`s.Fill(mut into)` appends to `into`, a `Bytes`, what the read buffer of a `File` or a `TcpStream`
+holds (S3), all of it, and consumes none of it, as Rust's `BufRead::fill_buf` gives the buffer: where
+the buffer holds bytes it makes no system call, and where it holds none it first fills it with one
+read of the system, as a `Read` below 8 KiB fills it. `s.Consume(n)` drops the first `n` of the bytes
+the buffer holds, as `BufRead::consume` does, so that the next `Read` or `Fill` starts after them. A
+reader so looks at a message's head without taking what follows it: it fills,
+finds the head's end in the bytes it was given, and consumes that far (§12, the owner, 2026-11-03,
+issue 110, comment 6615078257, against the same two members visible to `std/` alone and against a
+`Read` of one byte at a time; the cost is two public members, and a program can misuse `Consume`).
+
+`Consume` returns `void | IoError` and is a call in flight, as every call on a handle is (S5), so that
+through a holder of a closed handle it gets the closed handle's error; an `n` past the bytes the
+buffer holds, or below 0, raises `index-out-of-range`, as an index past a list's end does, the bound
+Rust's documentation of `consume` states, enforced as C#'s `PipeReader.AdvanceTo` enforces it (§12,
+the owner, 2026-11-03, issue 110, comment 6615355264, against such an `n` clamped, as Rust's
+`BufReader` clamps it, and against a plain `void` that does nothing on a closed handle).
+
+`Fill` returns the count it appended, `int | IoError`, 0 at the end of a file or of a connection its
+peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A pull of a line (S16)
+starts after the bytes a `Consume` dropped, as the next `Read` does. A `Fill` is a call in
+flight too, and one that fills is a read as a `Read`'s fill is: it holds the handle's lock while its
+read waits, its time runs out as a read's does (S9), a read that fails stores nothing, and one that
+finds the handle marked by a `Close` when its read returns gives `into` all it read and keeps none of
+it. *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
+of a line starting after the bytes consumed, and `Fill` as a call in flight whose fill
+holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does)*
+
+Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a file's bytes looked at and consumed: a `Fill` appends what the buffer holds and consumes none of it, so that a second gives the same
+// bytes again; a `Consume` drops bytes from the front, and the `Read` and the `Fill` after it start past them; at the end of the file a
+// `Fill` appends nothing and gives 0
+void | IoError Look() {
+    File.WriteAll("fill-consume.txt", "abcdef".Bytes)
+    f = File.Open("fill-consume.txt")
+    File.Delete("fill-consume.txt")
+    mut seen = Bytes()
+    first = f.Fill(mut seen)
+    second = f.Fill(mut seen)
+    print("{first} {second} {seen.Count}")
+    print(Text(seen))
+    f.Consume(2)
+    mut rest = Bytes()
+    read = f.Read(mut rest, 2)
+    print("{read} {Text(rest)}")
+    rest.Clear()
+    filled = f.Fill(mut rest)
+    print("{filled} {Text(rest)}")
+    f.Consume(filled)
+    print(f.Fill(mut rest))
+    f.Close()
+}
+
+Look() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-head.kz](../corpus/system/fill-head.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// the index after the first blank line, "\r\n\r\n", in `bytes`, or -1 where it has none
+int HeadEnd(Bytes bytes) {
+    for i in 3..<bytes.Count {
+        if bytes[i - 3] == byte(13) && bytes[i - 2] == byte(10) && bytes[i - 1] == byte(13) && bytes[i] == byte(10) {
+            return i + 1
+        }
+    }
+
+    return -1
+}
+
+// a request's head read from a stream without taking what follows it: each fill appends what the buffer holds, the bytes before the
+// blank line are consumed, and the body after it is left to the reads that follow
+void | IoError Serve() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET / HTTP/1.1\r\nHost: a\r\n\r\nhello".Bytes)
+    client.ShutdownWrite()
+    mut head = Bytes()
+    mut end = -1
+    while end < 0 {
+        before = head.Count
+        got = server.Fill(mut head)
+        if got == 0 {
+            print("no head")
+            return
+        }
+
+        end = HeadEnd(head)
+        if end < 0 {
+            server.Consume(got)
+        } else {
+            server.Consume(end - before)
+        }
+    }
+
+    print("head {end}")
+    mut body = Bytes()
+    mut more = 1
+    while more > 0 {
+        more = server.Read(mut body, 100)
+    }
+
+    print(Text(body))
+    print(server.Fill(mut body))
+    server.Close()
+    client.Close()
+}
+
+Serve() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-held.kz](../corpus/system/fill-held.kz)
+```kurz
+// the read system calls of the process so far, the line `syscr` of the system's `/proc/self/io`, and -1 where it has none
+long | IoError Reads() {
+    bytes = File.ReadAll("/proc/self/io")
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => ""
+    }
+
+    for line in text.Split('\n') {
+        if line.StartsWith("syscr:") {
+            return long.Parse(line.Replace("syscr:", "")) else {
+                ParseError => -1
+            }
+        }
+    }
+
+    return -1
+}
+
+// 1000 fills of a buffer that holds a file's 6 bytes make no read of the system, fewer than 100 reads between the counts, which read
+// `/proc/self/io` themselves; once they are consumed, each of 1000 fills at the end of the file reads, 1000 reads or more
+void | IoError Show() {
+    File.WriteAll("fill-held.txt", "abcdef".Bytes)
+    f = File.Open("fill-held.txt")
+    File.Delete("fill-held.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    before = Reads()
+    for i in 0..<1000 {
+        seen.Clear()
+        f.Fill(mut seen)
+    }
+
+    after = Reads()
+    print("{seen.Count} {before > 0 && after - before < 100}")
+    f.Consume(6)
+    start = Reads()
+    mut given = 0
+    for i in 0..<1000 {
+        given = given + f.Fill(mut seen)
+    }
+
+    end = Reads()
+    print("{given} {start > 0 && end - start >= 1000}")
+    f.Close()
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-timeout.kz](../corpus/system/fill-timeout.kz)
+```kurz
+// a fill that waits on a stream with nothing sent runs out of time as a read does, stores nothing, and lets the next fill in
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    server.SetReadTimeout(50ms)
+    mut got = Bytes()
+    match server.Fill(mut got) {
+        int n => print(n)
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    client.Write("x".Bytes)
+    n = server.Fill(mut got)
+    print("{n} {got[0]}")
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-past.kz](../corpus/system/consume-past.kz)
+```kurz
+// the buffer holds the file's 3 bytes: consuming all of them passes, and one more is past what it holds
+void | IoError Past() {
+    File.WriteAll("consume-past.txt", "abc".Bytes)
+    f = File.Open("consume-past.txt")
+    File.Delete("consume-past.txt")
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Consume(3)
+    f.Consume(1)
+}
+
+Past() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-negative.kz](../corpus/system/consume-negative.kz)
+```kurz
+void | IoError Negative() {
+    File.WriteAll("consume-negative.txt", "abc".Bytes)
+    f = File.Open("consume-negative.txt")
+    File.Delete("consume-negative.txt")
+    int n = -1
+    f.Consume(n)
+}
+
+Negative() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
+```kurz
+// a `Close` through one holder while the buffer holds the file's bytes: a `Fill` and a `Consume` through the other holder find the mark
+// before they reach the buffer, and get the closed handle's error
+void | IoError Closed() {
+    File.WriteAll("fill-closed.txt", "abc".Bytes)
+    f = File.Open("fill-closed.txt")
+    File.Delete("fill-closed.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    match g.Fill(mut seen) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
 ### S4 (assumed, §12) Writing writes every byte
 
 `f.Write(bytes)` writes every byte of `bytes`, a `Bytes`, and returns `void | IoError`: where the
@@ -144,15 +626,39 @@ Case: [system/write-read.kz](../corpus/system/write-read.kz)
 A `File` is a handle: a copy is a second holder of the one file, as a list's copy holds its block
 (section 3 of the record), and the file closes when the last value that holds it lets go of it,
 ignoring an error of that close. `f.Close()` closes it before that and returns `void | IoError`; a
-`Close` through one holder closes it for all. Every call on a closed file, `Close` among them, returns
-the error the system gives a descriptor that is not open, `Other` with the number 9, with the path
-the file was opened with, since a close stores -1 in the file's descriptor before the system closes
-it, so that no call that starts after that store passes the system a number it may have given
-another file. A call through another holder that read the descriptor before the store and enters
-the system after the close can still reach such a number, and so read or write a file its holder
-never opened, while a call already in the system keeps the file it entered with: the record names that hazard in the cost of the answer and keeps what bounds it open
-(§12, §14). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the closed file's
-error, the -1 stored at the close, the close that ignores its error, and no text)*
+`Close` through one holder ends the handle for every holder at once: it marks the handle closed, its
+mark, so that every later call through any holder, `Close` among them, returns the error the system
+gives a descriptor that is not open, `Other` with the number 9, with the path the file was opened
+with (§12, the owner, 2026-11-02, issue 110, comment 6573974441, and the error the answer of comment
+6574625739 names, "the one error every call on a closed handle gets"), and the descriptor itself is
+released only when the last call in flight on the handle returns, as Rust's `Arc<File>` closes the
+file with its last clone, so that no call reaches a number the system has given another file since: a
+call already in flight when the `Close` runs keeps the descriptor and completes, and the `Close`
+succeeds at once, an error of the close the last call makes dropped, as the close at the last count
+drops it (§12, the owner, 2026-11-02, against a lock around each call, against keeping the hazard and
+against a new error for a deferred close; the cost is a count kept around each call on a handle, two
+atomic operations, and a `Close` that shuts a socket down holds a count of its own across the
+shutdown, so that the release comes after it (S9; the owner, 2026-11-02, on a review's finding)). A
+call in flight is a `Read`, a `Write`, a stream's `ShutdownWrite`, a listener's `Accept`, a setter of
+a bound (S9), a `Fill` or a `Consume` (S24) or a pull of a loop over the lines (S16), each from after
+its arguments have run to its return (§12, the owner, 2026-11-02, issue 110, comment 6588037045;
+`ShutdownWrite`'s, issue 39, comment 6583351876; `Consume`'s, issue 110, comment 6615355264; `Fill`'s
+assumed, S24); a loop over the lines is in flight while it pulls a line, and not while its block runs,
+so that a `Close` in its block ends the handle and the next pull gets the error above, as a borrow
+of `&mut self` in Rust lasts one call, `read_line`'s, while Rust's loop over `lines()` holds its
+reader for the whole loop and refuses a close in its block when it compiles (the same comment,
+against a count held for the loop's whole
+block, at the cost of a `Close` in that block whose release would wait for its own loop). The bytes
+the file's buffer holds that no read took (S3) are dropped at the close, as dropping Rust's
+`BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
+flight, and one that finds the mark when its read returns gives what it took and keeps none of the
+rest in the buffer, while every later call through any holder finds the mark before it reaches the
+buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+last count that ignores its error, and no text)*
+
+No case: a case runs one thread, and a call in flight beside a `Close` needs two.
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
 
 Case: [system/close-twice.kz](../corpus/system/close-twice.kz)
 ```kurz
@@ -185,6 +691,31 @@ Show() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/setter-after-close.kz](../corpus/system/setter-after-close.kz)
+```kurz
+// a stream's setter and a listener's on a handle closed before get the system's error of a descriptor that is not open, as every
+// call after `Close` does
+void | IoError Closed() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    client.Close()
+    client.SetReadTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    listener.Close()
+    listener.SetAcceptTimeout(1s) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
 
 ### S6 (decided, §12) A whole file
 
@@ -287,7 +818,41 @@ it is written. An address that holds a NUL byte is `InvalidInput`, as a path is 
 takes every interface where its address is a wildcard, `0.0.0.0`, `[::]`, which takes IPv4 too on
 Linux's dual stack, on by default, since the runtime sets no `IPV6_V6ONLY`, as Rust sets none, or a
 name that resolves to either. A `TcpListener` and a `TcpStream` are handles as a `File` is (S5); a stream reads, writes
-and closes as a file does (S3, S4, S5), and a listener accepts and closes. A listener's socket reuses
+and closes as a file does (S3, S4, S5), and a listener accepts and closes. The bytes a stream's
+buffer holds that no read took are dropped at its close, and only the bytes still in the system's
+queue make the close send the peer a reset (§12, the owner, 2026-11-02). A `Close` of a stream
+or a listener also shuts the socket down, `shutdown(2)`, so that a call that blocks on it in another
+thread returns at once, as Go's close wakes it, a blocked `Accept` or `Read` with the error of a closed
+handle, S5's, and a listener's port is free right away (§12, the owner, 2026-11-02, against a call that
+waits for its bound). The shutdown runs only while calls are in flight, a `Close` with none releasing
+the descriptor at once as before (against a shutdown at every `Close`); a blocked `Write` that the
+shutdown wakes gets that error too, as Go's close gives a blocked write `net.ErrClosed` (against the
+system's broken pipe or reset); a `Read` in flight that the shutdown meets with bytes the socket holds
+takes them, and the next call gets that error (against failing the call and dropping the bytes); and a
+stream's `Read` or `Write` or a listener's `Accept` that fails, or reads no byte, after the mark (S5)
+gives that error, a real timeout or reset that races the `Close` among them (against the system's
+answer, which would depend on the race) (§12, the owner, 2026-11-02). An `Accept` in flight whose
+system call succeeds after the mark returns the stream it got, as a `Read` keeps the bytes it took,
+and the next `Accept` gets that error, so that the connection it got is not thrown away, as Go's
+`Accept` returns a connection whose system call finished before the close (§12, the owner,
+2026-11-02, issue 39, comment 6578783655, against that error with the connection closed, at the cost
+of a connection the system accepted and its client sees closed; the cost is a stream that reaches
+the program after the listener's `Close`, which the program closes, or lets go of, as any other; the costs,
+issue 110, comment 6588037045); a connection still waiting in the listener's queue is reset at the
+listener's `Close`, by the release where no call is in flight and by the shutdown where one is, as
+Linux resets the queue of a listener that stops listening: the system's behaviour, not a choice of
+§12, which names it as a cost of a listener's `Close`; and a `Write` that the shutdown
+ends after part of its bytes went out gives that error, the part sent not reported, as Rust's
+`write_all` and C#'s `Stream.Write` report none (§12, the owner, 2026-11-02, the same comment, against
+the count sent with the error left to the next call, at the cost of a `Write` that returns a count,
+where a `Write` writes every byte and returns none (S4); the cost is that the program cannot tell
+how many of its bytes went out before the shutdown; the costs, issue 110, comment 6588037045). An actor waiting in the poller on a
+socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
+wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
+bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
+that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, and a call
+of a program without actors blocks its thread (S10) and waits in no poller, the shutdown waking it.
+A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
 address without a `:`, a port that is not a number from 0 to 65535 and a name whose lookup succeeds
@@ -307,8 +872,8 @@ lookup that succeeds with no address, the error of the system `EAI_SYSTEM` passe
 the last address tried, and the string a connection's error names)*
 
 A read, a write and the connect of `TcpStream.Connect` on a socket wait at most 5 seconds by default,
-as long as a call of an actor waits (§6), whether those 5 seconds cover the lookup of a name in
-`Connect` too, and so bound the whole call, standing open (§14), and the time of a read and a write can be set for each socket, as
+as long as a call of an actor waits (§6), the bound of a read and a write holding for each call of the
+system and that of `Connect` starting after the lookup of a name (below), and the time of a read and a write can be set for each socket, as
 Rust's `set_read_timeout` and `set_write_timeout` set a time for each socket (§12, the
 owner, 2026-10-30, against a timeout as an argument with no default and against a default in the
 HTTP server alone). `Connect` creates the socket such a setter would set, and another time reaches it
@@ -318,45 +883,70 @@ setting `Connect` reads before it creates the socket and against the 5 seconds a
 takes one address and looks nothing up, and this form is read as taking the name the first form takes,
 looking it up and trying its addresses in turn, as the first form's `address` reads above (§12, the
 owner, 2026-10-29, "Names too, as Rust", an answer on the first form), a reading under the marker on
-the bound of `TcpStream.Connect` at the end of this rule's paragraph; how the time meets the lookup
-stands open (§14). A call whose time runs out
+the one bound of `TcpStream.Connect` below. A call whose time runs out
 gives an `IoError` of the kind `TimedOut`, and `s.SetReadTimeout(d)` and `s.SetWriteTimeout(d)` set
-the time of a stream's reads and of its writes, taking a `duration`, `null` for no bound, as Rust's
+the time of a stream's reads and of its writes, taking a `duration?`, `null` for no bound, as Rust's
 `set_read_timeout(Option<Duration>)`, with a time of zero and a negative time refused as
 `InvalidInput`, as Rust refuses a zero `Duration` (§12, the owner, 2026-11-01, Q8 (a), against
 `WouldBlock`, which Rust gives on Linux for the same timeout, and against properties, as C#'s
 `Socket.ReceiveTimeout`). A time of zero or below in the second form of `Connect` is `InvalidInput`
 too, as Rust's `connect_timeout` refuses a zero `Duration` (§12, the owner, 2026-11-01, "Same:
-InvalidInput", against the 5 seconds of the first form and against no bound). *(assumed, §12: the
-parameter a `duration?`; the time of the second form of `Connect` a `duration`; a time cut down to
-whole microseconds, and a positive time that would come to zero raised to 1 microsecond, as Rust's
-setters cut and raise it, and a time whose seconds pass
-the largest `time_t` bounded by `time_t::MAX` seconds, as Rust bounds it (checked 2026-11-01: `set_timeout`
-in `library/std/src/sys/net/connection/socket/unix.rs` of Rust's master branch); a setter giving
+InvalidInput", against the 5 seconds of the first form and against no bound). A time is cut down to
+whole microseconds, and a positive time that would come to zero is raised to 1 microsecond, as Rust's
+setters cut and raise it, and a time whose seconds would pass the largest `time_t`, which Rust bounds
+by `time_t::MAX` seconds, cannot be written (checked 2026-11-01: `set_timeout` in
+`library/std/src/sys/net/connection/socket/unix.rs` of Rust's master branch; §12, the owner,
+2026-11-02, the socket pass's Q7 and Q8 at their defaults). *(assumed, §12: the parameter a
+`duration?`; the time of the second form of `Connect` a `duration`; a setter giving
 `void | IoError`; and every `EAGAIN` other than the one Q8 (a) names keeping `WouldBlock`, that one
 being the only exception to the kinds of Rust's mapping, told by what the runtime sees: socket(7)
 says that `SO_RCVTIMEO` and `SO_SNDTIMEO` make a call on a blocking socket fail with `EAGAIN` when
 their time runs out, or with `EINPROGRESS` for `connect`, so that every `EAGAIN` of a read, a write
 or an `Accept` on a blocking socket whose time is set is that case (checked 2026-11-01: socket(7) of
-the Linux man-pages); and, proposed with the product pass of the build of these bounds, a read or a
-write whose time runs out giving `TimedOut` with the number of `EAGAIN`, 11, a `Connect` whose bound
-runs out `TimedOut` with the number 0, as an error that is not the system's, and the bound of a read
-and a write holding for each call of the system, so that a `Write` of many bytes to a peer that takes
-them slowly can take longer than the bound in all, as Rust's `write_all` does)* The socket options `SO_RCVTIMEO` and
+the Linux man-pages))* A read or a write whose time runs out gives `TimedOut` with the number of
+`EAGAIN`, 11, and a `Connect` whose bound runs out `TimedOut` with the number 0, as an error that is
+not the system's, while a connect the kernel times out keeps `ETIMEDOUT`, 110 (§12, the owner,
+2026-11-02, "11 (EAGAIN) for a read or a write, 0 for Connect's own bound", against 110 for both and
+against 0 for a read and a write too). The bound of a read and a write holds for each call of the
+system, so that a `Write` of many bytes to a peer that takes them slowly can take longer than the
+bound in all, as Rust's `write_all` does, and a peer that stops reading gives `TimedOut` after the
+bound (§12, the owner, 2026-11-02, "per system call", against one deadline for the whole `Write`, as
+Go's `SetWriteDeadline`). The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
-the bound holds for an actor's socket, which runs without blocking, stands open (§14). *(assumed, §12:
-one bound of `TcpStream.Connect` shared by its attempts to connect to every address it tries in turn
-and not given to each, which says nothing of the lookup, open in §14, at the cost that a first
-address that never answers spends the whole bound and the later addresses are not tried; and the second form's lookup and
-its trial of the addresses, a reading of the answer's `Connect(address, timeout)`, which names the
-first form's parameter)*
+the bound holds for an actor's socket, which runs without blocking, stands open (§14). The bound of
+`TcpStream.Connect` starts once the lookup of the name has given its addresses, the lookup waiting
+without a bound of its own, as Rust's `connect` leaves `getaddrinfo`, and is one bound shared by its
+attempts to connect to the addresses it tries in turn, not given to each (§12, the owner, 2026-11-02,
+"one bound of 5 s after the lookup, shared by the addresses tried in turn", against a bound that
+covers the lookup too, as Go's `DialTimeout`, against the bound spread over the addresses, as Go
+spreads it, and against a bound for each address), at the cost of a call that waits past its time on
+a slow name server, and of a first address that never answers, which spends the whole bound while
+the later addresses are not tried. *(assumed, §12: the second form's lookup and its trial of the
+addresses, a reading of the answer's `Connect(address, timeout)`, which names the first form's
+parameter)*
 `l.Accept()` waits without a bound by default, as Rust's `TcpListener::accept` waits, and a bound
 can be set on a listener (§12, the owner, 2026-10-30, "Accept waits, as Rust", whose option read "No
 default bound on Accept. Read, write and Connect keep 5 s, and a bound can still be set on a
 listener", against the default of 5 seconds on `Accept` too). A listener's bound is set by
-`l.SetAcceptTimeout(d)`, taking a `duration?` as the stream's setters do *(assumed, §12: following
+`l.SetAcceptTimeout(d)`, taking a `duration?` as the stream's setters do, and giving `void | IoError`,
+refusing a time of zero or below as `InvalidInput` and cutting a time down to whole microseconds as
+they do *(assumed, §12: following
 from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and how
 the bound holds for an actor's socket stands open (§14).
+
+`s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
+`TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
+(S3), and the stream still reads what the peer sends until it closes. It gives `void | IoError`, S5's
+error on a closed stream, and what the system answers as it is: a second call passes, and a call on a
+stream whose peer reset the connection is `NotConnected` with the number 107. A call through one
+holder ends the writes of every holder, so that a later write through any holder is `BrokenPipe` with
+the number 32, and the reads go on. A listener has no such member, and there is no `ShutdownRead` and
+no `Shutdown(how)` (§12, the owner, 2026-11-02, a half-close on `TcpStream` for the staged close of
+the HTTP server, and the answers to the product pass of the call).
+
+No case: a case runs one thread, and a call in flight beside a `Close` needs two; the runtime of
+Linux has no poller (S10); and whether a `Close` with no call in flight shuts the socket down no
+program can see, since the runtime shares no descriptor across processes.
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
 ```kurz
@@ -437,7 +1027,9 @@ match TcpStream.Connect("127.0.0.1:65536") {
 Case: [system/read-timeout.kz](../corpus/system/read-timeout.kz)
 ```kurz
 // a read whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, which the system counts in
-// its own ticks, and long before the 5 seconds of the default; the stream stays open, and the next read takes what the peer wrote
+// its own ticks; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
+// floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
+// nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -451,7 +1043,7 @@ void | IoError Wait() {
     }
 
     elapsed = timestamp.Now - start
-    print(elapsed >= 40ms && elapsed < 2s)
+    print(elapsed >= 40ms && elapsed < 4s)
     server.Write("x".Bytes)
     print(client.Read(mut buffer, 1))
 }
@@ -463,15 +1055,18 @@ Wait() else {
 
 Case: [system/write-timeout.kz](../corpus/system/write-timeout.kz)
 ```kurz
-// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`
+// a peer that never reads: the writes fill what the system holds for it, and the one that waits longer than its time is `TimedOut`.
+// All of it takes less than 4 s, a margin no rule fixes, for the buffers the kernel sizes and the one wait of 50 ms, set below the 5 s
+// of the default, so that a setter that set nothing, whose last write would wait the default, prints `false`
 void | IoError Stall() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.SetWriteTimeout(50ms)
-    mut chunk = "0123456789abcdef".Bytes
+    piece = "0123456789abcdef".Bytes
+    mut chunk = Bytes()
     while chunk.Count < 65536 {
-        chunk.AddRange(chunk)
+        chunk.AddRange(piece)
     }
 
     start = timestamp.Now
@@ -485,7 +1080,7 @@ void | IoError Stall() {
         }
     }
 
-    print(timestamp.Now - start < 3s)
+    print(timestamp.Now - start < 4s)
     server.Close()
 }
 
@@ -497,7 +1092,11 @@ Stall() else {
 Case: [system/connect-timeout.kz](../corpus/system/connect-timeout.kz)
 ```kurz
 // a listener that accepts nothing: once its queue of connections that wait is full, a connection waits, and the second form of
-// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it
+// `Connect` gives `TimedOut` after its time, with the number 0, since no error of the system came with it. The queue fills on
+// Linux's defaults: the 128 a listener asks for, within `somaxconn`, and `tcp_abort_on_overflow` at 0, which drops a connection
+// that finds the queue full where 1 would refuse it; a kernel that took every connection ends the loop at 1000 with no `TimedOut`
+// line. All of it takes less than 4 s, a margin no rule fixes, set below the 5 s of the default, so that a bound that was not
+// passed on prints `false`
 void | IoError Full() {
     listener = TcpListener.Bind("127.0.0.1:0")
     mut held = List<TcpStream>()
@@ -517,7 +1116,7 @@ void | IoError Full() {
     }
 
     print(held.Count > 1)
-    print(timestamp.Now - start < 2s)
+    print(timestamp.Now - start < 4s)
 }
 
 Full() else {
@@ -527,8 +1126,11 @@ Full() else {
 
 Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
 ```kurz
-// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, where it waits without a
-// bound by default; the listener stays open, and the next `Accept` takes the connection that came, whose stream gets the default
+// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time; the listener stays open,
+// and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
+// and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
+// default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the
+// default, `FileTests` reads back by `getsockopt`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
     listener.SetAcceptTimeout(50ms)
@@ -539,7 +1141,7 @@ void | IoError Wait() {
     }
 
     elapsed = timestamp.Now - start
-    print(elapsed >= 40ms && elapsed < 2s)
+    print(elapsed >= 40ms && elapsed < 4s)
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.Write("x".Bytes)
@@ -554,8 +1156,8 @@ Wait() else {
 
 Case: [system/timeout-refused.kz](../corpus/system/timeout-refused.kz)
 ```kurz
-// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; `null` is no bound; and a setter on a closed
-// stream gets the system's error of a descriptor that is not open, as every call after `Close` does
+// a time of zero or below is refused, in a stream's setter, in a listener's and in the second form of `Connect`; and `null` is taken,
+// which `FileTests` reads back as no bound by `getsockopt`
 void | IoError Refused() {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -578,11 +1180,6 @@ void | IoError Refused() {
     }
 
     client.SetReadTimeout(null)
-    client.Close()
-    client.SetReadTimeout(1s) else {
-        IoError e => print("{e.Kind} {e.Code}")
-    }
-
     server.Close()
 }
 
@@ -590,6 +1187,64 @@ Refused() else {
     IoError e => print(e)
 }
 ```
+
+Case: [system/setter-after-close.kz](../corpus/system/setter-after-close.kz)
+
+Case: [system/shutdown-write.kz](../corpus/system/shutdown-write.kz)
+```kurz
+// the writes of one end ended through one holder: its peer reads the end of the stream, a second call passes, and the other
+// holder still reads and has its write refused; a stream whose peer reset it, and a closed one, get the system's answer
+void | IoError Half() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    held = server
+    server.ShutdownWrite()
+    mut end = Bytes()
+    print(client.Read(mut end, 16))
+    server.ShutdownWrite()
+    print("again")
+    client.Write("hi".Bytes)
+    mut buffer = Bytes()
+    mut read = 1
+    while buffer.Count < 2 && read > 0 {
+        read = held.Read(mut buffer, 2 - buffer.Count)
+    }
+
+    print(string.FromUtf8(buffer) else {
+        InvalidUtf8 => "not UTF-8"
+    })
+    held.Write("late".Bytes) else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    // a peer that closes with a byte it never read, still in the system's queue, resets the connection
+    reset = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    accepted = listener.Accept()
+    accepted.Write("x".Bytes)
+    reset.Close()
+    accepted.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+
+    server.Close()
+    server.ShutdownWrite() else {
+        IoError e => print("{e.Kind} {e.Code}")
+    }
+}
+
+Half() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/read-buffer-zero.kz](../corpus/system/read-buffer-zero.kz)
+
+Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
+
+Case: [system/read-buffer-close.kz](../corpus/system/read-buffer-close.kz)
+
+Case: [system/fill-timeout.kz](../corpus/system/fill-timeout.kz)
 
 ### S10 (decided, §12) A call blocks its thread
 
@@ -604,7 +1259,8 @@ the system completes without the accept.
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
-and `File.Modified` (S13 to S15; §12, assumed), and a `Command`'s calls, `Stdin` and `Environment.Exit`
+and `File.Modified` (S13 to S15; §12, assumed), `instant.Now` and `t.Elapsed` (S25; §12, the owner,
+2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls, `Stdin` and `Environment.Exit`
 (S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
@@ -619,7 +1275,7 @@ program's code to such a function needs the grant, so that no package borrows a 
 another that has it (§13, the owner, 2026-10-30, "Every package on path"). A call without the grant
 is the compile error `files-not-allowed` or `network-not-allowed` at the call. A package that reads a
 variable of the environment needs `allow env` in the same way, and a read without it is `env-not-allowed`;
-the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). A package that starts a program, by `Output()`, `Status()` or `Spawn()` of a `Command` (S17 to S19), needs `allow run` in the same way, and a call without it is `run-not-allowed`, while `Command.New` and the members that set a command need none, since nothing runs before a call that starts (§13, the owner, 2026-11-01, "allow run"); a read of standard input needs none (S22). *(assumed, §13: the id `run-not-allowed` and the members that set a command)* For a package on the
+the command line and the clock need no grant (§13, the owner, 2026-10-30, "`allow env`, as Deno", the option that carried this sentence). A package that starts a program, by `Output()`, `Status()` or `Spawn()` of a `Command` (S17 to S19), needs `allow run` in the same way (§13, the owner, 2026-11-01, "allow run"), and a call without it is `run-not-allowed`, while `Command.New` and the members that set a command need none, since nothing runs before a call that starts; a read of standard input needs none (S22). *(assumed, §13: the id `run-not-allowed` and the members that set a command)* For a package on the
 path that calls no such function itself, the error stands at its call that leads on toward the
 function, a line of its own code, and names the path, as `Report -> Store.Save -> File.Write`, one
 error for each such line (§13, the owner, 2026-10-30, "At its call, naming the path"). The program
@@ -820,6 +1476,57 @@ Times() else {
 }
 ```
 
+### S25 (decided, §12) The monotonic clock
+
+`instant.Now` is a reading of the monotonic clock, an `instant` (T36), read from
+`clock_gettime(CLOCK_MONOTONIC)` on Linux, which counts no time while the system is suspended, as
+Rust's `Instant::now()` and .NET's `Stopwatch` read it there, and `t.Elapsed` is `instant.Now - t`, a
+`duration` (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock, Q1 (a)
+and Q5 (a)). A reading's text is its time since the clock's zero in the text of a duration (A12), and
+a `data` value that holds one shows it so (§12, the same answer, Q4 (a)). `instant.Now` is `not
+supported` in a build for Windows, as `timestamp.Now` is, and so is `t.Elapsed`, which reads the
+clock (S11; §12, the same answer, Q6 (a)). *(assumed, §12: the defaults of that round, not objected
+to: `t.Elapsed` is `instant.Now - t`; two readings may be equal, since the clock need not move
+between two reads; the zero is one the record does not name, on Linux the boot; and `instant.Now`
+reads the runtime's one monotonic clock, which the bounds of `Connect` read too.)*
+
+Case: [system/monotonic-clock.kz](../corpus/system/monotonic-clock.kz)
+```kurz
+instant start = instant.Now
+instant later = instant.Now
+print(later >= start)
+duration taken = start.Elapsed
+print(taken >= later - start)
+print(instant.Now - start >= taken)
+```
+
+Case: [values/text-instant.kz](../corpus/values/text-instant.kz)
+```kurz
+data Mark(instant At)
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+print(Reading(0))
+print(Reading(7505123456789))
+print(Reading(-1))
+print(Mark(Reading(1000000000)))
+```
+
+### S26 (decided, §12) A reading stays in its process
+
+A reading in an actor's message or in a `durable` actor's state is a compile error, since a reading
+means nothing in another process or after a restart, and a deadline crosses as the `duration` left
+(§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock, Q8 (a)).
+
+No case: a case runs one actor and keeps no state past its run, and the compiler builds neither a
+send to another actor nor a `durable` actor, so no case can hold the error. The record names no id
+for it, and [12-errors.md](12-errors.md) has none: a row there comes with the case that expects it.
+
 ### S16 (decided, §12) The lines of a file
 
 `for line in f.Lines() { }` runs its block once for each line of a file `File.Open` opened, pulling the
@@ -888,10 +1595,9 @@ print(Count("a\n\nb") else {
 The `File` buffers its own reads and stays open after the loop, whether it ended, a `break` left it or
 a failure ended it: the lines it did not pull stay in the `File`, so that a later `Lines()` or `Read`
 goes on where the loop stopped, and a `Read` takes the buffered bytes first (§12, the owner, 2026-11-01,
-"`f.Lines()` on an open File" and "Stays open, continues"). Such a `Read` takes at most `max` of the
-buffered bytes and reads from the descriptor only where the buffer holds none, as Rust's
-`BufReader::read` does *(assumed, §12)*. The buffer takes 8 KiB at a time, as Rust's `BufReader` reads
-*(assumed, §12)*.
+"`f.Lines()` on an open File" and "Stays open, continues"). The buffer is the one every `Read` goes
+through (S3), so that such a `Read` takes at most `max` of the buffered bytes first, and it holds
+8 KiB, as Rust's `BufReader` (§12, the owner, 2026-11-02).
 
 Case: [system/lines-break-read.kz](../corpus/system/lines-break-read.kz)
 ```kurz
@@ -923,7 +1629,7 @@ Show() else {
 ```
 
 `Close` gives up the bytes the buffer holds, so that a later `Lines()` or `Read` takes none of them
-and gets the error of a closed file (S5) *(proposed)*. A line longer than the buffer is read whole,
+and gets the error of a closed file (S5; §12, the owner, 2026-11-02). A line longer than the buffer is read whole,
 and one of more bytes than the largest `int` ends the process with `allocation-failed`, as a string
 past it does *(assumed, §12)*. The loop keeps the `File` its collection gave when it started: an
 assignment to the variable in the block changes the variable, not what the loop pulls *(proposed)*.
@@ -1184,12 +1890,15 @@ value of `enum Stdio { Inherit, Piped, Null }`, its input, `Input(bytes)` (S19),
 called on as it was, so that a chain needs no `mut` and a loop writes `cmd = cmd.Arg(x)` on a `mut`
 variable; where no other value holds the command a member is called on, the new command is that one
 changed in place, as a write into a list's block that no other value holds (M3), so that a chain builds
-into one block and a command is copied only where a program keeps it and calls a member on it again
-(§12, the same answer). The names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus`, `Stdio` and
-`ExitError` are seen by every file, so that a file's own declaration of one is `redeclared` (V9), as of
-`Environment` (S14) (§12, the owner, 2026-11-01, "Mixed: ChildProcess, ProcessOutput"). A program that
-does not start is an `IoError` (S1) whose path is the program (S21). *(assumed, §12: `ExitError` among
-the names; a command without a text and without `==`)*
+into one block and a command is copied only where a program keeps it and calls a member on it again;
+in `cmd = cmd.Arg(x)`, where no value but `cmd` holds the command, it changes in place, since the
+assignment keeps no earlier command. The
+names `Command`, `ChildProcess`, `ProcessOutput`, `ExitStatus` and `Stdio` are seen by every file, so
+that a file's own declaration of one is `redeclared` (V9), as of `Environment` (S14) (§12, the owner,
+2026-11-01, "Mixed: ChildProcess, ProcessOutput"), and so is `ExitError` (S18). A program that does not
+start is an `IoError` (S1) whose path S21 gives. *(assumed, §12: the change in place and
+its count, the answer given to a question on that answer, and `cmd = cmd.Arg(x)`; `ExitError` among the names; a command
+without a text and without `==`)*
 
 Case: [system/command-output.kz](../corpus/system/command-output.kz)
 ```kurz
@@ -1252,14 +1961,17 @@ print(1)
 `Output()` runs the command to its end and gives `ProcessOutput | IoError | ExitError`, where `data
 ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the child wrote as bytes, which
 `string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A child that ends
-with a code other than 0, or that a signal ends, is the case `data ExitError(string Program,
-ProcessOutput Output)`, which the unwrap rule sends to the caller unless an `else` takes it (O2, O5)
-(§12, the owner, 2026-11-01, "A case of the call"). `ExitStatus` holds `Code`, an `int` that is 128 and
+with a code other than 0, or that a signal ends, is a case of the call, which the unwrap rule sends to
+the caller unless an `else` takes it (O2, O5) (§12, the owner, 2026-11-01, "A case of the call"); that
+case is `data ExitError(string Program, ProcessOutput Output)`. `ExitStatus` holds `Code`, an `int` that is 128 and
 the signal's number where a signal ended the child, `Signal`, an `int?` that holds that number, and
 `Success`, a `bool` (§12, the owner, 2026-11-01, "Code int + Signal int?"). `Status()` runs the command
-with the program's three streams and gives `void | IoError | ExitError`. The text of an `ExitError` is
+with the program's three streams and gives `void | IoError | ExitError`; the `ExitError` of `Status()`
+and of `Wait()` (S19) holds the status and two empty `Bytes`. `ExitStatus` is `data ExitStatus(int Code,
+int? Signal, bool Success)`, whose text A4 gives. The text of an `ExitError` is
 the words of what ended the child, a colon and the program: `exit status 3: sh`, `signal 15: sh`.
-*(assumed, §12: `Status()`'s result, its streams and its `ExitError` with no output, the name
+*(assumed, §12: `Status()`'s result, its streams and the output of its `ExitError` and of `Wait()`'s, `ExitStatus` as a
+`data` type, the name
 `ExitError`, its fields and its text, `ProcessOutput` keeping the status, `Success` where `Code` is 0 and
 `Signal` is `null`)*
 
@@ -1328,10 +2040,19 @@ end and gives `void | IoError | ExitError`, `WaitWithOutput()` gives `ProcessOut
 ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoError`, and `Id` is its
 process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
 while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
-forms"). A second `Wait()` gives what the first gave; a child let go of without a `Wait()` is neither
-waited for nor killed. *(assumed, §12: the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the
-signal, the second `Wait()`, the child let go of, `Id`'s type, and an `Input` under `Spawn()`, written by
-the call that waits, the child's `Stdin` then `null`)*
+forms"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
+starts the child, so that a spawned child takes its input through `child.Stdin`, and `Status()` writes
+the input and closes the child's input (§12, the owner, 2026-11-02, "`Input` beside `Spawn()` or beside
+a `Stdin` member is `InvalidInput` at the start"). `Status()` with a `Stdout` set to `Stdio.Piped`
+closes the program's end of that pipe at once, so that a child that writes there is ended by `SIGPIPE`
+(S21) and the call gives an `ExitError` (§12, the owner, 2026-11-02, "`Status()` with a piped Stdout
+closes the program's end of that pipe at once"). A second wait of either kind gives the status the
+first gave, and `WaitWithOutput()` reads each pipe from where the program stopped, a pipe read to its
+end or closed giving empty `Bytes`; `Kill()` on a child that ended or was waited for gives `void` and
+sends no signal; a child let go of without a `Wait()` is neither waited for nor killed. *(assumed, §12:
+the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
+end, the child let go of, `Id`'s type, `Status()` writing the input under `poll`, and a piped `Stderr`
+under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 ```kurz
@@ -1404,13 +2125,46 @@ Run() else {
 }
 ```
 
+Case: [system/spawn-input.kz](../corpus/system/spawn-input.kz)
+```kurz
+match Command.New("cat").Input("hi".Bytes).Spawn() {
+    ChildProcess c => print(c.Id > 0)
+    IoError e => print(e)
+}
+
+match Command.New("cat").Stdin(Stdio.Piped).Input("hi".Bytes).Output() {
+    ProcessOutput o => print(o.Status)
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/status-piped.kz](../corpus/system/status-piped.kz)
+```kurz
+Command.New("yes").Stdout(Stdio.Piped).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
+Case: [system/status-input.kz](../corpus/system/status-input.kz)
+```kurz
+Command.New("cat").Input("hi\n".Bytes).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}
+```
+
 ### S20 (decided, §12) A bound on a child's time
 
 `Timeout(d)`, a `duration`, bounds the run from its start: when it has passed, the call that waits
 kills the child, waits for its end and gives an `IoError` of the kind `TimedOut` (S1) whose path is the
 program, `timed out: sleep`; without it a call waits without a bound (§12, the owner, 2026-11-01,
-"Optional .Timeout(d)"). *(assumed, §12: the kill by `SIGKILL`, the path, and a bound of 0 or below
-ending the child at once)*
+"Optional .Timeout(d)"). A bound of 0 or below has passed at the start, so that the child is killed at
+once and the call gives `TimedOut`. Under `Spawn()` the bound is held by `Wait()` and `WaitWithOutput()`,
+so that a read of the child's pipe before them and a child let go of are not bounded, and a child that
+ended before the bound gives its own status. *(assumed, §12: the kill by `SIGKILL`, the path, a bound of 0
+or below, the bound under `Spawn()` and the child's end)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
 ```kurz
@@ -1431,13 +2185,19 @@ Run() else {
 ### S21 (assumed, §12) How a child starts
 
 There is no shell: each argument reaches the program as it is written, and a program that wants a shell
-runs `sh -c`. A program named without a `/` is looked up in the `PATH` the child gets. A child inherits
-the program's environment, which `Env`, `EnvRemove` and `EnvClear` change, and runs in the program's
-working directory unless `Dir` names another. It gets back the default action of `SIGPIPE`, which the
+runs `sh -c`. A program named without a `/` is looked up in the `PATH` the child gets, and in the
+system's default path where it gets none; an empty program is `NotFound` (S1) at the call that starts
+it, with the empty path; a program named with a `/` but not from the root is found from the directory
+`Dir` names. A child inherits the program's environment, which `Env`, `EnvRemove` and `EnvClear` change,
+and runs in the program's working directory unless `Dir` names another; the members apply in the order
+they were called, the later one winning, so that `EnvClear()` drops what an earlier `Env` set and a
+second `Dir` replaces the first. It gets back the default action of `SIGPIPE`, which the
 runtime sets to ignored at its start (§6), and no descriptor but its three streams. `Output()` pipes the
 child's output and error and gives it an input at its end; `Status()` and `Spawn()` give it the
-program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that. A call that waits for a
-child blocks its thread, or parks its actor, as a call on a file does (S10). A start that fails is an
+program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that, and `Input` gives the
+child its input (S19); `Output()` gives empty `Bytes` for a stream set to `Stdio.Inherit` or `Stdio.Null`.
+A call that waits for a child blocks its thread in a program without actors, and in an actor parks it
+while the wait runs on the pool of threads for blocking calls, as a call on a file does (S10). A start that fails is an
 `IoError` (S1) whose path is the program, or the directory where that is what does not exist, and never
 an argument, the input or the output. A NUL byte in the program, an argument, the directory, or a name
 or a value of the environment is `InvalidInput` with the number 0 at the call that starts the child. A
@@ -1452,9 +2212,21 @@ void | IoError | ExitError | InvalidUtf8 Run() {
     script = "printf '%s|%s|%s' \"$KURZ_CASE_A\" \"$KURZ_CASE_B\" \"$(basename \"$(pwd -P)\")\""
     out = Command.New("sh").Args(["-c", script]).Env("KURZ_CASE_A", "1").Env("KURZ_CASE_B", "2").EnvRemove("KURZ_CASE_B").Dir("command-dir").Output()
     print(string.FromUtf8(out.Stdout))
+    Directory.Delete("command-dir")
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-words.kz](../corpus/system/command-words.kz)
+```kurz
+void | IoError | ExitError | InvalidUtf8 Run() {
     words = Command.New("printf").Args(["%s", "$HOME *"]).Output()
     print(string.FromUtf8(words.Stdout))
-    Directory.Delete("command-dir")
 }
 
 Run() else {
@@ -1486,10 +2258,11 @@ each pull (§12, the owner, 2026-11-01, "A type Stdin" and "Also Stdin.ReadLine(
 as a file's are: `\n` and `\r\n` end a line and are taken off it, no empty line follows the last line
 break, a line that is not UTF-8 ends the read with `InvalidUtf8` (T15), `Stdin.Lines()` stands as a
 `for` loop's collection alone, a failure leaves the loop as a call's case leaves it, and the next read
-goes on where the loop stopped. `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
+goes on where the loop stopped. A read waits until the other end writes or closes, with no bound, and
+runs as a call on a file does (S10). `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
 needs no grant (S12); a file's own declaration of `Stdin` is `redeclared` (V9); and a build for Windows
 says `not supported` to it (S11). *(assumed, §12: the reading of the lines as a file's, `ReadAll`'s
-result, no `Close`, the path, the grant, the name and Windows)*
+result, the wait of a read, no `Close`, the path, the grant, the name and Windows)*
 
 Both cases read the standard input a case is given, which holds nothing (chapter 0).
 
@@ -1538,14 +2311,17 @@ print(1)
 
 ### S23 (decided, §12) The exit code
 
-`Environment.Exit(code)` ends the process at once with `code`: the other actors end where they stand,
-no handle is closed at its last count but by the system, and nothing written is lost, since `print`
-and `f.Write` keep no buffer (§12, the owner, 2026-11-01, "Top-level return n + Exit"). No path
+A program sets its exit code with `Environment.Exit(code)` and with a top-level `return n` (F17) (§12, the
+owner, 2026-11-01, "Top-level return n + Exit"). `Environment.Exit(code)` ends the process at once with
+`code`: the other actors end where they stand, no handle is closed at its last count but by the system,
+and nothing a write that returned before the call wrote is lost, since `print` and `f.Write` keep no
+buffer, while a write in progress in another actor can be cut short. No path
 goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
 of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
 Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
-the program with that code (F17). *(assumed, §12: the name, the end at once, the path after the call,
-the low 8 bits, any actor and Windows)*
+the program with that code, of which Linux takes the low 8 bits too, and a build for Windows says
+`not supported` to it (F17). *(assumed, §12: the name, the end at once and what it keeps and cuts,
+the path after the call, the low 8 bits, any actor and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 

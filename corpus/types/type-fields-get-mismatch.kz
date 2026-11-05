@@ -1,0 +1,13 @@
+// expect: error type-mismatch at 9
+// rules: T33
+
+data Order(string Id)
+data Invoice(string Id)
+
+void Show<T>(T value, Invoice other) {
+    for f in T.Fields {
+        print(f.Get(other))
+    }
+}
+
+Show(Order("a1"), Invoice("b2"))

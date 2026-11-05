@@ -1,0 +1,18 @@
+// expect: output
+// | none
+// | ann
+// rules: K7
+
+class Owner(string Name)
+
+class Pet {
+    pub mut weak Owner? keeper = null
+
+    pub string Who() => keeper?.Name ?? "none"
+}
+
+o = Owner("ann")
+p = Pet()
+print(p.Who())
+p.keeper = o
+print(p.Who())

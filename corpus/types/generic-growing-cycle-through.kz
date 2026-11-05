@@ -1,0 +1,15 @@
+// expect: error growing-type-argument at 6
+// rules: T34
+
+void Ping<T>(T x, int n) {
+    if n > 0 {
+        Pong([x], n - 1)
+    }
+}
+
+void Pong<U>(U y, int n) {
+    Ping(y, n)
+}
+
+Ping(1, 3)
+print("done")

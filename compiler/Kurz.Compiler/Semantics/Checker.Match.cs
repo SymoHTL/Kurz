@@ -40,6 +40,8 @@ public sealed partial class Checker
         var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
         var nullNamed = false;
         var kind = KindMatch(subject, typed); // T33: a `match` on `T.Kind` in a copy reads the one arm that takes the copy's kind
+        var loops = fieldsLoopDepth; // T34: a call in an arm of a `match` on `T.Kind` of a function's text is read in the copies alone, the `match` inside a loop over `T.Fields` too; a loop opened in the arm counts again
+        fieldsLoopDepth = KindOfTypeParameter(subject) ? 0 : loops;
         MatchArm? taken = null;
         foreach (var arm in arms)
         {
@@ -229,6 +231,7 @@ public sealed partial class Checker
             PopScope();
         }
 
+        fieldsLoopDepth = loops;
         frame.Known = Join(reaching, start);
 
         if (kind is { } k)
@@ -358,7 +361,7 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
-        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)");
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)"); // `e.Line` is the `else` keyword's
 
         if (!isStatement && Types.IsVoid(success))
         {

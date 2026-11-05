@@ -20,8 +20,8 @@ namespace Kurz.Compiler.Emit;
 /// it is made in, and the end of that region lets go of what no place took over. A value read from a variable, a field, an item
 /// or a parameter is borrowed: the place it goes to counts it once more. A variable lets go of its value at the end of its block,
 /// and at a <c>return</c>, a <c>break</c> and a <c>continue</c> that leave the block; a <c>throw</c> ends the process. A parameter
-/// is borrowed from the caller for the call. The blocks of data types in a relation of inheritance or that hold themselves are
-/// never freed, so what they hold keeps the count it was stored with. A function value is counted as a list is, by the
+/// is borrowed from the caller for the call. The block of a data value laid out as a block counts the values that hold it, and its
+/// last count lets go of what its fields hold and frees it off a work list, as an instance's does. A function value is counted as a list is, by the
 /// environment of its lambda (<see cref="EmitLambda"/>), a map and a hasher by their blocks, and a file or a socket by the block of its
 /// handle, which closes it at its last count (S5); values of every other type are not counted.
 /// </summary>
@@ -31,11 +31,12 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or PrimitiveType { Kind: Primitive.String } => true,
-        DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
+        DataType d when layout.IsBlock(d) => true,
+        DataType d => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
     };
@@ -208,6 +209,18 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is DataType block && layout.IsBlock(block))
+        {
+            fn.Emit($"call void {RetainBlock(block.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType)
+        {
+            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            return;
+        }
+
         if (type is PrimitiveType { Kind: Primitive.String })
         {
             if (!IsLiteral(value))
@@ -246,6 +259,18 @@ public sealed partial class Emitter
         if (type is ClassType c)
         {
             fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is DataType block && layout.IsBlock(block))
+        {
+            fn.Emit($"call void {ReleaseBlock(block.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w)
+        {
+            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -822,7 +847,9 @@ public sealed partial class Emitter
     /// The most bytes an <c>AddRange</c> copies with the C library's <c>memcpy</c>, as Rust's <c>extend_from_slice</c> copies them;
     /// more are copied by the library's <c>ListAppend</c>, whose loop the optimiser widens. glibc's <c>memcpy</c> turns to
     /// <c>rep movsb</c> from 2112 bytes on a processor with fast short <c>rep movsb</c>, which measured slower than that loop for
-    /// appends of 3072 and 4000 bytes to a list that kept its room, 5.49 against 4.83 ms and 5.87 against 5.03 (#157).
+    /// appends of 3072 and 4000 bytes to a list that kept its room, 5.49 against 4.83 ms and 5.87 against 5.03 (#157). The bound
+    /// was measured against glibc 2.39's <c>memcpy</c> on Linux; the <c>memcpy</c> of the C runtime a Windows build calls was not
+    /// measured.
     /// </summary>
     private const int SmallCopy = 2048;
 
@@ -1109,10 +1136,21 @@ public sealed partial class Emitter
     /// that makes the pair smaller (<see cref="PairLayout"/>); the pairs sorted by their keys, and by their positions where two keys are equal,
     /// so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
-    /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
-    /// <c>allocation-failed</c> (M9). The list is read without a count of its own while the keys are made: a key that reads it is the
-    /// checker's <c>changed-while-held</c> (M7), a lambda changes nothing it captures (F11), and a copy of the list a lambda holds keeps
-    /// the block shared, so that the sort copies it (M3).
+    /// the keys let go of. The place is taken once, before the keys: where a key gives a field on the way to the list another instance,
+    /// the field written is the one of the instance read before them, which that read holds to the end of its statement (X8, assumed).
+    /// An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
+    /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
+    /// items of the list as it was read (X8, assumed): a lambda changes no variable it captures (F11), but a key can change the list through an
+    /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
+    /// one. Where the place holds another block after the keys, the list counts as changed, whatever items it holds, and a field
+    /// assigned the list it held, or given it back, is unchanged and sorted (X8, section 12, the owner, 2026-11-02, #194); a change
+    /// stands and the sort of the list as it was read is dropped (X8, section 12, the owner, 2026-11-01, "Change stands, as C#", #39).
+    /// Where a key assigns the field, C#'s <c>List.Sort</c> does the same, sorting the list it read while the field holds another;
+    /// where a key adds to the list, C#'s result depends on the list's capacity (.NET 10's <c>List&lt;T&gt;.Sort</c>, run 2026-11-03).
+    /// A key that reads the list by the variable that holds it is the checker's
+    /// <c>changed-while-held</c> (M7); one that reads or changes it through an instance passes, and reads the list the field holds at
+    /// that moment, with a count of its own: the list as it was read before a change, and the new one after it. A copy of the list a
+    /// lambda holds keeps the block shared, so that the sort copies it (M3).
     /// </summary>
     private string? EmitListSortBy(CallExpression c, CallInfo info)
     {
@@ -1140,6 +1178,10 @@ public sealed partial class Emitter
             var environment = fn.Value("extractvalue %kz.fn %a1, 1");
             var at = fn.Alloca("i64", "at");
             fn.Emit($"store i64 0, ptr {at}");
+
+            // the list read is held across the keys (X8): a key can change it through an instance whose field holds it (K2), and the
+            // change then copies the block (M3) or replaces it while the keys go on reading this one
+            Retain(block, list);
             EachItem(block, list.Element, item =>
             {
                 var i = fn.Value($"load i64, ptr {at}");
@@ -1150,6 +1192,14 @@ public sealed partial class Emitter
             });
             var move = fn.Label("move");
             var release = fn.Label("release");
+
+            // where the place holds another block, a key changed the list: the change stands and the sort of the list as it was read
+            // is dropped (X8; the owner, 2026-11-01, "Change stands, as C#")
+            var kept = fn.Value($"icmp eq ptr {fn.Value("load ptr, ptr %a0")}, {block}");
+            Release(block, list);
+            var sortable = fn.Label("sortable");
+            fn.CondBranch(kept, sortable, release);
+            fn.Block(sortable);
             fn.CondBranch(fn.Value($"icmp sge i32 {count}, 2"), move, release);
             fn.Block(move);
             fn.Emit($"call void {UnstableSort(sorted)}(ptr {pairs}, i64 {n})");
@@ -2984,21 +3034,30 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The global that holds the case table of one direction (X3), written once into a program that changes case by Unicode's mapping in
-    /// that direction: four counts, of the runs, the mappings to several code points and the ranges of Cased and Case_Ignorable, then
-    /// those numbers of <see cref="CaseTables"/> in that order, as the standard library's <c>CaseMapped</c> reads them. Only lowering reads
-    /// the ranges, for the final sigma, so the table of uppercasing holds none.
+    /// that direction, as the standard library's <c>CaseMapped</c> reads it: four counts of 32 bits, of the blocks of deltas, the mappings
+    /// to several code points and the ranges of Cased and Case_Ignorable; the index of the levels, a byte for each block of 32 code points
+    /// of the first two planes; the deltas, 16 bits each; then the mappings to several code points and the ranges, 32 bits each, from
+    /// <see cref="CaseTables"/>. Only lowering reads the ranges, for the final sigma, so the table of uppercasing holds none. The fields
+    /// stand without padding, and the global at a multiple of 4, so that each number stands at a multiple of its size.
     /// </summary>
     private string CaseTable(bool upper)
     {
         var name = upper ? "@\"case.upper\"" : "@\"case.lower\"";
         if (helpers.Add(name))
         {
-            var runs = upper ? CaseTables.UpperRuns : CaseTables.LowerRuns;
+            var index = upper ? CaseTables.UpperIndex : CaseTables.LowerIndex;
+            var deltas = upper ? CaseTables.UpperDeltas : CaseTables.LowerDeltas;
             var multis = upper ? CaseTables.UpperMultis : CaseTables.LowerMultis;
             var cased = upper ? [] : CaseTables.Cased;
             var ignorable = upper ? [] : CaseTables.CaseIgnorable;
-            int[] words = [runs.Length / 4, multis.Length / 4, cased.Length / 2, ignorable.Length / 2, .. runs, .. multis, .. cased, .. ignorable];
-            module.Global($"{name} = private unnamed_addr constant [{words.Length} x i32] [{string.Join(", ", words.Select(w => $"i32 {w}"))}]");
+            int[] counts = [deltas.Length / 32, multis.Length / 4, cased.Length / 2, ignorable.Length / 2];
+            int[] rest = [.. multis, .. cased, .. ignorable];
+            var type = $"<{{ [4 x i32], [{index.Length} x i8], [{deltas.Length} x i16], [{rest.Length} x i32] }}>";
+            var value = $"<{{ [4 x i32] [{string.Join(", ", counts.Select(w => $"i32 {w}"))}], " +
+                $"[{index.Length} x i8] [{string.Join(", ", index.Select(w => $"i8 {unchecked((sbyte)w)}"))}], " +
+                $"[{deltas.Length} x i16] [{string.Join(", ", deltas.Select(w => $"i16 {unchecked((short)w)}"))}], " +
+                $"[{rest.Length} x i32] [{string.Join(", ", rest.Select(w => $"i32 {w}"))}] }}>";
+            module.Global($"{name} = private unnamed_addr constant {type} {value}, align 4");
         }
 
         return name;
@@ -3298,9 +3357,24 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), body, exit);
         fn.Block(body);
         var wide = fn.Value($"sext i32 {i} to i64");
-        fn.Emit($"store {Ir(type.Element)} {fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}")}, ptr {slot}");
+        var item = fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}");
         loops.Push((exit, next, regions.Count, scopes.Count));
-        EmitBlock(f.Body);
+        if (type.Element is WeakRefType weak)
+        {
+            // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
+            InScope(() =>
+            {
+                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                Declare(slot, Types.Read(weak));
+                EmitBlock(f.Body);
+            });
+        }
+        else
+        {
+            fn.Emit($"store {Ir(type.Element)} {item}, ptr {slot}");
+            EmitBlock(f.Body);
+        }
+
         loops.Pop();
         fn.Block(next);
         var again = fn.Value($"load i32, ptr {counter}");

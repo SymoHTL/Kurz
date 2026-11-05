@@ -243,6 +243,88 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_walk_of_a_map_reads_the_control_bytes_of_a_group_as_one_word()
+    {
+        // hashbrown's `RawIterRange`: the loop over a map, in `kz.main`, and the walk of its text, in the text helper, load a group's
+        // word, mark the slots with an entry, whose bytes have the high bit clear, and take the marks lowest first by counting trailing
+        // zeros, with no load of a single control byte
+        var program = Compile("mut m = Map<int, int>()\nm[1] = 2\nfor k, v in m {\n    print(k + v)\n}\nprint(m)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        foreach (var name in new[] { "define internal void @kz.main(", "define internal %kz.str @\"text." })
+        {
+            var start = program.Ir.IndexOf(name, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            var body = program.Ir[start..program.Ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+            Assert.Matches(@"= xor i64 %[^,]+, -1[,\r\n]", body); // the slots with an entry, the high bit of each byte turned around
+            Assert.Contains(", -9187201950435737472", body, StringComparison.Ordinal); // the high bit of each byte
+            Assert.Contains("call i64 @llvm.cttz.i64(", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("load i8, ptr", body, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_map_keeps_the_hash_of_a_key_whose_hash_reads_more_than_one_word()
+    {
+        // `KeepsHash`: a slot of a key of one word holds the key and the value, as hashbrown's bucket, and its growth hashes the key
+        // again; a slot of a key of a kind whose hash can read more than one word holds its hash first, as .NET keeps an entry's hash
+        // code (issue 157, item 14, under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
+        const string program =
+            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\n\nlongduration far = 100000days\n" +
+            "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
+            "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
+            "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
+            "mut j = Map<duration, int>()\nj[90min] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
+            "mut m = Map<float, int>()\nm[1.5f] = 1\nmut n = Map<Cell, int>()\nn[Cell(1)] = 1\nmut o = Map<Spot, int>()\no[Spot(1, 2)] = 1\n" +
+            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count)\n";
+        var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(compiled is not null, "no program");
+        string[] layouts =
+        [
+            "Map<int, int>\" = type { i32, i32 }",
+            "Map<long, int>\" = type { i64, i32 }",
+            "Map<char, int>\" = type { i32, i32 }",
+            "Map<bool, int>\" = type { i1, i32 }",
+            "Map<Color, int>\" = type { i8, i32 }",
+            "Map<double, int>\" = type { double, i32 }",
+            "Map<duration, int>\" = type { i64, i32 }",
+            "Map<float, int>\" = type { float, i32 }",
+            "Map<Cell, int>\" = type { ptr, i32 }",
+            "Map<string, int>\" = type { i64, %kz.str, i32 }",
+            "Map<Pair, int>\" = type { i64, %\"d.Pair\", i32 }",
+            "Map<List<int>, int>\" = type { i64, ptr, i32 }",
+            "Map<longduration, int>\" = type { i64, i128, i32 }",
+            "Map<int?, int>\" = type { i64, { i8, [1 x i32] }, i32 }",
+            "Map<Spot, int>\" = type { i64, ptr, i32 }",
+        ];
+        Assert.All(layouts, layout => Assert.Contains($"\n%\"entry.{layout}", compiled.Ir, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Remove_finds_the_slot_of_its_key_again_only_in_a_block_it_copied()
+    {
+        // hashbrown's `remove_entry` finds the key's slot once: the helper of `Remove` looks the key up a second time only on the branch
+        // where the block it found the slot in was shared and was copied (M3), so that the slot of the copy is taken
+        var program = Compile("mut m = Map<long, long>()\nm[1] = 2\nprint(m.Remove(1) ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
+        Assert.True(program is not null, "no program");
+        var lines = program.Ir.Split('\n').Select(l => l.TrimEnd('\r')).ToArray(); // the IR ends its lines in CR LF on Windows
+        var first = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains("@\"remove.", StringComparison.Ordinal));
+        Assert.True(first >= 0, "no remove helper in the IR");
+        var body = lines[first..Array.IndexOf(lines, "}", first)];
+        var finds = Enumerable.Range(0, body.Length).Where(i => body[i].Contains("call ptr @\"find.", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, finds.Count); // the lookup, and the lookup in the copy
+        var label = body.Take(finds[1]).Last(l => l.EndsWith(':') && !l.StartsWith(' '));
+        Assert.StartsWith("in.copy.", label, StringComparison.Ordinal);
+
+        // the branch into the second lookup is taken where the block the map holds after `OwnBlock` is not the block the slot was
+        // found in, and the slot found is taken where it is
+        var branch = Assert.Single(body, l => l.TrimStart().StartsWith("br i1 ", StringComparison.Ordinal) && l.Contains("label %in.copy.", StringComparison.Ordinal));
+        Assert.Matches(@"label %take\.\d+, label %in\.copy\.", branch);
+        var condition = branch.TrimStart()["br i1 ".Length..].Split(',')[0];
+        var test = Assert.Single(body, l => l.TrimStart().StartsWith(condition + " = ", StringComparison.Ordinal));
+        Assert.Matches(@"= icmp eq ptr %[^,\s]+, %[^,\s]+", test);
+    }
+
+    [Fact]
     public void The_push_of_a_list_widens_its_count_without_a_sign()
     {
         // std's ListPush reads the count as a `uint`, so that the item's offset is no sign extension and a loop of `Add`s reads the count
@@ -277,6 +359,26 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains(" noinline cold ", reserve.Split('\n')[0], StringComparison.Ordinal);
         Assert.Contains("ListGrow", reserve, StringComparison.Ordinal);
         Assert.Contains("ListCopy", reserve, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_end_of_a_block_and_the_end_of_an_instance_let_go_of_their_fields_in_their_order()
+    {
+        // section 3, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust
+        // drops a value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of
+        // their string before their list
+        const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nprint(p.B)\nprint(t.B)\n";
+        var ir = Compile(text, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        foreach (var name in new[] { "drop.block.Pair", "drop.class.Two" })
+        {
+            var start = ir.IndexOf($"define internal void @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            var body = ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+            var first = body.IndexOf("call void @\"release.string\"(", StringComparison.Ordinal);
+            var second = body.IndexOf("call void @\"release.List<int>\"(", StringComparison.Ordinal);
+            Assert.True(first >= 0 && second >= 0, $"{name} lets go of no string or of no list");
+            Assert.True(first < second, $"{name} lets go of its list before its string");
+        }
     }
 
     [Fact]
@@ -336,7 +438,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var program = Emit(Program);
         Assert.Contains("icmp eq ptr", program.Ir, StringComparison.Ordinal);
         Assert.Contains("inttoptr (i64 1 to ptr)", program.Ir, StringComparison.Ordinal);
-        Assert.Contains("type { i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its type's number, `Value` and `Next`
+        Assert.Contains("type { i64, i32, i32, ptr }", program.Ir, StringComparison.Ordinal); // the node's block: its count, its type's number, `Value` and `Next`
         Assert.Contains("alloca { i8, [1 x i64] }", program.Ir, StringComparison.Ordinal);
         Ran(Toolchain.Run(toolchain.Build(program, "null-niche")), 0, ["[]", "null", "[0, 1]", "false", "null", "2", "0", "5"], string.Empty);
     }

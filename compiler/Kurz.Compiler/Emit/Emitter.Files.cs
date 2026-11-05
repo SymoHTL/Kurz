@@ -8,11 +8,12 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// Files and sockets (chapter 13; design record, section 12). A file, a listener and a stream are the address of their handle's block:
-/// the count of the values that hold it, 8 bytes, its descriptor, 4 bytes, -1 once it is closed, a listener's port, 4 bytes, from its
+/// the count of the values that hold it, 8 bytes, its descriptor, 4 bytes, a listener's port, 4 bytes, from its
 /// 16th byte the path or the address it was opened with, a string of which the block holds a count, from its 32nd byte the address of the
 /// buffer a file's lines are read through, null until the first pull, the position of its first byte not taken yet and the count of the
-/// bytes read into it, 4 bytes each, and the word of the lock a pull takes, 4 bytes (S16), then 4 bytes of padding; 56 bytes. A stream a listener's
-/// <c>Accept</c> gives holds the listener's address (S9). The last value that lets go of it closes the descriptor, ignoring an error of the close, as Rust's
+/// bytes read into it, 4 bytes each, and the word of the lock a pull takes, 4 bytes (S16), and from its 52nd byte the word of the calls in
+/// flight on it and of the mark a <c>Close</c> leaves, 4 bytes (S5, <see cref="InFlightAt"/>); 56 bytes. A stream a listener's
+/// <c>Accept</c> gives holds the listener's address (S9). The last value that lets go of it closes the descriptor no <c>Close</c> marked, ignoring an error of the close, as Rust's
 /// <c>Drop</c> of a <c>File</c> ignores it, lets go of the path, frees the buffer and the block (S5; the owner, 2026-10-29, "At the last count, as Rust
 /// Drop"). A call on a file calls the runtime of Linux, whose result is a number of 0 or more or a failure below 0, which the runtime's
 /// <c>ErrorKind</c> and <c>ErrorCode</c> read into an <c>IoError</c> with the path the call was about (S1); the runtime of Windows gives none of
@@ -30,12 +31,27 @@ public sealed partial class Emitter
     private const string LineBuffer = "8192";
 
     /// <summary>
-    /// S16: where a handle's block holds the state of its reader of lines, 24 bytes: the address of the buffer, null until the first pull,
-    /// 8 bytes, then the position of the buffer's first byte not taken yet, the count of the bytes read into it and the word of the lock a
-    /// pull takes, 4 bytes each, and 4 bytes unused. The pull reads nothing else of the handle but its descriptor, so that whatever holds a
-    /// descriptor can hold a reader's state.
+    /// S3, S16: where a handle's block holds the state of its reader, which its reads and a file's lines go through, 20 bytes: the address
+    /// of the buffer, null until the first fill or pull, 8 bytes, then the position of the buffer's first byte not taken yet, the count of
+    /// the bytes read into it and the word of the lock a read or a pull takes, 4 bytes each. The pull reads nothing else of the handle but
+    /// its descriptor, so that whatever holds a descriptor can hold a reader's state.
     /// </summary>
     private const int ReaderAt = 32;
+
+    /// <summary>
+    /// S5: where a handle's block holds the word of its calls in flight, 4 bytes: 2 for each call on the handle that runs, between
+    /// <see cref="EnterHandle"/> and <see cref="LeaveHandle"/>, and 1 once a <c>Close</c> through any holder marked the handle closed, so that
+    /// the call that leaves the word at 1, the last call in flight out or a <c>Close</c> that finds none in flight, releases the descriptor,
+    /// as Rust's <c>Arc&lt;File&gt;</c> closes the file with its last clone (the owner, 2026-11-02, against a lock around each call and against
+    /// keeping the hazard of a call that reaches a number the system has given another file since).
+    /// </summary>
+    private const int InFlightAt = 52;
+
+    /// <summary>S5: the result a call on a handle a <c>Close</c> marked gives, the system's error of a descriptor that is not open, <c>EBADF</c>.</summary>
+    private const string ClosedResult = "-9";
+
+    /// <summary>S9: the runtime's function of the kinds of a failure of a stream's read and write and of a listener's <c>Accept</c>, the calls on a socket that block.</summary>
+    private const string SocketKinds = "SocketErrorKind";
 
     // the fields of a reader's state, from its start
     private const int ReaderBuffer = 0;
@@ -70,15 +86,23 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout)
+        if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+            or CallKind.TcpShutdownWrite)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
-            var kinds = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener } ? "SocketErrorKind" : "ErrorKind";
+            var socket = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener };
+            var kinds = socket ? SocketKinds : "ErrorKind";
             var handle = EmitExpression(target);
             switch (info.Kind)
             {
                 case CallKind.FileRead:
                     EmitFileRead(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.FileFill:
+                    EmitFileFill(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.FileConsume:
+                    EmitFileConsume(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.FileWrite:
                     EmitFileWrite(c, info, outcome, handle, kinds);
@@ -89,8 +113,18 @@ public sealed partial class Emitter
                 case CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout:
                     EmitSetTimeout(c, info, outcome, handle);
                     break;
+                case CallKind.TcpShutdownWrite:
+                    {
+                        // S9: the writes ended by the system's `shutdown`, the descriptor kept, so that the stream still reads; a call in
+                        // flight on the handle (S5), so that through a holder of a closed stream it gets the closed handle's error
+                        var o = Enter(outcome, handle, "ErrorKind");
+                        FailBelowZero(o, SysCall("ShutdownWrite", $"i32 {HandleDescriptor(handle)}"), HandlePath(handle));
+                        Succeed(o, null);
+                        Leave(o, outcome, handle);
+                        break;
+                    }
                 default:
-                    EmitFileClose(outcome, handle);
+                    EmitFileClose(outcome, handle, socket);
                     break;
             }
         }
@@ -245,10 +279,16 @@ public sealed partial class Emitter
     /// S3: <c>f.Read(mut into, max)</c>: a <c>max</c> below 0 raises <c>index-out-of-range</c>; then the room for <c>max</c> more bytes
     /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end; the kind of a
     /// failure is the one the runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
-    /// S16: the bytes a loop over the lines left in the buffer go first, at most <c>max</c> of them, under the lock a pull takes, and the
-    /// descriptor is read only where the buffer holds none, as Rust's <c>BufReader::read</c> gives what it holds before it reads.
+    /// The read goes through the handle's buffer of <see cref="LineBuffer"/> bytes, which a loop over a file's lines fills too (S16), under
+    /// the lock a pull takes, as Rust's <c>BufReader::read</c> reads (§12, the owner, 2026-11-02): the bytes the buffer holds go first, at
+    /// most <c>max</c> of them, with no system call; where it holds none, a <c>max</c> of 8 KiB or more, and one of 0, lets the lock go and
+    /// is read straight into the list, and a smaller one fills the buffer with one read, the buffer made at the first fill, holding the lock
+    /// while that read waits, and takes at most <c>max</c> of what it read. A failed read stores nothing.
+    /// S5: the read is a call in flight on the handle (<see cref="Enter"/>), after the room is made, and a socket's read that a <c>Close</c>
+    /// woke gets the closed handle's error (<see cref="Woken"/>), the fill's as the straight one's; a fill that finds the handle marked when
+    /// its read returns keeps none of the rest in the buffer, so that a <c>Close</c> made while the read waited drops those bytes too.
     /// </summary>
-    private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome o, string handle, string kinds)
+    private void EmitFileRead(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {
         var arguments = Arguments(c, info, j => j == 0 ? new ListType(Types.Byte) : Types.Int, j => j == 0, _ => null, cConvention: false, owned: false);
         var place = arguments[0]["ptr ".Length..];
@@ -261,77 +301,224 @@ public sealed partial class Emitter
         fn.Block(counted);
         var more = fn.Value($"sext i32 {max} to i64");
         var block = Reserve(place, more);
+        var o = Enter(outer, handle, kinds);
         var reader = HandleField(handle, ReaderAt);
-        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
-        var buffered = fn.Label("buffered");
-        var unbuffered = fn.Label("unbuffered");
-        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, unbuffered);
-        fn.Block(buffered);
         var word = ReaderField(reader, ReaderLock);
+        void Unlock() => fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        void Append(string from, string count) => AppendBytes(block, from, count);
+
         fn.Emit($"call void {LockReader()}(ptr {word})");
         var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
         var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
         var take = fn.Label("take");
         var empty = fn.Label("empty");
         fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, empty);
+
+        // the bytes the buffer holds, at most `max` of them, with no system call
         fn.Block(take);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
         var taken = fn.Value($"select i1 {fn.Value($"icmp slt i32 {held}, {max}")}, i32 {held}, i32 {max}");
-        var wide = fn.Value($"sext i32 {taken} to i64");
-        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, i64 {wide}, i1 false)");
-        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {wide})");
+        Append(fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}"), fn.Value($"sext i32 {taken} to i64"));
         fn.Emit($"store i32 {fn.Value($"add i32 {at}, {taken}")}, ptr {ReaderField(reader, ReaderPosition)}");
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Unlock();
         Succeed(o, taken);
+
+        // none held: a `max` of 8 KiB or more, as Rust's `BufReader` passes such a read by, and one of 0, which waits for no byte, read
+        // straight into the list with the lock let go
         fn.Block(empty);
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
-        fn.Branch(unbuffered);
-        fn.Block(unbuffered);
-        var r = SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}");
+        var straight = fn.Label("straight");
+        var fill = fn.Label("fill");
+        var large = fn.Value($"icmp sge i32 {max}, {LineBuffer}");
+        fn.CondBranch(fn.Value($"or i1 {large}, {fn.Value($"icmp eq i32 {max}, 0")}"), straight, fill);
+        fn.Block(straight);
+        Unlock();
+        var r = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}"), kinds, read: true);
         FailBelowZero(o, r, HandlePath(handle), kinds: kinds);
         fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
         Succeed(o, fn.Value($"trunc i64 {r} to i32"));
+
+        // a smaller one: one read of up to 8 KiB into the buffer, made at the first, under the lock, and at most `max` of it taken; the
+        // rest kept for the next read, unless a `Close` marked the handle while the read waited (S5)
+        fn.Block(fill);
+        var (filled, read) = FillBuffer(o, handle, reader, kinds, Unlock);
+        var given = fn.Value($"select i1 {fn.Value($"icmp slt i64 {read}, {more}")}, i64 {read}, i64 {more}");
+        Append(filled, given);
+        var gave = fn.Value($"trunc i64 {given} to i32");
+        KeepUnlessMarked(handle, reader, gave, fn.Value($"trunc i64 {read} to i32"));
+        Unlock();
+        Succeed(o, gave);
+        Leave(o, outer, handle);
     }
 
-    /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>; the kind of a failure as <see cref="EmitFileRead"/> gives it.</summary>
-    private void EmitFileWrite(CallExpression c, CallInfo info, FileOutcome o, string handle, string kinds)
+    /// <summary>
+    /// S24: <c>s.Fill(mut into)</c>, as Rust's <c>BufRead::fill_buf</c> (§12, the owner, 2026-11-03): the bytes the handle's buffer
+    /// holds are appended to <c>into</c>, all of them, with no system call, and none is consumed; where it holds none, the buffer is filled
+    /// first, as a <c>Read</c> below 8 KiB fills it (<see cref="FillBuffer"/>), and all that read gave is appended and kept from the
+    /// buffer's start. The room in the list is made for the bytes appended, as <c>Add</c> grows a list. The count appended is the result,
+    /// 0 at the end of the file or the stream (assumed, as a <c>Read</c>'s). A call in flight on the handle (S5), whose fill, where a
+    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it (assumed, as a <c>Read</c>'s fill
+    /// gives what it took).
+    /// </summary>
+    private void EmitFileFill(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, _ => new ListType(Types.Byte), _ => true, _ => null, cConvention: false, owned: false);
+        var place = arguments[0]["ptr ".Length..];
+        var o = Enter(outer, handle, kinds);
+        var reader = HandleField(handle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        void Unlock() => fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
+        var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
+        var take = fn.Label("fill.held");
+        var empty = fn.Label("fill.empty");
+        fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, empty);
+
+        // the bytes the buffer holds, all of them, with no system call, its position left where it is
+        fn.Block(take);
+        var count = fn.Value($"sext i32 {held} to i64");
+        var from = fn.Value($"getelementptr i8, ptr {fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}")}, i64 {fn.Value($"sext i32 {at} to i64")}");
+        AppendBytes(Reserve(place, count), from, count);
+        Unlock();
+        Succeed(o, held);
+
+        // none held: one read of up to 8 KiB into the buffer, all of it appended and kept from the buffer's start
+        fn.Block(empty);
+        var (filled, read) = FillBuffer(o, handle, reader, kinds, Unlock);
+        AppendBytes(Reserve(place, read), filled, read);
+        var gave = fn.Value($"trunc i64 {read} to i32");
+        KeepUnlessMarked(handle, reader, "0", gave);
+        Unlock();
+        Succeed(o, gave);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S24: <c>s.Consume(n)</c>, as Rust's <c>BufRead::consume</c> (§12, the owner, 2026-11-03): the first <c>n</c> bytes the handle's
+    /// buffer holds are dropped, under the lock, with no system call. An <c>n</c> below 0 raises <c>index-out-of-range</c>, as a
+    /// <c>Read</c>'s <c>max</c> below 0 does, and so does one past the bytes the buffer holds, the bound Rust's <c>consume</c> states held
+    /// as C#'s <c>PipeReader.AdvanceTo</c> holds it (assumed). A call in flight on the handle (S5), so that a closed handle gives its error.
+    /// </summary>
+    private void EmitFileConsume(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false);
+        var n = arguments[0]["i32 ".Length..];
+        var negative = fn.Label("negative");
+        var counted = fn.Label("counted");
+        fn.CondBranch(fn.Value($"icmp slt i32 {n}, 0"), negative, counted);
+        fn.Block(negative);
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(counted);
+        var o = Enter(outer, handle, kinds);
+        var reader = HandleField(handle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var position = ReaderField(reader, ReaderPosition);
+        var at = fn.Value($"load i32, ptr {position}");
+        var held = fn.Value($"sub i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, {at}");
+        var past = fn.Label("consume.past");
+        var within = fn.Label("consume.within");
+        fn.CondBranch(fn.Value($"icmp sgt i32 {n}, {held}"), past, within);
+        fn.Block(past);
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(within);
+        fn.Emit($"store i32 {fn.Value($"add i32 {at}, {n}")}, ptr {position}");
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Succeed(o, null);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S3, S24: the fill of the handle's empty buffer that a <c>Read</c> below 8 KiB and a <c>Fill</c> make, under the lock the caller
+    /// holds: the buffer made at the first fill, then one read of up to <see cref="LineBuffer"/> bytes into it, a socket's woken by a
+    /// <c>Close</c> (<see cref="Woken"/>), whose failure lets the lock go (<paramref name="unlock"/>) and stores nothing; the buffer and
+    /// the count read, an <c>i64</c>.
+    /// </summary>
+    private (string Buffer, string Read) FillBuffer(FileOutcome o, string handle, string reader, string kinds, Action unlock)
+    {
+        var slot = ReaderField(reader, ReaderBuffer);
+        var none = fn.Label("unbuffered");
+        var made = fn.Label("buffered");
+        fn.CondBranch(fn.Value($"icmp eq ptr {fn.Value($"load ptr, ptr {slot}")}, null"), none, made);
+        fn.Block(none);
+        fn.Emit($"store ptr {fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {LineBuffer})")}, ptr {slot}");
+        fn.Branch(made);
+        fn.Block(made);
+        var filled = fn.Value($"load ptr, ptr {slot}");
+        var read = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {filled}, i64 {LineBuffer}"), kinds, read: true);
+        FailBelowZero(o, read, HandlePath(handle), unlock, kinds);
+        return (filled, read);
+    }
+
+    /// <summary>
+    /// S5: the <paramref name="position"/> and the <paramref name="count"/>, <c>i32</c>s, that a fill leaves in the handle's buffer for
+    /// the calls after it, unless a <c>Close</c> marked the handle while the fill's read waited, so that the bytes it read go with the
+    /// close as the bytes the buffer held do.
+    /// </summary>
+    private void KeepUnlessMarked(string handle, string reader, string position, string count)
+    {
+        var kept = fn.Label("kept");
+        var done = fn.Label("filled");
+        var mark = fn.Value($"and i32 {fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4")}, 1");
+        fn.CondBranch(fn.Value($"icmp eq i32 {mark}, 0"), kept, done);
+        fn.Block(kept);
+        fn.Emit($"store i32 {position}, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Emit($"store i32 {count}, ptr {ReaderField(reader, ReaderCount)}");
+        fn.Branch(done);
+        fn.Block(done);
+    }
+
+    /// <summary><paramref name="count"/> bytes, an <c>i64</c>, at <paramref name="from"/> added at the end of the list of bytes <paramref name="block"/>, for which <see cref="Reserve"/> made room.</summary>
+    private void AppendBytes(string block, string from, string count)
+    {
+        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, ptr {from}, i64 {count}, i1 false)");
+        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {count})");
+    }
+
+    /// <summary>S4: <c>f.Write(bytes)</c>, every byte, a write of which the system takes none <c>WriteZero</c>; the kind of a failure as <see cref="EmitFileRead"/> gives it; a call in flight on the handle (S5).</summary>
+    private void EmitFileWrite(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {
         var list = Arguments(c, info, _ => new ListType(Types.Byte), _ => false, _ => null, cConvention: false, owned: false).Single()["ptr ".Length..];
         var (items, count) = BytesOf(list);
-        var r = SysCall("WriteFile", $"i32 {HandleDescriptor(handle)}, ptr {items}, i64 {count}");
+        var o = Enter(outer, handle, kinds);
+        var r = Woken(handle, SysCall("WriteFile", $"i32 {HandleDescriptor(handle)}, ptr {items}, i64 {count}"), kinds, read: false);
         var path = HandlePath(handle);
         FailBelowZero(o, r, path, kinds: kinds);
         WriteZeroBelow(o, r, count, path);
         Succeed(o, null);
+        Leave(o, outer, handle);
     }
 
     /// <summary>
     /// S9: a stream's <c>SetReadTimeout(timeout)</c> or <c>SetWriteTimeout(timeout)</c>, or a listener's <c>SetAcceptTimeout(timeout)</c>:
     /// the runtime's <c>SetTimeout</c> with <c>SO_RCVTIMEO</c> (20), which bounds a read and an <c>accept</c> (socket(7)), or
-    /// <c>SO_SNDTIMEO</c> (21), the nanoseconds of the time, and whether there is one, <c>null</c> being no bound.
+    /// <c>SO_SNDTIMEO</c> (21), the nanoseconds of the time, and whether there is one, <c>null</c> being no bound; a call in flight on the handle (S5).
     /// </summary>
-    private void EmitSetTimeout(CallExpression c, CallInfo info, FileOutcome o, string handle)
+    private void EmitSetTimeout(CallExpression c, CallInfo info, FileOutcome outer, string handle)
     {
         var nullable = Types.Nullable(Types.Duration);
         var time = Arguments(c, info, _ => nullable, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(nullable).Length + 1)..];
         var bounded = fn.Value($"xor i1 {IsCase(Tag(time, nullable), nullable, Types.Null)}, true");
         var nanoseconds = fn.Value($"select i1 {bounded}, i64 {Payload(time, nullable, Types.Duration)}, i64 0");
         var option = info.Kind == CallKind.TcpSetWriteTimeout ? "21" : "20";
+        var o = Enter(outer, handle, "ErrorKind");
         var r = SysCall("SetTimeout", $"i32 {HandleDescriptor(handle)}, i32 {option}, i64 {nanoseconds}, i1 {bounded}");
         FailBelowZero(o, r, HandlePath(handle));
         Succeed(o, null);
+        Leave(o, outer, handle);
     }
 
     /// <summary>
-    /// S5: <c>f.Close()</c>: the descriptor closed and -1 in its place, and the bytes a loop over the lines left in the buffer given up
-    /// (S16), so that every later call, a second <c>Close</c> and a pull among them, gets the system's error of a descriptor that is not open.
+    /// S5: <c>f.Close()</c>, the handle marked closed for every holder (<see cref="CloseHandle"/>), so that every later call, a second
+    /// <c>Close</c> and a pull among them, gets the system's error of a descriptor that is not open; the descriptor released at once, the
+    /// error of that close given, where no call is in flight on the handle, and else by the last call in flight out, a
+    /// <paramref name="socket"/> shut down so that a call that blocks on it ends at once.
     /// </summary>
-    private void EmitFileClose(FileOutcome o, string handle)
+    private void EmitFileClose(FileOutcome o, string handle, bool socket)
     {
-        var fd = HandleDescriptor(handle);
-        fn.Emit($"store i32 -1, ptr {HandleField(handle, 8)}");
-        fn.Emit($"store i64 0, ptr {ReaderField(HandleField(handle, ReaderAt), ReaderPosition)}"); // the position and the count
-        var r = SysCall("CloseFile", $"i32 {fd}");
+        var r = fn.Value($"call i64 {CloseHandle()}(ptr {handle}, i1 {(socket ? "true" : "false")})");
         FailBelowZero(o, r, HandlePath(handle));
         Succeed(o, null);
     }
@@ -339,14 +526,16 @@ public sealed partial class Emitter
     /// <summary>
     /// S9: a listener's <c>Accept()</c>, a stream that holds the listener's address on a count of its own, which
     /// <see cref="NewHandle"/> takes, so that the address outlives the listener's block; the kind of a failure is the one the
-    /// runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
+    /// runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>); a call in flight on the listener (S5).
     /// </summary>
-    private void EmitAccept(FileOutcome o, string handle, string kinds)
+    private void EmitAccept(FileOutcome outer, string handle, string kinds)
     {
-        var r = SysCall("Accept", $"i32 {HandleDescriptor(handle)}");
+        var o = Enter(outer, handle, kinds);
+        var r = Woken(handle, SysCall("Accept", $"i32 {HandleDescriptor(handle)}"), kinds, read: false);
         var address = HandlePath(handle);
         FailBelowZero(o, r, address, kinds: kinds);
         Succeed(o, NewHandle(fn.Value($"trunc i64 {r} to i32"), address));
+        Leave(o, outer, handle);
     }
 
     /// <summary>M9, M5: <c>list.Clear()</c>, through the place of the list's variable or of the field a path from one ends at.</summary>
@@ -547,7 +736,7 @@ public sealed partial class Emitter
         var source = ((MemberAccess)Unwrap(call.Callee)).Target;
         var handle = Owned(source);
         regions[^1].Add((handle, TypeOf(source))); // the statement's end, a `return` or a `break` lets go of it
-        EmitLinesLoop(f, (UnionType)Sub(Model.CallOf(call).Result), HandleField(handle, 8), HandleField(handle, ReaderAt), HandlePath(handle));
+        EmitLinesLoop(f, (UnionType)Sub(Model.CallOf(call).Result), handle, HandleField(handle, 8), HandleField(handle, ReaderAt), HandlePath(handle));
     }
 
     /// <summary>
@@ -556,22 +745,36 @@ public sealed partial class Emitter
     /// Each round pulls a line (<see cref="PullLine"/>), which the block's end, a <c>break</c>, a <c>continue</c> and a <c>return</c> let go
     /// of. A pull that fails makes the case of the outcome, an <c>IoError</c> naming <paramref name="path"/>, which the arms of the loop's
     /// <c>else</c> take as a call's (O5), and a case no arm takes leaves the function at the loop's line (O2, O3); after an arm the code goes
-    /// on after the loop.
+    /// on after the loop. Each pull is a call in flight on <paramref name="handle"/> (S5), and one on a handle a <c>Close</c> marked fails as
+    /// a read of a descriptor that is not open does.
     /// </summary>
-    private void EmitLinesLoop(ForInStatement f, UnionType union, string descriptor, string reader, string path)
+    private void EmitLinesLoop(ForInStatement f, UnionType union, string handle, string descriptor, string reader, string path)
     {
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "lines"), fn.Label("lines.failed"));
         var slot = fn.Alloca("%kz.str", f.Variable);
         slots[Model.DeclarationOf(f)] = slot;
         var at = fn.Alloca("i32", "at");
+        var pulled = fn.Alloca("i64", "pulled");
         var pull = fn.Label("pull");
+        var open = fn.Label("pull.open");
+        var closed = fn.Label("pull.closed");
+        var done = fn.Label("pulled");
         var body = fn.Label("for");
         var invalid = fn.Label("not.utf8");
         var exit = fn.Label("endfor");
         fn.Branch(pull);
         fn.Block(pull);
         fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {slot}");
-        var r = fn.Value($"call i64 {PullLine()}(ptr {descriptor}, ptr {reader}, ptr {slot}, ptr {at})");
+        fn.CondBranch(fn.Value($"call i1 {EnterHandle()}(ptr {handle})"), open, closed);
+        fn.Block(open);
+        fn.Emit($"store i64 {fn.Value($"call i64 {PullLine()}(ptr {descriptor}, ptr {reader}, ptr {slot}, ptr {at})")}, ptr {pulled}");
+        fn.Emit($"call void {LeaveHandle()}(ptr {handle})");
+        fn.Branch(done);
+        fn.Block(closed);
+        fn.Emit($"store i64 {ClosedResult}, ptr {pulled}");
+        fn.Branch(done);
+        fn.Block(done);
+        var r = fn.Value($"load i64, ptr {pulled}");
         FailBelowZero(outcome, r, path);
         fn.Terminate($"switch i64 {r}, label %{invalid} [ i64 1, label %{body} i64 0, label %{exit} ]");
         fn.Block(body);
@@ -603,7 +806,7 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// S16: the helper that pulls the next line of the descriptor at <c>%a0</c>, read at each read so that a close's -1 is seen, through
+    /// S16: the helper that pulls the next line of the descriptor at <c>%a0</c>, through
     /// the reader's state at <c>%a1</c> (<see cref="ReaderAt"/>) into the string at <c>%a2</c>, under the reader's lock, as Rust's
     /// <c>BufRead::read_line</c> reads one through a <c>BufReader</c>. The buffer, made at the first pull, is read again
     /// where every byte of it was taken, <see cref="LineBuffer"/> bytes at a time; the next <c>\n</c> is looked for with the standard
@@ -797,8 +1000,157 @@ public sealed partial class Emitter
         fn.Emit($"store ptr null, ptr {ReaderField(reader, ReaderBuffer)}");
         fn.Emit($"store i64 0, ptr {ReaderField(reader, ReaderPosition)}"); // the position and the count of the buffer's bytes
         fn.Emit($"store i32 0, ptr {ReaderField(reader, ReaderLock)}"); // the lock, free
+        fn.Emit($"store i32 0, ptr {HandleField(handle, InFlightAt)}"); // no call in flight, and no mark
         return handle;
     }
+
+    /// <summary>
+    /// S5: the call on <paramref name="handle"/> that follows taken as a call in flight (<see cref="EnterHandle"/>); on a handle a
+    /// <c>Close</c> marked, the call ends with the error <see cref="ClosedResult"/> gives, its kind the one the runtime's function
+    /// <paramref name="kinds"/> gives, as a failure of the system does (<see cref="FailBelowZero"/>). The outcome the call ends through,
+    /// whose end <see cref="Leave"/> emits.
+    /// </summary>
+    private FileOutcome Enter(FileOutcome o, string handle, string kinds)
+    {
+        var open = fn.Label("handle.open");
+        var closed = fn.Label("handle.closed");
+        fn.CondBranch(fn.Value($"call i1 {EnterHandle()}(ptr {handle})"), open, closed);
+        fn.Block(closed);
+        Fail(o, fn.Value($"call {Ir(Layout.Fields(o.Error)[0])} {SysFunction(kinds)}(i64 {ClosedResult})"), fn.Value($"call i32 {SysFunction("ErrorCode")}(i64 {ClosedResult})"), HandlePath(handle));
+        fn.Block(open);
+        return o with { Done = fn.Label("handle.leave") };
+    }
+
+    /// <summary>S5: the end of a call <see cref="Enter"/> took, where every way out of <paramref name="inner"/> leaves the handle (<see cref="LeaveHandle"/>) before <paramref name="outer"/>'s end.</summary>
+    private void Leave(FileOutcome inner, FileOutcome outer, string handle)
+    {
+        fn.Block(inner.Done);
+        fn.Emit($"call void {LeaveHandle()}(ptr {handle})");
+        fn.Branch(outer.Done);
+    }
+
+    /// <summary>
+    /// S5: the helper that takes a call in flight on the handle at <c>%a0</c>, 2 added to its word (<see cref="InFlightAt"/>) by a
+    /// compare-and-swap, which fails and is tried again where another call changed the word, as Rust's <c>Weak::upgrade</c> takes a count;
+    /// false, and no count, where a <c>Close</c> marked it, so that the word, once marked, only falls, and reaches the mark alone once.
+    /// </summary>
+    private string EnterHandle() => Helper("enter.handle", "i1", ["ptr"], () =>
+    {
+        var word = HandleField("%a0", InFlightAt);
+        var seen = fn.Alloca("i32", "seen");
+        fn.Emit($"store i32 {fn.Value($"load atomic i32, ptr {word} monotonic, align 4")}, ptr {seen}");
+        var look = fn.Label("look");
+        var swap = fn.Label("swap");
+        var marked = fn.Label("marked");
+        var entered = fn.Label("entered");
+        fn.Branch(look);
+        fn.Block(look);
+        var before = fn.Value($"load i32, ptr {seen}");
+        fn.CondBranch(fn.Value($"icmp ne i32 {fn.Value($"and i32 {before}, 1")}, 0"), marked, swap);
+        fn.Block(swap);
+        var swapped = fn.Value($"cmpxchg ptr {word}, i32 {before}, i32 {fn.Value($"add i32 {before}, 2")} acquire monotonic");
+        fn.Emit($"store i32 {fn.Value($"extractvalue {{ i32, i1 }} {swapped}, 0")}, ptr {seen}");
+        fn.CondBranch(fn.Value($"extractvalue {{ i32, i1 }} {swapped}, 1"), entered, look);
+        fn.Block(entered);
+        fn.Return("i1 true");
+        fn.Block(marked);
+        fn.Return("i1 false");
+    });
+
+    /// <summary>
+    /// S5: the helper that ends a call in flight on the handle at <c>%a0</c>, 2 taken from its word; the last call out of a handle a
+    /// <c>Close</c> marked, which leaves the mark alone, releases the descriptor, ignoring an error of that close, as the last clone of
+    /// Rust's <c>Arc&lt;File&gt;</c> drops the file and ignores it.
+    /// </summary>
+    private string LeaveHandle() => Helper("leave.handle", "void", ["ptr"], () =>
+    {
+        var before = fn.Value($"atomicrmw sub ptr {HandleField("%a0", InFlightAt)}, i32 2 acq_rel");
+        var last = fn.Label("last");
+        var done = fn.Label("left");
+        fn.CondBranch(fn.Value($"icmp eq i32 {before}, 3"), last, done);
+        fn.Block(last);
+        SysCall("CloseFile", $"i32 {HandleDescriptor("%a0")}");
+        fn.Branch(done);
+        fn.Block(done);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// S5: the helper of <c>Close</c> on the handle at <c>%a0</c>: the mark set in its word for every holder by a compare-and-swap, which
+    /// is tried again where a call changed the word; <see cref="ClosedResult"/> where a <c>Close</c> marked it before, so that of two that
+    /// race one wins; the close's result where no call is in flight, the descriptor released at once; and 0 where calls are in flight, the
+    /// last of which releases it (<see cref="LeaveHandle"/>), a socket, where <c>%a1</c> is true, shut down first, so that a call that
+    /// blocks on it ends at once and gets the closed handle's error (<see cref="Woken"/>), as Go's close wakes the calls that wait (the
+    /// owner, 2026-11-02, against a call that waits for its bound), while the <c>Close</c> holds a count of its own, taken with the mark
+    /// and given back through <see cref="LeaveHandle"/> once the shutdown is made, so that no call out releases the descriptor, and the
+    /// system gives its number to another file, before the shutdown reaches it (the owner, 2026-11-02, on the review's finding, #39); the
+    /// error of the close the last call makes is dropped (the owner, 2026-11-02, as Rust's last <c>Arc&lt;File&gt;</c> drops it).
+    /// </summary>
+    private string CloseHandle() => Helper("close.handle", "i64", ["ptr", "i1"], () =>
+    {
+        var word = HandleField("%a0", InFlightAt);
+        var seen = fn.Alloca("i32", "seen");
+        fn.Emit($"store i32 {fn.Value($"load atomic i32, ptr {word} monotonic, align 4")}, ptr {seen}");
+        var look = fn.Label("look");
+        var marked = fn.Label("marked");
+        var swap = fn.Label("swap");
+        var swapped = fn.Label("swapped");
+        var idle = fn.Label("idle");
+        var busy = fn.Label("busy");
+        fn.Branch(look);
+        fn.Block(look);
+        var before = fn.Value($"load i32, ptr {seen}");
+        fn.CondBranch(fn.Value($"icmp ne i32 {fn.Value($"and i32 {before}, 1")}, 0"), marked, swap);
+        fn.Block(swap);
+        // the mark, and on a socket with calls in flight a count of the `Close`'s own, held across its shutdown
+        var shuts = fn.Value($"and i1 %a1, {fn.Value($"icmp ne i32 {before}, 0")}");
+        var own = fn.Value($"select i1 {shuts}, i32 3, i32 1");
+        var result = fn.Value($"cmpxchg ptr {word}, i32 {before}, i32 {fn.Value($"add i32 {before}, {own}")} acq_rel monotonic");
+        fn.Emit($"store i32 {fn.Value($"extractvalue {{ i32, i1 }} {result}, 0")}, ptr {seen}");
+        fn.CondBranch(fn.Value($"extractvalue {{ i32, i1 }} {result}, 1"), swapped, look);
+        fn.Block(swapped);
+        fn.CondBranch(fn.Value($"icmp eq i32 {before}, 0"), idle, busy);
+        fn.Block(idle);
+        fn.Return($"i64 {SysCall("CloseFile", $"i32 {HandleDescriptor("%a0")}")}");
+        fn.Block(busy);
+        var shut = fn.Label("shut");
+        var deferred = fn.Label("deferred");
+        fn.CondBranch("%a1", shut, deferred);
+        fn.Block(shut);
+        SysCall("ShutdownSocket", $"i32 {HandleDescriptor("%a0")}");
+        fn.Emit($"call void {LeaveHandle()}(ptr %a0)");
+        fn.Branch(deferred);
+        fn.Block(deferred);
+        fn.Return("i64 0");
+        fn.Block(marked);
+        fn.Return($"i64 {ClosedResult}");
+    });
+
+    /// <summary>
+    /// S5, S9: the result <paramref name="r"/> of a call on a socket that blocks, a read where <paramref name="read"/> holds, a write or an
+    /// <c>Accept</c>, which the runtime's function <see cref="SocketKinds"/> reads; a failure, or a read of no byte, on a handle a
+    /// <c>Close</c> marked while the call was in flight is the shutdown of that <c>Close</c>, and gives the closed handle's error,
+    /// <see cref="ClosedResult"/> (the owner, 2026-11-02, "a blocked `Accept` or `Read` returns with the closed-handle error"); a call
+    /// on a file is given back as it is.
+    /// </summary>
+    private string Woken(string handle, string r, string kinds, bool read) =>
+        kinds != SocketKinds ? r : fn.Value($"call i64 {WokenSocket()}(ptr {handle}, i64 {r}, i1 {(read ? "true" : "false")})");
+
+    /// <summary>S5, S9: the helper of <see cref="Woken"/>: the result in <c>%a1</c> of a call on the socket at <c>%a0</c>, a read where <c>%a2</c> holds.</summary>
+    private string WokenSocket() => Helper("woken.socket", "i64", ["ptr", "i64", "i1"], () =>
+    {
+        var none = fn.Value($"and i1 %a2, {fn.Value("icmp eq i64 %a1, 0")}");
+        var ended = fn.Value($"or i1 {fn.Value("icmp slt i64 %a1, 0")}, {none}");
+        var check = fn.Label("check");
+        var kept = fn.Label("kept");
+        fn.CondBranch(ended, check, kept);
+        fn.Block(check);
+        var word = fn.Value($"load atomic i32, ptr {HandleField("%a0", InFlightAt)} monotonic, align 4");
+        var marked = fn.Value($"icmp ne i32 {fn.Value($"and i32 {word}, 1")}, 0");
+        fn.Return($"i64 {fn.Value($"select i1 {marked}, i64 {ClosedResult}, i64 %a1")}");
+        fn.Block(kept);
+        fn.Return("i64 %a1");
+    });
 
     /// <summary>One more value holds the handle.</summary>
     private string RetainHandle() => Helper("retain.File", "void", ["ptr"], () =>
@@ -807,7 +1159,11 @@ public sealed partial class Emitter
         fn.Return(null);
     });
 
-    /// <summary>One value less holds the handle; the last closes a descriptor that is open, ignoring the close's error, lets go of the path and frees the block (S5).</summary>
+    /// <summary>
+    /// One value less holds the handle; the last closes a descriptor no <c>Close</c> marked, ignoring the close's error, lets go of the
+    /// path and frees the block (S5). No call is in flight on the handle then: a call holds its handle through a value, and no handle
+    /// reaches another thread, a pointer to it being <c>counted-pointee</c> (R10).
+    /// </summary>
     private string ReleaseHandle() => Helper("release.File", "void", ["ptr"], () =>
     {
         var count = fn.Value($"sub i64 {fn.Value("load i64, ptr %a0")}, 1");
@@ -822,12 +1178,12 @@ public sealed partial class Emitter
         }
         else
         {
-            var fd = HandleDescriptor("%a0");
+            var word = fn.Value($"load i32, ptr {HandleField("%a0", InFlightAt)}");
             var open = fn.Label("open");
             var closed = fn.Label("closed");
-            fn.CondBranch(fn.Value($"icmp sge i32 {fd}, 0"), open, closed);
+            fn.CondBranch(fn.Value($"icmp eq i32 {fn.Value($"and i32 {word}, 1")}, 0"), open, closed);
             fn.Block(open);
-            SysCall("CloseFile", $"i32 {fd}");
+            SysCall("CloseFile", $"i32 {HandleDescriptor("%a0")}");
             fn.Branch(closed);
             fn.Block(closed);
             Release(HandlePath("%a0"), Types.String);
@@ -1021,6 +1377,28 @@ public sealed partial class Emitter
         var read = fn.Label("now");
         var refused = fn.Label("now.refused");
         fn.CondBranch(fn.Value($"call i1 {SysFunction("Now")}(ptr {slot})"), read, refused);
+        fn.Block(refused);
+        fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
+        fn.Unreachable();
+        fn.Block(read);
+        return fn.Value($"load i64, ptr {slot}");
+    }
+
+    /// <summary>
+    /// S25: <c>instant.Now</c>, the monotonic clock in nanoseconds; where the runtime cannot map the page the system writes the time
+    /// into, the process ends as an allocation the system refused does, with the bytes of the page (O11), as <see cref="EmitNow"/>.
+    /// </summary>
+    private string EmitMonotonicNow(int line)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(line, ProcessNotOnWindows);
+        }
+
+        var slot = fn.Alloca("i64", "now");
+        var read = fn.Label("now");
+        var refused = fn.Label("now.refused");
+        fn.CondBranch(fn.Value($"call i1 {SysFunction("MonotonicNow")}(ptr {slot})"), read, refused);
         fn.Block(refused);
         fn.Emit($"call void {RuntimeFunction("AllocationFailed")}(i64 4096)");
         fn.Unreachable();

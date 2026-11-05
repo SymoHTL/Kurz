@@ -47,6 +47,22 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("f.Type x = f.Get(value)", "(declare f.Type x (call (. f Get) value))")]
+    [InlineData("print(Read<f.Type>(text))", "(call print (call Read<f.Type> text))")]
+    [InlineData("List<f.Type> xs = List<f.Type>()", "(declare List<f.Type> xs (call List<f.Type>))")]
+    [InlineData("a.b = 1", "(assign (. a b) (int 1))")]
+    [InlineData("print(f(a < b.c, d > (e)))", "(call print (call f (call a<b.c, d> e)))")]
+    [InlineData("print(int.Parse(s))", "(call print (call (. int Parse) s))")]
+    [InlineData("match k {\n    TypeKind.Data => print(1)\n}", "(match k [((. TypeKind Data) => (call print (int 1)))])")]
+    public void A_dotted_name_stands_as_a_type_where_a_type_stands(string program, string tree)
+    {
+        // T33: `f.Type` of a loop over `T.Fields` is a type, in a declaration and as a type argument, and so a dotted name among the type
+        // arguments of a call, as C# reads `a<b.c, d>(e)`; a path assigned, a member of a built-in type's name and a value named in an
+        // arm keep their forms
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
     [InlineData("int Add(int a, int b) =>\n    a + b", "(function int Add(int a, int b) => (+ a b))")]
     [InlineData("total = 1 +\n    2 +\n    3", "(assign-or-declare total (+ (+ (int 1) (int 2)) (int 3)))")]
     [InlineData("count = xs\n    .Where(x => x > 1)\n    .Count", "(assign-or-declare count (. (call (. xs Where) (lambda (x) (> x (int 1)))) Count))")]
@@ -559,14 +575,29 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void An_internal_member_parses_and_pub_beside_it_is_syntax()
+    {
+        // F9: `internal` shows a member to the files of its folder (the owner, 2026-11-03), kept for the checker as `prot` is above
+        var (tree, diagnostics) = Parse("class A {\n    internal static int x = 1\n}");
+        Assert.Empty(diagnostics.Items);
+        var type = Assert.IsType<TypeDeclaration>(Assert.Single(tree.Statements));
+        var field = Assert.IsType<FieldDeclaration>(Assert.Single(type.Members!));
+        Assert.Equal(Modifiers.Internal | Modifiers.Static, field.Modifiers);
+        // a reading under E4's general clause, as a modifier written twice: `pub` and `internal` contradict each other, in either order,
+        // as C# refuses two access modifiers (CS0107) (assumed, section 8)
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class A {\n    pub internal int x = 1\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class A {\n    internal static pub int x = 1\n}"));
+    }
+
+    [Fact]
     public void The_core_words_are_the_lists_of_l18_and_l19()
     {
         // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
         string[] words = ["if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw", "mut", "data",
-            "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "static", "this", "virtual", "override",
-            "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
+            "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "internal", "static", "this", "virtual",
+            "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
-            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp"];
+            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp", "instant"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());
         Assert.Equal(types.Order(), CoreWords.TypeNames.Order());
     }
@@ -721,6 +752,7 @@ public sealed class ParserTests
     [Theory]
     [InlineData("by")]
     [InlineData("pub")]
+    [InlineData("internal")]
     [InlineData("static")]
     [InlineData("mut")]
     [InlineData("void")]
@@ -835,6 +867,55 @@ public sealed class ParserTests
         // F1: the result type, the name and the typed parameters; F2 and F3: the two bodies; F4: `void`; F11: function types as parameter
         // types and the arrow's reach; O1: a union result; T19: type parameters with a limit; M7: a `mut` parameter; D11: a default value
         Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("void Say<const Mode M>(string text) {\n}", "(function void Say<const Mode M>(string text) {})")]
+    [InlineData("void Twice<T, const Mode M = Mode.Plain>(T value) {\n}", "(function void Twice<T, const Mode M = (. Mode Plain)>(T value) {})")]
+    [InlineData("void Late<const Mode M = Mode.Plain, T>() {\n}", "(function void Late<const Mode M = (. Mode Plain), T>() {})")]
+    [InlineData("void Bare<const>() {\n}", "(function void Bare<const>() {})")]
+    [InlineData("const = 1", "(assign-or-declare const (int 1))")]
+    [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
+    public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
+    {
+        // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
+        // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
+        // call writes the constant among its type arguments; the order of a default is the checker's
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("b = Buffer<64>()", "(assign-or-declare b (call Buffer<(int 64)>))")]
+    [InlineData("x = Pick<T, true>(y)", "(assign-or-declare x (call Pick<T, true> y))")]
+    [InlineData("m = Mark<'x'>()", "(assign-or-declare m (call Mark<(char 120)>))")]
+    [InlineData("n = Shift<-1>()", "(assign-or-declare n (call Shift<(- (int 1))>))")]
+    [InlineData("f(a < 64, c > (d))", "(call f (call a<(int 64), c> d))")]
+    [InlineData("f((a < 64), c > (d))", "(call f (paren (< a (int 64))), (> c (paren d)))")]
+    [InlineData("print(a < 64, c > d)", "(call print (< a (int 64)), (> c d))")]
+    [InlineData("f(a < 64.5, c > (d))", "(call f (< a (real 64.5)), (> c (paren d)))")]
+    [InlineData("f(a < \"s\", c > (d))", "(call f (< a (string \"s\")), (> c (paren d)))")]
+    public void A_literal_stands_among_a_calls_type_arguments_where_its_parenthesis_follows(string program, string tree)
+    {
+        // T35: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
+        // reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call `a<64, c>(d)` and the comparisons take
+        // parentheses; a list not followed by `(` stays two comparisons, and a real or a string literal is no constant a type parameter
+        // holds, so it keeps the comparisons
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void A_literal_among_type_arguments_before_a_member_is_no_list()
+    {
+        // T35 with R15: a literal stands in the list only where `(` follows it; `List<64>.FromRaw(p, 0)` is a comparison whose right
+        // operand is missing, `syntax` (E4), where `List<long>.FromRaw(p, 0)` names the member of a generic type
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("ys = List<64>.FromRaw(p, 0)").Distinct());
+    }
+
+    [Fact]
+    public void A_type_parameter_that_holds_a_constant_has_a_name()
+    {
+        // T35: `const Mode` with no name is no type parameter
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Say<const Mode>() {\n}").Distinct());
     }
 
     [Theory]

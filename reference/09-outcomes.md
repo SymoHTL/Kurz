@@ -289,8 +289,8 @@ case at one that unwraps it, so that the two functions of "The union one" both f
 functions that fit with a widening, neither exactly, are `ambiguous-call` (F13), both of them keeping
 the cases or one keeping them and one unwrapping the call, `Show(long n)` beside
 `Show(long | NotFound x)`; and a call that fits none of two or more functions of its name is
-`argument-mismatch` (F13), and one that does not fit the one function of its name `type-mismatch`
-(T1), each alone, with no `unlisted-case` for a case of a call among its arguments beside it (E1) *(assumed, §5: the
+`argument-mismatch` (F13), and one with an argument of a type the one function of its name does not
+take `type-mismatch` (T1), each alone, with no `unlisted-case` for a case of a call among its arguments beside it (E1) *(assumed, §5: the
 defaults of the change's product pass and the readings its reviews left)*. A parameter whose type is a union by a type argument written at the call,
 `Same<int | NotFound>(Find(1))`, or by the type of the list a method is called on, `xs.Add(Find(1))`
 on a `List<int | NotFound>`, is a written union and keeps the cases, so that a call unwraps at a type
@@ -302,23 +302,29 @@ as for a variable of `int | NotFound` (§5, the owner, 2026-11-01, "T = success 
 is no call binds the type parameter to its own type less the cases the union names, a variable of
 `int | NotFound | Rejected` giving `T` = `int | Rejected` (§5, the owner, 2026-11-01, "T = int |
 Rejected, as built"). Where another case of the union holds the type parameter, an argument of that
-case's shape is read through it, so that `void Wide<T>(T | List<T> x)` with a `List<int>` gives `T` =
+case's shape is read through it, before the readings of an argument that is no call above and of a
+literal below, so that `void Wide<T>(T | List<T> x)` with a `List<int>` gives `T` =
 `int` (§5, the owner, 2026-11-01, "Same shape first"). A union with a type parameter that names no case
-of the call beyond the success unwraps the call, and a literal binds the type parameter to its own
-type, as at a bare type parameter (T27), so that `F(Find(1))` and `F(5)` with `void F<T>(T | string x)`
-both give `T` = `int` (§5, the owner, 2026-11-01, "Bind T = int in both"). A list literal of calls is
+of the call beyond the success unwraps the call, and a literal of a type the union does not name binds
+the type parameter to its own type, as at a bare type parameter (T27), so that `F(Find(1))` and `F(5)` with `void F<T>(T | string x)`
+both give `T` = `int` (§5, the owner, 2026-11-01, "Bind T = int in both", asked of `F(Find(1))` and
+`F(5)` alone). A list literal of calls is
 read as such a call is: of `Show(List<int> xs)` and `Show(List<int | NotFound> xs)`, `Show([Find(1)])`
-runs the one whose item type keeps the cases (§5, the owner, 2026-11-01, "The union one"). The shape is
-any that the inference reads inside a type, a list, a map, a `data` type of the same name and a function
-type of the same count of parameters, and an argument union with cases of both shapes gives each case of
-a shape to the case of that shape and the rest to the bare type parameter; a literal of a case the union
+runs the one whose item type keeps the cases (§5, the owner, 2026-11-01, "The union one"). The shapes are
+the four that the inference reads inside a type, and no other: a list, a map, a `data` type of the same
+name and a function type of the same count of parameters; an argument union with cases of both shapes
+gives each case of a shape to the case of that shape and the rest to the bare type parameter, and where
+the two give the type parameter different types, `string | List<int>` for `T | List<T>`, the call is
+`cannot-infer` (T27); a literal of a case the union
 names, `F("a")`, is `cannot-infer`, as a variable of `string` is; a variable of `int | bool` passed to
 `F` gives `T` = `int | bool`; two type parameters in one union, `void G<T, U>(T | U | NotFound x)`, are
-`cannot-infer` (T27); and a list literal fits a parameter exactly item by item, a call by its whole
-union where the item type keeps its cases and by its success where the item type unwraps it, any other
-item by its own type, so that `[Find(1), 2]` runs `Show(List<int> xs)`, and two functions whose item
-types keep the cases with a widening are `ambiguous-call` (F13) *(assumed, §5: the defaults of the
-questions on O4 of 2026-11-01 and of their product pass)*.
+`cannot-infer` (T27); a list literal fits a parameter exactly by the whole union of each item call whose
+cases the item type keeps, and by the literal's own item type for every other item, a call the item type
+unwraps among them, so that `[Find(1), 2]` runs `Show(List<int> xs)`; among the functions a list literal
+of calls fits, exactness decides first and keeping the cases only among those that fit exactly, as for a
+call passed directly; and two functions whose item types keep the cases with a widening are
+`ambiguous-call` (F13) *(assumed, §5: the defaults of the questions on O4 of 2026-11-01 and of their
+product pass, and the readings the review of the change left)*.
 
 Case: [outcomes/match-call.kz](../corpus/outcomes/match-call.kz)
 ```kurz
@@ -493,6 +499,7 @@ void Report(int | NotFound found) {
 }
 
 // the parameter names `NotFound` and not `Invalid`, so it does not hold the call's cases
+// `Report` is the one function of its name, so the call is `type-mismatch`, not `argument-mismatch` (F13)
 Report(Find(1))
 ```
 
@@ -755,6 +762,17 @@ List<int> ys = Wide(xs)
 print(ys)
 ```
 
+Case: [outcomes/generic-union-same-shape-conflict.kz](../corpus/outcomes/generic-union-same-shape-conflict.kz)
+```kurz
+void Wide<T>(T | List<T> x) {
+    print(1)
+}
+
+string | List<int> v = "a"
+// the list's case gives `T` = `int` through `List<T>`, and the rest gives `T` = `string`: two types for one type parameter
+Wide(v)
+```
+
 Case: [outcomes/generic-union-unwraps-a-call.kz](../corpus/outcomes/generic-union-unwraps-a-call.kz)
 ```kurz
 data NotFound
@@ -839,8 +857,20 @@ match Same<int | NotFound>(Find(2)) {
     int n => print(n)
     NotFound => print("none")
 }
+```
 
-// and so does the item type of the list a method is called on
+Case: [outcomes/keep-list-item-type.kz](../corpus/outcomes/keep-list-item-type.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// the item type of the list a method is called on is a written union, and keeps the cases of the call
 mut List<int | NotFound> ys = []
 ys.Add(Find(1))
 ys.Add(Find(2))
@@ -862,7 +892,7 @@ void G<T, U>(T | U | NotFound x) {
     print("g")
 }
 
-// two type parameters in one union: neither is inferred, and the call writes them
+// two type parameters in one union: neither is inferred, so the call is `cannot-infer` unless it writes them
 G(Find(1))
 ```
 
@@ -992,8 +1022,9 @@ value = Find(2) else {
 print(value)
 ```
 
-An `else` with no arms handles no case: after a call with cases each of them propagates, and after a
-call with no case beside its success nothing can reach it, which is `unreachable-arm` at the line of
+An `else` with no arms handles no case: after a call with cases each of them propagates, as a case no
+arm lists does, so that in top-level code each is `unlisted-case` (O9); after a call with no case beside
+its success nothing can reach it, which is `unreachable-arm` at the line of
 the `else`, the error an `else` arm gets there (§5, the owner, 2026-11-02).
 
 Case: [outcomes/else-empty-propagates.kz](../corpus/outcomes/else-empty-propagates.kz)
@@ -1136,6 +1167,26 @@ int | NotFound Find(int id) {
 }
 
 value = Find(2)
+print(value)
+```
+
+An `else` with no arms handles none of a call's cases (O5), so in top-level code it is this error too,
+at the line of the `else`.
+
+Case: [outcomes/else-empty-top-level.kz](../corpus/outcomes/else-empty-top-level.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+// an `else` with no arms handles no case, and top-level code has no caller to pass `NotFound` to
+value = Find(1) else {
+}
 print(value)
 ```
 

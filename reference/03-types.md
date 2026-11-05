@@ -158,6 +158,16 @@ r = Pair(1L, [x])
 print(r)
 ```
 
+Case: [classes/static-narrowing.kz](../corpus/classes/static-narrowing.kz)
+```kurz
+class Level {
+    pub static byte Small = Wide
+    pub static int Wide = 7
+}
+
+print(Level.Small)
+```
+
 ### T8 (decided, §4) Implicit widening
 
 A value of a narrower integer type becomes a wider one without a word when the wider type holds
@@ -745,6 +755,78 @@ duration Negate(duration d) => -d
 print(Negate(-9223372036854775808ns)) // one constant: the parameter's type takes the literal with its sign (L17)
 ```
 
+### T36 (decided, §12) `instant`, a reading of the monotonic clock
+
+`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), a type
+of its own like the time types of T13 and a core word (L19) (§12, the owner, 2026-11-04, issue 110,
+comment 6643368937, the monotonic clock, Q1 (a)). `b - a` of two readings is a `duration`, negative
+where `a` is the later (§12, the same answer, Q2 (a)). A reading plus or less a `duration` is an
+`instant`, and `+` and `-` raise `overflow` (E3) where the result leaves the range, in every build,
+as T31 says of the other time types, so that a bound is checked by what has passed,
+`instant.Now - start >= limit`, and not by the sum `start + limit` (§12, the same answer, Q3 (a)).
+*(assumed, §12: the defaults of that round, not objected to: a reading holds 64 bits of
+nanoseconds, signed, and has no wide variant; `<`, `<=`, `>`, `>=`, `==` and `!=` compare two
+readings, inside a `data` value and as a map's key too; and a reading converts to no `timestamp`
+and no integer, and from neither.)* So a reading where an integer or a `timestamp` is required, two
+readings added, a reading beside a `timestamp` or a `longduration`, and the unary `-` of a reading
+are `type-mismatch`. A duration plus a reading is a reading too, and a conversion written into
+`instant` is `type-mismatch` whatever it converts, as one from a `duration` into a `timestamp` is
+(T13) *(assumed, §12: a reading plus a duration in either order, as `+` takes a `timestamp` and a
+`duration`, and a reading that only the clock makes)*.
+
+Case: [types/instant-arithmetic.kz](../corpus/types/instant-arithmetic.kz)
+```kurz
+instant start = instant.Now
+instant later = instant.Now
+duration taken = later - start
+print(taken >= 0s)
+print(start - later <= 0s)
+print(start + taken == later)
+print(later - taken == start)
+print(1ns + start > start)
+print(start + 90min - start)
+data Mark(instant At)
+print(Mark(start) == Mark(later - taken))
+mut seen = Map<instant, string>()
+seen[start] = "first"
+seen[later - taken] = "again"
+print(seen.Count)
+```
+
+Case: [types/instant-overflow-release.kz](../corpus/types/instant-overflow-release.kz)
+```kurz
+instant Later(instant t, duration d) => t + d
+
+long bits = 9223372036854775807
+raw {
+    instant last = *Ptr<instant>(&bits)
+    print(Later(last, 1ns))
+}
+```
+
+Case: [types/instant-not-integer.kz](../corpus/types/instant-not-integer.kz)
+```kurz
+int n = instant.Now
+print(n)
+```
+
+Case: [types/instant-not-timestamp.kz](../corpus/types/instant-not-timestamp.kz)
+```kurz
+timestamp t = instant.Now
+print(t)
+```
+
+Case: [types/instant-plus-instant.kz](../corpus/types/instant-plus-instant.kz)
+```kurz
+instant start = instant.Now
+print(start + start)
+```
+
+Case: [types/instant-conversion.kz](../corpus/types/instant-conversion.kz)
+```kurz
+print(instant(5s))
+```
+
 ### T14 (assumed, §4) Out of range and division by zero
 
 An index that is out of range raises the exception `index-out-of-range`, and a division by zero, of
@@ -1012,7 +1094,11 @@ print("b" > "b")
 
 ### T17 (decided, §4) Generics
 
-Generic types are written as in C#: `List<int>`, `Map<int, User>`.
+Generic types are written as in C#: `List<int>`, `Map<int, User>`. `void` is no type argument:
+`List<void>`, `Map<string, void>` and `Other<void>()` are the compile error `void-type-argument`
+where `void` is written, as C# refuses it (CS1547), while the result of a function type inside a
+type argument, `List<(int) => void>`, stands (§4, the owner, 2026-11-02, "refused, as CS1547").
+*(assumed, §4: the id, named for what it refuses)*
 
 Case: [values/list.kz](../corpus/values/list.kz)
 ```kurz
@@ -1021,6 +1107,13 @@ xs.Add(4)
 xs.Add(5)
 print(xs.Count)
 print(xs[1])
+```
+
+Case: [types/void-type-argument.kz](../corpus/types/void-type-argument.kz)
+```kurz
+fs = List<(int) => void>()
+names = Map<string, void>()
+print(fs.Count + names.Count)
 ```
 
 ### T19 (decided, §4) Declaring generic functions and types
@@ -1221,20 +1314,31 @@ fields in the order of their declaration, unrolled in each copy: `f.Name` is a c
 `T.Make(f => ...)` makes a value of a `data` type: it is unrolled into one call of the type's
 primary constructor, with one argument for each field in order, so that its constraints are checked
 as at any construction. Passing a type argument grants its reading, whatever package declared the
-type. The fields read are the primary constructor's (D14), never those the body declares (§4, the
-owner, 2026-11-01, "Kinds + parts", "for f in T.Fields", "T.Make(f => ...)" and "Type arg grants
-read"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+type. `T.Fields` holds the primary constructor's fields (D14), then the `pub` fields the body
+declares (F9, D16), in the order of their declaration, and never a field the body keeps private;
+`T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
+"for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
+type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
+a generic function lists every outcome any of its copies can give, and a copy that gives one its
+function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
+2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
-members of a type parameter alone; `f.Get(value)` reads as `value.Field`)* A `match` on `T.Kind`
+members of a type parameter alone; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
+`f.Get(value)` alone, and anywhere else is `syntax`; `f.Get` takes a value of `T` or of a type derived from it, and one of
+another type is `type-mismatch`)* A `match` on `T.Kind`
 is not held to name every kind or end in an `else` arm, unlike one on a union or an `enum` (O8,
 D12): it is checked in each copy, and where it has no arm for the kind of a copy's type argument,
 the call that made the copy is the compile error `kind-not-read`, which names the generic function,
 the type, its kind and the path of fields that led to it (§4, the owner, 2026-11-01, "Fixed compile
-error"). *(assumed, §4: the id; that `T.Fields` in a copy whose type is not a `data` type is the
-same error)* A generic function that reads its type, and one that passes its type parameter to such
+error"). Only a `match` with `T.Kind` as its subject narrows: an `if` on `T.Kind` narrows nothing, so
+that `T.Fields` in its branch, in a copy whose type is not a `data` type, is that error too (§4,
+the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
+same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
+argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
+fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
@@ -1251,6 +1355,29 @@ void ShowFields<T>(T value) {
 }
 
 ShowFields(Order("a1", 3))
+```
+
+Case: [types/type-fields-type.kz](../corpus/types/type-fields-type.kz)
+```kurz
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+string Show<T>(T value) => match T.Kind {
+    TypeKind.Data => Fields(value)
+    else => "{value}"
+}
+
+string Fields<T>(T value) {
+    mut text = ""
+    for f in T.Fields {
+        f.Type part = f.Get(value)
+        shown = Show<f.Type>(part)
+        text = "{text}{f.Name}=({shown});"
+    }
+    return text
+}
+
+print(Show(Shape("box", Point(1, 2))))
 ```
 
 Case: [types/type-kind.kz](../corpus/types/type-kind.kz)
@@ -1275,6 +1402,47 @@ Case: [types/type-make.kz](../corpus/types/type-make.kz)
 data Point(int X, int Y)
 
 T Zero<T>() => T.Make(f => 0)
+
+print(Zero<Point>())
+```
+
+Case: [types/type-make-get.kz](../corpus/types/type-make-get.kz)
+```kurz
+data Order(string Id, int Count)
+data Label(string Name, string Tag)
+data Empty
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+T Names<T>() => T.Make(f => "{f.Name}!")
+
+T Lazy<T>() => T.Make(f => (() => f.Name)())
+
+void Twin<T>(T value) {
+    for g in T.Fields {
+        print("{g.Name}: {T.Make(f => f.Get(value))}")
+    }
+}
+
+print(Remake(Order("a1", 3)))
+print(Remake(Empty))
+print(Names<Label>())
+print(Lazy<Label>())
+Twin(Order("b2", 4))
+```
+
+Case: [types/type-make-kind-not-read.kz](../corpus/types/type-make-kind-not-read.kz)
+```kurz
+T Zero<T>() => T.Make(f => 0)
+
+print(Zero<int>())
+```
+
+Case: [types/type-make-form.kz](../corpus/types/type-make-form.kz)
+```kurz
+data Point(int X, int Y)
+
+T Zero<T>() => T.Make((int f) => 0)
 
 print(Zero<Point>())
 ```
@@ -1334,6 +1502,363 @@ void ShowKind<T>() {
 
 ShowKind<Order>()
 ShowKind<bool>()
+```
+
+Case: [types/type-kind-if-not-read.kz](../corpus/types/type-kind-if-not-read.kz)
+```kurz
+data Point(int X, int Y)
+
+void Show<T>(T value) {
+    if T.Kind == TypeKind.Data {
+        for f in T.Fields {
+            print(f.Name)
+        }
+    }
+}
+
+Show(Point(1, 2))
+Show(true)
+```
+
+Case: [types/type-fields-kind-not-read.kz](../corpus/types/type-fields-kind-not-read.kz)
+```kurz
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print(f.Name)
+    }
+}
+
+ShowFields(3)
+```
+
+Case: [types/type-fields-value.kz](../corpus/types/type-fields-value.kz)
+```kurz
+data Order(string Id)
+
+void Show<T>(T value) {
+    for f in T.Fields {
+        print(f)
+    }
+}
+
+Show(Order("a1"))
+```
+
+Case: [types/type-fields-get-mismatch.kz](../corpus/types/type-fields-get-mismatch.kz)
+```kurz
+data Order(string Id)
+data Invoice(string Id)
+
+void Show<T>(T value, Invoice other) {
+    for f in T.Fields {
+        print(f.Get(other))
+    }
+}
+
+Show(Order("a1"), Invoice("b2"))
+```
+
+### T34 (decided, §4) A cycle of generic calls whose type argument grows
+
+A generic function becomes one copy of its code for each list of type arguments it is called with
+(§4). A call in a generic function's body whose type argument holds a type parameter of that
+function inside a list, as `[x]`, a `List<T>` for `T`, makes a copy for a larger type than the copy
+it stands in. Where such a call lies on a cycle of calls among generic
+functions, directly or through others, so that the type argument comes back to the type parameter
+it grew from, each copy makes a larger one without end, and the call is the compile error
+`growing-type-argument`, whatever values end the cycle while the program runs. A call that passes a
+type parameter unchanged, swaps two of them, or gives one to a function that takes it back out of
+a list, `Up<U>(List<U> ys)` called with `[x]` for `U = T`, makes no larger copy. The cycle is
+refused where it is written, whether or not a call reaches it. A generic function that reads its
+type (T33) keeps its check in the copies, but for the calls this paragraph reads on its text: an
+arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copies stays
+`not supported`. Of its calls, those in a loop over `T.Fields` are read for such a cycle on its
+text, and a cycle that grows there is refused at that call. The chain of copies stops at that
+call, so that it does not reach that bound, and the copies a call made before it report every
+other error of the function's body in the same build; a function that no call reaches has no copy,
+so its cycle is the one error it reports, as T33 reads such a function. A call in an arm of a
+`match` on `T.Kind` takes no part, in an arm inside such a loop as in one outside it, since each
+copy takes the one arm of its kind. A type argument of a call in a loop over `T.Fields` that is
+the field's type takes no part either, since the text does not give that type. A cycle
+that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
+bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+the calling function inside any other form of a type, a map, a `data` type and a function type
+among them, and not where it is a case of a union, which holds each case once, so that a
+`T | string` for `T` makes no larger copy; a type argument that holds the field's type inside a
+form of a type, `List<f.Type>`, takes no part, as the field's type itself; a call in a
+loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a call of that loop;
+every call of the cycle where a type argument grows is
+refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
+as one of the body)*
+
+Case: [types/generic-growing-cycle.kz](../corpus/types/generic-growing-cycle.kz)
+```kurz
+void Deep<T>(T x, int n) {
+    if n > 0 {
+        Deep([x], n - 1)
+    }
+}
+
+Deep(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-through.kz](../corpus/types/generic-growing-cycle-through.kz)
+```kurz
+void Ping<T>(T x, int n) {
+    if n > 0 {
+        Pong([x], n - 1)
+    }
+}
+
+void Pong<U>(U y, int n) {
+    Ping(y, n)
+}
+
+Ping(1, 3)
+print("done")
+```
+
+Case: [types/generic-growing-no-cycle.kz](../corpus/types/generic-growing-no-cycle.kz)
+```kurz
+void Same<T>(T x, int n) {
+    if n > 0 {
+        Same(x, n - 1)
+    }
+}
+
+void Swap<A, B>(A a, B b, int n) {
+    if n > 0 {
+        Swap(b, a, n - 1)
+    }
+}
+
+void Widen<T>(T x, int n) {
+    if n > 0 {
+        T | string y = x
+        Widen(y, n - 1)
+    }
+}
+
+void Down<T>(T x, int n) {
+    if n > 0 {
+        Up([x], n - 1)
+    }
+}
+
+void Up<U>(List<U> ys, int n) {
+    Down(ys[0], n)
+}
+
+List<T> Wrap<T>(T x) => [x]
+
+Same(1, 3)
+Swap(1, "a", 3)
+Widen(1, 3)
+Down(1, 3)
+print(Wrap(Wrap(1)).Count)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields.kz](../corpus/types/generic-growing-cycle-fields.kz)
+```kurz
+data Box<T>(T A)
+
+// `Deep` reads its type, and the call in its loop over `T.Fields` is read on its text: the chain of copies stops at it, after `Deep<Box<int>>`
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Box(x), n - 1)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields-arm.kz](../corpus/types/generic-growing-cycle-fields-arm.kz)
+```kurz
+data Box(int A)
+
+// a call in an arm of a `match` on `T.Kind` takes no part in the walk inside a loop over `T.Fields` too: no copy takes the `TypeKind.List` arm
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        match T.Kind {
+            TypeKind.List => Deep([x], n - 1)
+            else => print(n)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields-type.kz](../corpus/types/generic-growing-cycle-fields-type.kz)
+```kurz
+data Point(int X, int Y)
+data Shape(string Name, Point Corner)
+
+// `Show` calls itself in its loop over `T.Fields` with the field's type, which takes no part in a cycle that grows
+string Show<T>(T value) {
+    match T.Kind {
+        TypeKind.Data => {
+            mut text = ""
+            for f in T.Fields {
+                f.Type part = f.Get(value)
+                shown = Show<f.Type>(part)
+                text = "{text}{f.Name}=({shown});"
+            }
+            return text
+        }
+        else => return "{value}"
+    }
+}
+
+print(Show(Shape("box", Point(1, 2))))
+```
+
+### T35 (decided, §4) A type parameter that holds a constant
+
+A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
+type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
+writes the constant among its type arguments, `Json.Parse<Order, JsonKeys.SnakeCase>(text)`; each
+constant makes a copy of the function of its own (T19), and the function's code reads the
+parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
+as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
+call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
+`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
+type parameter with a default comes after every one without, and one without after one with is
+`syntax`; the parameter's name stands as a value of its type, and where a type stands it is
+`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
+where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
+constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
+parameter is checked in each copy a call makes, as one that reads its type is (T33))*
+
+A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
+where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
+the call `a<64, c>(d)`, and two comparisons take parentheses, `f((a < 64), c > (d))` (§4, the
+owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer takes its `-`,
+`Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
+an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
+another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
+`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
+
+Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    match M {
+        Mode.Plain => print(text)
+        Mode.Loud => print("{text}!")
+    }
+}
+
+void Twice<T, const Mode M = Mode.Plain>(T value) {
+    Say<M>("{value}")
+    Say<M>("{value}")
+}
+
+void Shout<const Mode M>(string text) {
+    Say<M>(text)
+}
+
+void Report<const Mode M>() {
+    f = () => M
+    print("{M} {f()}")
+    Shout<M>("c")
+}
+
+Say<Mode.Loud>("a")
+Twice(1)
+Twice<string, Mode.Loud>("b")
+Report<Mode.Loud>()
+```
+
+Case: [types/const-parameter-mismatch.kz](../corpus/types/const-parameter-mismatch.kz)
+```kurz
+enum Mode { Plain, Loud }
+enum Color { Red }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say<Color.Red>("a")
+```
+
+Case: [types/const-parameter-default-order.kz](../corpus/types/const-parameter-default-order.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Late<const Mode M = Mode.Plain, T>(T value) {
+    print("{M} {value}")
+}
+
+Late<Mode.Loud, int>(1)
+```
+
+Case: [types/const-parameter-as-type.kz](../corpus/types/const-parameter-as-type.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(M value) {
+    print(value)
+}
+
+Keep<Mode.Plain>(Mode.Plain)
+```
+
+Case: [types/const-parameter-not-inferred.kz](../corpus/types/const-parameter-not-inferred.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    print("{M} {text}")
+}
+
+Say("a")
+```
+
+Case: [types/const-parameter-literal.kz](../corpus/types/const-parameter-literal.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+bool Flag<const bool B>() => B
+char Mark<const char C>() => C
+
+void Show<const int N = 4>() {
+    print("{N}")
+}
+
+void Pass<const long L>() {
+    Show<5>()
+    print(L)
+}
+
+print(Scaled<64>(2))
+print(Flag<true>())
+print(Mark<'x'>())
+Show()
+Show<-3>()
+Pass<7>()
+```
+
+Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
+```kurz
+int Scaled<const int N>(int x) => x * N
+print(Scaled<true>(2))
+```
+
+Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)
+```kurz
+bool Both(bool x, bool y) => x && y
+
+a = 1
+c = 5
+d = 3
+print(Both((a < 64), c > (d)))
 ```
 
 ### T18 (assumed, §4) Operators

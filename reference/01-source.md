@@ -601,8 +601,11 @@ use as syntax, and `extern`, which the boundary with C uses (§2, §13, R16, R17
 (R11), are words inside an `asm` alone (§3, the owner, 2026-10-21), as are `inlateout`, `const`,
 `sym`, `label` and `options` *(assumed: as §3 marks them)*; `in` is a core word already. `thread` is
 a word only before `static` in R13's declaration and a name everywhere else (§3, the owner,
-2026-10-21). `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
-2026-10-21).
+2026-10-21). `const` is a word only before the type of a type parameter that holds a constant (T35),
+beside the words of an `asm`, and a name everywhere else *(assumed, §4: as `thread` is before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
+2026-10-21). `as` is a word of a `use` line alone, after the folder it renames (F10), and a name
+everywhere else *(assumed, §13)*. `internal`, which F9 uses as syntax for a member visible to its
+folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# reserves it)*.
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz
@@ -632,9 +635,10 @@ print(SizeOf)
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, `bool`, `string`, `char`,
-`duration`, `timestamp`, `longduration` and `longtimestamp`; the last two are T29's names, which T29 marks
-as assumed, accepted by the rule's id on 2026-10-09. Using one as a name is `reserved-word` (L12), as it is in C# for the
-first fourteen, which are keywords there; the four time types C# does not reserve. The owner chose
+`duration`, `timestamp`, `longduration`, `longtimestamp` and `instant`; `longduration` and `longtimestamp` are T29's
+names, which T29 marks as assumed, accepted by the rule's id on 2026-10-09, and `instant` is T36's, the built-in type of
+the monotonic clock (§12, the owner, 2026-11-04, the monotonic clock, Q1 (a)). Using one as a name is `reserved-word`
+(L12), as it is in C# for the first fourteen, which are keywords there; the five time types C# does not reserve. The owner chose
 this on 2026-10-04, against ordinary names that a declaration hides in its block, under which
 `long(x)` (T10) would have two readings in one program; the cost is that nothing can be called
 `string`, and that a ported program with a local called `duration` or `timestamp` has to rename it.
@@ -643,6 +647,12 @@ Case: [source/type-name-as-name.kz](../corpus/source/type-name-as-name.kz)
 ```kurz
 int = 1
 print(1)
+```
+
+Case: [source/instant-as-name.kz](../corpus/source/instant-as-name.kz)
+```kurz
+int instant = 1
+print(instant)
 ```
 
 ### L13 (decided, §8) A string over several lines

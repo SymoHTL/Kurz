@@ -181,13 +181,18 @@ public sealed partial class Emitter
         End();
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
-        while (pending.Count > 0 || lambdas.Count > 0)
+        while (pending.Count > 0 || lambdas.Count > 0 || defaultsPending.Count > 0)
         {
             if (pending.Count > 0)
             {
                 var (function, instanceMap, name, compiled) = pending.Dequeue();
                 features = compiled;
                 EmitFunction(function, instanceMap, name);
+            }
+            else if (defaultsPending.Count > 0)
+            {
+                var (symbol, name) = defaultsPending.Dequeue();
+                EmitClassDefaults(symbol, name);
             }
             else
             {
@@ -197,13 +202,13 @@ public sealed partial class Emitter
 
         if (released.Count > 0)
         {
-            EmitDrain(); // K2 with section 3: the work lists of the instances released
+            EmitDrain(); // K2 with section 3: the work lists of the instances and the blocks released
         }
 
-        var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)");
+        var main = new IrFunction("i32 @main(i32 %argc, ptr %argv)", StartAttributes); // nothing compiled for the build's CPU runs before its check
         if (CpuRead() is { } read)
         {
-            main.Emit($"call void {read}()"); // R18: the CPU's word, read once before the runtime starts, for every test that reads it
+            main.Emit($"call void {read}()"); // R18: the CPU's word and the start check, read once before the runtime starts
         }
 
         main.Emit($"call void {start}(i32 %argc, ptr %argv)");
@@ -406,6 +411,17 @@ public sealed partial class Emitter
         }
     }
 
+    /// <summary>
+    /// The functions of the runtime and the standard library that the emitter marks <c>noinline</c>, by their unit and their name.
+    /// <c>rt.common.SameBytes</c> compares the bytes of two strings of more than 16 bytes for the runtime's <c>Same</c> (T18), whose
+    /// one caller is <c>Same</c>: LLVM inlines a function into its one caller, and <c>Same</c> with it grew too big to be inlined, a
+    /// call at every <c>==</c> of strings. Rust's <c>==</c> of <c>str</c> has the shape this keeps, the test in every caller and a
+    /// call for the bytes, because that call is <c>bcmp</c>, in the C library, which LLVM cannot inline; the runtime of Kurz is
+    /// written in Kurz (design record, section 2), so the emitter keeps the call. No program sees the mark: it names no function of a
+    /// program.
+    /// </summary>
+    private static readonly HashSet<string> OutOfLine = new(StringComparer.Ordinal) { "rt.common.SameBytes" };
+
     private void EmitFunctionCore(FunctionSymbol f, FunctionDeclaration d, IReadOnlyDictionary<TypeParameterSymbol, KurzType> instanceMap, string name)
     {
         if ((d.Modifiers & Modifiers.Naked) != 0)
@@ -416,9 +432,9 @@ public sealed partial class Emitter
         var result = Types.Substitute(f.ReturnType, instanceMap);
         RequireSupported(result, d.Line);
         var parameters = new List<string>();
-        if (f.Owner is not null)
+        if (f.Owner is not null && !f.IsStatic)
         {
-            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller
+            parameters.Add("ptr %this"); // K7: the instance, borrowed from the caller; a `static` method has none
         }
 
         for (var i = 0; i < f.Parameters.Count; i++)
@@ -429,9 +445,10 @@ public sealed partial class Emitter
             parameters.Add(p.Mut ? $"ptr %p{i}" : $"{ParameterType(f, type)} %p{i}");
         }
 
-        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", FeatureAttributes(features)), instanceMap, result);
+        string[] attributes = unit.Runtime && OutOfLine.Contains($"{unit.Prefix}.{f.Name}") ? [.. FeatureAttributes(features), "noinline"] : FeatureAttributes(features);
+        Begin(new IrFunction($"internal {ParameterType(f, result)} {name}({string.Join(", ", parameters)})", attributes), instanceMap, result);
         Trace(unit.Prefix.StartsWith("rt.", StringComparison.Ordinal) ? Symbol(name) : TraceName(f, instanceMap), Symbol(name), d.Line);
-        if (f.Owner is not null)
+        if (f.Owner is not null && !f.IsStatic)
         {
             var self = fn.Alloca("ptr", "this");
             fn.Emit($"store ptr %this, ptr {self}");
@@ -764,9 +781,19 @@ public sealed partial class Emitter
 
     private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); S16: a file its lines (<see cref="EmitForInLines"/>); a `for` over anything else is not emitted.</summary>
+    /// <summary>C8, C6: a range runs its numbers in order, both ends read once, an end below the start the exception before the first round; a list its items (<see cref="EmitForInList"/>); S16: a file its lines (<see cref="EmitForInLines"/>); a loop over `T.Fields` its passes (T33); a `for` over anything else is not emitted.</summary>
     private void EmitForIn(ForInStatement f)
     {
+        if (Model.PassesOf(f) is { } passes)
+        {
+            foreach (var pass in passes)
+            {
+                EmitBlock(pass); // T33: a loop over `T.Fields`, unrolled: each pass in order, with no loop around them
+            }
+
+            return;
+        }
+
         if (Unwrap(f.Collection) is CallExpression call && Model.CallOf(call).Kind == CallKind.FileLines)
         {
             EmitForInLines(f, call);

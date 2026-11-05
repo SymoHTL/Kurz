@@ -8,16 +8,16 @@ public static class CoreWords
     {
         "if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw",
         "mut", "data", "class", "interface", "enum", "flags", "with", "equal", "by",
-        "pub", "prot", "static", "this", "virtual", "override", "weak", "raw", "use", "void",
+        "pub", "prot", "internal", "static", "this", "virtual", "override", "weak", "raw", "use", "void",
         "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf",
     };
 
-    /// <summary>L19, the built-in types, in the order of T2, T13 and T24.</summary>
+    /// <summary>L19, the built-in types, in the order of T2, T13 and T24, and the reading of the monotonic clock (T36).</summary>
     public static readonly IReadOnlySet<string> TypeNames = new HashSet<string>(StringComparer.Ordinal)
     {
         "sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong",
         "float", "double", "decimal", "bool", "string", "char",
-        "duration", "timestamp", "longduration", "longtimestamp",
+        "duration", "timestamp", "longduration", "longtimestamp", "instant",
     };
 
     /// <summary>L14, the units a number can carry, with their meaning as nanoseconds or bytes.</summary>

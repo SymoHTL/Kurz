@@ -1,0 +1,14 @@
+// expect: output
+// | $HOME *
+// rules: S21
+
+void | IoError | ExitError | InvalidUtf8 Run() {
+    words = Command.New("printf").Args(["%s", "$HOME *"]).Output()
+    print(string.FromUtf8(words.Stdout))
+}
+
+Run() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+    InvalidUtf8 e => print(e)
+}

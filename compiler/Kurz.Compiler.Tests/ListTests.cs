@@ -2142,7 +2142,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // a list and a map in a field, written through a path from a `mut` variable (M4, M5, M9) by each `mut` member, an item and an entry
     // written, `Add`, `Clear` and `Remove`: beside a copy taken before (M3), in a `mut` parameter, after a value that replaced the variable
     // (M4), nested, in a data type that holds itself, whose block another variable holds, with a key `Remove` reads from that block,
-    // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block
+    // grown past its first block, and in a nullable field known not null (N3), of a plain value and of a block; and each field read by
+    // `f.Get(value)` in the passes of a loop over `T.Fields` and kept past an assignment that replaces the value (T33), and each field
+    // read by `f.Get(value)` into the value `T.Make` makes, kept past a change of the value it was read from (T33)
     private const string Fields = """
         data Store(List<string> Names, Map<string, string> Etags, int Hits)
         data Shelf(Store Main, string Label)
@@ -2158,6 +2160,17 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         string Reset(mut Store store) {
             store = Store(List<string>(), Map<string, string>(), 0)
             return "after"
+        }
+
+        T Remade<T>(T value) => T.Make(f => f.Get(value))
+
+        void Keep<T>(mut T value, T replaced, T back) {
+            for f in T.Fields {
+                read = f.Get(value)
+                value = replaced
+                print(read)
+                value = back
+            }
         }
 
         mut s = Store(List<string>(), Map<string, string>(), 0)
@@ -2260,6 +2273,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
         print(bag.Xs)
         print(prior.Xs)
+        mut keep = Store(List<string>(), Map<string, string>(), 7)
+        keep.Names.Add("kept")
+        keep.Etags["k"] = "v"
+        spare = keep
+        Keep(mut keep, Store(List<string>(), Map<string, string>(), 8), spare)
+        print(keep)
+        mut made = Store(List<string>(), Map<string, string>(), 9)
+        made.Names.Add("m")
+        made.Etags["e"] = "f"
+        twin = Remade(made)
+        made.Names.Add("n")
+        made.Etags["e"] = "g"
+        print(twin)
+        print(made)
         """;
 
     private static readonly string[] FieldsPrint =
@@ -2304,12 +2331,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[]",
         "[4]",
         "[3]",
+        "[kept]", // T33: `f.Get(value)` of each field of a pass, kept past the change of the value it was read from
+        "[k: v]",
+        "7",
+        "Store { Names = [kept], Etags = [k: v], Hits = 7 }",
+        "Store { Names = [m], Etags = [e: f], Hits = 9 }", // T33: `T.Make(f => f.Get(value))` holds what it read, past the changes after it
+        "Store { Names = [m, n], Etags = [e: g], Hits = 9 }",
     ];
 
     // instances of classes (chapter 7): a method that changes its fields by their names and through `this`, a second reference, a
     // list and an instance read from fields while a method replaces them, also inside one interpolation, a nullable field, an
-    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, and a chain of 1000 links
-    // made and let go of, which the release frees off its work list
+    // instance in a `data` value, in a lambda's environment and in a list, a method on a list's item, a chain of 1000 links
+    // made and let go of, which the release frees off its work list, and lambdas that assign and write into the fields of the
+    // instances they captured (F11 with K2), `this` among them, while an interpolation holds the list one of them replaces
     private const string Classes = """
         class Counter(mut int Count, string Name) {
             pub void Add(int n) {
@@ -2318,6 +2352,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             pub string Text() => "{Name}={Count}"
+
+            pub void Later(int n) {
+                f = () => { Count = n }
+                f()
+            }
         }
 
         class Holder(mut List<string> Items, mut Counter? Current) {
@@ -2409,6 +2448,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print("{note.Title} {note.Counts} {Clear(note)} {note.Title} {note.Counts}")
         note.Mark()
         print(note.Counts)
+        swap = () => {
+            h.Items = ["s"]
+            h.Items.Add("t")
+            h.Items[0] = "u"
+            c.Count = 30
+            p.Left.Count = 7
+        }
+        swap()
+        c.Later(40)
+        print("{c.Count} {h.Items} {p.Left.Count}")
+        g = () => {
+            h.Items = ["g"]
+            return "g"
+        }
+        print("{h.Items} {g()} {h.Items}")
         """;
 
     private static readonly string[] ClassesPrint =
@@ -2428,6 +2482,165 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "c=14",
         "14n [a: 1] r 14n! []", // the string and the map the first holes took a count of, which the call replaced (K2)
         "[m: 2]",
+        "40 [u, t] 7",
+        "[u, t] g [g]", // the list the first hole took a count of, which the lambda replaced (K2)
+    ];
+
+    // `weak` references (R3): a field, a variable, a parameter, a result, a list's item and a data value's field; a target freed while
+    // weak references to it are held, whose block stays until the last of them lets go; a temporary target, null once its statement
+    // ends; a read held in a variable, which keeps its target; a test that narrows a field; the text of a list of weak references; the
+    // read of a `weak` item through `?[`
+    private const string Weak = """
+        class Owner(string Name) {
+            pub string Text() => Name
+        }
+
+        class Pet(string Name, mut weak Owner? Keeper)
+
+        class Club(mut List<weak Owner?> Members)
+
+        data Tag(string Label, weak Owner? By)
+
+        weak Owner? Remember(weak Owner? w) {
+            return w
+        }
+
+        string NameOf(weak Owner? w) => w?.Name ?? "gone"
+
+        Pet Adopt() {
+            ann = Owner("Ann")
+            return Pet("Rex", ann)
+        }
+
+        o = Owner("Bob")
+        p = Pet("Tom", o)
+        print(NameOf(p.Keeper))
+        lost = Adopt()
+        print(NameOf(lost.Keeper))
+        p.Keeper = Owner("Cy")
+        print(NameOf(p.Keeper))
+        held = Remember(o)
+        print(held?.Name ?? "none")
+        p.Keeper = o
+        if p.Keeper != null {
+            print(p.Keeper.Name)
+        }
+
+        c = Club(List<weak Owner?>())
+        c.Members.Add(o)
+        c.Members.Add(Owner("Eve"))
+        c.Members.Add(null)
+        print(c.Members)
+        for m in c.Members {
+            print(m?.Name ?? "gone")
+        }
+
+        print("{p.Keeper} {c.Members[1]}")
+        List<weak Owner?>? maybe = c.Members
+        print(maybe?[0]?.Name ?? "gone")
+        print(maybe?[1] != null)
+        print("{maybe?[0]} {maybe?[2]}")
+        t = Tag("x", o)
+        print(NameOf(t.By))
+        mut Owner? strong = Owner("Fay")
+        weak Owner? faint = strong
+        print(NameOf(faint))
+        strong = null
+        print(NameOf(faint))
+        print(strong?.Name ?? "freed")
+        mut Owner? gus = Owner("Gus")
+        pg = Pet("Max", gus)
+        Owner? kept = pg.Keeper
+        gus = null
+        print(NameOf(pg.Keeper))
+        print(kept?.Name ?? "freed")
+        """;
+
+    private static readonly string[] WeakPrint =
+    [
+        "Bob",
+        "gone", // R3: `Ann` was freed at the end of `Adopt`, and the block stayed for the weak reference to read
+        "gone", // a temporary, freed at the end of its statement
+        "Bob",
+        "Bob",
+        "[Bob, null, null]", // A4 with R3: the text of what each read gives
+        "Bob",
+        "gone",
+        "gone",
+        "Bob null",
+        "Bob",
+        "false", // R3 with N5: `?[` reads a `weak` item, so the freed `Eve` is null there as in `c.Members[1]`
+        "Bob null",
+        "Bob",
+        "Fay",
+        "gone",
+        "freed",
+        "Gus", // R3: the read `kept` stored holds its target after its other holder let go of it
+        "Gus",
+    ];
+
+    // K4, K5, K8 with K12: instances compared by identity, by content and by the fields a clause names, in a list, a data value, a
+    // nullable value and a chain, and kept as map keys: a key equal to one the map holds replaces its value and is let go of
+    private const string Equality = """
+        class Point(int X, int Y)
+        class Box(mut int N)
+        class User(int Id, mut string Name) equal by Id
+        class Link(int V, Link? Next)
+        class Mark
+        data Pair(Point A, Box B)
+
+        a = Point(1, 2)
+        print(a == Point(1, 2))
+        print(a != Point(2, 1))
+        b = Box(1)
+        c = b
+        print("{b == Box(1)} {b == c}")
+        u = User(1, "a")
+        print(u == User(1, "b"))
+        u.Name = "c"
+        print(u == User(2, "c"))
+        print(Link(1, Link(2, null)) == Link(1, Link(2, null)))
+        print(Link(1, Link(2, null)) == Link(1, null))
+        print([Point(1, 2), Point(3, 4)] == [Point(1, 2), Point(3, 4)])
+        print(Pair(a, b) == Pair(Point(1, 2), c))
+        print(Pair(a, b) == Pair(a, Box(1)))
+        Point? n = null
+        print("{n == a} {Mark() == Mark()}")
+        mut m = Map<Point, string>()
+        m[Point(1, 2)] = "one"
+        m[Point(1, 2)] = "uno"
+        m[Point(2, 1)] = "two"
+        print("{m.Count} {m[a] ?? "-"} {m[Point(9, 9)] ?? "-"}")
+        mut boxes = Map<Box, int>()
+        boxes[b] = 1
+        boxes[Box(1)] = 2
+        print("{boxes.Count} {boxes[c] ?? 0}")
+        mut users = Map<User, string>()
+        users[u] = "first"
+        users[User(1, "z")] = "second"
+        print("{users.Count} {users[User(1, "q")] ?? "-"}")
+        mut links = Map<Link, int>()
+        links[Link(1, Link(2, null))] = 3
+        print(links[Link(1, Link(2, null))] ?? 0)
+        """;
+
+    private static readonly string[] EqualityPrint =
+    [
+        "true",
+        "true",
+        "false true", // K4: a class with a `mut` field compares by identity
+        "true", // K5: by the field the clause names
+        "false",
+        "true", // a chain compares link by link
+        "false",
+        "true",
+        "true",
+        "false",
+        "false true", // a class with no fields: every instance has the same content *(assumed)*
+        "2 uno -",
+        "2 1", // a key that compares by identity hashes its address
+        "1 second",
+        "3",
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
@@ -2493,6 +2706,198 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             mut bs = List<Box>()
             bs.Add(Make(100))
             total = total + Early(100) + p.Left.Count() + h() + bs[0].Count() - 400
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // values of data types laid out as blocks made and let go of through every way out of a block, as the lists' rounds take them: a
+    // variable, a variable assigned over, a `return`, a `break` and a `continue` that leave a block, a call's result nothing holds,
+    // the body of a `void` function, a lambda's environment, a list's item written over, a map's value written over, a plain value's
+    // field, a `with` of a block and of a plain value, a path assignment through a block, a union's case, a derived value through its
+    // base, the one value of a type without fields, and the string and the list a block holds
+    private const string DataRounds = """
+        data Shape
+        data Circle(string Name, List<int> Rs) : Shape
+        data Dot : Shape
+        data Tree(int V, Tree? Left, Tree? Right)
+        data Pair(Tree Left, int Right)
+
+        Tree Make(int depth) {
+            if depth == 0 {
+                return Tree(0, null, null)
+            }
+
+            return Tree(depth, Make(depth - 1), Make(depth - 1))
+        }
+
+        int Count(Tree t) {
+            mut n = 1
+            if t.Left != null {
+                n = n + Count(t.Left)
+            }
+
+            if t.Right != null {
+                n = n + Count(t.Right)
+            }
+
+            return n
+        }
+
+        int Early(int depth) {
+            t = Make(depth)
+            if depth > 0 {
+                return Count(t)
+            }
+
+            return 0
+        }
+
+        void Drop(int depth) => Make(depth)
+
+        Shape Pick(int i) {
+            if i % 3 == 0 {
+                return Dot
+            }
+
+            if i % 3 == 1 {
+                return Circle("c{i}", [i, i + 1])
+            }
+
+            return Shape
+        }
+
+        int Size(Shape s) => match s {
+            Circle c => c.Rs.Count
+            Dot => 0
+            Shape => 1
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(5)
+            mut b = Make(5)
+            b = Make(4)
+            p = Pair(Make(4), 1)
+            for j in 0..<3 {
+                c = Make(3)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + Count(c)
+            }
+
+            for x in 0..<5 {
+                d = Make(3)
+                total = total + Count(d) - 15
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(4)
+            Drop(4)
+            h = () => Count(a)
+            mut ts = List<Tree>()
+            ts.Add(Make(3))
+            ts.Add(Make(2))
+            ts[0] = ts[1]
+            mut m = Map<int, Tree>()
+            m[1] = Make(3)
+            m[1] = Make(2)
+            w = a with { V = 9 }
+            mut q = Make(7)
+            q.Left = Make(2)
+            Tree | Shape u = Make(2)
+            s = Pick(round)
+            k = Pair(Make(2), 2) with { Left = Make(1) }
+            total = total + Early(4) + Count(p.Left) + h() + Count(ts[0]) + Count(m[1] ?? a) + Count(w) + Count(q) + Size(s) + Count(b) + Count(k.Left) - 300
+            total = total + match u {
+                Tree t => Count(t)
+                Shape => 0
+            }
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // instances of a class held by data values laid out as blocks, a chain of 200 made and dropped each round, each instance holding
+    // a list
+    private const string HeldInstanceRounds = """
+        class Box(mut List<int> Xs)
+        data Tree(Box Item, Tree? Next)
+
+        Tree? Chain(int n) {
+            mut Tree? t = null
+            for i in 0..<n {
+                b = Box(List<int>())
+                b.Xs.Add(i)
+                t = Tree(b, t)
+            }
+
+            return t
+        }
+
+        int Count(Tree? t) {
+            mut Tree? at = t
+            mut n = 0
+            while at != null {
+                n = n + at.Item.Xs.Count
+                at = at.Next
+            }
+
+            return n
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            total = total + Count(Chain(200))
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // the same rounds, each tree also holding a `weak` reference to its box, read through it (R3): the end of a block lets go of the
+    // weak count as it lets go of the strong one
+    private static readonly string WeakHeldRounds = HeldInstanceRounds
+        .Replace("data Tree(Box Item, Tree? Next)", "data Tree(Box Item, weak Box? Seen, Tree? Next)", StringComparison.Ordinal)
+        .Replace("t = Tree(b, t)", "t = Tree(b, b, t)", StringComparison.Ordinal)
+        .Replace("n = n + at.Item.Xs.Count", "n = n + (at.Seen?.Xs.Count ?? 0)", StringComparison.Ordinal);
+
+    // copies of blocks that hold a list of 2000 items, round after round: a `with` of a block another variable holds too, whose copy
+    // starts at one count, a `with` that replaces the list, which the copy lets go of, and a write into the list through a path, whose
+    // copied block takes no count of the list beyond the copy's own: each count kept too many keeps a list of 8000 bytes each round
+    private const string BlockCopyRounds = """
+        data Big(List<int> Xs, Big? Next)
+
+        List<int> Fill(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            return xs
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Big(Fill(2000), null)
+            b = a
+            c = a with { Next = null }
+            d = Big(Fill(2000), null) with { Xs = Fill(10) }
+            mut e = Big(Fill(2000), null)
+            e.Xs.Add(1)
+            total = total + b.Xs.Count + c.Xs.Count + d.Xs.Count + e.Xs.Count
         }
 
         print(round)
@@ -2902,6 +3307,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Pieces, toolchain.Runtime, "string-pieces"), 0, PiecesPrint, "");
         Ran(BuildAndRun(ListWrites, toolchain.Runtime, "list-writes"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
+        Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
     }
 
     [Fact]
@@ -2970,6 +3377,99 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
 
+    /// <summary>D5, K2: <c>with</c> on a block read from a field of an instance through its path, while a method gives the field another block.</summary>
+    private const string WithFieldPath = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.B with { Xs = h.Change() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, K7: <c>with</c> on a block read from a field by its name alone in a method, while a method gives the field another block.</summary>
+    private const string WithFieldName = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+
+            pub Big Copy() => B with { Xs = Change() }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.Copy()
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, F11: <c>with</c> on a block read from a field of an instance through its path, while a lambda gives the field another block.</summary>
+    private const string WithFieldLambda = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B)
+
+        h = Holder(Big([1, 2, 3], null))
+        f = () => {
+            h.B = Big([9], null)
+            return [7]
+        }
+        b = h.B with { Xs = f() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    private const string HandleTarget = """
+        class Log(mut File Out) {
+            pub int Swap(File next) {
+                Out = next
+                return 2
+            }
+
+            pub Bytes Again(File next) {
+                Out = next
+                return "xy".Bytes
+            }
+
+            pub int | IoError ReadOwn(mut Bytes into, File next) => Out.Read(mut into, this.Swap(next))
+        }
+
+        void | IoError Run() {
+            File.WriteAll("held-read.txt", "abc".Bytes)
+            log = Log(File.Open("held-read.txt"))
+            mut buffer = Bytes()
+            print(log.Out.Read(mut buffer, log.Swap(File.Open("held-read.txt"))))
+            print(log.Out.Read(mut buffer, 5))
+            print(log.ReadOwn(mut buffer, File.Open("held-read.txt")))
+            print(log.Out.Read(mut buffer, 5))
+            out = Log(File.Create("held-write.txt"))
+            out.Out.Write(out.Again(File.Create("held-other.txt")))
+            print(File.ReadAll("held-write.txt").Count)
+            print(File.ReadAll("held-other.txt").Count)
+            File.Delete("held-read.txt")
+            File.Delete("held-write.txt")
+            File.Delete("held-other.txt")
+        }
+
+        Run() else {
+            IoError e => print(e)
+        }
+
+        """;
+
     [Fact]
     public void No_block_is_read_or_written_after_it_is_freed()
     {
@@ -2986,15 +3486,125 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
+        // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
+        // change stands (X8, section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that frees the instance whose field holds
+        // the list, which the read of `h.B` holds as a temporary to the end of its statement (R3, section 3); a key that changes nothing
+        // sorts, which the item it moves shows; a key that reads the list through the instance sorts, and one that reads it before a
+        // change and after it reads the list the field holds at that moment, the list read and then the new one; and a key that gives the
+        // field on the way to the list another instance while a variable holds the one read sorts the list of the one read, and the new
+        // one keeps its own (X8, assumed, as C# evaluates a call's receiver once)
+        const string sortByChange = """
+            class Bag(mut List<int> Items) {
+                pub int Reset(int x) {
+                    Items = [0]
+                    return x
+                }
+
+                pub int Push(int x) {
+                    Items.Add(x * 10)
+                    return x
+                }
+
+                pub void SortMe() {
+                    Items.SortBy(x => Reset(x))
+                }
+            }
+
+            class Names(mut List<string> Items) {
+                pub string Reset(string x) {
+                    Items = ["z"]
+                    return x
+                }
+            }
+
+            class Log(mut List<int> Items, mut List<int> Seen) {
+                pub int Read(int x) {
+                    Seen.Add(Items.Count)
+                    if x == 3 {
+                        Items = [0]
+                    }
+                    return x
+                }
+            }
+
+            class Holder(mut Bag B) {
+                pub int Swap(int x) {
+                    B = Bag([0])
+                    return x
+                }
+            }
+
+            b = Bag([3, 1, 2])
+            b.Items.SortBy(x => b.Reset(x))
+            print(b.Items.Count)
+            print(b.Items[0])
+            c = Bag([3, 1, 2])
+            c.Items.SortBy(x => c.Push(x))
+            print(c.Items.Count)
+            print(c.Items[0])
+            print(c.Items[5])
+            d = Bag([3, 1, 2])
+            d.SortMe()
+            print(d.Items[0])
+            n = Names(["c", "a", "b"])
+            n.Items.SortBy(x => n.Reset(x))
+            print(n.Items[0])
+            e = Bag([3, 1, 2])
+            e.Items.SortBy(x => 0 - x)
+            print(e.Items[1])
+            h = Holder(Bag([3, 1, 2]))
+            h.B.Items.SortBy(x => h.Swap(x))
+            print(h.B.Items[0])
+            g = Holder(Bag([3, 1, 2]))
+            old = g.B
+            g.B.Items.SortBy(x => g.Swap(x))
+            print(old.Items)
+            print(g.B.Items)
+            r = Bag([3, 1, 2])
+            r.Items.SortBy(x => r.Items.Count - x)
+            print(r.Items[1])
+            l = Log([3, 1, 2], [9])
+            l.Items.SortBy(x => l.Read(x))
+            print(l.Seen)
+            print(l.Items[0])
+
+            """;
+        Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "[1, 2, 3]", "[0]", "2", "[9, 3, 1, 1]", "0"], "");
+        Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
+        Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
+        // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
+        // a release under way stands once in the program
+        Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
         // every way out of a block, as the budget's program takes them, in rounds few enough for a mapping per block
         Ran(BuildAndRun(Rounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "list-rounds-fenced"), 0, ["20", "80020"], "");
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
         Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(DataRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "data-rounds-fenced"), 0, ["20", "2181"], "");
+        Ran(BuildAndRun(HeldInstanceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "held-instance-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(WeakHeldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "weak-held-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(BlockCopyRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "block-copy-rounds-fenced"), 0, ["20", "120220"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
         Ran(BuildAndRun(where, fenced, "list-where-fenced"), 0, ["166670"], "");
+        // a call on a handle reads its target before its arguments (D11), and the read of a field of a class instance, by its path or
+        // by its name in a method (K7), takes a count held to the statement's end, so that an argument that gives the field another
+        // file lets go of none the call uses: each read reads the file the field held when the call began, and the write writes it (S5);
+        // a call on a file is `not supported` in a build for Windows (S11)
+        if (Builder.HostTarget != Target.Windows)
+        {
+            Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
+        }
+
+        // `with` on a block read from a field of a class instance, while a replaced value gives the field another block: through the
+        // instance's path by a method, by the field's name alone in a method (K7), and through the path by a lambda that assigns it
+        // (F11); the read takes a count held to the statement's end (K2), so the copy reads the block the field held when the `with`
+        // began, and the field keeps the new one (D5)
+        Ran(BuildAndRun(WithFieldPath, fenced, "with-field-path-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldName, fenced, "with-field-name-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldLambda, fenced, "with-field-lambda-fenced"), 0, ["[7]", "[9]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
@@ -3057,6 +3667,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
         Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(DataRounds, Budget(), "data-rounds"), 0, ["3000", "327000"], "");
+        Ran(BuildAndRun(HeldInstanceRounds, Budget(), "held-instance-rounds"), 0, ["3000", "600000"], "");
+        Assert.Contains("n = n + (at.Seen?.Xs.Count ?? 0)", WeakHeldRounds, StringComparison.Ordinal); // the variant reads through the weak field
+        Ran(BuildAndRun(WeakHeldRounds, Budget(), "weak-held-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(BlockCopyRounds, Budget(), "block-copy-rounds"), 0, ["3000", "18033000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -3080,6 +3695,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
         Assert.Equal(1, boxes.Code);
         Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+
+        // and the rounds' trees, each with a tree of 1023 nodes of 32 bytes, all held: about 100 megabytes
+        var trees = BuildAndRun(DataRounds.Replace("    a = Make(5)\n", "    a = Make(5)\n    all.Add(Make(9))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Tree>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "data-rounds-held");
+        Assert.Equal(1, trees.Code);
+        Assert.StartsWith("error: allocation-failed (", trees.Error, StringComparison.Ordinal);
+
+        // and the instances the trees hold, kept by a list of their boxes while each tree is dropped: about 40 megabytes
+        var instances = BuildAndRun(HeldInstanceRounds.Replace("        b.Xs.Add(i)\n", "        b.Xs.Add(i)\n        boxes.Add(b)\n", StringComparison.Ordinal).Replace("Tree? Chain(int n) {", "Tree? Chain(mut List<Box> boxes, int n) {", StringComparison.Ordinal).Replace("Count(Chain(200))", "Count(Chain(mut all, 200))", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal), Budget(), "held-instance-rounds-held");
+        Assert.Equal(1, instances.Code);
+        Assert.StartsWith("error: allocation-failed (", instances.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3100,12 +3725,40 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_chain_of_a_million_data_values_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 4, a reading of the owner's answer on classes of 2026-11-01, "Iterative, never crashes": the last count of a link's
+        // block that a release lets go of waits on its family's work list, as an instance's does, so no release calls itself once for
+        // each link
+        const string chain = "data Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "data-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "data-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
+    }
+
+    [Fact]
+    public void The_first_block_a_program_releases_may_hold_a_block_of_another_family()
+    {
+        // the release of `Outer`'s family, the first one built, builds `Inner`'s for its field before `Outer`'s work list is in the
+        // emitter's list of released families: the flag of a release under way is declared once all the same, as for a class
+        // (The_first_class_a_program_releases_may_hold_a_field_of_another_class)
+        Ran(BuildAndRun("data Inner(int V, Inner? Next)\ndata Outer(Inner I, Outer? Next)\n\nprint(Outer(Inner(1, null), null).I.V)\n", toolchain.Runtime, "release-nested-blocks"), 0, ["1"], "");
+    }
+
+    [Fact]
     public void A_mut_field_of_the_instance_passed_as_mut_is_written_in_its_place()
     {
         // M7 with K7: a `mut` field named alone in a method and passed as `mut` is the field's own place, so the callee's write is the
-        // field's, and the block the list field held before is let go of once, which the fence holds
-        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\n";
-        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]"], "");
+        // field's, and the block the list field held before is let go of once, which the fence holds; a lambda that passes the field
+        // writes it through the reference to the instance it holds, inside the method and after it returned (F11 with K2)
+        const string box = "class Box(mut int N, mut List<int> Items) {\n    pub void Fill() {\n        Bump(mut N)\n        Grow(mut Items, N)\n        Grow(mut Items, N)\n    }\n\n    pub void Later() {\n        f = () => Bump(mut N)\n        g = () => Grow(mut Items, N)\n        f()\n        g()\n    }\n\n    pub () => void Bumper() => () => Bump(mut N)\n\n    pub string Text() => \"{N} {Items}\"\n}\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nvoid Grow(mut List<int> xs, int n) {\n    xs = [n]\n    for i in 0..<n {\n        xs.Add(i)\n    }\n}\n\nb = Box(1, [7])\nb.Fill()\nprint(b)\nb.Later()\nprint(b)\nk = b.Bumper()\nk()\nk()\nprint(b)\n";
+        Ran(BuildAndRun(box, Fenced, "class-mut-field-argument-fenced"), 0, ["2 [2, 0, 1]", "3 [3, 0, 1, 2]", "5 [3, 0, 1, 2]"], "");
     }
 
     [Fact]
@@ -3427,10 +4080,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_Insert_past_the_limit_reports_the_bytes_of_the_items_after_it()
     {
         // X11, M9: as `Add`, with the limit of the largest `int` lowered to 3 in the library's text, so that a fourth `Insert` asks for
-        // 4 times the 16 bytes of a string
-        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nxs.Insert(0, \"b\")\nxs.Insert(1, \"c\")\nxs.Insert(1, \"d\")\nprint(xs)\n";
-        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, [], "error: allocation-failed (64 bytes)\n");
-        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["[b, d, c, a]"], ""); // the positive control
+        // 4 times the 16 bytes of a string; the count printed after each of the first three shows that the fourth is the one refused
+        const string text = "mut xs = List<string>()\nxs.Insert(0, \"a\")\nprint(xs.Count)\nxs.Insert(0, \"b\")\nprint(xs.Count)\nxs.Insert(1, \"c\")\nprint(xs.Count)\nxs.Insert(1, \"d\")\nprint(xs)\n";
+        Ran(BuildAndRun(text, Edited(("std/std.kz", "2147483647", "3")), "list-insert-limit"), 1, ["1", "2", "3"], "error: allocation-failed (64 bytes)\n");
+        Ran(BuildAndRun(text, toolchain.Runtime, "list-insert-below-limit"), 0, ["1", "2", "3", "[b, d, c, a]"], ""); // the positive control
     }
 
     [Fact]
@@ -3631,6 +4284,96 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(edge, Fenced, "utf8-words-edge-fenced"), 0, ["0", "4064"], "");
+    }
+
+    [Fact]
+    public void Copy_writes_every_byte_of_0_to_17_and_24_wherever_it_reads_them_and_writes_them()
+    {
+        // The standard library's `Copy`, whose form for small counts the speed escape of issue 156 (comment 6575718942) kept: up to
+        // 16 bytes as the C library's `memcpy` copies a small count, two words of 8, two words of 4 or three bytes, overlapping where
+        // the count is no power of two, and more byte by byte. `Substring` copies through it from the offset it starts at, and `Join`
+        // to the offset of each part: for each count 0 to 17 and 24, bytes of 128 and above in every place of a word (letters of two
+        // bytes, after one byte of ASCII where the count is odd), cut 0, 1, 3 and 7 bytes into a string that holds a block, with 0 or 5
+        // bytes after them, so that a cut ends where its string ends; and the cut joined after the bytes before it, so that `Join`
+        // writes it at that offset. Under the fence too, where a block ends where its page ends
+        const string text = """
+            Bytes Content(int count) {
+                mut b = Bytes()
+                if count % 2 == 1 {
+                    b.Add(90)
+                }
+
+                for j in 0..<count / 2 {
+                    c = 128 + (41 * j + 7 * count) % 1920
+                    b.Add(byte(192 + c / 64))
+                    b.Add(byte(128 + c % 64))
+                }
+
+                return b
+            }
+
+            void Cut(string s, int at, int count) {
+                cut = s.Substring(at, count)
+                print(cut.Bytes)
+                print(string.Join("", [s.Substring(0, at), cut]).Bytes)
+            }
+
+            for n in 0..<19 {
+                mut count = n
+                if n == 18 {
+                    count = 24
+                }
+
+                content = Content(count)
+                for at in [0, 1, 3, 7] {
+                    for end in [0, 5] {
+                        mut b = Bytes()
+                        for i in 0..<at {
+                            b.Add(byte(97 + i))
+                        }
+
+                        b.AddRange(content)
+                        for i in 0..<end {
+                            b.Add(byte(65 + i))
+                        }
+
+                        match string.FromUtf8(b) {
+                            string s => Cut(s, at, count)
+                            InvalidUtf8 e => print(e.At)
+                        }
+                    }
+                }
+            }
+
+            """;
+        var lines = new List<string>();
+        foreach (var count in Enumerable.Range(0, 18).Append(24))
+        {
+            var content = new List<int>();
+            if (count % 2 == 1)
+            {
+                content.Add(90);
+            }
+
+            for (var j = 0; j < count / 2; j++)
+            {
+                var c = 128 + (((41 * j) + (7 * count)) % 1920);
+                content.Add(192 + (c / 64));
+                content.Add(128 + (c % 64));
+            }
+
+            foreach (var at in new[] { 0, 1, 3, 7 })
+            {
+                foreach (var _ in new[] { 0, 5 })
+                {
+                    lines.Add("[" + string.Join(", ", content) + "]");
+                    lines.Add("[" + string.Join(", ", Enumerable.Range(97, at).Concat(content)) + "]");
+                }
+            }
+        }
+
+        Ran(BuildAndRun(text, toolchain.Runtime, "copy-counts"), 0, [.. lines], "");
+        Ran(BuildAndRun(text, Fenced, "copy-counts-fenced"), 0, [.. lines], "");
     }
 
     [Fact]
@@ -3954,10 +4697,15 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_map_block_the_system_refuses_reports_the_bytes_the_allocator_was_asked_for()
     {
         // the first block of a `Map<long, long>`: 48 bytes of counts and keys, 16 of the control bytes of its 8 slots, padded, and 8
-        // entries of a hash, a key and a value
+        // entries of a key and a value, 16 bytes each, since a key of one word keeps no hash in its slot (`KeepsHash`, issue 157, item
+        // 14: 256 bytes before, with the hash); of a `Map<string, long>` 8 entries of a hash, a key and a value, 32 bytes each, since a
+        // string's hash reads its bytes
         const string text = "mut m = Map<long, long>()\nm[1] = 1\nprint(m[1] ?? 0)\n";
-        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (256 bytes)\n");
+        Ran(BuildAndRun(text, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-refused"), 1, [], "error: allocation-failed (192 bytes)\n");
         Ran(BuildAndRun(text, toolchain.Runtime, "map-granted"), 0, ["1"], ""); // the positive control
+        const string strings = "mut m = Map<string, long>()\nm[\"a\"] = 1\nprint(m[\"a\"] ?? 0)\n";
+        Ran(BuildAndRun(strings, EmitterTests.RuntimeWithoutMemory(Builder.HostTarget!.Value), "map-string-refused"), 1, [], "error: allocation-failed (320 bytes)\n");
+        Ran(BuildAndRun(strings, toolchain.Runtime, "map-string-granted"), 0, ["1"], "");
     }
 
     [Fact]
@@ -4288,8 +5036,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Two_strings_are_equal_where_every_byte_is_compared_in_words_the_last_of_which_ends_where_the_bytes_end()
     {
-        // T18: the runtime's `Same` compares the first byte, then 8 bytes or more as words of 8, the last ending where the bytes end over
-        // the one before it, 4 to 7 as two words of 4 and 1 to 3 as their first, middle and last byte: a string of every count from 0 to
+        // T18: the runtime's `Same` compares the first bytes first, then 1 to 3 bytes as their first, middle and last byte, 4 to 16 as
+        // four words of 4, and more as 16 bytes at a time in words of 8 and the 16 bytes that end them: a string of every count from 0 to
         // 40 against the same count of bytes with one byte changed at each place, which never equals it (a count of 1 each), and against
         // an interpolation of the same bytes, which does (a count of 1000 each); then the same of 0 to 20 letters of two bytes each, every
         // byte 128 or more, against one letter changed at each place, which changes its second byte alone; and the same under the fence,
@@ -4300,12 +5048,48 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_strings_with_no_bytes_are_equal_whatever_the_blocks_they_share_hold()
+    {
+        // T18: the runtime's `Same` reads no byte of two strings with no bytes: two such strings, each sharing the block of a list of
+        // bytes whose one byte was removed, `a` in one and `b` in the other, are equal to each other and to the literal "", although a
+        // read of the first byte of each would find the two bytes that differ
+        const string text = """
+            mut a = Bytes()
+            a.Add(byte(97))
+            first = a.RemoveAt(0)
+            mut b = Bytes()
+            b.Add(byte(98))
+            second = b.RemoveAt(0)
+            x = string.FromUtf8(a) else {
+                InvalidUtf8 => "?"
+            }
+
+            y = string.FromUtf8(b) else {
+                InvalidUtf8 => "?"
+            }
+
+            print(long(first) + long(second))
+            print(x.Bytes.Count + y.Bytes.Count)
+            if x == y {
+                print("x == y")
+            }
+
+            if x == "" && "" == y {
+                print("both equal the literal")
+            }
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "string-same-no-bytes"), 0, ["195", "0", "x == y", "both equal the literal"], "");
+    }
+
+    [Fact]
     public void Two_strings_are_ordered_by_the_first_byte_in_which_they_differ_read_in_words_with_their_first_byte_highest()
     {
-        // T32: the runtime's `Order` compares the first byte, then 8 shared bytes or more as words of 8 read with their first byte
-        // highest, each an unsigned number, the last ending where the shared bytes end over the one before it, 4 to 7 as two words of 4
-        // and 1 to 3 as their first, middle and last byte, and where the shared bytes agree the lengths: a string of every count from 0
-        // to 40 against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
+        // T32: the runtime's `Order` compares the first byte, whose difference is the order where it differs, then the shared bytes as
+        // words read with their first byte highest, each an unsigned number: 1 to 3 as their first, middle and last byte, 4 to 16 as four
+        // words of 4, more as 16 bytes at a time and then four words of 8, the first word that differs giving the order, and where the
+        // shared bytes agree the lengths: a string of every count from 0
+        // to 72, so that the loop of 16 bytes runs up to three steps, against the same bytes with, at each place, the byte raised and the one after it lowered, the byte lowered and the one
         // after it raised, and the byte replaced by `é`, whose first byte, 195, is above every byte of ASCII; then against itself one
         // byte longer, itself, and a copy of itself. Each pair is read both ways through `<`, `==` and `>`, and gives the sign of the
         // order of its UTF-8 bytes; and the same under the fence, where a changed string of 16 or 32 bytes ends where its page ends, so
@@ -4328,8 +5112,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 return t
             }
 
-            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE"
-            for count in 0..<41 {
+            s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk"
+            for count in 0..<73 {
                 a = s.Substring(0, count)
                 mut line = ""
                 for k in 0..<count {
@@ -4353,9 +5137,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
-        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        const string s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk";
         var lines = new List<string>();
-        for (var count = 0; count <= 40; count++)
+        for (var count = 0; count <= 72; count++)
         {
             var a = s[..count];
             var line = new StringBuilder();
@@ -4377,6 +5161,98 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("<>><<>", lines[40], StringComparison.Ordinal); // a raised, a lowered and a wider byte each give their sign
         Ran(BuildAndRun(text, toolchain.Runtime, "string-order-words"), 0, [.. lines], "");
         Ran(BuildAndRun(text, Fenced, "string-order-words-fenced"), 0, [.. lines], "");
+    }
+
+    [Fact]
+    public void Two_strings_of_one_count_are_compared_by_their_first_bytes_before_a_word_of_either_is_read()
+    {
+        // T18: the runtime's `Same` tests the first bytes of two strings of one count before it reads a word of either or calls
+        // `SameBytes`, which reads the words of more than 16 bytes, since two different strings of one count most often differ there.
+        // No result tells that order from the other, so the IR holds it: in a program that compares two strings, the body of `Same` as
+        // the emitter writes it, in the order of its source, reads a byte (`load i8`) before its first call that reads a word of 4 and
+        // before its call of `SameBytes`, and the body of `SameBytes` reads words of 8
+        var ir = Compile("a = \"ab\"\nb = \"ac\"\nprint(a == b)\n", toolchain.Runtime).Program!.Ir;
+        string Body(string definition)
+        {
+            var start = ir.IndexOf(definition, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"the program holds {definition}");
+            var body = ir[start..];
+            return body[..body.IndexOf("\n}", StringComparison.Ordinal)];
+        }
+
+        var same = Body("define internal i1 @\"rt.common.Same.");
+        var bytes = same.IndexOf("= load i8, ptr", StringComparison.Ordinal);
+        int[] later = [same.IndexOf("call i32 @\"std.LittleEndianWord.", StringComparison.Ordinal), same.IndexOf("call i1 @\"rt.common.SameBytes.", StringComparison.Ordinal)];
+        Assert.True(bytes >= 0, $"`Same` reads a byte:\n{same}");
+        Assert.All(later, at => Assert.True(at >= 0, $"`Same` reads words of 4 and calls `SameBytes`:\n{same}"));
+        Assert.True(bytes < later.Min(), $"`Same` reads the first bytes before a word and before it calls `SameBytes`:\n{same}");
+        var rest = Body("define internal i1 @\"rt.common.SameBytes.");
+        Assert.True(rest.Contains("call i64 @\"std.WordAt.", StringComparison.Ordinal), $"`SameBytes` reads words of 8:\n{rest}");
+    }
+
+    [Fact]
+    public void Two_strings_of_up_to_16_bytes_are_compared_in_each_caller_and_longer_ones_by_a_call()
+    {
+        // T18: the runtime's `Same` holds the test of the counts, of the first bytes and of up to 16 bytes, small enough that clang
+        // inlines it into each caller, and `SameBytes` the bytes of longer strings, a call, as Rust's `==` of `str` calls `bcmp` for
+        // the bytes (the owner, 2026-11-02, pull request 232, comment 6578274207, and the answer after it); the emitter marks
+        // `SameBytes` `noinline` (`Emitter.OutOfLine`), so that LLVM does not inline it into `Same`, its one caller, and keep `Same`
+        // a call. No result tells that from one function of both, so the IR clang optimises as a release build is optimised holds
+        // it: a program that compares strings in three places, whose IR calls `Same` in each, calls `Same` nowhere once optimised,
+        // and `SameBytes` in more than one place (LLVM writes a name without its quotes where it needs none)
+        const string text = """
+            bool Equal(string x, string y) {
+                return x == y
+            }
+
+            bool Differ(string x, string y) {
+                return x != y
+            }
+
+            mut words = List<string>()
+            for i in 0..<6 {
+                words.Add("w{i % 3}")
+            }
+
+            mut count = 0
+            for i in 0..<6 {
+                if Equal(words[i], words[(i + 1) % 6]) {
+                    count = count + 1
+                }
+
+                if Differ(words[i], words[(i + 2) % 6]) {
+                    count = count + 10
+                }
+
+                if words[i] == words[(i + 3) % 6] {
+                    count = count + 100
+                }
+            }
+
+            print(count)
+
+            """;
+        var program = Builder.Compile(SourceText.FromString("program.kz", text), [], toolchain.Runtime, testBuild: false).Program!;
+        static int Calls(IEnumerable<string> lines, string name) =>
+            lines.Count(l => l.Contains("call ", StringComparison.Ordinal)
+                && (l.Contains($"@\"rt.common.{name}.", StringComparison.Ordinal) || l.Contains($"@rt.common.{name}.", StringComparison.Ordinal)));
+        Assert.True(Calls(program.Ir.Split('\n'), "Same") >= 3, "the IR as the emitter writes it calls `Same` in each place");
+        var directory = Path.Combine(toolchain.Directory, "string-same-inlined");
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "program.ll");
+        var output = Path.Combine(directory, "optimised.ll");
+        File.WriteAllText(input, program.Ir);
+        List<string> arguments = ["-O2", "-S", "-emit-llvm", input, "-o", output];
+        if (program.CpuFlag is { } cpu)
+        {
+            arguments.Add(cpu);
+        }
+
+        var (code, _, error) = Processes.Capture(toolchain.Clang.Path, arguments, null, TimeSpan.FromMinutes(2));
+        Assert.True(code == 0, error);
+        var optimised = File.ReadAllLines(output);
+        Assert.Equal(0, Calls(optimised, "Same"));
+        Assert.True(Calls(optimised, "SameBytes") >= 2, string.Join('\n', optimised.Where(l => l.Contains("rt.common.Same", StringComparison.Ordinal))));
     }
 
     /// <summary>The sign of the order of the UTF-8 bytes of two strings (T32), as the program's <c>Sign</c> writes it.</summary>

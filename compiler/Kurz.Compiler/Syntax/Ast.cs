@@ -29,6 +29,12 @@ public sealed record WeakType(int Line, TypeSyntax Inner) : TypeSyntax(Line);
 /// <summary><c>void</c> (F4), as a result type.</summary>
 public sealed record VoidType(int Line) : TypeSyntax(Line);
 
+/// <summary>
+/// T35: a literal among a call's type arguments, the constant a type parameter that holds one takes: <c>Buffer&lt;64&gt;()</c>,
+/// <c>Pick&lt;T, true&gt;(x)</c>, an integer with its <c>-</c>, a <c>bool</c> or a <c>char</c>.
+/// </summary>
+public sealed record ConstantTypeArgument(int Line, Expression Value) : TypeSyntax(Line);
+
 /// <summary><c>int*</c>, a raw pointer to what <paramref name="Pointee"/> names, <c>void*</c> among them (R10, R14).</summary>
 public sealed record PointerType(int Line, TypeSyntax Pointee) : TypeSyntax(Line);
 
@@ -170,7 +176,8 @@ public sealed record WhileStatement(int Line, Expression Condition, Block Body) 
 
 /// <summary>
 /// <c>for name in collection { }</c> (C6, C8), and <c>for key, value in map { }</c>, whose second name is <paramref name="Second"/> (C6);
-/// <paramref name="Arms"/> are those of an <c>else</c> after the block, which handles the cases its collection fails with (S16), null without one.
+/// <paramref name="Arms"/> are those of an <c>else</c> after the block, which handles the cases its collection fails with (S16), null without one,
+/// and <paramref name="ElseLine"/> is the line of that <c>else</c> keyword, 0 without one.
 /// </summary>
 public sealed record ForInStatement(int Line, string Variable, int VariableLine, Expression Collection, Block Body, LoopName? Second = null, IReadOnlyList<MatchArm>? Arms = null, int ElseLine = 0) : Statement(Line);
 
@@ -244,13 +251,17 @@ public enum Modifiers
     Naked = 64,
     Thread = 128,
     Extern = 256,
+    Internal = 512, // F9: visible to the files of the folder that declares it
 }
 
 /// <summary>A parameter of a function, a lambda or a primary constructor: <c>mut</c> (M7), a type (absent on an untyped lambda parameter), a name and a default (D11).</summary>
 public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name, Expression? Default);
 
-/// <summary>A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>.</summary>
-public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit);
+/// <summary>
+/// A type parameter with its limit (T19): <c>T</c>, <c>T: Comparable</c>; or one that holds a constant of a type, with its default
+/// (T35): <c>const JsonKeys K</c>, <c>const Mode M = Mode.Plain</c>.
+/// </summary>
+public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, TypeSyntax? Constant = null, Expression? Default = null);
 
 /// <summary>A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method.</summary>
 public sealed record FunctionDeclaration(
