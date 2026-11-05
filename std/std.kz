@@ -7004,8 +7004,8 @@ pub class HttpResponseMessage(int Status, HttpHeaders Headers, HttpBody Body) {
 
 // A connection of a client's pool: its stream, its host and port, when it opened and when it last went idle, and, while a response
 // holds it, that response's body, held weakly, so that a body let go of unread closes the connection at the next call (W13).
-class HttpConnection(TcpStream Stream, string Key, timestamp Opened) {
-    internal mut timestamp idleSince = Opened
+class HttpConnection(TcpStream Stream, string Key, instant Opened) {
+    internal mut instant idleSince = Opened
     internal mut weak HttpBody? body = null
     internal mut bool keep = true
     internal mut bool ended = false
@@ -7016,7 +7016,7 @@ class HttpConnection(TcpStream Stream, string Key, timestamp Opened) {
     internal void Ends(bool isClean) {
         ended = true
         clean = isClean
-        idleSince = timestamp.Now
+        idleSince = instant.Now
     }
 }
 
@@ -7139,7 +7139,7 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
     // connection idle longer than `PooledConnectionIdleTimeout`, or open longer than `PooledConnectionLifetime`, closes, as
     // hyper-util's pool passes over expired connections at its checkout (W13).
     HttpConnection? Checkout(string key) {
-        now = timestamp.Now
+        now = instant.Now
         mut i = 0
         while i < busy.Count {
             c = busy[i]
@@ -7202,7 +7202,7 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
         s = TcpStream.Connect("{uri.Host}:{uri.Port}")
         s.SetReadTimeout(null)
         s.SetWriteTimeout(null)
-        return HttpConnection(s, key, timestamp.Now)
+        return HttpConnection(s, key, instant.Now)
     }
 
     // Lets go of a response the client follows past: its body read and dropped up to `MaxDrainSize`, so that its connection goes idle,

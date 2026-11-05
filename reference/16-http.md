@@ -2076,8 +2076,8 @@ new connection given no second try; the reads and writes of a connection bounded
 connect by the 5 seconds of `Connect` (C1), while `std/` holds no bound of the call's 100 seconds (§12), so that
 a server that accepts and never answers holds the call; the request a `GET` with `Host`, the port in it
 where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
-the path of a call of `Get` needs `allow network` (S12); and the pool's times read from `timestamp.Now`, so that a jump
-of the wall clock moves the idle time and the life of a connection)*
+the path of a call of `Get` needs `allow network` (S12); and the pool's times read from `instant.Now` (S25), as the server's
+bounds read theirs)*
 
 Case: [http/client-get.kz](../corpus/http/client-get.kz)
 ```kurz
