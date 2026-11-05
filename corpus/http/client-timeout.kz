@@ -1,0 +1,180 @@
+// expect: output
+// | true
+// | TimedOut 0
+// | TimedOut 0
+// | 200 [1 /n]
+// | 200 [2 /n]
+// | 200 [late]
+// | 200 [4 /r/0]
+// | TimedOut 0
+// | TimedOut 0
+// | true
+// | TimedOut 0
+// | true
+// allow: raw native
+// rules: W16
+
+// a call of the client has 100 seconds by default, which the options set; a time of zero or below gives `TimedOut` with the number
+// 0 before any connect; the largest `duration` is a time like any other, which the call's arithmetic holds without passing the
+// clock's range; a read waits what remains of the call's time and not a socket's 5 seconds; a chain of redirects has one
+// time in all; a server that does not answer in time ends the call with `TimedOut` after its time, and so does a connect that the
+// server's queue holds
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request answered by `Answer`
+void Serve(TcpListener on) {
+    mut count = 0
+    while true {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        count = count + 1
+        number = count
+        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(number, r)) else {
+            IoError e => {
+            }
+            HttpError e => {
+            }
+        }
+    }
+}
+
+// the child's thread held for `ms` milliseconds
+void Sleep(int ms) {
+    raw {
+        usleep(ms * 1000)
+    }
+}
+
+// `/slow/5200` and `/slow/1000` answered after that many milliseconds, `/r/N` a `302` to `/r/N-1` after 150 milliseconds, and the
+// other paths with the number of the connection and the path
+HttpResponse Answer(int number, HttpRequest r) {
+    path = r.Path
+    if path == "/slow/5200" || path == "/slow/1000" {
+        if path == "/slow/5200" {
+            Sleep(5200)
+        } else {
+            Sleep(1000)
+        }
+
+        return HttpResponse.Text(200, "late")
+    }
+
+    if path.StartsWith("/r/") && path != "/r/0" {
+        n = path.Bytes[3] - 48
+        Sleep(150)
+        response = HttpResponse.Empty(302)
+        response.Headers.Set("Location", "/r/{n - 1}") else {
+            HttpError e => {
+            }
+        }
+
+        return response
+    }
+
+    return HttpResponse.Text(200, "{number} {path}")
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against((int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    if child == 0 {
+        Serve(on)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// a `GET` of `path` with a call's time of `timeout`, and its status and body, or its failure
+string Show(int port, string path, duration timeout) {
+    at = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return "{e.Kind} {e.At}"
+    }
+
+    match HttpClient(HttpClientOptions(Timeout: timeout)).Get(at) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e.Kind} {e.Code}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e.Kind} {e.Code}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Calls(int port) {
+    print(Show(port, "/n", 0s))
+    print(Show(port, "/n", -1s))
+    print(Show(port, "/n", 100s))
+    print(Show(port, "/n", 9223372036854775807ns))
+    print(Show(port, "/slow/5200", 10s))
+    print(Show(port, "/r/3", 5s))
+    print(Show(port, "/r/3", 400ms))
+    start = instant.Now
+    print(Show(port, "/slow/1000", 200ms))
+    elapsed = instant.Now - start
+    print(elapsed >= 200ms && elapsed < 900ms)
+}
+
+// a connect the queue of a listener that accepts nothing holds, as `connect-timeout.kz` fills it: the call ends at its time
+void | IoError Queued() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    mut held = List<TcpStream>()
+    mut full = false
+    while !full && held.Count < 1000 {
+        match TcpStream.Connect("127.0.0.1:{listener.Port}", 100ms) {
+            TcpStream s => held.Add(s)
+            IoError e => {
+                full = true
+            }
+        }
+    }
+
+    start = instant.Now
+    print(Show(listener.Port, "/", 300ms))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 4s)
+}
+
+print(HttpClientOptions().Timeout == 100s)
+Against((int port) => Calls(port))
+Queued() else {
+    IoError e => print(e)
+}
