@@ -744,7 +744,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
-  the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
+  the instance, `this`, borrowed from the caller as a parameter is (K7); a read of a property, `b.Count` or `Count` inside its
+  class, the call of its method, whose result is a temporary of its statement, as a call's is (K7); the text of an instance, which
   its `Text()` gives (A5); a class some class derives from (K6), whose reference is two words, the
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
@@ -1785,8 +1786,9 @@ which is the complete one: an `interface` or a `flags` type and a value of one (
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), an interface among its
 bases (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
-other than `pub`, `internal` and `mut` (K18, R13), a method that is `extern` or that has type parameters of its own (K7,
-section 4), each of which leaves the class, every class derived from it and every value of them unread, and of a
+other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type
+parameters of its own (K7, section 4) and a property that is `static`, `virtual`, `override` or `prot`, which section 14
+leaves open (K7), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
 (K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
 (K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
@@ -1799,7 +1801,9 @@ of a class derived from a case, which tests the instance's class at run time (C4
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
 but for one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
-cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
+cycle R9 judges by the lambdas of the program (R9), a method as a value, a property of `void` or
+of a type that lists cases beside its success, which section 14 leaves open (K7, O2, O10), a
+property read after `?.` (K7, N5) or after `&`, where the checker reads a field alone (K7, R10), an assignment into a
 `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
 method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a field that holds a

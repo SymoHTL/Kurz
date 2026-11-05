@@ -1,0 +1,26 @@
+// expect: output
+// | 1
+// | 2
+// | 4
+// | ann: 2
+// rules: K7
+
+class Bag(string Name) {
+    mut List<int> items = [1]
+
+    pub int Count => items.Count
+    pub string Label => "{Name}: {Count}"
+
+    pub void Add(int x) {
+        items.Add(x)
+    }
+
+    pub int Twice() => Count * 2
+}
+
+b = Bag("ann")
+print(b.Count)
+b.Add(5)
+print(b.Count)
+print(b.Twice())
+print(b.Label)
