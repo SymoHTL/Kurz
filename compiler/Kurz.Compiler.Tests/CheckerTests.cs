@@ -2938,6 +2938,29 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void Two_names_over_a_class_with_Count_NameAt_and_ValueAt_are_not_supported()
+    {
+        // C6: two names over an instance of a class whose chain holds a `Count` field or property and the methods `NameAt` and `ValueAt`
+        // of one `int` walk it as an index loop (section 12, the owner, 2026-11-02; proposed: the `int`s), which the build does not make:
+        // `not supported` at the collection, and nothing more of the two names (E1); one name over such a class, and two names over a
+        // class of another shape, stay `type-mismatch` (C6, proposed)
+        const string Members = "    pub string NameAt(int i) => \"n\"\n\n    pub string ValueAt(int i) => \"v\"\n}\n\n";
+        const string Walk = "p = Pairs()\nfor name, value in p {\n    int n = name\n    print(\"{n}={value}\")\n}";
+        const string Text = "two names over a `Pairs`, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)";
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n" + Members + Walk)); // a property
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count = 2\n\n" + Members + Walk)); // a field
+        Assert.Equal([$"12: {Text}"], NotSupported("class Base {\n    pub int Count => 2\n}\n\nclass Pairs : Base {\n" + Members + Walk)); // from the base
+
+        // the controls: two names over a map are read, and the other shapes stay `type-mismatch`
+        Clean("mut m = Map<string, int>()\nm[\"a\"] = 1\nfor key, value in m {\n    print(\"{key}={value}\")\n}");
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n" + Members + "p = Pairs()\nfor item in p {\n    print(item)\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(int i) => \"n\"\n}\n\n" + Walk));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count() => 2\n\n" + Members + Walk)); // `Count` a method
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // `NameAt` of a `string`
+    }
+
+    [Fact]
     public void A_double_or_a_float_key_compares_as_C_s_Equals()
     {
         // M9: a `double` or a `float` key, alone or in a field of a data key, NaN finding NaN and -0.0 finding 0.0 (section 4, the owner,
