@@ -246,15 +246,15 @@ public sealed partial class Emitter
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: false));
 
     /// <summary>
-    /// The helper a lookup past the bound hands the rest of its probe to, with the map's block, <c>%a0</c>, the key, <c>%a1</c>, its
-    /// hash, <c>%a2</c>, the group the probe goes on at, <c>%a3</c>, and the stride it took last, <c>%a4</c>: where <c>MapLongLookup</c>
-    /// says the block rehashes, it rehashes it and finds the key again under its new hash; where it does not, it goes on with the probe
-    /// from that group with no bound. It is out of line and cold, and the lookup returns what it gives, so that the lookup does not call
-    /// itself, keeps neither the test nor a second hash in its body, and has no value its loop needs after a call: the lookup stays
-    /// small enough for its callers to take it in.
+    /// The helper a lookup past the bound hands its probe to, with the map's block, <c>%a0</c>, the key, <c>%a1</c>, and its hash,
+    /// <c>%a2</c>, alone: where <c>MapLongLookup</c> says the block rehashes, it rehashes it and finds the key again under its new hash;
+    /// where it does not, it probes again from the hash's first group with no bound, passing again the groups the lookup passed. It is
+    /// out of line and cold, and the lookup returns what it gives, so that the lookup does not call itself, keeps neither the test nor a
+    /// second hash in its body, and hands the call none of its loop's values: the lookup stays small enough for its callers to take it
+    /// in.
     /// </summary>
     private string FarEntry(MapType type) =>
-        Helper($"far.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64", "i64", "i64"], () => ProbeBody(type, far: true), "noinline", "cold");
+        Helper($"far.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: true), "noinline", "cold");
 
     /// <summary>The body of <see cref="FindEntry"/> or, where <paramref name="far"/> is set, of <see cref="FarEntry"/>.</summary>
     private void ProbeBody(MapType type, bool far)
@@ -281,8 +281,8 @@ public sealed partial class Emitter
         var at = fn.Alloca("i64", "group");
         var step = fn.Alloca("i64", "step");
         var marks = fn.Alloca("i64", "marks");
-        fn.Emit(far ? "store i64 %a3, ptr " + at : $"store i64 {fn.Value($"and i64 {fn.Value($"and i64 %a2, {mask}")}, -8")}, ptr {at}");
-        fn.Emit(far ? "store i64 %a4, ptr " + step : $"store i64 0, ptr {step}");
+        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"and i64 %a2, {mask}")}, -8")}, ptr {at}");
+        fn.Emit($"store i64 0, ptr {step}");
         var group = fn.Label("group");
         var check = fn.Label("marks");
         var mark = fn.Label("mark");
@@ -334,7 +334,7 @@ public sealed partial class Emitter
             var on = fn.Label("onward");
             fn.CondBranch(fn.Value($"icmp eq i64 {stepped}, 520"), bound, on); // 65 groups without a slot of 255: past 512 slots (section 4)
             fn.Block(bound);
-            fn.Return($"ptr {fn.Value($"call ptr {FarEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 %a2, i64 {onward}, i64 {stepped})")}");
+            fn.Return($"ptr {fn.Value($"call ptr {FarEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 %a2)")}");
             fn.Block(on);
         }
 
