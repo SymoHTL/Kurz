@@ -119,6 +119,9 @@ public enum CallKind
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
+    /// <summary><c>Hint.BlackBox(value)</c>, the value itself, which the optimiser cannot see through, as Rust's <c>std::hint::black_box</c> (F18).</summary>
+    BlackBox,
+
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
 
@@ -299,6 +302,9 @@ public sealed class SemanticModel
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
+
+    // K7: a read of a property, `h.Count` or `Count` inside its class, by the call of its method that the read is
+    private readonly Dictionary<Expression, CallExpression> propertyReads = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> monotonicReads = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
@@ -407,6 +413,12 @@ public sealed class SemanticModel
     /// </summary>
     public bool IsChainMember(MemberAccess access, out KurzType member) => chainMembers.TryGetValue(access, out member!);
 
+    /// <summary>
+    /// K7: the call a read of a property is, <c>h.Count</c> or <c>Count</c> inside its class, whose callee is the read itself and which
+    /// takes no arguments; null for any other expression.
+    /// </summary>
+    public CallExpression? PropertyCallOf(Expression read) => propertyReads.TryGetValue(read, out var call) ? call : null;
+
     /// <summary>Whether the member is <c>timestamp.Now</c>, the read of the wall clock (S15).</summary>
     public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
 
@@ -501,6 +513,8 @@ public sealed class SemanticModel
     internal void RecordDataType(TypeDeclaration declaration, DataSymbol symbol) => dataTypes[declaration] = symbol;
 
     internal void RecordChainMember(MemberAccess access, KurzType member) => chainMembers[access] = member;
+
+    internal void RecordPropertyRead(Expression read, CallExpression call) => propertyReads[read] = call;
 
     /// <summary>The symbol of a class of the file (K1).</summary>
     public ClassSymbol ClassOf(TypeDeclaration declaration) => classes.TryGetValue(declaration, out var c) ? c : throw Missing($"class `{declaration.Name}`", declaration.Line);

@@ -43,6 +43,8 @@ public sealed partial class Emitter
         {
             case StringLiteral s:
                 return EmitInterpolation(s);
+            case MemberAccess or NameExpression when Model.PropertyCallOf(e) is { } property:
+                return EmitPropertyRead(property, type); // K7
             case NameExpression n when Model.IsImplicitField(n, out _, out var field) && field is not null:
                 return ImplicitField(n, field, type); // K7
             case ThisExpression t:
@@ -120,6 +122,20 @@ public sealed partial class Emitter
 
         Retain(value, type);
         return Temp(value, type);
+    }
+
+    /// <summary>
+    /// K7: a read of a property, <c>h.Count</c> or <c>Count</c> inside its class, the call of its method, the instance before the dot or
+    /// <c>this</c> borrowed for it as for any method; its result is a temporary of the statement, as a call's is.
+    /// </summary>
+    private string EmitPropertyRead(CallExpression call, KurzType type)
+    {
+        if (Model.CallOf(call).Result is WeakRefType weak)
+        {
+            return Upgrade(Temp(EmitCall(call)!, weak), weak); // R3: a `weak T?` result, read as a strong `T?`
+        }
+
+        return Temp(EmitCall(call) ?? throw new InvalidOperationException($"a `void` property is read at line {call.Line}: the checker reports it"), type);
     }
 
     /// <summary>What an expression the emitter does not lay out is, for its <c>not supported</c>.</summary>
@@ -810,6 +826,16 @@ public sealed partial class Emitter
             return value;
         }
 
+        if (from is ClassType fc && to is ClassType tc)
+        {
+            return Layout.Fat(tc.Symbol) && !Layout.Fat(fc.Symbol) ? Pair(value, Table(fc.Symbol)) : value; // K6: an instance of a derived class with its class's table
+        }
+
+        if (from is WeakRefType fw && to is WeakRefType tw)
+        {
+            return Layout.Fat(tw.Target.Symbol) && !Layout.Fat(fw.Target.Symbol) ? Pair(value, Table(fw.Target.Symbol)) : value; // R3 with K6: the same weak count
+        }
+
         if (to is WeakRefType weak)
         {
             return Weaken(value, from, weak, owned); // R3: a value the place holds, unless the callee borrows it
@@ -971,7 +997,7 @@ public sealed partial class Emitter
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`
-                    var strong = Upgraded(value);
+                    var strong = Upgraded(value, w);
                     var text = TextOf(strong, Types.Read(w), line);
                     Release(strong, Types.Read(w));
                     return text;

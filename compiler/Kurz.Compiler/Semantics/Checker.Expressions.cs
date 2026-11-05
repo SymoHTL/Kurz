@@ -495,6 +495,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (methods.Find(f => f.IsProperty) is { } property)
+            {
+                return ReadImplicitProperty(n, property); // K7: the property of `this`
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -660,6 +665,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
+        {
+            return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
+        }
+
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
     }
 
@@ -1495,7 +1505,7 @@ public sealed partial class Checker
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is ListType && Types.Same(left.Type, right.Type))
-                || (left.Type is ClassType && Types.Same(left.Type, right.Type))
+                || (left.Type is ClassType && right.Type is ClassType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is UnionType && right.Type is UnionType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
@@ -1503,7 +1513,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => HeldEquality(left.Type, [], [], []),
+                ClassType => HeldEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type, [], [], []), // K13: the two as the base, whose derived classes it reads
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1560,7 +1570,9 @@ public sealed partial class Checker
     /// </summary>
     private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
     {
-        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ClassType c => seen.Add(c.Symbol)
+            && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))
+                || classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)).Any(x => ComparesByClause(new ClassType(x), seen))),
         ListType l => ComparesByClause(l.Element, seen),
         UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
         DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
