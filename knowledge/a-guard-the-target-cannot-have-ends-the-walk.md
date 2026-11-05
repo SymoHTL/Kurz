@@ -17,8 +17,8 @@ answered by the test alone, so the walk saw a guard the function lacked, started
 for it, and in that function saw the same guard, still not `true`: it recursed until the compiler's
 own stack overflowed. The right side of `&&` after such a test was compiled as a function with x86's
 `target-features` inside an Arm module. The standard library's SHA-256 has such a run, so every
-program that called it failed to build for Arm. The test of the SIMD search built for Arm found it
-(2026-11-02), before any Arm build ran: no suite runs on an Arm machine.
+program that called it failed to build for Arm. The test of the SIMD search found it while building
+for Arm (2026-11-02); no suite runs on an Arm machine.
 
 Since the fix a run starts a guarded function only where every guard is unknown
 (`guards.All(c => Known(c) is null)`), and a right side whose guards hold one the target cannot
