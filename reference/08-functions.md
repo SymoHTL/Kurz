@@ -54,7 +54,8 @@ print(Sign(3))
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
 is no type of a value: a parameter a function declares, a field or a variable of type `void` is
 `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
-`void` (§5) and so may the result of a function type (F11) *(assumed, §8)*.
+`void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
