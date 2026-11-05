@@ -1,6 +1,6 @@
 ---
 name: a-test-of-saturation-takes-the-largest-value
-description: A sum that saturates at the largest long is tested with the largest value the type holds, since a large value that passes the bound only after the monotonic clock has run long enough passes the test on a machine that started recently, with the saturation taken out; the bound of 106751 days in connect-timeout.kz passes it only after about 23.8 hours, and the mutation stayed green on a machine that had run 19 (pull request 203, 2026-11-01)
+description: A sum that saturates at the largest long is tested with the largest value the type holds, since a large value that passes the bound only after the monotonic clock has run long enough passes the test on a machine that started recently, with the saturation taken out; the bound of 106751 days that connect-timeout.kz first asked for passes it only after about 23.8 hours, and the mutation stayed green on a machine that had run 19 (pull request 203, 2026-11-01)
 metadata:
   type: reference
 ---
@@ -20,8 +20,9 @@ The machine that ran the mutation had run about 19, and every sum fit. On a mach
 day the same case would have overflowed, so the mutation's verdict hung on the time since the boot,
 and a runner of the forge, started for the job, would not have turned it red.
 
-The case now asks for `9223372036854775807ns`, the largest `duration`; the sum passes the largest
-`long` on every machine whose clock has run a nanosecond, and the mutation turned red.
+Pull request 203 was merged with the case asking for `9223372036854775807ns`, the largest `duration`
+(2026-11-02); the sum passes the largest `long` on every machine whose clock has run a nanosecond,
+and the mutation turned red.
 
 ## What to do
 

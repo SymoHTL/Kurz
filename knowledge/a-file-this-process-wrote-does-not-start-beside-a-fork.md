@@ -36,12 +36,12 @@ tests of that day (`main` at 7b398b2) ran two kinds of file:
 So the variants are the only files a child forked by the test host could hold open for writing at
 their start, on the condition the elimination leaves open: that no writer of a build outlives clang.
 None was known on 2026-11-01, in a reading of `TraceTests`, `Clang.cs` and `Processes.cs` at 7b398b2
-and at 0484780.
+and at 0484780 (`main` on 2026-11-01).
 
 Linux refuses to start a file, `execve(2)` with `ETXTBSY`, while any open file description of it is
 open for writing: the probe of 2026-11-01 saw it on Linux 6.8, and the CI runs of item 4 saw a start
-refused so on the runners' kernel, whose version their logs do not give, as the local run of
-2026-10-30 gives none. .NET opens
+refused so on the runners' kernel, whose version their logs do not give; the local run of
+2026-10-30 does not give its kernel's version either. .NET opens
 its files with `O_CLOEXEC`, but a child that another thread forks in that time holds a copy of
 every descriptor of the process, from its fork to its exec. The host closes its own descriptor;
 the child's copy still holds the write.

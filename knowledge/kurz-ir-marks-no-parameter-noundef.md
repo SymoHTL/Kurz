@@ -20,7 +20,7 @@ clang's IR of the same function in C writes on every one: with it, the change sa
 into two adds into the sum. Neither had a probe behind it, and the review of pull request 170 found
 both. The probe and the measurement below refute both.
 
-## The probe, 2026-11-02
+## The probe, 2026-11-02, and the select, 2026-11-03
 
 Clang 23.1.4 at `-O2`, the level `kurz build --release` passes. The IR of `kurz build --release` was
 kept by a script named `clang-23`, first on `PATH`, that copies the `.ll` file it is given and runs the
@@ -53,9 +53,12 @@ real clang; the command has no option that keeps it.
 So the gap came from G's form, and F's or is the faster of these two forms of F. A third form, the
 select OpenSSL's x86-64 assembly writes, `((c ^ d) & b) ^ d`, is faster than the or: 51.76 ms against
 52.14 ms for MD5 of 16 MiB hashed three times, the best of 9, and 51.77 against 52.09 ms in a run of
-the two alone, the best of 15 (issue 157, 2026-11-03, comment 6594121046). In that run each of the two
-ran beside a byte-identical copy of its binary: the or took 52.09 and 52.10 ms, the select 51.77 and
-51.78 ms, a gap of 0.32 ms between the two against 0.01 ms between two copies of one binary. std
+the two forms and no other, the best of 15 (issue 157, 2026-11-03, comment 6594121046). In that run
+each of the two
+ran beside a byte-identical copy of its binary, and the best of the 15 runs of each copy was 52.09
+and 52.10 ms for the or and 51.77 and 51.78 ms for the select: a gap of 0.32 ms between the two forms
+against 0.01 ms between the best runs of two copies of one binary. The measurement gives no spread
+of the 15 runs; a run that keeps the spread, as the rule below asks, gives it. std
 writes F so, and the
 comment on `Md5F` gives the numbers. Of the or, LLVM (clang 23) makes the select in 14 of F's 16
 steps and keeps the or, with a `not`, in the last two (the same comment). Why the other forms cost

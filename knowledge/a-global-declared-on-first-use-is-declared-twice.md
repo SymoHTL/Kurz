@@ -22,7 +22,8 @@ the compiler's "clang did not build the program": `class Outer(Inner? I, int N)`
 any `Inner` was (2026-11-02). The suite held no such program: in each of its programs a temporary
 or a local of the field's class was released first.
 
-Since the fix, `EmitDrain` declares the flag; the emitter calls it once, after the last function,
+Since the fix (pull request 211, 2026-11-02), `EmitDrain` declares the flag; the emitter calls it
+once, after the last function,
 exactly when `released` is not empty. The shape to look for is a global, a type or a constant
 declared at its first use by a test of state that the builder changes only after its body has run:
 a builder nested in that body sees the state from before the change. Declare it where its
