@@ -162,10 +162,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-pace");
-        var free = new TcpListener(IPAddress.Loopback, 0);
-        free.Start();
-        var port = ((IPEndPoint)free.LocalEndpoint).Port;
-        free.Stop();
+        var port = FreePort();
         var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
@@ -233,10 +230,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-coded-file");
-        var free = new TcpListener(IPAddress.Loopback, 0);
-        free.Start();
-        var port = ((IPEndPoint)free.LocalEndpoint).Port;
-        free.Stop();
+        var port = FreePort();
         var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var whole = 0;
@@ -324,10 +318,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-long-reads");
-        var free = new TcpListener(IPAddress.Loopback, 0);
-        free.Start();
-        var port = ((IPEndPoint)free.LocalEndpoint).Port;
-        free.Stop();
+        var port = FreePort();
         var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
@@ -350,6 +341,31 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
+    // the next port a test gives its program, below the ranges a system hands out for port 0 (32768 to 60999 on Linux, 49152 to 65535
+    // on Windows), in a block of this process's own: a port taken with port 0 and freed for the program could be given to a socket of
+    // a test that runs beside it, a program of the corpus binding port 0 among them, before the program binds it, and the client would
+    // then talk to that socket while the program waits in its accept until the test's time ends
+    private static int nextPort = 20000 + Environment.ProcessId % 400 * 25;
+
+    /// <summary>A port of the loopback that no socket holds now and that this process gives out once.</summary>
+    private static int FreePort()
+    {
+        while (true)
+        {
+            var port = Interlocked.Increment(ref nextPort);
+            try
+            {
+                var probe = new TcpListener(IPAddress.Loopback, port);
+                probe.Start();
+                probe.Stop();
+                return port;
+            }
+            catch (SocketException)
+            {
+            }
+        }
+    }
+
     private static TcpClient Connect(int port, Task program)
     {
         while (true)
