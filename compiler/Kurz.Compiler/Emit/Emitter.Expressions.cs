@@ -810,6 +810,16 @@ public sealed partial class Emitter
             return value;
         }
 
+        if (from is ClassType fc && to is ClassType tc)
+        {
+            return Layout.Fat(tc.Symbol) && !Layout.Fat(fc.Symbol) ? Pair(value, Table(fc.Symbol)) : value; // K6: an instance of a derived class with its class's table
+        }
+
+        if (from is WeakRefType fw && to is WeakRefType tw)
+        {
+            return Layout.Fat(tw.Target.Symbol) && !Layout.Fat(fw.Target.Symbol) ? Pair(value, Table(fw.Target.Symbol)) : value; // R3 with K6: the same weak count
+        }
+
         if (to is WeakRefType weak)
         {
             return Weaken(value, from, weak, owned); // R3: a value the place holds, unless the callee borrows it
@@ -971,7 +981,7 @@ public sealed partial class Emitter
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`
-                    var strong = Upgraded(value);
+                    var strong = Upgraded(value, w);
                     var text = TextOf(strong, Types.Read(w), line);
                     Release(strong, Types.Read(w));
                     return text;

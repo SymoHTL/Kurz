@@ -4,7 +4,8 @@
 accepts. A call is one of them, each alone: its words in their places, nothing before, between or after.
 
 `refused(argv, calls, tool)` is True where argv is no call of the table, and then it has printed the
-refusal to stderr, which the harness shows the session on a hook's exit 2 (stdout it does not):
+refusal to stderr, which the harness gives the session as the reason of a hook's exit 2
+(knowledge/a-hook-denies-by-exit-2-or-by-its-json.md):
 `REFUSED, nothing run: <arguments> is not a call of this tool`, or `<option> needs <what>` where
 an option's argument is missing or not accepted, then the usage, which is made from the same table, so
 that it names what is taken and nothing else. The arguments are printed in ASCII, a character outside it
@@ -21,7 +22,8 @@ The route: every tool of ROUTED begins its `__main__` with
 so that nothing in that block reads an argument before the question. Gate: `self-tests` (this module's
 cases "route:", which read each of them). The one argument read before it is the write-time hook's:
 `tools/tree_gate.py` denies a `--hook` call by exit 2 where `kit.py` or this module does not import. A tool outside ROUTED keeps the parser it has (`merge_pr.py`, `pr_gates.py`, `quality_evidence.py`,
-`red_proof.py`, `review/review.py`, `kit.py`): review rule "tools".
+`red_proof.py`, `review/review.py`, `kit.py`), and no gate holds it to the route: no case reads its
+`__main__`, and no rule of the review reads a tool's command line.
 
 Calls: `--self-test` alone runs this module's cases; any other call is refused as above."""
 import contextlib
@@ -142,7 +144,8 @@ def self_test():
                   and understood(["--self-test", "-v"], CALLS) is None and understood([], CALLS) is None, CALLS))
     routed = {p: kit.read(os.path.join(kit.ROOT, p)) for p in ROUTED}
     errors = [e for p, text in routed.items() for e in route_errors(p, text)]
-    cases.append(("route: each tool of ROUTED begins its __main__ by asking calls.refused with its own path and reads no argument before",
+    cases.append(("route: each tool of ROUTED begins its __main__ block by asking calls.refused with its own path; what stands above "
+                  "the block is not read",
                   len(ROUTED) == 7 and not errors, errors))
     gate = '    if calls.refused(sys.argv[1:], CALLS, "tools/t.py"):\n        sys.exit(calls.REFUSED)\n'
     own = 'import sys\nif __name__ == "__main__":\n    if "--self-test" in sys.argv:\n        sys.exit(0)\n' + gate
