@@ -602,8 +602,12 @@ use as syntax, and `extern`, which the boundary with C uses (§2, §13, R16, R17
 `sym`, `label` and `options` *(assumed: as §3 marks them)*; `in` is a core word already. `thread` is
 a word only before `static` in R13's declaration and a name everywhere else (§3, the owner,
 2026-10-21). `const` is a word only before the type of a type parameter that holds a constant (T35) and before
-`assert(` at the start of a statement, where `assert` is a word too (T37), beside the words of an
-`asm`, and both are names everywhere else *(assumed, §4: as `thread` is before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
+`assert(` at the start of a statement, where `assert` is a word too (T37), but not where the `)` that
+closes that `(` is followed by `=>` or `{`, the shape of a function's body, so that
+`const assert(int x) => const(x)` declares a function named `assert` whose type is named `const`
+*(assumed, §4: told apart by the shape that follows, as C# reads a contextual keyword by what follows
+it)*, beside the words of an `asm`, and both are names everywhere else *(assumed, §4: as `thread` is
+before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words too (§3, the owner,
 2026-10-21). `as` is a word of a `use` line alone, after the folder it renames (F10), and a name
 everywhere else *(assumed, §13)*. `internal`, which F9 uses as syntax for a member visible to its
 folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# reserves it)*.

@@ -573,7 +573,8 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.Name)
         {
-            if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen)
+            if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen
+                && !BodyFollowsTheParentheses())
             {
                 return ParseConstAssert(); // T37: a statement of its own; `const` and `assert` are names everywhere else (L18)
             }
@@ -770,6 +771,37 @@ public sealed class Parser
         suppressNewlines--;
         Expect(TokenKind.RightParen, "`)`");
         return new AsmStatement(keyword.Line, templates, operands);
+    }
+
+    /// <summary>
+    /// L18 with T37: whether the first <c>(</c> from the cursor closes on a <c>)</c> that <c>=&gt;</c> or <c>{</c> follows, the
+    /// shape of a function's parameters before its body, so that <c>const assert(int x) =&gt; const(x)</c> declares a function
+    /// named <c>assert</c> whose type is named <c>const</c>, as it did before <c>const assert</c> was a statement, and every other
+    /// <c>const assert(</c> is the statement *(assumed, §4: told apart by the shape that follows)*; an <c>=&gt;</c> inside the
+    /// parentheses, of a lambda in the condition or of a parameter's function type, decides nothing.
+    /// </summary>
+    private bool BodyFollowsTheParentheses()
+    {
+        var depth = 0;
+        for (var i = index; i < tokens.Count && tokens[i].Kind != TokenKind.EndOfFile; i++)
+        {
+            if (tokens[i].Kind == TokenKind.LeftParen)
+            {
+                depth++;
+            }
+            else if (tokens[i].Kind == TokenKind.RightParen && --depth == 0)
+            {
+                var next = i + 1;
+                while (suppressNewlines > 0 && next < tokens.Count && tokens[next].Kind == TokenKind.Newline)
+                {
+                    next++;
+                }
+
+                return next < tokens.Count && tokens[next].Kind is TokenKind.Arrow or TokenKind.LeftBrace;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
