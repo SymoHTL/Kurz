@@ -255,8 +255,9 @@ counts its bytes against `MaxRequestBodySize` as it is read, as Kestrel counts t
 giving `HttpError(TooLarge, "request body over limit")` (§12) *(assumed, §12: that reading)*. A read
 of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
 as a handler's read does, and the connection closes; the `408` is sent only while no response has
-begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the error
-`request timed out`, read from Q12 (b) of 2026-11-04 and from Q8)*, and after a `408` the response
+begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error `request timed out`
+being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment 6657251329, which replaced
+the `IoError` with `IoKind.TimedOut` of 2026-11-03), and after a `408` the response
 the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
