@@ -1342,7 +1342,10 @@ fields gives its value)* A generic function that reads its type, and one that pa
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
-does not read that arm)*
+does not read that arm; a build stopped at the bound of 64 copies on a chain of copies (the record,
+section 14) reports that `not supported` and the errors of the copies made before it, while a copy
+of the same outer call that a chain asks for after the bound is not made, so that its errors show
+only in a build where the chain is ended)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
