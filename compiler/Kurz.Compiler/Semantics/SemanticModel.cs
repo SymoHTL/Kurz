@@ -119,6 +119,9 @@ public enum CallKind
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
+    /// <summary><c>Hint.BlackBox(value)</c>, the value itself, which the optimiser cannot see through, as Rust's <c>std::hint::black_box</c> (F18).</summary>
+    BlackBox,
+
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
 

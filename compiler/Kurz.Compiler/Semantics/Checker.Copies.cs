@@ -227,8 +227,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// T34: the subject <c>T.Kind</c> of a type parameter, as the text of a generic function writes it: a call in one of its arms is read in
-    /// the copies alone, inside a loop over <c>T.Fields</c> as outside it, since each copy takes the one arm of its kind (the owner,
-    /// 2026-11-03, comment 6603481343 on issue 156).
+    /// the copies alone, where the <c>match</c> lies inside a loop over <c>T.Fields</c> as outside it, since each copy takes the one arm of
+    /// its kind (the owner, 2026-11-03, comment 6603481343 on issue 156); a loop over <c>T.Fields</c> opened inside the arm is read again.
     /// </summary>
     private bool KindOfTypeParameter(Expression subject) =>
         Unwrap(subject) is MemberAccess { Target: NameExpression n, Member: "Kind", Conditional: false } && TypeParameter(n.Name) is not null;

@@ -3,7 +3,7 @@
 // | false
 // | read
 // | 1
-// rules: K7
+// rules: K7, K4
 
 class Point(int X) {
     pub int Loud => Say()
