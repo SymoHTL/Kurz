@@ -38,7 +38,7 @@ asked for this entry.
 - A compiler mutation is red only where the named test is among the failed tests of a run that
   printed its summary (`Failed!  - Failed: <n>`). A non-zero exit with no summary, or with an
   `error CS` or `error CA` line before it, is a build error: the mutation is NOT RUN, never red.
-- Write a mutation that removes a decision in a form the build takes: a condition the analyzer
+- Write a mutation that removes a decision in a form the build takes: a condition the C# compiler
   cannot fold (`s.Line < 0`), not a constant; a changed value, not deleted code that leaves a
   parameter, a variable or `this` unused.
 - Rebuild after the file is restored, so that the next mutation does not start from a failed build.
@@ -47,7 +47,7 @@ asked for this entry.
 
 - A tool's mutation: `self-tests`. `tools/red_proof.py` counts a recorded mutation as red only
   where the self-test prints `FAIL` with the named case; a mutation that keeps the tool from
-  starting prints no such line and is refused as one that turns another case red is: "the mutation
-  no longer turns that case red".
+  starting prints no such line and is refused with the same words as one that turns another case
+  red: "the mutation no longer turns that case red".
 - A compiler mutation: nothing in this repository. Its runs are not recorded here, and reading a
-  run as red is a `judgment step`, as the description of the pull request that claims it.
+  run as red is a `judgment step`, as is the description of the pull request that claims it.

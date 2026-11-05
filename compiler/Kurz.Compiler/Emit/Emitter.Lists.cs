@@ -203,9 +203,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType)
+        if (type is ClassType retained)
         {
-            fn.Emit($"call void {RetainInstance()}(ptr {value})");
+            fn.Emit($"call void {RetainInstance()}(ptr {Address(value, retained.Symbol)})");
             return;
         }
 
@@ -215,9 +215,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is WeakRefType)
+        if (type is WeakRefType weak)
         {
-            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            fn.Emit($"call void {RetainWeak()}(ptr {Address(value, weak.Target.Symbol)})"); // R3
             return;
         }
 
@@ -256,9 +256,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType c)
+        if (type is ClassType c && Layout.Fat(c.Symbol))
         {
-            fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            ReleaseThroughTable(value); // K6: the release of the instance's class
             return;
         }
 
@@ -268,9 +268,21 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is WeakRefType w)
+        if (type is ClassType thin)
         {
-            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
+            fn.Emit($"call void {ReleaseInstance(thin.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w && Layout.Fat(w.Target.Symbol))
+        {
+            fn.Emit($"call void {ReleaseWeakThroughTable()}(%kz.obj {value})"); // R3 with K6
+            return;
+        }
+
+        if (type is WeakRefType w2)
+        {
+            fn.Emit($"call void {ReleaseWeak(w2.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -1136,7 +1148,9 @@ public sealed partial class Emitter
     /// that makes the pair smaller (<see cref="PairLayout"/>); the pairs sorted by their keys, and by their positions where two keys are equal,
     /// so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
-    /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
+    /// the keys let go of. The place is taken once, before the keys: where a key gives a field on the way to the list another instance,
+    /// the field written is the one of the instance read before them, which that read holds to the end of its statement (X8, assumed).
+    /// An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
     /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
     /// items of the list as it was read (X8, assumed): a lambda changes no variable it captures (F11), but a key can change the list through an
     /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
@@ -3362,7 +3376,7 @@ public sealed partial class Emitter
             // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
             InScope(() =>
             {
-                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                fn.Emit($"store {Ir(Types.Read(weak))} {Upgraded(item, weak)}, ptr {slot}");
                 Declare(slot, Types.Read(weak));
                 EmitBlock(f.Body);
             });

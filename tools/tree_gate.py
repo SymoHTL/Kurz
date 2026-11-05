@@ -15,10 +15,15 @@ Three callers, one definition:
                                                                                    (.githooks/pre-push)
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
 `--self-test` plants one case per rule and per pattern, plus precision cases that must stay clean.
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is scanned, so that a mistyped `--hook` denies the call (tools/calls.py). That holds where
+tools/kit.py and tools/calls.py import: where one does not, a mistyped `--hook` ends the script in
+1, which the command in .claude/settings.json makes 2.
 In --hook mode the script blocks a call by exit 2 and prints no JSON decision, the other way the
 harness accepts (knowledge/a-hook-denies-by-exit-2-or-by-its-json.md), so every failure path there
-ends in exit 2, a
-tools/kit.py that does not import included. The command in .claude/settings.json turns every
+ends in exit 2: a tools/kit.py or tools/calls.py that does not import, and an exception nothing
+caught, `calls.refused`'s at the top of `__main__` among them, which `denied` ends in exit 2 in
+place of Python's 1. The command in .claude/settings.json turns every
 other way this script can end into exit 2 as well, and falls back to python3 where there is no
 `py` launcher; the self-test runs that command. What the hook cannot hold: a write made through
 a shell command, and a hook the harness cut off at its timeout (HAZARD #4)."""
@@ -35,11 +40,26 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import kit  # noqa: E402
-except Exception:  # only exit 2 blocks a hook call: a kit that is broken must not let every write through
+    import calls  # noqa: E402
+except Exception:  # only exit 2 blocks a hook call: a kit or calls that is broken must not let every write through
     if "--hook" not in sys.argv:
         raise
-    print("tree gate could not start: tools/kit.py does not import", file=sys.stderr)
+    print("tree gate could not start: tools/kit.py or tools/calls.py does not import", file=sys.stderr)
     sys.exit(2)
+
+
+def denied(kind, value, trace):
+    """The end of a hook call that an exception nobody caught ended, `calls.refused`'s among them: its traceback,
+    and exit 2, which denies the call, where Python ends in 1, which lets it through."""
+    sys.__excepthook__(kind, value, trace)
+    print("tree gate could not run: an exception ended the check, so the call is denied", file=sys.stderr)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(2)
+
+
+if "--hook" in sys.argv:
+    sys.excepthook = denied
 
 # Every other rule is satisfied by finding nothing; a scan of the wrong directory prints "0 errors".
 FLOOR = 5
@@ -491,7 +511,7 @@ def cases_in(base):
         # its git calls run in kit.ROOT; a clean commit of its own, which no ref of the remote holds
         fresh = git("commit-tree", f"{clean}^{{tree}}", "-p", clean, "-m", "clean too")
         os.makedirs(os.path.join(repo, "tools"), exist_ok=True)
-        for name in ("tree_gate.py", "kit.py"):
+        for name in ("tree_gate.py", "kit.py", "calls.py"):
             shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), os.path.join(repo, "tools", name))
 
         def pre_push(stdin_text):
@@ -558,14 +578,38 @@ def cases_in(base):
     here = os.path.dirname(os.path.abspath(__file__))
     shutil.copy(os.path.abspath(__file__), os.path.join(scratch, "tools", "tree_gate.py"))
 
-    def hook_exit(kit_text):
+    def hook_exit(kit_text, calls_text=None, whole=False):
         with open(os.path.join(scratch, "tools", "kit.py"), "w", encoding="utf-8") as f:
             f.write(kit_text)
-        return subprocess.run([sys.executable, os.path.join(scratch, "tools", "tree_gate.py"), "--hook"], input=call(outside),
-                              capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+        with open(os.path.join(scratch, "tools", "calls.py"), "w", encoding="utf-8") as f:
+            f.write(kit.read(os.path.join(here, "calls.py")) if calls_text is None else calls_text)
+        run = subprocess.run([sys.executable, os.path.join(scratch, "tools", "tree_gate.py"), "--hook"], input=call(outside),
+                             capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        return run if whole else run.returncode
 
     exits = got(lambda: (hook_exit(kit.read(os.path.join(here, "kit.py"))), hook_exit("def (:\n")))
     cases.append(("hook: a kit that does not import ends in exit 2, where the same call passes with a kit that does", exits == (0, 2), exits))
+    broken = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), "def (:\n"))
+    cases.append(("hook: a calls.py that does not import ends in exit 2 too, as the kit's case above passes with one that does",
+                  broken == 2 and isinstance(exits, tuple) and exits[0] == 0, (broken, exits)))
+    # a calls.py that imports and whose refused raises, at the top of __main__, outside the guard of the imports
+    raising = kit.read(os.path.join(here, "calls.py")) + "\n\ndef refused(*args, **kwargs):\n    raise RuntimeError(\"refused raised\")\n"
+    raised = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), raising, whole=True))
+    said = getattr(raised, "stderr", "")
+    cases.append(("hook: a calls.refused that raises ends in exit 2, where Python ends in 1, with its traceback and then the line that "
+                  "the call is denied on stderr, as the kit's case above passes with the calls.py whose refused does not raise",
+                  getattr(raised, "returncode", None) == 2 and isinstance(exits, tuple) and exits[0] == 0
+                  and 0 <= said.find("RuntimeError: refused raised") < said.find(
+                      "tree gate could not run: an exception ended the check, so the call is denied"),
+                  (getattr(raised, "returncode", raised), said[-300:], exits)))
+    # a mistyped --hook in the hook's command: refused with exit 2, which denies the call, where it used to scan the
+    # working tree and let the write through; the kit's case above is the positive control, the same call let through
+    typo = got(lambda: subprocess.run([sys.executable, os.path.join(kit.ROOT, "tools", "tree_gate.py"), "--hok"], input=call(outside),
+                                      capture_output=True, text=True, timeout=300, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}))
+    cases.append(("hook: a mistyped --hook is refused with exit 2, which denies the call, and says why on stderr, which the "
+                  "session sees",
+                  getattr(typo, "returncode", None) == 2 and "REFUSED, nothing run: --hok is not a call of this tool" in typo.stderr,
+                  (getattr(typo, "stderr", typo), getattr(typo, "stdout", ""))))
 
     # The command the session settings hand to the harness, run the way the harness runs it: by a
     # shell. Only exit 2 blocks a write, so the command has to end in 0 or in 2 whatever became of
@@ -594,6 +638,13 @@ def cases_in(base):
     ]:
         code = got(lambda: command_exit(*how))
         cases.append((name, code == want, f"exit {code!r}, wanted {want}"))
+    good = [[], ["--hook"], ["--pre-push", "origin"], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--hok"], ["tools"], ["--pre-push"], ["--hook", "--hook"], ["--hook", "--pre-push", "origin"],
+           ["--pre-push", "origin", "extra"]]
+    cases.append(("call: no argument, --hook, --pre-push REMOTE and --self-test are its calls, each alone; --help, -h, a "
+                  "mistyped --hook, a positional argument, --pre-push without its remote and two calls together are not",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
@@ -627,5 +678,12 @@ def main(argv):
     return 1 if errors else 0
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"scan": (), "hook": ("--hook",), "pre-push": ("--pre-push", calls.Value("REMOTE", "the remote the push goes to")),
+         "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/tree_gate.py"):
+        sys.exit(calls.REFUSED)
     sys.exit(main(sys.argv[1:]))

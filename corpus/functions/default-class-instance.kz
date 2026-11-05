@@ -1,0 +1,8 @@
+// expect: error default-not-constant at 6
+// rules: F12
+
+class Counter(int Count)
+
+int Read(Counter c = Counter(1)) => c.Count
+
+print(Read())
