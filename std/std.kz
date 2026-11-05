@@ -7810,13 +7810,13 @@ data HttpLines(HttpHeaders Headers, int Host, int Hosts, int Length, int Lengths
 // `parse_headers_iter`, a table of tokens for the name and eight bytes at a time for the value; the faults, their words and their
 // order, and where a line ends are this parser's own, as they were before. Each fault is named where the line first shows it: a
 // line that starts with a space or a tab is folded; the name's bytes are tokens up to the colon, a space or a tab before it its
-// own fault, and a CR before it a line
-// with none; the spaces and tabs after the colon are skipped; and the value's bytes up to the CR are read eight at a time while
-// eight are left before `end`, as httparse's `match_header_value_char_8_swar` (`src/simd/swar.rs`) tests them, a byte below
-// 0x20 or 0x7F ending the words, a tab among them taken and the words going on, and any other a control byte; the spaces and
-// tabs before the CR are dropped. Each name, and each value of ASCII alone, is made a string once from its bytes; a value with
-// a byte from 0x80 up is checked as `string.FromUtf8` checks it. The line ends at its first CR, and the next starts two bytes
-// after it.
+// own fault, a CR LF before it a line
+// with none, and a CR alone no token; the spaces and tabs after the colon are skipped; and the value's bytes up to the CR LF are
+// read eight at a time while eight are left before `end`, as httparse's `match_header_value_char_8_swar` (`src/simd/swar.rs`)
+// tests them, a byte below 0x20 or 0x7F ending the words, a tab among them taken and the words going on, a CR before a LF the
+// value's end, and any other, a CR alone among them, a control byte; the spaces and tabs before the CR LF are dropped. Each name,
+// and each value of ASCII alone, is made a string once from its bytes; a value with a byte from 0x80 up is checked as
+// `string.FromUtf8` checks it. A line ends at its first CR LF, as RFC 9112, section 2.2, ends one, and the next starts after it.
 HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
     headers = HttpHeaders()
     mut count = 0
@@ -7838,7 +7838,7 @@ HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
 
             while p[at] != 58 {
                 c = p[at]
-                if c == 13 {
+                if c == 13 && p[at + 1] == 10 {
                     return "header without a colon"
                 }
 
@@ -7883,7 +7883,7 @@ HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
                 }
 
                 c = p[at]
-                if c == 13 {
+                if c == 13 && p[at + 1] == 10 {
                     break
                 }
 

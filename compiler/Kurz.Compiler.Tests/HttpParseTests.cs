@@ -114,9 +114,10 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
     [Fact]
     public void Every_byte_of_a_name_and_of_a_value_is_read_as_before_by_the_server_and_by_the_client()
     {
-        // the bytes 10 and 13 end a line, which the reader finds before the parse; every other byte stands in the name, and at each
-        // place of a value of 20 bytes, and last in a short value on a line before another, of the server's head and of the client's
-        var bytes = Enumerable.Range(0, 256).Where(b => b is not 10 and not 13).ToList();
+        // the byte 10 ends a line, which the reader finds before the parse; every other byte, a CR alone among them, stands in the
+        // name, and at each place of a value of 20 bytes, and last in a short value on a line before another, of the server's head
+        // and of the client's
+        var bytes = Enumerable.Range(0, 256).Where(b => b is not 10).ToList();
         var program = $$"""
             Bytes With(string before, int value, string after) {
                 mut b = before.Bytes
@@ -127,7 +128,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
 
             void Sweep(string before, string after, bool response) {
                 for v in 0..<256 {
-                    if v != 10 && v != 13 {
+                    if v != 10 {
                         if response {
                             print(HttpRequest.ResponseOf(With(before, v, after)))
                         } else {
@@ -198,6 +199,11 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
             (R + "Host: h\r\n: v\r\n\r\n", "400 malformed request: bad header name"),
             (R + "Host: h\r\n X: v\r\n\r\n", "400 malformed request: folded header"),
             (R + "Host: h\r\n\tX: v\r\n\r\n", "400 malformed request: folded header"),
+            // a CR alone is a byte of its line: in a value a control byte, before the value's CR LF too, and in a name no token
+            (R + "Host: h\r\nX: a\rb: c\r\n\r\n", "400 malformed request: control byte in a header"),
+            (R + "Host: h\r\nX: a\rbc: d\r\n\r\n", "400 malformed request: control byte in a header"),
+            (R + "Host: h\r\nX: a\r\r\n\r\n", "400 malformed request: control byte in a header"),
+            (R + "Host: h\r\nX\r: v\r\n\r\n", "400 malformed request: bad header name"),
             (R + "Host: h\r\nX: \t a b \t\r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X=a b"),
             (R + "Host: h\r\nX:\r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X="),
             (R + "Host: h\r\nX: \t \r\n\r\n", "ok GET|/||1|0|false|false|Host=h|X="),
