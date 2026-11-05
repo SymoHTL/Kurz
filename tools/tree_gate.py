@@ -16,11 +16,14 @@ Three callers, one definition:
   --hook       one Write/Edit call of an agent session, path rule only              (.claude/settings.json)
 `--self-test` plants one case per rule and per pattern, plus precision cases that must stay clean.
 Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
-anything is scanned, so that a mistyped `--hook` denies the call (tools/calls.py).
+anything is scanned, so that a mistyped `--hook` denies the call (tools/calls.py). That holds where
+tools/kit.py and tools/calls.py import: where one does not, a mistyped `--hook` ends the script in
+1, which the command in .claude/settings.json makes 2.
 In --hook mode the script blocks a call by exit 2 and prints no JSON decision, the other way the
 harness accepts (knowledge/a-hook-denies-by-exit-2-or-by-its-json.md), so every failure path there
-ends in exit 2, a
-tools/kit.py that does not import included. The command in .claude/settings.json turns every
+ends in exit 2: a tools/kit.py or tools/calls.py that does not import, and an exception nothing
+caught, `calls.refused`'s at the top of `__main__` among them, which `denied` ends in exit 2 in
+place of Python's 1. The command in .claude/settings.json turns every
 other way this script can end into exit 2 as well, and falls back to python3 where there is no
 `py` launcher; the self-test runs that command. What the hook cannot hold: a write made through
 a shell command, and a hook the harness cut off at its timeout (HAZARD #4)."""
@@ -43,6 +46,20 @@ except Exception:  # only exit 2 blocks a hook call: a kit or calls that is brok
         raise
     print("tree gate could not start: tools/kit.py or tools/calls.py does not import", file=sys.stderr)
     sys.exit(2)
+
+
+def denied(kind, value, trace):
+    """The end of a hook call that an exception nobody caught ended, `calls.refused`'s among them: its traceback,
+    and exit 2, which denies the call, where Python ends in 1, which lets it through."""
+    sys.__excepthook__(kind, value, trace)
+    print("tree gate could not run: an exception ended the check, so the call is denied", file=sys.stderr)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(2)
+
+
+if "--hook" in sys.argv:
+    sys.excepthook = denied
 
 # Every other rule is satisfied by finding nothing; a scan of the wrong directory prints "0 errors".
 FLOOR = 5
@@ -574,14 +591,19 @@ def cases_in(base):
     broken = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), "def (:\n"))
     cases.append(("hook: a calls.py that does not import ends in exit 2 too, as the kit's case above passes with one that does",
                   broken == 2 and isinstance(exits, tuple) and exits[0] == 0, (broken, exits)))
+    # a calls.py that imports and whose refused raises, at the top of __main__, outside the guard of the imports
+    raising = kit.read(os.path.join(here, "calls.py")) + "\n\ndef refused(*args, **kwargs):\n    raise RuntimeError(\"refused raised\")\n"
+    raised = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), raising))
+    cases.append(("hook: a calls.refused that raises ends in exit 2, where Python ends in 1, as the kit's case above passes with the "
+                  "calls.py whose refused does not raise", raised == 2 and isinstance(exits, tuple) and exits[0] == 0, (raised, exits)))
     # a mistyped --hook in the hook's command: refused with exit 2, which denies the call, where it used to scan the
     # working tree and let the write through; the kit's case above is the positive control, the same call let through
     typo = got(lambda: subprocess.run([sys.executable, os.path.join(kit.ROOT, "tools", "tree_gate.py"), "--hok"], input=call(outside),
                                       capture_output=True, text=True, timeout=300, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}))
-    cases.append(("hook: a mistyped --hook is refused with exit 2, which denies the call, says why on stderr, which the session "
-                  "sees, and nothing is scanned",
-                  getattr(typo, "returncode", None) == 2 and "REFUSED, nothing run: --hok is not a call of this tool" in typo.stderr
-                  and "tree gate:" not in typo.stdout, (getattr(typo, "stderr", typo), getattr(typo, "stdout", ""))))
+    cases.append(("hook: a mistyped --hook is refused with exit 2, which denies the call, and says why on stderr, which the "
+                  "session sees",
+                  getattr(typo, "returncode", None) == 2 and "REFUSED, nothing run: --hok is not a call of this tool" in typo.stderr,
+                  (getattr(typo, "stderr", typo), getattr(typo, "stdout", ""))))
 
     # The command the session settings hand to the harness, run the way the harness runs it: by a
     # shell. Only exit 2 blocks a write, so the command has to end in 0 or in 2 whatever became of

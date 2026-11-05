@@ -1124,7 +1124,8 @@ def self_test():
                   type(out) is tuple and any("Blast radius" in e for e in out[0]) and out[1] == "1 files", repr(out)))
     out = got(lambda: run_gate("spelling", "o/n", 1, lambda path: pr, listed([commit], [changed])))
     cases.append(("a gate this tool does not have is refused", type(out) is kit.Refused and "unknown gate" in str(out), repr(out)))
-    cases.append(("the refusal of a gate this tool does not have names every gate and command it has, cap among them",
+    cases.append(("the refusal of a gate this tool does not have ends in the fixed list of its gates and commands, cap among them; "
+                  "the list is written out, not read from run_gate",
                   type(out) is kit.Refused and str(out).endswith("title, breadth, findings, resolve or cap"), repr(out)))
     numbers = (got(lambda: pr_number(["title", "--pr", "7"], {})), got(lambda: pr_number(["title"], {"PR_NUMBER": "9"})))
     cases.append(("number: --pr and PR_NUMBER are read", numbers == (7, 9), repr(numbers)))
