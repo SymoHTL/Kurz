@@ -303,8 +303,11 @@ flowchart TD
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
         reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
         in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
+        A --plan without --passes reads the state the CI account stored, as the run in CI does, with --passes the state of its own login,
+        as a run off the pipeline does, and says NOT CHECKED, exit 1, never cap, where that state's key is not the checkout's
+        and the checkout's reviewer is not the default branch's (issue 300).
         Red: self-tests (the count, the label before the first pass, the label taken off at a limit before any paid pass and its
-        refusal, the end and its status, the run that only replays).
+        refusal, the end and its status, the run that only replays, whose state a plan reads and its NOT CHECKED).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end
