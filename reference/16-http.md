@@ -242,8 +242,8 @@ read or the drain closed the connection (below) (§12, the owner, 2026-11-05, is
 6657251688, Q5, and comment 6666386552, Q7). The response, the `408` and the close stay the
 server's, on the write half, and a read of the body that timed out is reported back to the server
 at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). A body's first
-read, in any actor, signals the server through the halves' pair of types, and the server writes
-`100 Continue` on the write half for a request that expects it while no response has begun, while a
+read, in any actor, signals the server through the halves' pair of types, and `100 Continue` is
+written on the server's write half for a request that expects it while no response has begun, while a
 handler that returns with the body unread by every actor keeps the close of a body unread at its
 return (§12, the owner, 2026-11-05, issue 156, comment 6668914650, Q10). The write is made by
 `std/`'s code of that pair at the first read, in the actor that reads, under its flag of whether a
@@ -286,7 +286,10 @@ so that the body's next read gives `request timed out` and its drop drains nothi
 *(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
 runs, the server times nothing: it times the grace once the call has returned, and a read that
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
-2026-11-05, issue 156, comment 6669908509). The time between reads counts in the body's rate as the time a read waits does, and a
+2026-11-05, issue 156, comment 6669908509). The grace runs from the body's last read and does not
+start again when the call returns, and a body that no read has reached counts it from that return
+(§12) *(assumed, §12: where the grace starts, and that it does not start again)*. The time between
+reads counts in the body's rate as the time a read waits does, and a
 time past the grace since the last read ends the body at once; a body that the handler reads
 itself counts only the time a read waits, since Q8 was asked of a moved body (§12) *(assumed, §12:
 those readings)*. That a moved body's read under the rate ends the body and closes the connection
