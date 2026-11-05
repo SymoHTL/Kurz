@@ -495,7 +495,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if (methods.Find(f => f.IsProperty) is { } property)
+            if (ImplicitPropertyOf(n.Name) is { } property)
             {
                 return ReadImplicitProperty(n, property); // K7: the property of `this`
             }

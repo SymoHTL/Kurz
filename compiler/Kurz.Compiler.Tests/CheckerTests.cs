@@ -4106,6 +4106,9 @@ public sealed class CheckerTests
 
         // in a field's default it is a member of the instance, `unknown-name` as a method of the instance is there (C#'s CS0236)
         Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C {\n    pub int One => 1\n    int two = One + 1\n\n    pub int Two() => two\n}\n\nprint(C().Two())\n"));
+
+        // and so at a call of the value it gives
+        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C {\n    pub (int) => int Adder => (int x) => x + 1\n    int two = Adder(1)\n\n    pub int Two() => two\n}\n\nprint(C().Two())\n"));
     }
 
     [Fact]
@@ -4237,6 +4240,41 @@ public sealed class CheckerTests
         Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n");
         Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count() => 2\n}\n\nprint(D(1, 2).Count())\n");
         Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Count) : B\n\nprint(D(1, 2).Count)\n");
+    }
+
+    [Fact]
+    public void A_field_of_the_class_stands_before_a_property_of_a_base_it_does_not_see_at_a_call()
+    {
+        // K7: a property of a base the class does not see stands behind the class's field of its name (F9), at a call by the name alone
+        // and at a call through an instance as at a read: the call is the field's, whose `int` is no function (F11)
+        const string Base = "class B(int X) {\n    int Count => X\n}\n\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors(Base + "class D(int Count) : B {\n    pub int Run() => Count()\n}\n\nprint(D(1, 2).Run())\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(Base + "class D(int Count) : B\n\nprint(D(1, 2).Count())\n"));
+
+        // the positive control: where no field has the name, the call by the name alone is the base's property's, which the class does
+        // not see
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors(Base + "class D(int Y) : B {\n    pub int Run() => Count()\n}\n\nprint(D(1, 2).Run())\n"));
+    }
+
+    [Theory]
+    [InlineData("    pub int Run() => Count(3)\n", null)]
+    [InlineData("    pub int Run() => Count + 1\n", "12: not supported")]
+    [InlineData("    pub void Run() {\n        Count = 1\n    }\n", "13: error redeclared")]
+    [InlineData("    pub void Run() {\n        Bump(mut Count)\n    }\n", "13: not supported")]
+    [InlineData("    pub void Run() {\n        Count.Add(1)\n    }\n", "13: not supported")]
+    public void A_method_of_the_class_stands_before_a_property_of_a_base_it_does_not_see(string use, string? expected)
+    {
+        // K7: a property of a base the class does not see stands behind the class's own method of its name (F9): the name alone is the
+        // method's at a call, a read, an assignment, after `mut` and as the receiver of a change, as in a class with no such base
+        const string Program = "void Bump(mut int n) {\n    n = n + 1\n}\n\nclass B(int X) {\n    int Count => X\n}\n\n";
+        var body = "    pub int Count(int y) => y + Y\n\n" + use + "}\n\nprint(1)\n";
+        static List<string> Said(string program) => Check(program).Diagnostics.Sorted.Select(d => d.ToString()).ToList();
+        var said = Said(Program + "class D(int Y) : B {\n" + body);
+        string[] heads = expected is null ? [] : [expected];
+        Assert.Equal(heads, said.Select(s => s[..s.IndexOf(':', s.IndexOf(':') + 1)]));
+
+        // the positive control: the same class with no base, whose method the name alone stands for, says the same, word for word
+        Assert.Equal(Said(Program + "class D(int Y) {\n" + body), said);
     }
 
     [Fact]
