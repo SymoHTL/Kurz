@@ -316,6 +316,8 @@ public sealed partial class Checker
             ResolveClass(symbol); // K1
         }
 
+        RefuseChainMembers(); // K6, K7, K18: once every base is known
+
         CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
@@ -344,7 +346,7 @@ public sealed partial class Checker
             }
             else if (ReadsFields(f))
             {
-                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text has such a loop
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
         }
 
@@ -1462,8 +1464,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
-    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
-    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default (D11), which
+    /// <c>CheckDefaults</c> holds to a constant where the field is declared, so that this walk reads no field's default:
+    /// <c>data H(List&lt;int&gt; Xs = [1])</c> is <c>default-not-constant</c> at the field, and <c>H()</c> is a constant. The emitter
+    /// makes it as it makes any construction, from those constants, at each call that leaves the argument out.
     /// </summary>
     private bool IsConstantData(Expression value) =>
         value is CallExpression c
@@ -1602,7 +1606,9 @@ public sealed partial class Checker
 
             if (!f.IsLambda || f.Outer is null)
             {
-                return statics.TryGetValue(name, out var state) ? (state, false) : (null, false); // R13: state outside a function, which every function reaches
+                // R13: state outside a function, which every function reaches; inside its class a member of the name hides it (K7, K18),
+                // as a method hides a top-level function of its name there (section 4)
+                return !IsMemberName(name) && statics.TryGetValue(name, out var state) ? (state, false) : (null, false);
             }
 
             captured = true;
@@ -1618,13 +1624,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
-    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4), and
+    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), and <c>Hint</c> (F18).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
-        || name is "X86" or "Arm" or "Vector128" or "Vector256";
+        || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
 
     /// <summary>
     /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
@@ -1678,7 +1684,7 @@ public sealed partial class Checker
             data HexError(HexKind Kind, int At)
             enum TypeKind {
                 SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
-                LongDuration, LongTimestamp, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
+                LongDuration, LongTimestamp, Instant, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
             }
             """));
 
@@ -2115,6 +2121,13 @@ public sealed partial class Checker
         if (variable is null && ImplicitField(a.Name) is { } implicitField)
         {
             AssignImplicitField(a, implicitField); // K7: the field of `this`
+            return;
+        }
+
+        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        {
+            AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
+            CheckExpression(a.Value, Untyped(a.Value));
             return;
         }
 

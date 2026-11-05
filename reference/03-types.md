@@ -755,6 +755,78 @@ duration Negate(duration d) => -d
 print(Negate(-9223372036854775808ns)) // one constant: the parameter's type takes the literal with its sign (L17)
 ```
 
+### T36 (decided, §12) `instant`, a reading of the monotonic clock
+
+`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), a type
+of its own like the time types of T13 and a core word (L19) (§12, the owner, 2026-11-04, issue 110,
+comment 6643368937, the monotonic clock, Q1 (a)). `b - a` of two readings is a `duration`, negative
+where `a` is the later (§12, the same answer, Q2 (a)). A reading plus or less a `duration` is an
+`instant`, and `+` and `-` raise `overflow` (E3) where the result leaves the range, in every build,
+as T31 says of the other time types, so that a bound is checked by what has passed,
+`instant.Now - start >= limit`, and not by the sum `start + limit` (§12, the same answer, Q3 (a)).
+*(assumed, §12: the defaults of that round, not objected to: a reading holds 64 bits of
+nanoseconds, signed, and has no wide variant; `<`, `<=`, `>`, `>=`, `==` and `!=` compare two
+readings, inside a `data` value and as a map's key too; and a reading converts to no `timestamp`
+and no integer, and from neither.)* So a reading where an integer or a `timestamp` is required, two
+readings added, a reading beside a `timestamp` or a `longduration`, and the unary `-` of a reading
+are `type-mismatch`. A duration plus a reading is a reading too, and a conversion written into
+`instant` is `type-mismatch` whatever it converts, as one from a `duration` into a `timestamp` is
+(T13) *(assumed, §12: a reading plus a duration in either order, as `+` takes a `timestamp` and a
+`duration`, and a reading that only the clock makes)*.
+
+Case: [types/instant-arithmetic.kz](../corpus/types/instant-arithmetic.kz)
+```kurz
+instant start = instant.Now
+instant later = instant.Now
+duration taken = later - start
+print(taken >= 0s)
+print(start - later <= 0s)
+print(start + taken == later)
+print(later - taken == start)
+print(1ns + start > start)
+print(start + 90min - start)
+data Mark(instant At)
+print(Mark(start) == Mark(later - taken))
+mut seen = Map<instant, string>()
+seen[start] = "first"
+seen[later - taken] = "again"
+print(seen.Count)
+```
+
+Case: [types/instant-overflow-release.kz](../corpus/types/instant-overflow-release.kz)
+```kurz
+instant Later(instant t, duration d) => t + d
+
+long bits = 9223372036854775807
+raw {
+    instant last = *Ptr<instant>(&bits)
+    print(Later(last, 1ns))
+}
+```
+
+Case: [types/instant-not-integer.kz](../corpus/types/instant-not-integer.kz)
+```kurz
+int n = instant.Now
+print(n)
+```
+
+Case: [types/instant-not-timestamp.kz](../corpus/types/instant-not-timestamp.kz)
+```kurz
+timestamp t = instant.Now
+print(t)
+```
+
+Case: [types/instant-plus-instant.kz](../corpus/types/instant-plus-instant.kz)
+```kurz
+instant start = instant.Now
+print(start + start)
+```
+
+Case: [types/instant-conversion.kz](../corpus/types/instant-conversion.kz)
+```kurz
+print(instant(5s))
+```
+
 ### T14 (assumed, §4) Out of range and division by zero
 
 An index that is out of range raises the exception `index-out-of-range`, and a division by zero, of
@@ -1502,16 +1574,20 @@ type (T33) keeps its check in the copies, but for the calls this paragraph reads
 arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copies stays
 `not supported`. Of its calls, those in a loop over `T.Fields` are read for such a cycle on its
 text, and a cycle that grows there is refused at that call. The chain of copies stops at that
-call, so that it does not reach that bound, and the copies before it report every other error of
-the function's body in the same build. A call in an arm of a `match` on `T.Kind` takes no part,
-inside such a loop as outside it, since each copy takes the one arm of its kind, and neither does
-a type argument there that is the field's type, since the text does not give that type. A cycle
+call, so that it does not reach that bound, and the copies a call made before it report every
+other error of the function's body in the same build; a function that no call reaches has no copy,
+so its cycle is the one error it reports, as T33 reads such a function. A call in an arm of a
+`match` on `T.Kind` takes no part, in an arm inside such a loop as in one outside it, since each
+copy takes the one arm of its kind. A type argument of a call in a loop over `T.Fields` that is
+the field's type takes no part either, since the text does not give that type. A cycle
 that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
-bound. *(assumed, §4: the id; a type argument that holds the field's type inside a form of a type,
-`List<f.Type>`, takes no part, as the field's type itself; a type argument grows where it holds a type parameter of
+bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
-`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+`T | string` for `T` makes no larger copy; a type argument that holds the field's type inside a
+form of a type, `List<f.Type>`, takes no part, as the field's type itself; a call in a
+loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a call of that loop;
+every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
 as one of the body)*
 

@@ -1,0 +1,10 @@
+// expect: output
+// | Ann
+// rules: R3
+
+class Owner(string Name)
+
+o = Owner("Ann")
+mut keepers = Map<string, weak Owner?>()
+keepers["ann"] = o
+print(keepers["ann"]?.Name ?? "gone")

@@ -2141,6 +2141,29 @@ pub bool Now(mut long nanoseconds) {
     return true
 }
 
+// The monotonic clock in nanoseconds, put in `nanoseconds` (S25), read by `clock_gettime` with
+// `CLOCK_MONOTONIC` (1), as Rust's `Instant::now` reads it, into the page of the thread that `stat` fills:
+// true, or false where the page cannot be mapped. The clock counts from a zero the record does not name,
+// on Linux the time the system has run since its boot, with no time counted while it is suspended. The result
+// of `clock_gettime` is not read, as in `Now` (above): it fails only for a clock the kernel lacks, an address
+// outside the process or a `time_t` of 32 bits, none of them on Linux for x86-64.
+pub bool MonotonicNow(mut long nanoseconds) {
+    raw {
+        if status == null {
+            status = Memory(4096)
+        }
+
+        if status == null {
+            return false
+        }
+
+        clock_gettime(1, Ptr<void>(status))
+        nanoseconds = *Ptr<long>(status) * 1000000000 + *Ptr<long>(status + 8)
+    }
+
+    return true
+}
+
 // The arguments of the process from the one at `skip` on, added to `list` in their order (S13): 0, or the
 // number of the first that is not UTF-8, counted from 1, which a `string` does not hold, as Rust's
 // `env::args()` panics on it.

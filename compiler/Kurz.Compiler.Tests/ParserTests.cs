@@ -590,6 +590,33 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void A_property_in_a_type_body_is_a_method_without_parameters_read_without_a_call()
+    {
+        // K7 (section 4: the owner, 2026-11-03): `Type Name => expression` in a type body is a read-only property
+        var (tree, diagnostics) = Parse("class Bag {\n    pub int Count => 3\n}");
+        Assert.Empty(diagnostics.Items);
+        var property = Assert.IsType<FunctionDeclaration>(Assert.Single(Assert.IsType<TypeDeclaration>(Assert.Single(tree.Statements)).Members!));
+        Assert.Equal((true, "Count", Modifiers.Pub, 0, true), (property.Property, property.Name, property.Modifiers, property.Parameters.Count, property.ExpressionBody is not null));
+
+        // the positive control: a method of no parameters is no property
+        var (methods, _) = Parse("class Bag {\n    pub int Count() => 3\n}");
+        Assert.False(Assert.IsType<FunctionDeclaration>(Assert.IsType<TypeDeclaration>(methods.Statements[0]).Members![0]).Property);
+    }
+
+    [Theory]
+    [InlineData("class Bag {\n    pub int Count { get; }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count {\n        get => 3\n    }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count { set; }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count[int i] => i\n}", 2)]
+    [InlineData("int Count => 3", 1)]
+    public void A_property_is_written_with_its_arrow_in_a_type_body_alone(string program, int line)
+    {
+        // K7: `Type Name => expression` is the one form of a property (the product pass's question 3, at its default), and it stands in a
+        // type body alone: C#'s accessors, and the form outside a type, are `syntax` (E4)
+        Assert.Equal((ErrorIds.Syntax, line), Errors(program).First());
+    }
+
+    [Fact]
     public void The_core_words_are_the_lists_of_l18_and_l19()
     {
         // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
@@ -597,7 +624,7 @@ public sealed class ParserTests
             "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "internal", "static", "this", "virtual",
             "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
-            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp"];
+            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp", "instant"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());
         Assert.Equal(types.Order(), CoreWords.TypeNames.Order());
     }
