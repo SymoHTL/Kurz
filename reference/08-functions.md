@@ -193,7 +193,11 @@ line, in every file of the project, those of the folder `json` included, and wit
 `use json as j` (§8, the owner, 2026-11-02). The reading reads a project's files: the runtime's `use sys` and `use std`
 stand as §2 makes them, and in a program's file they are paths like any other, which a folder at
 the top or a line of `project.kz` of that name answers, `unknown-name` where the project has neither
-(§8, the owner, 2026-11-03, "the runtime's names only"). *(assumed, §8, §13: the two ids; a type of the file's own
+(§8, the owner, 2026-11-03, "the runtime's names only"). A `.` or `..` where a name of the path stands,
+`use ../util`, is `syntax` (§8, the owner, 2026-11-04, "as built"). A path longer than a package's line name
+reaches that package's folder: with a line `json` of `project.kz` and no folder `json` at the top,
+`use json/schema` reaches the folder `schema` of that package (§8, §13, the owner, 2026-11-04, "with only a
+`json` dependency line, `use json/schema` reaches that package's subfolder"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
 the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
@@ -202,8 +206,7 @@ declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
 the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
-which that package's line alone reaches, are `unknown-name` at the `use` line; a `.` or `..` where
-a name of the path stands, `use ../util`, is `syntax`; a longer
+which that package's line alone reaches, are `unknown-name` at the `use` line; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
 folder of the project, so that `use json` beside it names the line)*
