@@ -69,6 +69,8 @@ public sealed partial class Emitter
                 return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
             case MemberAccess m when Model.IsClockRead(m):
                 return EmitNow(m.Line);
+            case MemberAccess m when Model.IsMonotonicRead(m):
+                return EmitMonotonicNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
             case CallExpression c when !Model.IsMade(c, out _) && Model.CallOf(c).Result is WeakRefType weak: // `T.Make` is its construction, no call (T33)
@@ -426,6 +428,8 @@ public sealed partial class Emitter
                 return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
                 return EnumNumber(target(), e); // D18
+            case PrimitiveType { Kind: Primitive.Instant } when m.Member == "Elapsed":
+                return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
                 return fn.Value($"load i32, ptr {HandleField(target(), 12)}"); // S9
 

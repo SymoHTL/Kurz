@@ -9,7 +9,8 @@ namespace Kurz.Compiler.Tests;
 /// The decisions of the server's reader of requests (W5, W6; design record, section 12) that no corpus case pins: the status the
 /// server answers each refusal with, which a program does not see, read through a function an edited std/ adds, with every limit of
 /// <c>HttpLimits()</c> at its edge as Kestrel counts it; and a build for Windows, whose runtime gives no socket, says
-/// <c>not supported</c> at the line of the program whose call reaches the socket through std/, where its author can act.
+/// <c>not supported</c> at the line of the program whose call reaches the socket through std/, where its author can act; and no
+/// form of <c>Read</c> that takes limits, which a case that expects a run cannot show beside its run.
 /// </summary>
 public sealed class HttpRequestTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -119,5 +120,24 @@ public sealed class HttpRequestTests(Toolchain toolchain) : IClassFixture<Toolch
         Assert.Equal((3, Emitter.NotOnWindows), (diagnostic.Line, diagnostic.Message));
         Assert.StartsWith("program.kz:3: not supported: a call on a file or a socket", diagnostic.At("program.kz"), StringComparison.Ordinal);
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+    }
+
+    [Fact]
+    public void A_program_reads_a_request_under_the_default_limits_alone()
+    {
+        // W7 (section 12, the owner, 2026-11-02, Q3): `HttpRequest.Read(stream)` reads under `HttpLimits()`, and the limits a server
+        // is given reach the parser through an entry of std/ that no program calls, with no second public form; a call of `Read` with
+        // limits and a call of that entry are refused, beside the form with the stream alone, the positive control, which checks
+        const string text = """
+            void | IoError | HttpError Show(TcpStream s) {
+                r = HttpRequest.Read(s)
+                print(r.Method)
+                other = HttpRequest.Read(s, HttpLimits())
+                inner = HttpReadRequest(s, HttpLimits())
+            }
+            """;
+        var compilation = Compile(text, Builder.CheckRuntime(Target.Linux));
+        var errors = compilation.Diagnostics.Sorted.Select(d => (d.Id, d.Line, d.Message)).ToList();
+        Assert.Equal([("argument-mismatch", 4, "the call passes 2 arguments to 1 parameter (D11)"), ("unknown-name", 5, "no `HttpReadRequest` is visible here (V10)")], errors);
     }
 }

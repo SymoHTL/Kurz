@@ -16,7 +16,8 @@ namespace Kurz.Compiler.Tests;
 /// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; the time a write of a response is given (W10), which
 /// needs a client that reads beside the server's loop, a second thread no corpus case has; and the end of a chunked file's body,
 /// which goes out in the write of its last piece, where the bytes are the same either way and only the time of a client that sends
-/// each request after the whole response tells them apart.
+/// each request after the whole response tells them apart; and the reads of a request that wait more than 5 seconds where its bounds
+/// allow it, which a case could only show by a run of that length.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -279,6 +280,73 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var (code, output, error) = await run;
         Assert.Equal((0, "", "served\n", 100, ""), (code, error, output, whole, failed));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 chunked files took {watch.Elapsed.TotalMilliseconds:F0} ms");
+    }
+
+    [Fact]
+    public async Task A_read_of_a_request_waits_past_five_seconds_where_its_bounds_allow_it()
+    {
+        // W10 (section 12, Q10 (b) and Q11 (a)): a read of a head waits what is left of `RequestHeadersTimeout`, 30 seconds by
+        // default, and a read of a body the longer of its grace and its bytes at the rate, less what its reads waited, with no
+        // 5 seconds of a read on a socket inside the server; a pause of 5.5 seconds in the head and another in the body, with a grace
+        // of 10 seconds, are both waited out. Held to 5 seconds, either read ends in its pause and the request is answered 408
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                server = listener.Accept()
+                echo = (HttpRequest r) => {
+                    body = r.Body.ReadAllText(100) else {
+                        IoError e => "{e.Kind}"
+                        HttpError e => e.Detail
+                        else => "?"
+                    }
+
+                    return HttpResponse.Text(200, body)
+                }
+
+                HttpServer.ServeConnection(server, echo, HttpLimits(MinRequestBodyDataRate: HttpRate(240, 10s))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-long-reads");
+        var free = new TcpListener(IPAddress.Loopback, 0);
+        free.Start();
+        var port = ((IPEndPoint)free.LocalEndpoint).Port;
+        free.Stop();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var got = new MemoryStream();
+        using (var client = Connect(port, run))
+        {
+            var stream = client.GetStream();
+            stream.Write("POST /a HTTP/1.1\r\nHost: h\r\n"u8);
+            await Task.Delay(5500);
+            stream.Write("Content-Length: 4\r\nConnection: close\r\n\r\nab"u8);
+            await Task.Delay(5500);
+            stream.Write("cd"u8);
+            stream.CopyTo(got);
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n"), (code, error, output));
+        var response = System.Text.Encoding.ASCII.GetString(got.ToArray());
+        Assert.StartsWith("HTTP/1.1 200 OK\r\n", response);
+        Assert.EndsWith("\r\n\r\nabcd", response);
     }
 
     /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>

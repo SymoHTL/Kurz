@@ -782,8 +782,11 @@ after a grace of 5 seconds, each rate an `HttpRate(int BytesPerSecond, duration 
 owner, 2026-10-31, "HttpLimits data", 2026-11-01, "Kestrel's bounds" and "Add Kestrel's response
 rate", and 2026-11-03), and 100 requests to a connection, an idle connection closed after 5 seconds,
 64 KiB of a body drained and a chunk's size line of 4096 bytes (§12, the owner, 2026-11-03).
-`HttpRequest.Read(stream, limits)` reads with other limits (§12, assumed: `ServeConnection` takes
-them in a second form too). *(assumed, §12, not put to the owner: the lines counted as Kestrel
+`HttpRequest.Read(stream)` reads with the limits of `HttpLimits()`, and the limits a server is given
+reach the parser through an entry inside `std/` that no program calls (§12, the owner, 2026-11-02,
+Q3, #110, comment 6573113786), so that a program holds a request to other limits by
+`ServeConnection(stream, handler, limits)` (§12, assumed: `ServeConnection` takes them in a second
+form too). *(assumed, §12, not put to the owner: the lines counted as Kestrel
 counts them, the request line with its CR LF against `MaxRequestLineSize` and the header lines with
 theirs against `MaxRequestHeadersTotalSize` and 2 more bytes for the empty line, as Kestrel's
 `Http1Connection` begins each request with `MaxRequestHeadersTotalSize + 2` bytes allowed)*
@@ -802,31 +805,34 @@ print("{mine.MaxRequestBodySize} {mine.MaxRequestHeadersTotalSize}")
 
 Case: [http/request-limits.kz](../corpus/http/request-limits.kz)
 ```kurz
-// a request read with limits of the program's own: a request line of at most 19 bytes with its CR LF, at most 2 header lines of at
-// most 40 bytes in all with their CR LFs, and a body of at most 5 bytes, declared or in chunks
+// a request served with limits of the program's own, which `ServeConnection` takes, since `HttpRequest.Read` reads under those of
+// `HttpLimits()` alone: a request line of at most 19 bytes with its CR LF, at most 2 header lines of at most 40 bytes in all with
+// their CR LFs, and a body of at most 5 bytes, declared or in chunks
 void | IoError Show(string request) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
     server = listener.Accept()
     client.Write(request.Bytes)
     client.ShutdownWrite()
-    small = HttpLimits(MaxRequestLineSize: 19, MaxRequestHeadersTotalSize: 40, MaxRequestHeaderCount: 2, MaxRequestBodySize: 5)
-    match HttpRequest.Read(server, small) {
-        HttpRequest r => {
-            match r.Body.ReadAll(100) {
-                Bytes b => {
-                    if b.Count > 0 {
-                        print("{r.Method} {r.Path}: {b.Count}")
-                    } else {
-                        print("{r.Method} {r.Path}")
-                    }
+    shown = (HttpRequest r) => {
+        match r.Body.ReadAll(100) {
+            Bytes b => {
+                if b.Count > 0 {
+                    print("{r.Method} {r.Path}: {b.Count}")
+                } else {
+                    print("{r.Method} {r.Path}")
                 }
-
-                IoError e => print(e)
-                HttpError e => print("{e.Kind}: {e.Detail}")
             }
+
+            IoError e => print(e)
+            HttpError e => print("{e.Kind}: {e.Detail}")
         }
 
+        return HttpResponse.Empty(204)
+    }
+
+    small = HttpLimits(MaxRequestLineSize: 19, MaxRequestHeadersTotalSize: 40, MaxRequestHeaderCount: 2, MaxRequestBodySize: 5)
+    HttpServer.ServeConnection(server, shown, small) else {
         IoError e => print(e)
         HttpError e => print("{e.Kind}: {e.Detail}")
     }
@@ -1183,8 +1189,8 @@ program that calls them (§12, "Loop not supported"). *(assumed, §12, not put t
 the server's `Date`, as Kestrel writes it; a handler's `Transfer-Encoding` dropped for a request of
 HTTP/1.0 and the body framed by its length; the body the handler left read before the response is
 written, so that a body past `MaxDrainSize` is answered with `Connection: close`; the wait for the
-first byte of a request after the first bounded by `KeepAliveTimeout`, and the reads of a request by
-the 5 seconds of a read on a socket; a connection aborted, reset or refused before `Accept` took it
+first byte of each request, the first of a connection among them, bounded by `KeepAliveTimeout`, and
+the reads of a request by the head's time and the body's rate alone (W10); a connection aborted, reset or refused before `Accept` took it
 passed over, as hyper's loop of accepts passes over it; and the response to a request with no body whose
 next request's head stands whole in the stream's buffer held, up to 64 KiB, and written with the response
 after it in one write, as hyper's `Conn` buffers its writes, so that a client that sends its requests at
@@ -1819,20 +1825,28 @@ to `MinRequestBodyDataRate` after that rate's grace, and a request that falls un
 `HttpError(Protocol, "request timed out")` (§12, the owner, 2026-11-03, "The server's error texts mirror the client's"); it holds a response to `MinResponseDataRate` after its
 grace, and under it the connection closes, since its status has gone out (§12, the owner, 2026-11-01,
 "Add Kestrel's response rate"); and an idle connection closes without an answer at `KeepAliveTimeout`
-(§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03). *(assumed, §12, not put to
-the owner: each read of a head waiting the smaller of the 5 seconds of a read on a socket and what is
-left of the head's time; the body's rate counted over the time its reads wait, as Kestrel counts it,
-a read of the handler that falls under it giving the `IoError` of the kind `TimedOut`; each write of a
-response given the longer of the grace and its length at the rate, as Kestrel gives it, for each call
-of the system the write makes; and `HttpRequest.Read` and `Write`, the raw layer, setting no time on
-the stream, so that a program's own loop holds the times it sets itself)*
+(§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03). The server measures these
+bounds by `instant` and holds them by the socket's own times, `SO_RCVTIMEO` set before each refill to
+what remains of the bound that read is under (§12, the owner, 2026-11-04, the monotonic clock, Q9 (a));
+a read of a head waits what remains of the head's time alone, with no 5 seconds of a read on a socket
+inside the server (Q10 (b)); before each refill of a body the read may wait until the body would fall
+under its rate, the longer of the grace and the bytes read so far at the rate, less the time its reads
+waited already (Q11 (a)); and a handler's read of a body that falls under its rate gives
+`HttpError(Protocol, "request timed out")`, answered `408` (Q12 (b)) (#110, comment 6643368937).
+*(assumed, §12, not put to the owner: `KeepAliveTimeout` the wait for the first byte of each request,
+the first of a connection among them; a remainder of zero or below the timeout, with no call of the
+system; each write of a response given the longer of the grace and its length at the rate, as Kestrel
+gives it, for each call of the system the write makes; and `HttpRequest.Read` and `Write`, the raw
+layer, setting no time on the stream, so that a program's own loop holds the times it sets itself)*
 
 Case: [http/serve-timeouts.kz](../corpus/http/serve-timeouts.kz)
 ```kurz
 // a head that does not arrive whole within `RequestHeadersTimeout` from its first byte, and a body whose reads fall under
 // `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection, the handler's response
-// unwritten, and the connection gives `HttpError(Protocol, "request timed out")`; a response whose write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate
-// closes it, since its status has gone out
+// unwritten, the handler's read of such a body giving `HttpError(Protocol, "request timed out")`, and the connection gives that error
+// too; a connection whose first request sends no byte within `KeepAliveTimeout` is closed with nothing written; a response whose
+// write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate closes it, since its status
+// has gone out
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
     listener = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => return
@@ -1904,6 +1918,7 @@ string Wire(TcpStream client) {
 reading = (HttpRequest r) => {
     text = r.Body.ReadAllText(100) else {
         IoError e => "{e.Kind}"
+        HttpError e => e.Detail
         else => "?"
     }
 
@@ -1917,6 +1932,12 @@ Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", reading, Ht
 
 // the same where the request says `Connection: close`, so that no drain of the body follows the handler
 Stall("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+
+// a handler that reads none of such a body, which the server drains after it
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", hello, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+
+// a client that sends nothing at all
+Stall("", hello, HttpLimits(KeepAliveTimeout: 100ms))
 Unread()
 
 // a response of 32 MiB to a client that reads none of it, which the buffers of the connection cannot hold
