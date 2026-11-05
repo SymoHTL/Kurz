@@ -5889,6 +5889,13 @@ pub class HttpHeaders {
         values.Add(value)
     }
 
+    // A name and a value the parse of a head read and proved free of CR and LF, after every value the headers hold, with no second
+    // walk of either for them (W5, W14).
+    internal void Append(string name, string value) {
+        names.Add(name)
+        values.Add(value)
+    }
+
     // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them,
     // and the value goes after every value the headers hold. A refused value takes out nothing.
     pub void | HttpError Set(string name, string value) {
@@ -7688,13 +7695,51 @@ bool HttpHeadFollows(Bytes b, int from) {
 // What a head says of its request, for its body and the server's loop.
 data HttpHead(string Method, string Path, string Query, HttpHeaders Headers, int Minor, long Length, bool Chunked, bool Continue)
 
-// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2).
+// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2), as httparse's `TOKEN_MAP` holds
+// them: the bits of the bytes 0 to 63 and of the bytes 64 to 127, and no byte above.
 bool HttpTokenByte(byte c) {
-    if c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 {
-        return true
+    if c < 64 {
+        return (0x03FF6CFA00000000UL >> int(c) & 1UL) != 0
     }
 
-    return c == 33 || c >= 35 && c <= 39 || c == 42 || c == 43 || c == 45 || c == 46 || c == 94 || c == 95 || c == 96 || c == 124 || c == 126
+    if c < 128 {
+        return (0x57FFFFFFC7FFFFFEUL >> int(c - 64) & 1UL) != 0
+    }
+
+    return false
+}
+
+// The string of the `n` bytes at `p`, which the parse of a head proved ASCII and so UTF-8, made once from them, with no second
+// check (R15's `string.Allocate` and `string.FromRaw`).
+string HttpAscii(byte* p, long n) {
+    if n == 0 {
+        return ""
+    }
+
+    mut made = ""
+    raw {
+        byte* q = string.Allocate(n)
+        Copy(q, p, n)
+        made = string.FromRaw(q, n)
+    }
+
+    return made
+}
+
+// Whether the `n` bytes at `p`, a header's name and so a token, are the name `lower`, of as many bytes and spelled in lowercase, in
+// any case of ASCII, as `HttpHeaders` compares names: a byte of a token with its bit 0x20 set is a letter's lowercase only where it
+// was that letter in either case, and is `-` only where it was `-`.
+bool HttpNamed(byte* p, long n, string lower) {
+    raw {
+        byte* q = lower.Pointer
+        for i in 0..<n {
+            if (p[i] | 32) != q[i] {
+                return false
+            }
+        }
+    }
+
+    return true
 }
 
 // Whether a `Host` is a host and an optional port, a name of the bytes RFC 3986 allows in one or an address between brackets.
@@ -7751,72 +7796,152 @@ bool HttpHostValid(string host) {
 // A header line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse
 // refuses it (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
 HttpHeaders | string HttpParseHeaderLines(Bytes head, int from, int end) {
+    lines = HttpReadHeaderLines(head, from, end) else {
+        string what => return what
+    }
+
+    return lines.Headers
+}
+
+// The headers of a head's lines, and of the four names the server judges after them, `Host`, `Content-Length`,
+// `Transfer-Encoding` and `Expect` in any case of ASCII, the place of the first among the headers, -1 where the lines have none,
+// and how many the lines have (W5).
+data HttpLines(HttpHeaders Headers, int Host, int Hosts, int Length, int Lengths, int Coding, int Codings, int Expect)
+
+// The header lines of a head, as `HttpParseHeaderLines` gives them, each line read once with the mechanism of httparse 1.10.1's
+// `parse_headers_iter`, a table of tokens for the name and eight bytes at a time for the value; the faults, their words and their
+// order, and where a line ends are this parser's own, as they were before. Each fault is named where the line first shows it: a
+// line that starts with a space or a tab is folded; the name's bytes are tokens up to the colon, a space or a tab before it its
+// own fault, a CR LF before it a line
+// with none, and a CR alone no token; the spaces and tabs after the colon are skipped; and the value's bytes up to the CR LF are
+// read eight at a time while eight are left before `end`, as httparse's `match_header_value_char_8_swar` (`src/simd/swar.rs`)
+// tests them, a byte below 0x20 or 0x7F ending the words, a tab among them taken and the words going on, a CR before a LF the
+// value's end, and any other, a CR alone among them, a control byte; the spaces and tabs before the CR LF are dropped. Each name,
+// and each value of ASCII alone, is made a string once from its bytes; a value with a byte from 0x80 up is checked as
+// `string.FromUtf8` checks it. A line ends at its first CR LF, as RFC 9112, section 2.2, ends one, and the next starts after it.
+HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
     headers = HttpHeaders()
-    mut lineStart = from
-    while lineStart < end {
-        mut lineStop = lineStart
-        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
-            lineStop = lineStop + 1
-        }
-
-        if head[lineStart] == 32 || head[lineStart] == 9 {
-            return "folded header"
-        }
-
-        mut colon = lineStart
-        while colon < lineStop && head[colon] != 58 {
-            if head[colon] == 32 || head[colon] == 9 {
-                return "space before a header's colon"
+    mut count = 0
+    mut host = -1
+    mut hosts = 0
+    mut length = -1
+    mut lengths = 0
+    mut coding = -1
+    mut codings = 0
+    mut expect = -1
+    mut at = from
+    raw {
+        byte* p = head.Pointer
+        while at < end {
+            lineStart = at
+            if p[at] == 32 || p[at] == 9 {
+                return "folded header"
             }
 
-            if !HttpTokenByte(head[colon]) {
+            while p[at] != 58 {
+                c = p[at]
+                if !HttpTokenByte(c) {
+                    if c == 13 && p[at + 1] == 10 {
+                        return "header without a colon"
+                    }
+
+                    if c == 32 || c == 9 {
+                        return "space before a header's colon"
+                    }
+
+                    return "bad header name"
+                }
+
+                at = at + 1
+            }
+
+            if at == lineStart {
                 return "bad header name"
             }
 
-            colon = colon + 1
-        }
-
-        if colon == lineStop {
-            return "header without a colon"
-        }
-
-        if colon == lineStart {
-            return "bad header name"
-        }
-
-        mut valueStart = colon + 1
-        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
-            valueStart = valueStart + 1
-        }
-
-        mut valueEnd = lineStop
-        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
-            valueEnd = valueEnd - 1
-        }
-
-        for p in valueStart..<valueEnd {
-            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
-                return "control byte in a header"
+            nameEnd = at
+            at = at + 1
+            while p[at] == 32 || p[at] == 9 {
+                at = at + 1
             }
-        }
 
-        name = string.FromUtf8(head[lineStart..<colon]) else {
-            InvalidUtf8 => ""
-        }
+            valueStart = at
+            mut ulong high = 0
+            while true {
+                while at + 8 <= end {
+                    ulong x = WordAt(p + at)
+                    ulong low = (x -% 0x2020202020202020UL) & ~x & 0x8080808080808080UL
+                    ulong d = x ^ 0x7F7F7F7F7F7F7F7FUL
+                    ulong stop = low | (d -% 0x0101010101010101UL) & ~d & 0x8080808080808080UL
+                    if stop != 0 {
+                        long k = FirstFlag(stop)
+                        high = high | x & (1UL << int(8 * k)) -% 1UL
+                        at = at + int(k)
+                        break
+                    }
 
-        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
-            InvalidUtf8 => return "header not UTF-8"
-        }
+                    high = high | x
+                    at = at + 8
+                }
 
-        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
-        headers.Add(name, value) else {
-            HttpError e => return "control byte in a header"
-        }
+                c = p[at]
+                if c == 13 && p[at + 1] == 10 {
+                    break
+                }
 
-        lineStart = lineStop + 2
+                if c < 32 && c != 9 || c == 127 {
+                    return "control byte in a header"
+                }
+
+                high = high | ulong(c)
+                at = at + 1
+            }
+
+            mut valueEnd = at
+            while valueEnd > valueStart && (p[valueEnd - 1] == 32 || p[valueEnd - 1] == 9) {
+                valueEnd = valueEnd - 1
+            }
+
+            long n = long(nameEnd - lineStart)
+            name = HttpAscii(p + lineStart, n)
+            mut value = ""
+            if (high & 0x8080808080808080UL) == 0 {
+                value = HttpAscii(p + valueStart, long(valueEnd - valueStart))
+            } else {
+                value = string.FromUtf8(head[valueStart..<valueEnd]) else {
+                    InvalidUtf8 => return "header not UTF-8"
+                }
+            }
+
+            if n == 4 && HttpNamed(p + lineStart, n, "host") {
+                if hosts == 0 {
+                    host = count
+                }
+
+                hosts = hosts + 1
+            } else if n == 14 && HttpNamed(p + lineStart, n, "content-length") {
+                if lengths == 0 {
+                    length = count
+                }
+
+                lengths = lengths + 1
+            } else if n == 17 && HttpNamed(p + lineStart, n, "transfer-encoding") {
+                if codings == 0 {
+                    coding = count
+                }
+
+                codings = codings + 1
+            } else if n == 6 && expect < 0 && HttpNamed(p + lineStart, n, "expect") {
+                expect = count
+            }
+
+            headers.Append(name, value)
+            count = count + 1
+            at = at + 2
+        }
     }
 
-    return headers
+    return HttpLines(headers, host, hosts, length, lengths, coding, codings, expect)
 }
 
 // The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5).
@@ -7838,15 +7963,31 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         return HttpBad("bad request line")
     }
 
-    method = string.FromUtf8(head[0..<at]) else {
-        InvalidUtf8 => ""
+    // the method's bytes are tokens, and so ASCII; a target of ASCII alone is made into its path and its query from its bytes,
+    // split at its first `?`, and any other is checked as `string.FromUtf8` checks it, where it was before
+    mut byte* p = null
+    raw {
+        p = head.Pointer
+    }
+
+    mut method = ""
+    raw {
+        method = HttpAscii(p, long(at))
     }
 
     targetStart = at + 1
     at = targetStart
+    mut ascii = true
+    mut question = -1
     while at < lineEnd && head[at] != 32 {
         if head[at] < 33 || head[at] == 127 {
             return HttpBad("bad request line")
+        }
+
+        if head[at] >= 128 {
+            ascii = false
+        } else if head[at] == 63 && question < 0 {
+            question = at
         }
 
         at = at + 1
@@ -7856,50 +7997,72 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         return HttpBad("bad request line")
     }
 
-    target = string.FromUtf8(head[targetStart..<at]) else {
-        InvalidUtf8 => return HttpBad("target not UTF-8")
+    targetEnd = at
+    mut target = ""
+    if !ascii {
+        target = string.FromUtf8(head[targetStart..<targetEnd]) else {
+            InvalidUtf8 => return HttpBad("target not UTF-8")
+        }
     }
 
-    v = head[at + 1..<lineEnd]
-    if v.Count != 8 || v[0] != 72 || v[1] != 84 || v[2] != 84 || v[3] != 80 || v[4] != 47 || v[6] != 46 || v[5] < 48 || v[5] > 57 || v[7] < 48 || v[7] > 57 {
+    v = targetEnd + 1
+    if lineEnd - v != 8 || head[v] != 72 || head[v + 1] != 84 || head[v + 2] != 84 || head[v + 3] != 80 || head[v + 4] != 47 || head[v + 6] != 46 || head[v + 5] < 48 || head[v + 5] > 57 || head[v + 7] < 48 || head[v + 7] > 57 {
         return HttpBad("bad request line")
     }
 
-    if v[5] != 49 || v[7] > 49 {
+    if head[v + 5] != 49 || head[v + 7] > 49 {
         return HttpRefused(505, HttpError(HttpKind.Unsupported, "unsupported HTTP version"))
     }
 
-    minor = v[7] - 48
+    minor = head[v + 7] - 48
     if method == "CONNECT" {
         return HttpBad("CONNECT")
     }
 
     mut path = target
     mut query = ""
-    question = target.IndexOf("?")
-    if question != null {
-        path = target.Substring(0, question)
-        query = target.Substring(question + 1, target.Bytes.Count - question - 1)
+    if ascii {
+        raw {
+            if question < 0 {
+                path = HttpAscii(p + targetStart, long(targetEnd - targetStart))
+            } else {
+                path = HttpAscii(p + targetStart, long(question - targetStart))
+                query = HttpAscii(p + question + 1, long(targetEnd - question - 1))
+            }
+        }
+    } else {
+        split = target.IndexOf("?")
+        if split != null {
+            path = target.Substring(0, split)
+            query = target.Substring(split + 1, target.Bytes.Count - split - 1)
+        }
     }
 
-    headers = HttpParseHeaderLines(head, lineEnd + 2, end) else {
+    lines = HttpReadHeaderLines(head, lineEnd + 2, end) else {
         string what => return HttpBad(what)
     }
 
-    hosts = headers.GetAll("Host")
-    if hosts.Count > 1 {
+    // the four names the server judges, noted while the lines were read, are judged once every line has been read
+    headers = lines.Headers
+    if lines.Hosts > 1 {
         return HttpBad("two Host headers")
     }
 
-    if hosts.Count == 0 && minor == 1 {
+    if lines.Hosts == 0 && minor == 1 {
         return HttpBad("no Host")
     }
 
-    if hosts.Count == 1 && !HttpHostValid(hosts[0]) {
+    if lines.Hosts == 1 && !HttpHostValid(headers.ValueAt(lines.Host)) {
         return HttpBad("bad Host")
     }
 
-    lengths = headers.GetAll("Content-Length")
+    mut lengths = List<string>()
+    if lines.Lengths == 1 {
+        lengths.Add(headers.ValueAt(lines.Length))
+    } else if lines.Lengths > 1 {
+        lengths = headers.GetAll("Content-Length")
+    }
+
     mut length = -1L
     mut over = false
     for text in lengths {
@@ -7927,12 +8090,11 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         length = n
     }
 
-    codings = headers.GetAll("Transfer-Encoding")
-    if codings.Count > 0 && lengths.Count > 0 {
+    if lines.Codings > 0 && lines.Lengths > 0 {
         return HttpBad("Content-Length beside Transfer-Encoding")
     }
 
-    if codings.Count > 1 || codings.Count == 1 && codings[0].ToLowerAscii() != "chunked" {
+    if lines.Codings > 1 || lines.Codings == 1 && headers.ValueAt(lines.Coding).ToLowerAscii() != "chunked" {
         return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported transfer encoding"))
     }
 
@@ -7941,9 +8103,8 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
     }
 
     mut expects = false
-    expect = headers.Get("Expect")
-    if expect != null {
-        if expect.ToLowerAscii() != "100-continue" {
+    if lines.Expect >= 0 {
+        if headers.ValueAt(lines.Expect).ToLowerAscii() != "100-continue" {
             return HttpRefused(417, HttpError(HttpKind.Unsupported, "unsupported expectation"))
         }
 
@@ -7955,7 +8116,7 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         sized = 0
     }
 
-    return HttpHead(method, path, query, headers, minor, sized, codings.Count == 1, expects)
+    return HttpHead(method, path, query, headers, minor, sized, lines.Codings == 1, expects)
 }
 
 // Whether a byte stands in a `Uri`: a letter, a digit, one of `-._~`, of the delimiters `:/?#[]@!$&'()*+,;=`, or `%` (RFC 3986,
