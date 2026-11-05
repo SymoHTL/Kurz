@@ -367,7 +367,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // R1, the owner, 2026-11-04: the end of a value lets go of what its fields hold in the order of the fields, as Rust drops a
         // value's fields, a block by the release of its family and an instance by its class's; `Pair` and `Two` let go of their
         // string before their list, `Rev` and `Owt` of their list before their string, so that an order by the kind of a field
-        // fails one of them; a derived block lets go of its base's fields first (R1, assumed: the reading of D7), so `Tagged`
+        // fails one of them; a derived block lets go of its base's fields first (R1, the owner, 2026-11-05), so `Tagged`
         // lets go of the string of `Named` before its own list
         const string text = "data Pair(string A, List<int> B, Pair? Next)\nclass Two(string A, List<int> B)\ndata Rev(List<int> B, string A, Rev? Next)\nclass Owt(List<int> B, string A)\ndata Named(string A)\ndata Tagged(List<int> B) : Named\n\np = Pair(\"{1}\", [2], null)\nt = Two(\"{3}\", [4])\nr = Rev([5], \"{6}\", null)\no = Owt([7], \"{8}\")\ng = Tagged(\"{9}\", [10])\nprint(p.B)\nprint(t.B)\nprint(r.B)\nprint(o.B)\nprint(g.B)\n";
         const string release = "call void @\"release.string\"(";
