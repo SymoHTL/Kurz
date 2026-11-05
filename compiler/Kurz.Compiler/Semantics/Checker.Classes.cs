@@ -1684,6 +1684,7 @@ public sealed partial class Checker
         switch (type)
         {
             case ClassType c:
+                reached.Add(c.Symbol); // a class of std/ or of a folder is in no table of the file's classes (W1)
                 reached.UnionWith(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol))); // K6: an instance of a derived class stands where its base does
                 break;
             case ListType l:
