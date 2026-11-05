@@ -16,6 +16,18 @@ go of the head of a million links frees all of them before it returns, where a r
 one sweep only for the memory of a message (§13, "Region per message", the research verdict on
 Goose's data stacks).
 
+The end of an instance or of a block lets go of what its fields hold in the order of the fields, as
+Rust drops a value's fields (§3, §4, the owner, 2026-11-04, issue 156, comment 6643376941), a derived
+block's base's fields first (§4, the owner, 2026-11-05, issue 110, comment 6657251329, recorded as a
+reading of that answer from D7), an instance of a derived class its base's fields first too, and a
+value whose last count a field held ends after the value that held it, from the work list.
+*(assumed, §3, §4: the end after its holder, a reading of the owner's answer on classes of
+2026-11-01, "Iterative, never crashes", issue 110, comment 6560107950; a derived class's base's
+fields first, a reading of the answer of 2026-11-05, given for a derived block, as K6 lays the
+base's fields out first)* No case shows the
+order: a release runs no code of the program between two fields, and a handle that closes at its
+last count (S5) shows it only outside the program.
+
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
 class Link(int Value, Link? Next)
