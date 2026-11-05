@@ -1896,7 +1896,9 @@ the build stops at is the one that made the outermost copy; the error names that
 function that holds the `const assert`, as `kind-not-read` does)* *(assumed, §4: where the `)` that
 closes the `(` after `const assert` is followed by `=>` or `{`, the shape of a function's body, the
 line declares a function named `assert` whose type is named `const`, as before the statement
-existed (L18); an `=>` inside the parentheses decides nothing)*
+existed (L18); an `=>` inside the parentheses decides nothing, and neither does a `{` on the next
+line, since a function's body opens on the line of its signature (C1), so that such a line is a
+`const assert` and its `syntax`)*
 
 Case: [types/const-assert.kz](../corpus/types/const-assert.kz)
 ```kurz

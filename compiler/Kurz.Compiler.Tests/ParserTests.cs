@@ -977,6 +977,14 @@ public sealed class ParserTests
         Assert.StartsWith("(function const assert(", Tree("const assert(int x, (int) => int f) => f(x)"));
     }
 
+    [Fact]
+    public void A_brace_on_the_next_line_decides_nothing()
+    {
+        // L18 with T37: a function's body opens on the line of its signature (C1), so a `{` on the next line leaves the line a
+        // `const assert`, whose parentheses hold no condition and text
+        Assert.Equal((ErrorIds.Syntax, 1), Errors("const assert(int x)\n{\n    return const(x)\n}").First());
+    }
+
     [Theory]
     [InlineData("const assert(true, 5)")]
     [InlineData("const assert(true, n)")]
