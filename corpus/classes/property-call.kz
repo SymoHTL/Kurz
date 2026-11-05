@@ -1,5 +1,5 @@
 // expect: error type-mismatch at 11
-// rules: K7
+// rules: K7, F11
 
 class Bag {
     mut List<int> items = []

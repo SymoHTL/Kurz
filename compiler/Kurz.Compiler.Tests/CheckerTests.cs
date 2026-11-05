@@ -4044,10 +4044,13 @@ public sealed class CheckerTests
     [InlineData("b = Bag()\nb.Add(1)\nprint(b.Count)\n", 0)]
     [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
     [InlineData("class C {\n    pub int Count => 1\n\n    pub void Reset() {\n        this.Count = 0\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub string? Name => null\n\n    pub void Reset() {\n        Name = null\n    }\n}\n\nC().Reset()\n", 5)]
+    [InlineData("class C {\n    pub string? Name => null\n\n    pub void Reset() {\n        this.Name = null\n    }\n}\n\nC().Reset()\n", 5)]
     public void A_property_has_no_setter(string program, int line)
     {
         // K7: a property is read-only, through an instance, through `this` and by its name inside its class: `assign-immutable` (the
-        // product pass's question 1, at its default); the second row is the positive control, a change of the field the property reads
+        // product pass's question 1, at its default); the second row is the positive control, a change of the field the property reads;
+        // the value assigned is read as the instance path reads it, by the name alone too, so a `null` adds no error of its own
         List<(string Id, int Line)> expected = line == 0 ? [] : [(ErrorIds.AssignImmutable, line)];
         Assert.Equal(expected, Errors(program.StartsWith("class", StringComparison.Ordinal) ? program : PropertyBag + program));
     }
@@ -4146,15 +4149,18 @@ public sealed class CheckerTests
     [InlineData("    pub void Run() {\n        Bump(mut Count)\n    }\n", ErrorIds.MutAtCall)]
     [InlineData("    pub void Run() {\n        Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
     [InlineData("    pub void Run() {\n        this.Items.Add(1)\n    }\n", ErrorIds.MutRequired)]
+    [InlineData("    pub void Run() {\n        Bump(mut this.Count)\n    }\n", ErrorIds.MutAtCall)]
+    [InlineData("    pub void Run() {\n        c = C()\n        Bump(mut c.Count)\n    }\n", ErrorIds.MutAtCall)]
     public void A_property_is_no_place_a_change_reaches(string method, string id)
     {
         // K7, M5, M7: the value of a property is a call's, so it is neither passed as `mut` nor changed by a `mut` method, by the name
-        // alone or through `this`; the rows are the trap of a name without a variable, which the emitter would find no place for
+        // alone, through `this` or through an instance; the rows of the name alone are the trap of a name without a variable, which the
+        // emitter would find no place for
         var program = "void Bump(mut int n) {\n    n = n + 1\n}\n\nclass C {\n    mut List<int> items = []\n    mut int count = 0\n\n    pub List<int> Items => items\n    pub int Count => count\n\n" + method + "}\n\nC().Run()\n";
-        Assert.Equal([(id, 13)], Errors(program));
+        Assert.Equal([(id, method.Contains("c = C()") ? 14 : 13)], Errors(program));
 
         // the positive control: the fields themselves are changed
-        Clean(program.Replace("mut Count", "mut count").Replace("Items.Add", "items.Add"));
+        Clean(program.Replace("c = C()\n        Bump(mut c.Count)", "Bump(mut count)").Replace("mut this.Count", "mut count").Replace("mut Count", "mut count").Replace("Items.Add", "items.Add"));
     }
 
     [Fact]
@@ -4176,9 +4182,9 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("class C {\n    pub static int Count => 1\n}\n\nprint(1)\n", "2: a `static` property (K7, K19)")]
-    [InlineData("class C {\n    pub virtual int Count => 1\n}\n\nprint(1)\n", "2: the modifier `virtual` of a property (K7, R16)")]
-    [InlineData("class C {\n    pub override int Count => 1\n}\n\nprint(1)\n", "2: the modifier `override` of a property (K7, R16)")]
-    [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property (K7, R16)")]
+    [InlineData("class C {\n    pub virtual int Count => 1\n}\n\nprint(1)\n", "2: the modifier `virtual` of a property, which section 14 leaves open (K7)")]
+    [InlineData("class C {\n    pub override int Count => 1\n}\n\nprint(1)\n", "2: the modifier `override` of a property, which section 14 leaves open (K7)")]
+    [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property, which section 14 leaves open (K7)")]
     [InlineData("class C {\n    pub extern \"C\" int Count => 1\n}\n\nprint(1)\n", "2: the modifier `extern` of a property (K7, R16)")]
     [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "1: an interface (K6, K10)")]
     [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: the body of a data type (D16)")]
@@ -4188,11 +4194,60 @@ public sealed class CheckerTests
     [InlineData("class C {\n    pub int Count => 1\n}\n\nc = C()\np = &c.Count\nprint(1)\n", "6: a property read where the checker reads a field alone (K7)")]
     public void A_property_the_checker_does_not_read_is_not_supported(string program, string expected)
     {
-        // K7: a `static`, `virtual` or `override` property, one in an interface or in the body of a `data` type, and one of `void` or of
-        // a type that lists cases are open (section 14, the product pass's questions 6 and 7, at their defaults), and `prot` and `extern`
-        // are no modifiers a property takes here, as for a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
+        // K7: a `static`, `virtual`, `override` or `prot` property, one in an interface or in the body of a `data` type, and one of `void`
+        // or of a type that lists cases are open (section 14, the product pass's questions 6 and 7 and #39's readings, at their defaults),
+        // and `extern` is not supported on a property as on a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
         // this checker does not take for a property; an interface and a `data` type's body are not supported whatever they hold
         Assert.Equal([expected], NotSupported(program));
+    }
+
+    [Fact]
+    public void A_property_of_a_base_is_read_through_a_derived_instance()
+    {
+        // K7, K6 (assumed, #39's readings): an inherited property is read as C# reads one, through an instance of the derived class, through a
+        // reference of the base's type and by its name alone in the derived class's methods
+        Clean("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Twice() => Count * 2\n}\n\nd = D(1, 2)\nB b = d\nprint(d.Count + b.Count + d.Twice())\n");
+
+        // one without `pub` is private to the base (F9): the derived class reads it neither by its name alone nor through an instance,
+        // and the text names a property
+        var hidden = Check("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Twice() => Count * 2\n}\n\nprint(D(1, 2).Twice())\n").Diagnostics.Sorted.Single();
+        Assert.Equal((ErrorIds.NotVisible, 6), (hidden.Id, hidden.Line));
+        Assert.Equal("`Count` of `B` is private to its class: a property is visible outside it with `pub` (F9)", hidden.Message);
+        Assert.Equal([(ErrorIds.NotVisible, 8)], Errors("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B\n\nd = D(1, 2)\nprint(d.Count)\n"));
+    }
+
+    [Theory]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n", 6)]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count(int y) => y\n}\n\nprint(D(1, 2).Count(2))\n", 6)]
+    [InlineData("class B(int X) {\n    pub int Count => X\n}\n\nclass D(int Count) : B\n\nprint(D(1, 2).X)\n", 5)]
+    [InlineData("class B(int X) {\n    pub int Count(int y) => y\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n", 6)]
+    [InlineData("class A(int X) {\n    pub int Count => X\n}\n\nclass B(int Y) : A\n\nclass D(int Z) : B {\n    pub int Count() => 2\n}\n\nprint(D(1, 2, 3).Count())\n", 8)]
+    public void A_member_of_a_derived_class_takes_no_name_of_a_property_it_inherits(string program, int line)
+    {
+        // K7 (the owner, 2026-11-05, #110, comment 6659026217): a property has no override, so a derived class gives no member of its own
+        // the name of a property of a base it sees, a property, a method whatever its parameters or a field, two classes up the chain
+        // too, and gives no property the name of a method of such a base: `hides-member`, at the member
+        Assert.Equal([(ErrorIds.HidesMember, line)], Errors(program));
+
+        // a property with the name of a field of a base is `redeclared` (assumed: the id of that case), the base's fields being the class's
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("class B(int Count)\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Y)\n"));
+
+        // the positive controls: a property of a base without `pub`, which the derived class does not see, is hidden by nothing (F9), by
+        // a property, by a method, which the call on a derived instance picks, and by a field, which the read through one reads
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count => 2\n}\n\nprint(D(1, 2).Count)\n");
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Y) : B {\n    pub int Count() => 2\n}\n\nprint(D(1, 2).Count())\n");
+        Clean("class B(int X) {\n    int Count => X\n}\n\nclass D(int Count) : B\n\nprint(D(1, 2).Count)\n");
+    }
+
+    [Fact]
+    public void A_property_of_a_base_named_Text_gives_an_instance_no_text()
+    {
+        // A5, A9: the text of an instance is a method `Text()` of its class or of the nearest base, and a property of that name up the
+        // chain is no such method
+        Assert.Equal([(ErrorIds.NoText, 7)], Errors("class B {\n    pub string Text => \"b\"\n}\n\nclass D : B\n\nprint(D())\n"));
+
+        // the positive control: the base's method gives it
+        Clean("class B {\n    pub string Text() => \"b\"\n}\n\nclass D : B\n\nprint(D())\n");
     }
 
     // ---- what the checker does not read ---------------------------------------------------------------------

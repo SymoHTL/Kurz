@@ -87,7 +87,7 @@ public sealed partial class Checker
                 case FunctionDeclaration { Property: true } f when (f.Modifiers & Modifiers.Static) != 0:
                     return (f.Line, "a `static` property (K7, K19)"); // section 14 of the record: open
                 case FunctionDeclaration { Property: true } f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)) != 0:
-                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)).ToString().ToLowerInvariant()}` of a property (K7, R16)"); // section 14 of the record: open
+                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)).ToString().ToLowerInvariant()}` of a property, which section 14 leaves open (K7)");
                 case FunctionDeclaration f when (f.Modifiers & Modifiers.Extern) != 0:
                     return (f.Line, $"the modifier `extern` of a {(f.Property ? "property" : "method")} (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
@@ -608,7 +608,36 @@ public sealed partial class Checker
             {
                 CheckOverride(symbol, method);
             }
+
+            foreach (var field in symbol.Fields.Skip(symbol.Base?.Fields.Count ?? 0))
+            {
+                HidesProperty(symbol, field.Name, false, field.Line); // K7: a field of the class's own, its bases' fields coming first (K6)
+            }
         }
+    }
+
+    /// <summary>
+    /// K7 <i>(assumed)</i>: a property has no override (section 14: open), so a member of a derived class with the name of a property of a
+    /// base that the class sees (F9), a field or a method whatever its parameters, is <c>hides-member</c>, as a method of a property's name
+    /// is no overload of it in one class (V9); so is a property with the name of a method of a base that the class sees.
+    /// </summary>
+    private bool HidesProperty(ClassSymbol symbol, string name, bool isProperty, int line)
+    {
+        if (symbol.Base?.Chain.FirstOrDefault(c => c.Methods.TryGetValue(name, out var list) && list.Any(SeenByDerived)) is not { } b)
+        {
+            return false;
+        }
+
+        var ofProperty = b.Methods[name].Any(f => f.IsProperty);
+        if (!ofProperty && !isProperty)
+        {
+            return false;
+        }
+
+        Report(ErrorIds.HidesMember, line, ofProperty
+            ? $"`{name}` has the name of a property of `{b.Name}`: a derived class gives no member of its own the name of a property it inherits (K7)"
+            : $"`{name}` is a property, and `{b.Name}` has a method of this name: a derived class gives no property the name of a method it inherits (K7)");
+        return true;
     }
 
     /// <summary>
@@ -630,6 +659,11 @@ public sealed partial class Checker
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
             NotSupported(d.Line, marks == (Modifiers.Virtual | Modifiers.Override) ? "`virtual` and `override` on one method (K7)" : "`virtual` on a private method, which no derived class sees (K7, F9)");
+            return;
+        }
+
+        if (HidesProperty(symbol, method.Name, method.IsProperty, d.Line))
+        {
             return;
         }
 
