@@ -597,7 +597,7 @@ public sealed class ParserTests
             "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "internal", "static", "this", "virtual",
             "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
-            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp"];
+            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp", "instant"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());
         Assert.Equal(types.Order(), CoreWords.TypeNames.Order());
     }

@@ -171,6 +171,61 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_one_value_of_a_type_without_fields_is_a_constant_whose_count_no_holder_changes()
+    {
+        // D8 as compiler/README.md assumes it: the one value is a constant of the module, which nothing writes, and its count carries
+        // the highest bit, held for ever, as a literal's count of bytes carries its mark (section 4); a family with a type without
+        // fields tests the bit at every change of a count, so that the value is held and let go of in every place a block is
+        const string text = """
+            data Shape
+            data Dot : Shape
+            data Circle(double R) : Shape
+
+            data Holder(Shape S, int N)
+
+            Shape Pick(int i) {
+                if i % 2 == 0 {
+                    return Dot
+                }
+
+                return Circle(1.5)
+            }
+
+            mut all = List<Shape>()
+            for i in 0..<1000 {
+                all.Add(Dot)
+                all.Add(Pick(i))
+            }
+
+            d = Dot
+            mut Shape e = d
+            e = Pick(3)
+            e = Dot
+            h = Holder(Dot, 1)
+            k = h with { N = 2 }
+            print(all.Count)
+            print(e)
+            print(k)
+            """;
+        Ran(BuildAndRun(text, "unit-held"), 0, ["2000", "Dot", "Holder { S = Dot, N = 2 }"], "");
+        var held = Compile(text).Program!.Ir;
+        Assert.Contains("{ i64 -9223372036854775808, i32 ", held, StringComparison.Ordinal);
+        Assert.Contains("icmp slt i64", Release(held), StringComparison.Ordinal);
+
+        // a family without such a type tests nothing at a change of its counts
+        Assert.DoesNotContain("icmp slt i64", Release(Compile("data Link(int V, Link? Next)\n\nprint(Link(1, Link(2, null)).V)\n").Program!.Ir), StringComparison.Ordinal);
+    }
+
+    /// <summary>The body of the one helper of the program that lets go of a count of a block.</summary>
+    private static string Release(string ir)
+    {
+        var start = ir.IndexOf("define internal void @\"release.block.", StringComparison.Ordinal);
+        Assert.True(start >= 0, "no helper lets go of a count of a block");
+        Assert.Equal(-1, ir.IndexOf("define internal void @\"release.block.", start + 1, StringComparison.Ordinal));
+        return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+    }
+
+    [Fact]
     public void A_data_type_that_holds_a_value_of_its_own_type_is_a_block_read_and_written_as_any_value()
     {
         const string text = """
@@ -289,7 +344,6 @@ public sealed class DataTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nm = Map<Outer<int>, int>()\nprint(m)\n", 3, "a generic data type that holds a value of its own type, `Outer<int>` (D1, T19)")] // whatever its type arguments: the checker's walk of a key reads no `Map` behind it (M9)
     [InlineData("data Outer<T>(Outer<Map<int, int>>? O, T V)\n\nn = Outer<int>(null, 1)\nprint(n == n)\n", 3, "a generic data type that holds a value of its own type, `Outer<int>` (D1, T19)")] // nor its walk of `==` (D3)
     [InlineData("data Thing(int A)\ndata Box<T>(T V) : Thing\ndata Bag(Box<int> Weight)\n\nBag Empty() => Empty()\n\nEmpty()\n", 5, "a generic data type in a relation of inheritance, `Box<int>` (D6, T19)")] // the field of the type a called function returns, at that function
-    [InlineData("class C(int N)\ndata Leaf\ndata Tree(C Item, Tree | Leaf Next)\n\nprint(Tree(C(1), Leaf).Item.N)\n", 5, "an instance of a class held by `Tree`, a data value laid out as a block, which is never freed (section 3, R3)")] // K2 with D1: such a value is never given back
     public void What_the_emitter_does_not_lay_out_is_not_supported_at_its_line(string text, int line, string message)
     {
         var compilation = Compile(text);

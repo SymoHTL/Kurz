@@ -1,0 +1,10 @@
+// expect: error default-not-constant at 8
+// rules: F12
+
+data Rate(int BytesPerSecond, int GraceSeconds)
+
+int One() => 1
+
+int PerSecond(Rate r = Rate(One(), 1)) => r.BytesPerSecond
+
+print(PerSecond())
