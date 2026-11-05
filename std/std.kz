@@ -4548,10 +4548,9 @@ pub void MapWalk(byte* block, int change) {
 
 // For a lookup whose probe passed more than 512 slots, 64 groups of 8 without a slot of 255: whether the
 // block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
-// over a map holds it (section 4, the owner, 2026-11-02, "lookups count too, rehash in place onto
-// SipHash-1-3 past the bound"); the block is then marked as on SipHash-1-3, so that `MapHash` hashes
-// under its keys, and the emitted code moves the entries under their new hashes (`MapRehashMark`,
-// `MapRehashPlace`).
+// over a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the block is then marked
+// as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code moves the entries
+// under their new hashes (`MapRehashMark`, `MapRehashPlace`).
 pub bool MapLongLookup(byte* block) {
     mut bool rehash = false
     raw {
