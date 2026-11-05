@@ -9,6 +9,9 @@ shape, never meaning.
                               code block, inside a rule, its text equal to its path) from its corpus
                               file, naming each chapter as it is written
 
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is read or written (tools/calls.py).
+
 A rule is a heading `### <ID> (<status>[, §n ...])` with status decided, assumed, proposed or open
 (reference/00-about.md says what each means). A sample in the reference is a `Case:` line that
 links a corpus file, followed by a ```kurz block that equals the file's body. Within one chapter
@@ -47,6 +50,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 RULES_FLOOR, CASES_FLOOR = 40, 30
 RULE = re.compile(r"### ([A-Z]\d+) \((decided|assumed|proposed|open)((?:, §\d+)*)\)")
@@ -608,10 +612,22 @@ def cases_in(base):
     cases.append(("--sync: a temporary file that cannot be removed after a failed write is named in the refusal, to be removed by hand",
                   isinstance(stuck, kit.Refused) and leftovers == [f for f in leftovers if f in str(stuck)] and len(leftovers) == 1
                   and "could not be removed" in str(stuck), (repr(stuck), leftovers)))
+    good = [[], ["--sync"], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--snyc"], ["reference"], ["--sync", "--sync"], ["--sync", "--self-test"]]
+    cases.append(("call: no argument, --sync and --self-test are its calls, each alone; --help, -h, a mistyped --sync, a "
+                  "positional argument and two calls together are not",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"lint": (), "sync": ("--sync",), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/lint_reference.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     if "--sync" in sys.argv:

@@ -7,9 +7,10 @@ metadata:
 
 # What Goose does for speed, and what Kurz takes from it
 
-Read on 2026-10-30. Every fact about Goose comes from the page named beside it, with the sentence
-quoted; the names resolve under "Sources" at the end. Nothing was built, run or measured for this
-note. A figure computed for this note from published numbers says so.
+Read on 2026-10-30, and on 2026-10-31 where an item says so. Every fact about Goose comes from the
+page named beside it, with the sentence quoted; the names resolve under "Sources" at the end.
+Nothing was built, run or measured for this note. A figure computed for this note from published
+numbers says so.
 
 Verdicts: ALREADY (Kurz has it; for a weakness W<n>, Kurz already avoids it), ADOPTABLE (a question for the owner; the item says whether it was asked), CONFLICTS (with a
 decision of the record), UNKNOWN. An answered question names the owner's choice and the section of
@@ -108,8 +109,9 @@ or the finding it meets (knowledge/diagram-design-change-playbook.md, B4).
   what I get on my M1 if I ask the LLM to write more performant (still safe) solutions to a couple
   benchmarks", with Goose at 0.54x on `records` and 0.75x on `graph`, unverified (HN 2).
 - Verdict of the research: Goose is faster on pointer-rich, allocation-rich and variable-size data,
-  and level or behind elsewhere (lru 0.81 and scene 0.82 under MSVC, calc 0.89 under clang). "It is not evidence that a random Rust service, command-line tool, or web
-  backend becomes faster when rewritten in Goose." (dev.to)
+  and level or behind elsewhere (lru 0.81 and scene 0.82 under MSVC, calc 0.89 under clang: the
+  ratios of (results) above, read 2026-10-30). "It is not evidence that a random Rust service,
+  command-line tool, or web backend becomes faster when rewritten in Goose." (dev.to)
 
 ## Where the speed comes from, and where Kurz stands
 
@@ -207,7 +209,10 @@ per-object teardown, contiguous data, narrow links, and enums sized for the vari
   is 1.10x faster than Rust (256 against 282 ms)." (results). Kurz: ADOPTABLE, Q7, not asked.
 - W2, copies with no move. "By-value semantics with no move operation (4.1, TODO 3) mean that idioms
   a Rust programmer would express as a cheap move are an O(size) copy in Goose." (design). Kurz:
-  ALREADY avoided (copy on write).
+  ALREADY avoided in part: where a value is assigned or passed, which shares its storage until one side
+  writes, and where a list's storage is written while nobody else holds it (section 4); not where a
+  `data` value laid out as a block is written, by `with` or into a path, which copies the whole
+  block whatever its count, an O(size) copy at every such write (section 4, assumed).
 - W3, pools for lifetimes that are not nested. Lifetimes that are not nested "must go through
   reusable pools" (design). Kurz: ALREADY avoided (counts free in any order).
 
