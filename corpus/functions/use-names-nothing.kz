@@ -1,0 +1,6 @@
+// expect: error unknown-name at 4
+// rules: F10
+
+use nothing_here
+
+print(1)

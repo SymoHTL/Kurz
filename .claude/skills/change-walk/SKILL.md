@@ -110,7 +110,9 @@ the head that will be reviewed is a `judgment step`.
      posted, what converged is replayed, and the run after it continues with the rest. A run that
      labelled the pull request is a round whatever kind it ends with (item 8): running it again
      after any of them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among
-     them, takes the one round, and after it no run follows.
+     them, takes the one round, and after it no run follows; but a run that `usage-limit` ended
+     before any paid pass took its label off again, its note and its status say so, and its run
+     after the reset is the round.
      `head-moved`: a push arrived; review the new head. `oversized`: split the change. `base`:
      the pull request must target the default branch. `cap`: the pull request had its one
      review round, and item 8 says what follows. `rules`, `empty`, `bad-diff`: the line says
@@ -166,8 +168,9 @@ the head that will be reviewed is a `judgment step`.
    `judgment step`
 8. The cap: a pull request gets one review round, the rounds before the cap counted (the
    owner, 2026-10-22; three from 2026-10-21). A round is a run that labelled the pull request: a run with files to
-   review puts `review-round-<n>` on before its first pass, whatever follows; a dry run and
-   `--plan` put none on. `gh pr view <N> --json labels` shows the labels, and the count is the
+   review puts `review-round-<n>` on before its first pass, whatever follows, but for a run that
+   the usage limit ends before any paid pass, which takes its own label off again and is no round
+   (the owner, 2026-11-02, issue 156); a dry run and `--plan` put none on. `gh pr view <N> --json labels` shows the labels, and the count is the
    highest `n`; a second run with a file the cache does not answer ends before any pass as
    `REVIEW DID NOT COMPLETE (cap)`, and in CI
    its `error` takes the place of the `review` status on its head, the head the round at the cap
@@ -197,7 +200,8 @@ the head that will be reviewed is a `judgment step`.
       run, `py -3 tools/merge_pr.py <N> <full head sha> --dry-run` at the reviewed head: its refusal
       of the branch behind `main` says whether the round converged on every file, and where it did
       not, or where the status does not show it, that taking `main` makes the review of the new
-      head a paid round and the owner chooses: a paid round, over red at the new head, or hold
+      head end as `cap` before any pass and the owner chooses: a paid round, over red at the new
+      head, or hold
       (`knowledge/a-round-that-did-not-converge-makes-main-a-round.md`). A push to a Ready pull request
       starts the run; on a Draft, `py -3 tools/review/review.py --pr <N> --plan` prints 0 batches
       before the dispatch. A head with a file to review ends as `cap` before any pass and needs the

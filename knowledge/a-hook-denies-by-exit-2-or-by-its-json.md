@@ -1,19 +1,21 @@
 ---
 name: a-hook-denies-by-exit-2-or-by-its-json
-description: A PreToolUse hook blocks a tool call by exit 2, whatever it prints, or by a JSON decision "deny", which the harness reads on every exit code; every other end leaves the call to the normal permission flow, a crash, a timeout and a missing interpreter included (Claude Code docs, the hooks page, read 2026-10-08 and again 2026-10-09)
+description: A PreToolUse hook blocks a tool call by exit 2, whatever it prints, or by a JSON decision "deny", which the harness reads on every exit code; every other end leaves the call to the normal permission flow, a crash, a timeout and a missing interpreter included (Claude Code docs, the hooks page, read 2026-10-08, again 2026-10-09 and 2026-11-05)
 metadata:
   type: reference
 ---
 
 What the Claude Code documentation says of a `PreToolUse` hook (the hooks page,
 code.claude.com/docs/en/hooks, read 2026-10-08 and read again on 2026-10-09, after a review had
-doubted it):
+doubted it, and on 2026-11-05 for what the session is given):
 
 - The exit code does not act alone. In the page's own words, under "Exit code output": Claude
   Code "reads JSON output fields from stdout on every exit code, not just 0"; for the events with
   a decision model a parsed object that passes the schema takes effect beside the code.
 - Exit 2 is a blocking error: it blocks the tool call whether or not the hook prints JSON, and
-  even a JSON `permissionDecision` of `"allow"` cannot override it. (Before CLI 2.1.214 an exit 2
+  even a JSON `permissionDecision` of `"allow"` cannot override it. "The message that comes with
+  the block is your hook's stderr", and the page's example shows Claude receiving that stderr as
+  the tool's error (read 2026-11-05); the page does not say that stdout reaches the session. (Before CLI 2.1.214 an exit 2
   together with JSON that failed the schema was a non-blocking error, and the call went ahead.)
 - Any other exit code does not block on its own. With a parsed object that passes the schema the
   exit code is ignored and the object decides: a `hookSpecificOutput` with `permissionDecision`

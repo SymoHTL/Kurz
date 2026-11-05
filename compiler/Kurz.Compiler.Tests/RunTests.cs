@@ -109,8 +109,8 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 373 : 408;
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. Each number is the count measured on its system, with no margin, so that one case that stops being built turns it red, and a change that adds a case to the run raises it (#156).</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 401 : 453;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -121,12 +121,16 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/write-timeout.kz", "system/connect-timeout.kz", "system/timeout-refused.kz", "system/accept-timeout.kz",
         "system/lines-break-read.kz", "system/lines-empty.kz", "system/lines-invalid-utf8.kz", "system/lines-not-open-to-read.kz",
         "system/lines-propagate.kz", "system/lines-read.kz", "system/setter-after-close.kz", "system/lines-keeps-its-file.kz", "system/shutdown-write.kz",
+        "system/read-buffer-fill.kz", "system/read-buffer-straight.kz", "system/read-buffer-zero.kz", "system/read-buffer-failed.kz",
+        "system/read-buffer-close.kz", "system/fill-consume.kz", "system/fill-held.kz", "system/fill-head.kz", "system/fill-timeout.kz",
+        "system/consume-past.kz", "system/consume-negative.kz", "system/fill-closed.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
+        "system/monotonic-clock.kz", "types/instant-arithmetic.kz",
     ];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>

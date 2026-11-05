@@ -62,12 +62,13 @@ public sealed partial class Emitter
             CallKind.Parse => EmitParse(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
+            CallKind.BlackBox => EmitBlackBox(c, info),
             CallKind.MapRemove => EmitMapRemove(c),
             CallKind.MapContainsKey => EmitMapContainsKey(c),
             CallKind.MapClear => EmitMapClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.FileModified or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
-                or CallKind.FileRead or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+                or CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
                 or CallKind.TcpShutdownWrite => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
@@ -96,6 +97,22 @@ public sealed partial class Emitter
         var text = Text(EmitExpression(argument), TypeOf(argument), argument.Line);
         fn.Emit($"call void {RuntimeFunction("Print")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return null;
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, lowered as Rust lowers <c>black_box</c>: the value goes to a slot of its own, an empty <c>asm</c>
+    /// with a side effect takes the slot's address and clobbers memory, and the value is read back from the slot, so the optimiser must
+    /// have made the value before the call and knows nothing of it after (section 12, the owner, 2026-11-03). The value read back is the
+    /// call's, which holds the argument's count, and the call's expression makes it a temporary of the statement, as of every call.
+    /// </summary>
+    private string EmitBlackBox(CallExpression c, CallInfo info)
+    {
+        var type = Sub(info.Result);
+        var value = Owned(c.Arguments[0].Value);
+        var slot = fn.Alloca(Ir(type), "hint");
+        fn.Emit($"store {Ir(type)} {value}, ptr {slot}");
+        fn.Emit($"call void asm sideeffect \"\", \"r,~{{memory}}\"(ptr {slot}) nounwind");
+        return fn.Value($"load {Ir(type)}, ptr {slot}");
     }
 
     /// <summary>The type arguments of a call, in the terms of the function being emitted (T19, T27).</summary>

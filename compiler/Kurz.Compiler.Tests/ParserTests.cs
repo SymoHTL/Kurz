@@ -575,14 +575,29 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void An_internal_member_parses_and_pub_beside_it_is_syntax()
+    {
+        // F9: `internal` shows a member to the files of its folder (the owner, 2026-11-03), kept for the checker as `prot` is above
+        var (tree, diagnostics) = Parse("class A {\n    internal static int x = 1\n}");
+        Assert.Empty(diagnostics.Items);
+        var type = Assert.IsType<TypeDeclaration>(Assert.Single(tree.Statements));
+        var field = Assert.IsType<FieldDeclaration>(Assert.Single(type.Members!));
+        Assert.Equal(Modifiers.Internal | Modifiers.Static, field.Modifiers);
+        // a reading under E4's general clause, as a modifier written twice: `pub` and `internal` contradict each other, in either order,
+        // as C# refuses two access modifiers (CS0107) (assumed, section 8)
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class A {\n    pub internal int x = 1\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class A {\n    internal static pub int x = 1\n}"));
+    }
+
+    [Fact]
     public void The_core_words_are_the_lists_of_l18_and_l19()
     {
         // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
         string[] words = ["if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw", "mut", "data",
-            "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "static", "this", "virtual", "override",
-            "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
+            "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "internal", "static", "this", "virtual",
+            "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
-            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp"];
+            "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp", "instant"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());
         Assert.Equal(types.Order(), CoreWords.TypeNames.Order());
     }
@@ -737,6 +752,7 @@ public sealed class ParserTests
     [Theory]
     [InlineData("by")]
     [InlineData("pub")]
+    [InlineData("internal")]
     [InlineData("static")]
     [InlineData("mut")]
     [InlineData("void")]

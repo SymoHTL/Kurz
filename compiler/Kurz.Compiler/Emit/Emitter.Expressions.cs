@@ -67,6 +67,8 @@ public sealed partial class Emitter
                 return Temp(EmitChainMember(m, Sub(member), (UnionType)type), type);
             case MemberAccess m when Model.IsClockRead(m):
                 return EmitNow(m.Line);
+            case MemberAccess m when Model.IsMonotonicRead(m):
+                return EmitMonotonicNow(m.Line);
             case MemberAccess m:
                 return HeldCopy(m, EmitMember(m, type), type);
             case CallExpression c when !Model.IsMade(c, out _) && Model.CallOf(c).Result is WeakRefType weak: // `T.Make` is its construction, no call (T33)
@@ -158,11 +160,12 @@ public sealed partial class Emitter
                 return "zeroinitializer"; // N1: the value of a nullable type's case `null`, of no size
             case UnitConstant when type is DataType d && layout.IsBlock(d):
                 {
-                    // D8: the one value of a type without fields, a block that is never written, since a write copies a block first
+                    // D8: the one value of a type without fields, a block that is never written, since a write copies a block first, whose
+                    // count carries the highest bit, held for ever, which a count's change tests for (RetainBlock)
                     var name = $"@\"unit.{Lower.Mangle(d)}\"";
                     if (helpers.Add(name))
                     {
-                        module.Global($"{name} = private unnamed_addr constant {layout.Block(d.Symbol)} {{ i32 {Number(layout.Number(d))} }}");
+                        module.Global($"{name} = private unnamed_addr constant {layout.Block(d.Symbol)} {{ i64 {long.MinValue.ToString(CultureInfo.InvariantCulture)}, i32 {Number(layout.Number(d))} }}");
                     }
 
                     return name;
@@ -409,6 +412,8 @@ public sealed partial class Emitter
                 return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
                 return EnumNumber(target(), e); // D18
+            case PrimitiveType { Kind: Primitive.Instant } when m.Member == "Elapsed":
+                return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
                 return fn.Value($"load i32, ptr {HandleField(target(), 12)}"); // S9
 
@@ -805,6 +810,16 @@ public sealed partial class Emitter
             return value;
         }
 
+        if (from is ClassType fc && to is ClassType tc)
+        {
+            return Layout.Fat(tc.Symbol) && !Layout.Fat(fc.Symbol) ? Pair(value, Table(fc.Symbol)) : value; // K6: an instance of a derived class with its class's table
+        }
+
+        if (from is WeakRefType fw && to is WeakRefType tw)
+        {
+            return Layout.Fat(tw.Target.Symbol) && !Layout.Fat(fw.Target.Symbol) ? Pair(value, Table(fw.Target.Symbol)) : value; // R3 with K6: the same weak count
+        }
+
         if (to is WeakRefType weak)
         {
             return Weaken(value, from, weak, owned); // R3: a value the place holds, unless the callee borrows it
@@ -966,7 +981,7 @@ public sealed partial class Emitter
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`
-                    var strong = Upgraded(value);
+                    var strong = Upgraded(value, w);
                     var text = TextOf(strong, Types.Read(w), line);
                     Release(strong, Types.Read(w));
                     return text;

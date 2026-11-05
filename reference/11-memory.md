@@ -9,7 +9,12 @@ An instance whose last count ends lets go of the instances its fields hold throu
 not by a call for each, so a chain of any length is freed without exhausting the stack: a million
 links are freed as two are (§3, the owner, 2026-11-01, "Iterative, never crashes", against a
 release that calls itself for each nested instance, as Rust's drop glue does, under which a long
-chain ends the program with `stack-overflow`).
+chain ends the program with `stack-overflow`). The list needs no memory of its own: an instance on
+it is linked through its strong count, which counts nothing from then on, so the release allocates
+nothing and cannot run out *(assumed, as §3 marks it)*. Its cost is a pause: an assignment that lets
+go of the head of a million links frees all of them before it returns, where a region is freed in
+one sweep only for the memory of a message (§13, "Region per message", the research verdict on
+Goose's data stacks).
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
@@ -110,13 +115,13 @@ A `weak` reference points at an instance without keeping it alive. It is nullabl
 null once its target has been freed. A field that is `weak` is not a strong field for R2. When a
 target is freed follows from what holds it: a variable holds its instance until the end of the
 block that declares the variable, a field as long as its owner lives, and a temporary until the
-end of its statement; an instance is freed when the last of these ends. So in the case under N9
+end of its statement, or of its condition in an `if` or a `while`, as N9 ends a narrowing there (§4); an instance is freed when the last of these ends. So in the case under N9
 the `o` that is declared at the top level keeps `Ann` alive while `p.Keeper` is read. *(the
 record marks the lifetimes as assumed: proposed on 2026-10-03, against releasing a variable after
 its last use, which would free `Ann` before the print)*
 
 A read of a `weak T?` place, a field, a variable or an item, gives a strong `T?`, which holds the
-target as a temporary does, to the end of its statement, and longer where the read is stored:
+target as a temporary does, to the end of its statement or its condition, and longer where the read is stored:
 `k = p.Keeper` keeps the target alive while `k` lives, and a `T?` parameter takes the read as it
 is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
 `?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
@@ -125,6 +130,15 @@ A `weak T?` type stands wherever a type stands: a field, a list's item, a variab
 return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
 stands", against a field and a list's item alone). What a nullable type written as a case of a
 union is stays open (§14), a `weak T?` among them.
+
+A `weak T?` field of a `data` value compares by its target's identity (D3): two values are equal
+where it reaches the same instance, and a freed target reads as null, so two freed ones are equal
+and a freed one equals `null` (§3, the owner, 2026-11-02, #110, comment 6580085338). A `weak T?` is
+no key of a `Map`, nor is a type that reaches one through what `==` compares by content, a field of
+a `data` value, an item or a nullable, while a `weak` behind a class does not count: such a key type
+is the compile error `weak-key` at the line that writes it (§3, the owner, 2026-11-02, #110, comments
+6580085338 and 6580137405; the id and the line *(assumed, as §3 marks them)*). A clause of K8 that
+names a `weak` field is `equal-by-weak` (K8).
 
 Case: [memory/weak-back-pointer.kz](../corpus/memory/weak-back-pointer.kz)
 ```kurz
@@ -194,9 +208,44 @@ weak Owner? a = Remember(o)
 print(NameOf(a))
 weak Owner? b = Remember(Owner("Bob"))
 print(NameOf(b))
+```
+
+Case: [memory/weak-map-value.kz](../corpus/memory/weak-map-value.kz)
+```kurz
+class Owner(string Name)
+
+o = Owner("Ann")
 mut keepers = Map<string, weak Owner?>()
 keepers["ann"] = o
 print(keepers["ann"]?.Name ?? "gone")
+```
+
+Case: [memory/weak-data-equality.kz](../corpus/memory/weak-data-equality.kz)
+```kurz
+class Owner(string Name)
+data Tag(string Label, weak Owner? Keeper)
+
+o = Owner("Ann")
+print(Tag("x", o) == Tag("x", o))
+print(Tag("x", o) == Tag("x", Owner("Bo")))
+gone = Tag("x", Owner("Cy"))
+print(gone == Tag("x", null))
+```
+
+Case: [memory/weak-key.kz](../corpus/memory/weak-key.kz)
+```kurz
+class Owner(string Name)
+
+seen = Map<weak Owner?, int>()
+print(seen.Count)
+```
+
+Case: [classes/equal-by-weak.kz](../corpus/classes/equal-by-weak.kz)
+```kurz
+class Owner(string Name)
+class Pet(string Name, weak Owner? Keeper) equal by Name, Keeper
+
+print(Pet("Rex", null) == Pet("Rex", null))
 ```
 
 ### R4 (decided, §3) Where `weak` is enough

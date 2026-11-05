@@ -119,6 +119,9 @@ public enum CallKind
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
+    /// <summary><c>Hint.BlackBox(value)</c>, the value itself, which the optimiser cannot see through, as Rust's <c>std::hint::black_box</c> (F18).</summary>
+    BlackBox,
+
     /// <summary>A map's <c>ContainsKey(key)</c> (M9).</summary>
     MapContainsKey,
 
@@ -166,6 +169,12 @@ public enum CallKind
 
     /// <summary>A file's or a stream's <c>Read(mut into, max)</c> (S3, S9).</summary>
     FileRead,
+
+    /// <summary>A file's or a stream's <c>Fill(mut into)</c> (S24).</summary>
+    FileFill,
+
+    /// <summary>A file's or a stream's <c>Consume(n)</c> (S24).</summary>
+    FileConsume,
 
     /// <summary>A file's or a stream's <c>Write(bytes)</c> (S4, S9).</summary>
     FileWrite,
@@ -294,6 +303,7 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, DataSymbol> dataTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, KurzType> chainMembers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<MemberAccess> monotonicReads = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
@@ -404,6 +414,11 @@ public sealed class SemanticModel
     public bool IsClockRead(MemberAccess access) => clockReads.Contains(access);
 
     internal void RecordClockRead(MemberAccess access) => clockReads.Add(access);
+
+    /// <summary>Whether the member is <c>instant.Now</c>, the read of the monotonic clock (S25).</summary>
+    public bool IsMonotonicRead(MemberAccess access) => monotonicReads.Contains(access);
+
+    internal void RecordMonotonicRead(MemberAccess access) => monotonicReads.Add(access);
 
     /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
     public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);

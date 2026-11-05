@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: T36
+
+int n = instant.Now
+print(n)
