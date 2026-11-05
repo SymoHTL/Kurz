@@ -1,0 +1,19 @@
+// expect: output
+// | 3
+// | done
+// rules: T34
+
+data Box(int A)
+
+// a call in an arm of a `match` on `T.Kind` takes no part in the walk inside a loop over `T.Fields` too: no copy takes the `TypeKind.List` arm
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        match T.Kind {
+            TypeKind.List => Deep([x], n - 1)
+            else => print(n)
+        }
+    }
+}
+
+Deep(Box(1), 3)
+print("done")

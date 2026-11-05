@@ -13,6 +13,9 @@ one line of 2026-10-23).
   compiler_gate.py               build, test and ask the command; exit 0 when every check passed
   compiler_gate.py --self-test
 
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is built (tools/calls.py).
+
 Red when: compiler/NuGet.config is missing, is not well-formed XML, does not open its package
 sources with `<clear />` (the first child of `<packageSources>`, so that a clear inside a comment
 or inside another element does not count) or maps no package pattern to a source under
@@ -36,6 +39,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 CWD = "compiler"  # the working directory of the command: the dotnet host reads global.json from here and its parents, never from beside the solution
 SOLUTION = "Kurz.sln"  # relative to CWD
@@ -299,10 +303,22 @@ def self_test():
         cases.append(("the gate's own run prints a red run's output into a cp1252 log, and names its failing tests after it",
                       code == 1 and "↓ (pos 0)" in said and "ERROR: 5 tests failed" in said
                       and said.index("↓ (pos 0)") < said.index("ERROR: 5 tests failed"), said[-300:]))
+    good = [[], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--slef-test"], ["compiler"], ["--self-test", "--self-test"], ["--self-test", "-v"]]
+    cases.append(("call: no argument and --self-test are its calls, each alone; --help, -h, a mistyped option, a positional "
+                  "argument and a second argument are not, so none of them builds the compiler",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"the gate": (), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/compiler_gate.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     sys.exit(main())

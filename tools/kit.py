@@ -67,8 +67,9 @@ PARTLY = 5
 # The owner's cap on review rounds (three on 2026-10-21, one since 2026-10-22): a pull request gets
 # at most ROUND_CAP of them, the rounds before the cap counted. A round is a review run that labelled the pull request: a run with
 # files to review puts ROUND_LABEL plus the round's number on before its first pass, so it is a round
-# whatever follows, a limit, a cut-off or a failure before any pass included; a dry run and a count
-# of the batches put none on. The count is the highest such number: a lower label taken off
+# whatever follows, a cut-off or a failure before any pass included, but for a run that the usage limit
+# ends before any paid pass, which takes its own label off again and is no round (the owner, 2026-11-02,
+# issue 156); a dry run and a count of the batches put none on. The count is the highest such number: a lower label taken off
 # changes nothing, and one label put on by hand counts the rounds no reviewer labelled. What a
 # pull request at the cap still holds goes on the collection ticket, an open issue labelled
 # LEFTOVERS_LABEL.
