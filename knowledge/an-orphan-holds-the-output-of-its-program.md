@@ -34,9 +34,10 @@ and every other run that waited for the machine waited with it.
   `pipe:[inode]`. Where the streams have not ended in time, it finds each other process that holds one
   of those pipes in `/proc/<pid>/fd` and ends it with its tree. The run then answers -1, and its error
   stream ends with `` `<file>` ended, and an orphan holds its output: pid <n>, ended ``.
-- On Windows no list of a process's handles is read: the wait is bounded the same way, and the text
-  says that no process that holds the output was found. A build for Windows says `not supported` to
-  the client's cases and to every case of a socket, so none of them forks there.
+- On Windows no list of a process's handles is read, so nothing there ends a process that holds the
+  streams. The wait goes through the same lines, with no pipe found, but no test runs that path: the
+  test returns at once on Windows, where no shell forks a child. A build for Windows says `not
+  supported` to the client's cases and to every case of a socket, so none of them forks there.
 - A case that forks a server still ends its child, and bounds the child's `Accept` so that a child
   whose program ended first ends by itself.
 
