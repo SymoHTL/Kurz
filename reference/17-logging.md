@@ -85,20 +85,22 @@ Q9 (c)). An unknown level or a malformed filter refuses the start with `log-filt
 No case: a case gives its program no environment and declares no settings type, and its header
 holds no line of standard error.
 
-### P5 (proposed) `KURZ_LOG`
+### P5 (decided, §12) `KURZ_LOG`
 
 `KURZ_LOG` is read before the program's first statement, and only by a program with a log call in
-one of its files, as Rust reads `RUST_LOG` only where a subscriber is set up. Its entries are
-separated by commas, the spaces around an entry left out, and an empty entry is passed over, as
-Rust's filter passes it over, so that an empty `KURZ_LOG` is as none. An entry is a level, which
-sets the level of every category, the last such entry winning, or `prefix=level`, with no space
-around the `=`. A category takes the level of the entry with the longest prefix it starts with,
-the last of two alike, as .NET's rule selector picks a rule, and else the level of the entries
-without a prefix, else `Information`. Level names and prefixes are compared with no regard to the
-case of a letter, as .NET compares them. Any other entry, an unknown level among them and
-`=Debug`, ends the process before its first statement with the line
-`error: log-filter (<the entry>)` on standard error and the exit code 1, as `cpu-lacks-set`
-refuses a start (R18), and a value that is not UTF-8 with `error: log-filter (not unicode)`.
+one of its files, as Rust reads `RUST_LOG` only where a subscriber is set up (§12, the owner,
+2026-11-05, L5 and L7). Its entries are separated by commas, the spaces around an entry left out,
+and an empty `KURZ_LOG` is as none. An entry is a level, which sets the level of every category,
+or `prefix=level`. A category takes the level of the entry with the longest prefix it starts with,
+as .NET's rule selector picks a rule, and else the level of the entries without a prefix, else
+`Information`. Level names and prefixes are compared with no regard to the case of a letter, as
+.NET compares them, and `None` turns a category off. Any other entry, an unknown level among them,
+ends the process before its first statement with the line `error: log-filter (<the entry>)` on
+standard error and the exit code 1, as `cpu-lacks-set` refuses a start (R18) (§12, the owner,
+2026-11-05, L6). An empty entry is passed over, as Rust's filter passes it over; of two level
+entries, or of two entries with one prefix, the last wins; no space stands around the `=`, so that
+`=Debug` is such another entry; and a value that is not UTF-8 ends the start with
+`error: log-filter (not unicode)`. *(proposed)*
 
 No case: as P4's.
 
@@ -114,24 +116,26 @@ is its file's. The message is the template with its holes filled as an interpola
 (L6). A line's time is UTC in the named form of RFC 3339 with milliseconds, and a line break
 inside a value is written as `\n`, so that no value forges a line. Logs build wherever `eprint`
 builds (A17; §12, the owner, 2026-11-04, Q16 (a)).
-*(assumed, §12: the time, the line break, the category of top-level code)* A build for Windows,
-whose runtime gives no clock for a line's time, says `not supported` at a log call (S11).
-*(proposed)*
+The time, the line break and the category of top-level code are the owner's answers (§12, the
+owner, 2026-11-05, L3 and L8). A build for Windows, whose runtime gives no clock for a line's time,
+says `not supported` at a log call (S11) (§12, the owner, 2026-11-05, L2).
 
 No case: a case's header holds no line of standard error, and a case that expects output writes
 nothing to it.
 
-### P7 (proposed) The layout of a line
+### P7 (decided, §12) The layout of a line
 
 A line is the time, a space, the level's name as C# writes it, a space, the category, a colon and
-a space, the message, and each field in the template's order as a space, its name, `=` and its
-value: `2026-11-05T01:23:45.678Z Information Shop.Orders: Paid 17 order.Id=17`, as Rust's
+a space, the message, and each field as a space, its name, `=` and its value:
+`2026-11-05T01:23:45.678Z Information Shop.Orders: Paid 17 order.Id=17`, as Rust's
 `tracing_subscriber::fmt` lays a line out. The time has three digits of milliseconds. A field of
-type `string` stands in double quotes, with `"` and `\` in it after a `\`; a value of any other
-type is its text (A2 to A16). A line feed in the message or in a field is written as `\n` and a
-carriage return as `\r`, as Rust's `escape_debug` writes them. The category of top-level code is
-the name of its file without `.kz`. Where lines were dropped (P9), the line
-`<time> Warning Kurz.Log: dropped <n> lines`, `line` for one, stands before the next line written.
+type `string` stands in double quotes, with `"` and `\` in it after a `\`. A line feed in the
+message or in a field is written as `\n`. The category of top-level code is the name of its file
+without `.kz`, `main` for `main.kz`. Where lines were dropped (P9), the line
+`<time> Warning Kurz.Log: dropped <n> lines` stands before the next line written (§12, the owner,
+2026-11-05, L3, L4 and L8). The fields stand in the template's order, a value of any type but
+`string` is its text (A2 to A16), a carriage return is written as `\r`, as Rust's `escape_debug`
+writes it, and one dropped line is `dropped 1 line`. *(proposed)*
 
 No case: as P6's.
 
@@ -152,6 +156,6 @@ failed write)* Where §12 has a call put its line into a buffer of its thread an
 runtime's pool of threads write the buffers out, the runtime starts no thread: the thread that logs
 writes its line in one call of the system, as `print` writes (A1), and a line is dropped where that
 write fails. Its cost is a call of the system for each line written, in the thread that logs, which
-a slow standard error slows, the cost Q7 (a) set aside. *(proposed)*
+a slow standard error slows, the cost Q7 (a) set aside (§12, the owner, 2026-11-05, L1).
 
 No case: as P6's.
