@@ -3378,7 +3378,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     private const string HandleTarget = """
-        class Log(mut File Out) {
+        class Journal(mut File Out) {
             pub int Swap(File next) {
                 Out = next
                 return 2
@@ -3394,13 +3394,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         void | IoError Run() {
             File.WriteAll("held-read.txt", "abc".Bytes)
-            log = Log(File.Open("held-read.txt"))
+            log = Journal(File.Open("held-read.txt"))
             mut buffer = Bytes()
             print(log.Out.Read(mut buffer, log.Swap(File.Open("held-read.txt"))))
             print(log.Out.Read(mut buffer, 5))
             print(log.ReadOwn(mut buffer, File.Open("held-read.txt")))
             print(log.Out.Read(mut buffer, 5))
-            out = Log(File.Create("held-write.txt"))
+            out = Journal(File.Create("held-write.txt"))
             out.Out.Write(out.Again(File.Create("held-other.txt")))
             print(File.ReadAll("held-write.txt").Count)
             print(File.ReadAll("held-other.txt").Count)
@@ -3463,7 +3463,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
-            class Log(mut List<int> Items, mut List<int> Seen) {
+            class Journal(mut List<int> Items, mut List<int> Seen) {
                 pub int Read(int x) {
                     Seen.Add(Items.Count)
                     if x == 3 {
@@ -3509,7 +3509,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             r = Bag([3, 1, 2])
             r.Items.SortBy(x => r.Items.Count - x)
             print(r.Items[1])
-            l = Log([3, 1, 2], [9])
+            l = Journal([3, 1, 2], [9])
             l.Items.SortBy(x => l.Read(x))
             print(l.Seen)
             print(l.Items[0])

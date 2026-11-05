@@ -824,8 +824,8 @@ public sealed class CheckerTests
         // since the argument may have been meant for any of them
         var two = "void Show(int n) {\n    print(n)\n}\n\nvoid Show(string s) {\n    print(s)\n}\n\n";
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(two + "Show(missing)"));
-        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(two + "void Log() {\n}\nShow(Log())"));
-        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("void Log() {\n}\nvoid Take(int n) {\n    print(n)\n}\n\nTake(Log())"));
+        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(two + "void Note() {\n}\nShow(Note())"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("void Note() {\n}\nvoid Take(int n) {\n    print(n)\n}\n\nTake(Note())"));
     }
 
     [Theory]
@@ -1121,8 +1121,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nif x {\n    print(\"yes\")\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nwhile x {\n    print(\"yes\")\n}"));
         Clean("x = 7\nif (x > 5) {\n    print(\"big\")\n}");
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nif Log() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere but the body of a lambda with a result, which F11 makes type-mismatch
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nfor x in Log() {\n    print(1)\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nif Note() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere but the body of a lambda with a result, which F11 makes type-mismatch
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nfor x in Note() {\n    print(1)\n}"));
     }
 
     [Fact]
@@ -1188,7 +1188,7 @@ public sealed class CheckerTests
         var span = "int | duration d = 5days\nmatch d {\n";
         Clean(span + "    5days => print(0)\n    int n => print(n)\n    duration t => print(t)\n}");
         Assert.Equal([(ErrorIds.ConstantOverflow, 3)], Errors(span + "    106752days => print(0)\n    int n => print(n)\n    duration t => print(t)\n}"));
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nmatch Log() {\n    else => print(1)\n}")); // O10
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nmatch Note() {\n    else => print(1)\n}")); // O10
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("n = 1\nmatch n {\n    \"one\" => print(1)\n}")); // E1: the arm that names no case is the one error, not the match
     }
 
@@ -1217,7 +1217,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("n = 1\nstring s = match n {\n    0 => \"zero\"\n    else => 1\n}\nprint(s)"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("for i in 1..3 {\n    s = match i {\n        0 => break\n        else => \"many\"\n    }\n    print(s)\n}")); // C9: an arm of a value is an expression
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("n = 1\nm = 2\nx = match n {\n    0 => {\n        print(m)\n    }\n    else => 1\n}\nprint(x)")); // the arm's body is read all the same: `m` counts as read
-        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Log() {\n}\nn = 1\nx = match n {\n    else => Log()\n}\nprint(x)")); // E1: the arm carries the error, the match no second one
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Note() {\n}\nn = 1\nx = match n {\n    else => Note()\n}\nprint(x)")); // E1: the arm carries the error, the match no second one
         Clean("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nvoid Show(User | NotFound u) {\n    match u {\n        Admin a => print(\"admin {a.Level}\")\n        User x => print(\"user {x.Name}\")\n        NotFound => print(\"none\")\n    }\n}\n\nShow(Admin(\"Ann\", 2))");
     }
 
@@ -1441,7 +1441,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => {\n            if id > 0 {\n                print(1)\n            }\n        }\n    }\n    return value\n}\n\nprint(OrZero(1))")); // O5: the arm neither recovers, returns nor throws
         Assert.Equal([(ErrorIds.Redeclared, 12)], Errors(find + "int OrZero(int id) {\n    value = Nope(id) else {\n        NotFound id => 0\n    }\n    return value\n}\n\nprint(OrZero(1))").Where(e => e.Item1 == ErrorIds.Redeclared).ToList()); // after a call that did not type, a binding is still checked
         Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(find + "value = Find(2) else {\n    Nope => 0\n}\nprint(value)")); // E1: which case the arm meant is unknown, so no case is unlisted beside it
-        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Log() {\n}\n\nx = Nope() else {\n    NotFound => Log()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Note() {\n}\n\nx = Nope() else {\n    NotFound => Note()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
         Assert.Equal([(ErrorIds.Syntax, 11)], Errors(find + "value = Find(2) else {\n    0 => 0\n}\nprint(value)")); // O5: an arm of `else` names a case type, not a literal (E4)
     }
 
@@ -3622,8 +3622,8 @@ public sealed class CheckerTests
         // N9: a test narrows it, and a call, `print` and an interpolation of an instance among them (A5), or an assignment ends that; an
         // assignment of a value without `null` narrows it again; a field without `mut` stays narrowed, and a lambda knows nothing of such a path
         Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(a.E.Bytes.Count)\n}");
-        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class A(mut string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}"));
-        Clean("class A(string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class A(mut string? E)\n\nvoid Note() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Note()\n    print(a.E.Bytes.Count)\n}"));
+        Clean("class A(string? E)\n\nvoid Note() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Note()\n    print(a.E.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(1)\n    print(a.E.Bytes.Count)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors("class A(mut string? E) {\n    pub string Text() => \"a\"\n}\n\na = A(\"x\")\nif a.E != null {\n    s = \"{a}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}"));
         Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    n = a.E.Bytes.Count\n    s = \"{n}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}");
