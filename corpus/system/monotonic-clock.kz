@@ -1,0 +1,12 @@
+// expect: output
+// | true
+// | true
+// | true
+// rules: S25
+
+instant start = instant.Now
+instant later = instant.Now
+print(later >= start)
+duration taken = start.Elapsed
+print(taken >= later - start)
+print(instant.Now - start >= taken)

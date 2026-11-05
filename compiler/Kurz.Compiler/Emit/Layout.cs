@@ -228,8 +228,8 @@ internal sealed class Layout(IrModule module)
 
     /// <summary>
     /// The IR type of the block of a data type laid out as a block: the count of the values that hold it, 8 bytes, in front of the
-    /// number of the value's type, as Rust's <c>Rc</c> holds its count in front of its value (section 4, the owner, 2026-11-01,
-    /// "Implements section 3"), then the fields.
+    /// number of the value's type, as Rust's <c>Rc</c> holds its count in front of its value, then the fields (section 4, assumed, as the
+    /// owner's answer of 2026-11-01, "Implements section 3", issue 180, comment 6561898721, marks the counting of immutable data).
     /// </summary>
     public string Block(DataSymbol symbol)
     {
