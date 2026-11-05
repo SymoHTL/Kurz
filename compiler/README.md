@@ -301,6 +301,14 @@ ask about it.
 - A file that does not start, exits with a code other than 0 or gives no answer in 30 s names no
   release, and is refused as such. Pinned by
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
+- A program that a run captures, clang, a built case or the command in the tests, has its streams
+  waited for within what remains of the run's limit. On Linux each process that still holds the write
+  end of one of them then, a child the program left running, is ended while its start is still the one
+  it was found with, and the run answers -1 with its pid. A process that holds only a read end is no
+  holder. Pinned by
+  `CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`,
+  `CaptureTests.Only_a_process_that_holds_the_write_end_of_a_pipe_of_the_run_is_its_holder` and
+  `CaptureTests.A_holder_whose_id_another_process_took_since_is_not_ended`.
 - `build` takes its options before or after the file, each once, `--cpu` with the word after it as
   its name, and nothing else; the words of its own failures are this directory's, in the record's
   form, but for those of the CPU's question, which are the owner's. Pinned by `CommandTests`.
@@ -1416,8 +1424,9 @@ its sets, and the start check's against the machine where fewer than 20 of its t
 present or none reads as missing, since a path no test runs must not look clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
 A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
-tables as the function's name; a lambda made in the block is named after the function the block
-stands in, `main.lambda`, as its symbol is. A trace names a copy by its whole symbol,
+tables as the function's name; a guarded block made in the block adds its own mark, `main.guarded.guarded`
+(section 13, the owner, 2026-11-03); a lambda made in the block is named after the function the block
+stands in, `main.lambda`, as its symbol is (section 13, assumed). A trace names a copy by its whole symbol,
 `Next.1.for.X86.Sse41`, since its numbers do not end it: the name the emitter gives, which the record
 leaves open (section 14).
 
