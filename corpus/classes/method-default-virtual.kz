@@ -1,0 +1,16 @@
+// expect: output
+// | 10
+// | 20
+// rules: F12
+
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x = 2) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())

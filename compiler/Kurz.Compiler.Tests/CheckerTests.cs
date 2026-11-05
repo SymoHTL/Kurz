@@ -3557,6 +3557,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class C(int V) {\n    pub static int One() => 1\n    pub int G(int x = One()) => x\n}\n\nprint(C(1).G(2))"));
         Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int V) {\n    pub int G(C c = this) => c.V\n}\n\nprint(C(1).G())"));
         Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int A) {\n    pub static int F(int x = A) => x\n}\n\nprint(C.F(2))"));
+        // F12: a call takes the default of the method its receiver's static type names, so an override without one has none on its
+        // own type, while a call through the base takes the base's (the owner, 2026-11-05, #156, comment 6659240390)
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors("class A {\n    pub virtual int F(int x = 1) => x\n}\n\nclass B : A {\n"
+            + "    pub override int F(int x) => x * 10\n}\n\nA a = B()\nprint(B().F() + a.F())"));
+        Clean("class A {\n    pub virtual int F(int x) => x\n}\n\nclass B : A {\n    pub override int F(int x = 2) => x * 10\n}\n\n"
+            + "A a = B()\nprint(B().F() + a.F(3))");
         // V10: no variable is in sight there, as none is in a function's default
         Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("n = 1\n\nclass C(int V) {\n    pub int G(int x = n) => x\n}\n\nprint(C(1).G(2) + n)"));
     }
