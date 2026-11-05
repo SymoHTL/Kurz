@@ -578,13 +578,14 @@ def cases_in(base):
     here = os.path.dirname(os.path.abspath(__file__))
     shutil.copy(os.path.abspath(__file__), os.path.join(scratch, "tools", "tree_gate.py"))
 
-    def hook_exit(kit_text, calls_text=None):
+    def hook_exit(kit_text, calls_text=None, whole=False):
         with open(os.path.join(scratch, "tools", "kit.py"), "w", encoding="utf-8") as f:
             f.write(kit_text)
         with open(os.path.join(scratch, "tools", "calls.py"), "w", encoding="utf-8") as f:
             f.write(kit.read(os.path.join(here, "calls.py")) if calls_text is None else calls_text)
-        return subprocess.run([sys.executable, os.path.join(scratch, "tools", "tree_gate.py"), "--hook"], input=call(outside),
-                              capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+        run = subprocess.run([sys.executable, os.path.join(scratch, "tools", "tree_gate.py"), "--hook"], input=call(outside),
+                             capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        return run if whole else run.returncode
 
     exits = got(lambda: (hook_exit(kit.read(os.path.join(here, "kit.py"))), hook_exit("def (:\n")))
     cases.append(("hook: a kit that does not import ends in exit 2, where the same call passes with a kit that does", exits == (0, 2), exits))
@@ -593,9 +594,14 @@ def cases_in(base):
                   broken == 2 and isinstance(exits, tuple) and exits[0] == 0, (broken, exits)))
     # a calls.py that imports and whose refused raises, at the top of __main__, outside the guard of the imports
     raising = kit.read(os.path.join(here, "calls.py")) + "\n\ndef refused(*args, **kwargs):\n    raise RuntimeError(\"refused raised\")\n"
-    raised = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), raising))
-    cases.append(("hook: a calls.refused that raises ends in exit 2, where Python ends in 1, as the kit's case above passes with the "
-                  "calls.py whose refused does not raise", raised == 2 and isinstance(exits, tuple) and exits[0] == 0, (raised, exits)))
+    raised = got(lambda: hook_exit(kit.read(os.path.join(here, "kit.py")), raising, whole=True))
+    said = getattr(raised, "stderr", "")
+    cases.append(("hook: a calls.refused that raises ends in exit 2, where Python ends in 1, with its traceback and then the line that "
+                  "the call is denied on stderr, as the kit's case above passes with the calls.py whose refused does not raise",
+                  getattr(raised, "returncode", None) == 2 and isinstance(exits, tuple) and exits[0] == 0
+                  and 0 <= said.find("RuntimeError: refused raised") < said.find(
+                      "tree gate could not run: an exception ended the check, so the call is denied"),
+                  (getattr(raised, "returncode", raised), said[-300:], exits)))
     # a mistyped --hook in the hook's command: refused with exit 2, which denies the call, where it used to scan the
     # working tree and let the write through; the kit's case above is the positive control, the same call let through
     typo = got(lambda: subprocess.run([sys.executable, os.path.join(kit.ROOT, "tools", "tree_gate.py"), "--hok"], input=call(outside),

@@ -1288,6 +1288,8 @@
   {"tool": "tools/pr_gates.py", "anchor": "findings, resolve or cap\")\n", "replacement": "findings or resolve\")\n", "expect": "the refusal of a gate this tool does not have ends in the fixed list of its gates and commands, cap among them"},
   {"tool": "tools/tree_gate.py", "file": "tools/calls.py", "anchor": "print(line, file=sys.stderr)", "replacement": "print(line)", "expect": "hook: a mistyped --hook is refused with exit 2, which denies the call, and says why on stderr, which the session sees"},
   {"tool": "tools/tree_gate.py", "anchor": "    sys.excepthook = denied\n", "replacement": "    pass\n", "expect": "hook: a calls.refused that raises ends in exit 2"},
+  {"tool": "tools/tree_gate.py", "anchor": "    sys.__excepthook__(kind, value, trace)\n", "replacement": "", "expect": "hook: a calls.refused that raises ends in exit 2"},
+  {"tool": "tools/tree_gate.py", "anchor": "    print(\"tree gate could not run: an exception ended the check, so the call is denied\", file=sys.stderr)\n", "replacement": "", "expect": "hook: a calls.refused that raises ends in exit 2"},
   {"tool": "tools/review/review.py", "anchor": "                    forge.unlabel(counted)\n", "replacement": "                    pass\n", "expect": "run: a run the usage limit ends before any paid pass takes its own round label off again"},
   {"tool": "tools/review/review.py", "anchor": "Posted so far: {summary}\", uncounted=counted)", "replacement": "Posted so far: {summary}\")", "expect": "run: a run that took its round label off says so in its note and in its status"},
   {"tool": "tools/review/review.py", "anchor": " and not passes and not cost and ", "replacement": " and ", "expect": "run: a run the usage limit ends after one paid pass stays a round"},
