@@ -913,7 +913,7 @@ public sealed partial class Checker
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
             case ClassType c:
-                return ByFieldsThatCount(c, field => KeyOf(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => KeyOf(held, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -1019,7 +1019,7 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
-                return ByFieldsThatCount(c, field => HeldEquality(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1098,11 +1098,12 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the fields that count, each read by <paramref name="why"/>:
-    /// none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that compares by content. A
-    /// class met again inside its own fields was read where the walk met it first.
+    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
+    /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
+    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
     /// </summary>
-    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<FieldSymbol, (bool Mismatch, string Why)?> why)
+    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
         if (!classesCompared.Add(c.Symbol))
         {
@@ -1113,9 +1114,17 @@ public sealed partial class Checker
         {
             foreach (var field in c.Symbol.FieldsThatCount)
             {
-                if (why(field) is { } refused)
+                if (why(field.Type) is { } refused)
                 {
                     return refused with { Why = $"its field `{field.Name}`: {refused.Why}" };
+                }
+            }
+
+            foreach (var derived in classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)))
+            {
+                if (why(new ClassType(derived)) is { } refused)
+                {
+                    return refused with { Why = $"its derived class `{derived.Name}`: {refused.Why}" };
                 }
             }
 
@@ -1272,6 +1281,11 @@ public sealed partial class Checker
             if (IsHashName(n.Name))
             {
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
+            }
+
+            if (n.Name == "Hint")
+            {
+                return CheckHintFunction(m, c); // F18
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -1693,6 +1707,37 @@ public sealed partial class Checker
         }
 
         return Record(c, CallKind.StringJoin, typed, picked);
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, the value itself, of any type, <c>T BlackBox&lt;T&gt;(T value)</c>, which the optimiser cannot see
+    /// through, as Rust's <c>std::hint::black_box</c> in Kurz's casing (section 12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "any
+    /// value"); any other member of <c>Hint</c> is no name (V10). It takes no type arguments, as <c>string.Join</c> takes none (assumed).
+    /// </summary>
+    private Typed CheckHintFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member != "BlackBox")
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Hint` has no function `{m.Member}` (F18, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Hint.BlackBox`"))
+        {
+            return Typed.Error;
+        }
+
+        var parameter = new TypeParameterSymbol("T", c.Line);
+        var value = new TypeParameterType(parameter);
+        var candidate = new Candidate
+        {
+            Slots = [new Slot("value", value, false, false, true)],
+            TypeParameters = [parameter],
+            Result = value,
+            Form = "T BlackBox<T>(T value)",
+        };
+        return Record(c, CallKind.BlackBox, Call([candidate], c, null, out var picked), picked);
     }
 
     /// <summary>

@@ -101,6 +101,9 @@ What follows from it:
 - The bill is counted on the head that will be reviewed, never taken from an earlier run:
   `py -3 tools/review/review.py --pr N --plan` prints the batches a run would read and the
   passes that is, calls no model and posts nothing; with `--passes N` it counts for that limit.
+  Without `--passes` it plans the run in CI, from the state the CI account stored. With it, it plans
+  a run off the pipeline, from the state of the login it runs as, since such a run replays nothing
+  the CI account stored; a bill off the pipeline is counted with `--passes` (#300).
   The bill is those passes times the price of a pass above. The count is checked against the
   run's first line: a run off the pipeline that names more batches than the plan did is stopped,
   because the go-ahead covered the plan; a run in CI is reported with the count it names.
