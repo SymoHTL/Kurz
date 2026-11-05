@@ -269,7 +269,10 @@ public sealed record Parameter(int Line, bool Mut, TypeSyntax? Type, string Name
 /// </summary>
 public sealed record TypeParameter(int Line, string Name, TypeSyntax? Limit, TypeSyntax? Constant = null, Expression? Default = null);
 
-/// <summary>A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method.</summary>
+/// <summary>
+/// A function or a method (F1 to F4, K7). Both bodies are null for the signature of an interface method. <paramref name="Property"/>
+/// marks a read-only property of a type body, <c>pub int Count => names.Count</c> (K7): a method without parameters, read without a call.
+/// </summary>
 public sealed record FunctionDeclaration(
     int Line,
     Modifiers Modifiers,
@@ -278,7 +281,8 @@ public sealed record FunctionDeclaration(
     IReadOnlyList<TypeParameter> TypeParameters,
     IReadOnlyList<Parameter> Parameters,
     Expression? ExpressionBody,
-    Block? BlockBody) : Statement(Line);
+    Block? BlockBody,
+    bool Property = false) : Statement(Line);
 
 /// <summary>A field written in a type body (K7): <c>mut int count = 0</c>, <c>pub static int Step = 2</c>, <c>int x</c>, or <c>mut count = 0</c> without a written type, the reading on K7 with V2 (K7 shows a field as <c>Type name</c>; V2 declares a variable without one, and the record's actor bodies write the form).</summary>
 public sealed record FieldDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression? Value) : Statement(Line);

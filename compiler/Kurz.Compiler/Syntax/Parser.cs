@@ -1337,6 +1337,16 @@ public sealed class Parser
             return ParseFunctionRest(start.Line, modifiers, type, declared, typeName);
         }
 
+        if (typeName is not null && At(TokenKind.Arrow))
+        {
+            // K7: `pub int Count => names.Count` in a type body, a read-only property whose body is one expression (section 4: the
+            // owner, 2026-11-03); which kind of body may hold one is the checker's
+            committed = true; // `Type name =>`: a property, whatever follows
+            Advance();
+            SkipNewlines();
+            return new FunctionDeclaration(start.Line, modifiers, type, declared.Text, [], [], ParseExpression(), null, Property: true);
+        }
+
         if (typeName is null && (modifiers & (Modifiers.Static | Modifiers.Mut)) == (Modifiers.Static | Modifiers.Mut) && EndsStatement())
         {
             return new VariableDeclaration(start.Line, modifiers, type, declared.Text, null); // R13: state without an initial value, the checker's `static-state`
@@ -1348,7 +1358,9 @@ public sealed class Parser
             return new FieldDeclaration(start.Line, modifiers, type, declared.Text, null);
         }
 
-        throw Fail("`=` with the variable's value, or the parameters of a function");
+        throw Fail(typeName is null
+            ? "`=` with the variable's value, or the parameters of a function"
+            : "`=` with the field's value, `=>` with the property's, or the parameters of a method"); // K7: a property is `Type Name => expression` alone
     }
 
     private FunctionDeclaration ParseFunctionRest(int line, Modifiers modifiers, TypeSyntax returnType, Token name, string? typeName)

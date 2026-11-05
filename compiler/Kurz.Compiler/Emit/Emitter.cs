@@ -59,6 +59,7 @@ public sealed partial class Emitter
     private Unit unit;
     private IrFunction fn = null!;
     private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
+    private string? guardedDisplay; // the guarded block being emitted as a trace names it, which names a guarded block in it
     private Dictionary<VariableSymbol, string> slots = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyDictionary<TypeParameterSymbol, KurzType> map = NoMap;
     private KurzType returnType = Types.Void;

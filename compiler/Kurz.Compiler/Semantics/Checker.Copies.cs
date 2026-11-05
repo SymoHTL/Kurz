@@ -66,6 +66,9 @@ public sealed partial class Checker
 
     private readonly Dictionary<(FunctionSymbol Original, string Arguments), Copy> copiesByArguments = [];
 
+    /// <summary>T33: the outermost copies one of whose chains reached the bound, under which no copy is made after it.</summary>
+    private readonly HashSet<Copy> boundReached = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>Each call of a generic function of the file the checker typed, with the function whose body holds it, null in the top-level code, and the pass of a loop over <c>T.Fields</c> it stands in.</summary>
     private readonly List<(FunctionSymbol? Caller, CallExpression Call, FieldPass? Pass)> genericCalls = [];
 
@@ -443,7 +446,8 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// The copy of a function for a list of type arguments, made and checked at its first call; null where the chain is too deep to read.
+    /// The copy of a function for a list of type arguments, made and checked at its first call; null where the chain is too deep to read,
+    /// or where a chain of the same outermost copy was: a copy that makes two larger ones would otherwise make about 2^64 of them.
     /// A type argument that is the field's type of the pass the call stands in has the path to that field, and one its caller bound has the caller's path.
     /// </summary>
     private Copy? CopyOf(FunctionSymbol original, IReadOnlyDictionary<TypeParameterSymbol, KurzType> map, CallExpression origin, Copy? outer, FieldPass? pass)
@@ -454,9 +458,15 @@ public sealed partial class Checker
             return made;
         }
 
+        if (outer is not null && boundReached.Contains(outer.Outermost))
+        {
+            return null; // T33: a chain of the same outer call reached the bound, and its other chains make no copy after it
+        }
+
         if ((outer?.Depth ?? 0) >= CopyDepth)
         {
             var first = outer!.Outermost;
+            boundReached.Add(first);
             ReportOnce(Diagnostic.NotSupported(first.Origin.Line, $"a chain of more than {CopyDepth} copies of generic functions that read their type, from `{first.Symbol.Name}` (T33)"));
             return null;
         }

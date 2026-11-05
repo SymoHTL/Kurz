@@ -2127,6 +2127,13 @@ public sealed partial class Checker
             return;
         }
 
+        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        {
+            AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
+            CheckExpression(a.Value, Untyped(a.Value));
+            return;
+        }
+
         if (variable is null && ImplicitStaticField(a.Name) is { } staticField)
         {
             AssignStaticField(staticField, a.Line); // K18
