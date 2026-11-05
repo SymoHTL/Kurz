@@ -22,8 +22,9 @@ flowchart TD
         identity of directories, so a path spelled in another case is inside where case is ignored.
         It denies by exit 2 and prints no JSON. The command falls back to python3 without the py launcher.
         A call of the tool it does not take, a mistyped --hook among them, is refused through tools/calls.py with exit 2,
-        which denies the call, and says why on stderr, which the session sees; a kit.py or a calls.py that does not import
-        is denied by exit 2 too.
+        which denies the call, and says why on stderr, which the harness gives the session as the reason of the block
+        (the hooks page, read 2026-11-05, in a-hook-denies-by-exit-2-or-by-its-json); a kit.py or a calls.py that does not
+        import, and an exception nothing caught, calls.refused's among them, are denied by exit 2 too.
         Not held: a write through a shell command, a hook cut off at its timeout. HAZARD issue 4"]
     end
     subgraph P["Push time: this clone and the forge"]
@@ -110,7 +111,8 @@ flowchart TD
         for any target, or on a function common/ or std/ calls that a target's directory gives with other parameters
         or another result;
         and the corpus runner, which builds every case that expects a run and that the compiler emits with the
-        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, red on
+        pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, but for
+        the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
         passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
@@ -301,8 +303,11 @@ flowchart TD
         before any pass as cap, in CI with the status review at error naming the cap, on the head the round at the cap
         reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
         in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
+        A --plan without --passes reads the state the CI account stored, as the run in CI does, with --passes the state of its own login,
+        as a run off the pipeline does, and says NOT CHECKED, exit 1, never cap, where that state's key is not the checkout's
+        and the checkout's reviewer is not the default branch's (issue 300).
         Red: self-tests (the count, the label before the first pass, the label taken off at a limit before any paid pass and its
-        refusal, the end and its status, the run that only replays).
+        refusal, the end and its status, the run that only replays, whose state a plan reads and its NOT CHECKED).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
         at the same moment, and a dry run, which puts on no label: HAZARD issue 41"]
     end

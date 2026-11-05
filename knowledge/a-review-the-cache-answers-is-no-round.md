@@ -40,7 +40,13 @@ put on only before a first pass, stays as it was.
 The check before the push: `git diff --name-only <the merge base the round reviewed> origin/main`
 names none of the pull request's files and none of those three. On a Draft,
 `py -3 tools/review/review.py --pr N --plan` after the push prints 0 batches before a dispatch; at
-the cap it refuses as `cap` when a file is left to review.
+the cap it refuses as `cap` when a file is left to review. The plan reads the state the CI account
+stored, as the run in CI does, whatever login it runs with. Where that state was stored under
+another key than the checkout's, and the checkout's `review.py` or `kit.py` is not the default
+branch's, it cannot know the key of the run in CI: it prints NOT CHECKED and exits 1. So it is run
+from a checkout of the default branch. Before #300 the plan read only the state of the login it ran
+as: with a person's login it printed `cap` for the head of pull request 297, which the run in CI
+then replayed whole.
 
 ## How to apply
 
@@ -55,5 +61,6 @@ the cap it refuses as `cap` when a file is left to review.
   `review` at `error`, which only the owner's approval of that head merges over.
 
 Gate: `self-tests` (a run at the cap that only replays completes, makes no pass and labels nothing;
-a run at the cap with one file to review ends as `cap`); the check before the push is a
-`judgment step`.
+a run at the cap with one file to review ends as `cap`; the plan of the run in CI reads the state
+the CI account stored, and says NOT CHECKED where it cannot know that run's key); the check before
+the push is a `judgment step`.

@@ -9,15 +9,18 @@ namespace Kurz.Compiler.Semantics;
 /// <c>this</c>, the visibility of its members (F9), its text (A4, A5, A9, A15), the instance as a reference with identity whose
 /// <c>mut</c> fields change through every reference (K2, K3), the narrowing of a path through such a field (N9), and the cycle rule
 /// judged by the types of the fields (R2, R4), its <c>static</c> methods and fields (K7, K18), and its equality and hash, by identity or
-/// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15). What else a class can write, a base or an interface,
-/// a constructor in its body, a field there without a written type, a <c>virtual</c>, <c>override</c> or <c>prot</c> member, type parameters, and a field
-/// that holds a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
+/// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15), across inheritance (K13); its base class, in the
+/// short form and the explicit one (K6, K10, K11, K16, K17), and its <c>virtual</c>, <c>override</c> and <c>prot</c> methods (K7, F9).
+/// What else a class can write, an interface, a constructor in its body, a field there without a written type, a field in its body or
+/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18), type parameters, and a field that holds
+/// a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
     private readonly Dictionary<string, ClassSymbol> classes = new(StringComparer.Ordinal);
     private readonly List<ClassSymbol> classDeclared = [];
     private readonly HashSet<ClassSymbol> classesCompared = new(ReferenceEqualityComparer.Instance); // K4: the classes a walk of `==` is inside of
+    private readonly HashSet<ClassSymbol> classesResolving = new(ReferenceEqualityComparer.Instance); // K6: the classes whose bases are being resolved
 
     /// <summary>
     /// K1, K7: a class the checker reads is declared with its methods; one that writes what the checker does not read is <c>not
@@ -65,11 +68,6 @@ public sealed partial class Checker
             return (d.Line, "a generic class (T19, chapter 7)");
         }
 
-        if (d.Bases.Count > 0)
-        {
-            return (d.Bases[0].Line, "a base class or an interface after `:` (K6, K10)");
-        }
-
         foreach (var member in d.Members ?? [])
         {
             switch (member)
@@ -88,8 +86,10 @@ public sealed partial class Checker
                     return (c.Line, "a constructor declared in the body of a class (K14)");
                 case FunctionDeclaration { Property: true } f when (f.Modifiers & Modifiers.Static) != 0:
                     return (f.Line, "a `static` property (K7, K19)"); // section 14 of the record: open
-                case FunctionDeclaration f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)) != 0:
-                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot | Modifiers.Extern)).ToString().ToLowerInvariant()}` of a {(f.Property ? "property" : "method")} (K7, R16)");
+                case FunctionDeclaration { Property: true } f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)) != 0:
+                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)).ToString().ToLowerInvariant()}` of a property (K7, R16)"); // section 14 of the record: open
+                case FunctionDeclaration f when (f.Modifiers & Modifiers.Extern) != 0:
+                    return (f.Line, $"the modifier `extern` of a {(f.Property ? "property" : "method")} (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
                 case FunctionDeclaration:
@@ -150,14 +150,45 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K1: the fields of a class, those of its primary constructor in their order, <c>mut</c> where written; a field and a method of
-    /// one name, and a name two fields have, are <c>redeclared</c> (V9).
+    /// K1, K6, K10, K11, K16, K17: the base of a class and its fields, the base's first, as a data type's (D7), then those of its primary
+    /// constructor in their order, <c>mut</c> where written, and the parameters its constructor binds: in the short form the base's and
+    /// then the class's own, in the explicit form those the class lists. A parameter with a base field's name is that field (K11, K16);
+    /// with another type it is <c>base-field-clash</c> (K17), and so it is in the short form where it does not stand at the base's place
+    /// for it (K16). A field and a method of one name, and a name two fields have, are <c>redeclared</c> (V9). The clause of the base is
+    /// inherited and the class's own adds its fields to it (K13). Each class once, its base before it.
     /// </summary>
     private void ResolveClass(ClassSymbol symbol)
     {
-        var d = symbol.Declaration;
-        foreach (var p in d.PrimaryConstructor ?? [])
+        if (symbol.Resolved)
         {
+            return;
+        }
+
+        symbol.Resolved = true;
+        var d = symbol.Declaration;
+        classesResolving.Add(symbol);
+        var baseSpecifier = ResolveClassBase(symbol);
+        classesResolving.Remove(symbol);
+        var b = symbol.Base;
+        var shortForm = b is not null && baseSpecifier!.Arguments is null && d.PrimaryConstructor is not null;
+        if (b is not null && baseSpecifier is not null)
+        {
+            symbol.Fields.AddRange(b.Fields);
+            if (d.PrimaryConstructor is null && (baseSpecifier.Arguments is not null || b.Constructor.Count > 0))
+            {
+                NotSupported(baseSpecifier.Line, $"arguments of the base `{b.Name}`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)");
+            }
+            else if (shortForm && b.Declaration.PrimaryConstructor is null)
+            {
+                Report(ErrorIds.NoPrimaryConstructor, baseSpecifier.Line, $"`{b.Name}` has no primary constructor for the short form to follow: write its arguments after its name, `{b.Name}(...)` (K16)");
+            }
+        }
+
+        var own = new List<ConstructorSlot>();
+        var listed = d.PrimaryConstructor ?? [];
+        for (var i = 0; i < listed.Count; i++)
+        {
+            var p = listed[i];
             var type = p.Type is null ? Types.Error : Resolve(p.Type);
             if (p.Type is null)
             {
@@ -169,12 +200,67 @@ public sealed partial class Checker
                 type = Types.Error;
             }
 
+            if (b?.Field(p.Name) is { } inherited)
+            {
+                // K11, K16, K17: the parameter is the base's field, of its type, and in the short form at the base's place for it; one
+                // of another type stays a parameter of its own type and no field, so that its calls carry no second error (E1)
+                var place = b.Constructor.FindIndex(s => ReferenceEquals(s.Field, inherited));
+                if (!Types.IsError(type) && !Types.IsError(inherited.Type) && !Types.Same(type, inherited.Type))
+                {
+                    Report(ErrorIds.BaseFieldClash, p.Line, $"`{p.Name}` is a field of the base `{b.Name}` already, {Types.A(inherited.Type)}, so the class would hold two fields of one name (K17)");
+                    own.Add(new ConstructorSlot(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line), symbol, p));
+                    continue;
+                }
+
+                if (shortForm && place != i)
+                {
+                    Report(ErrorIds.BaseFieldClash, p.Line, place < 0
+                        ? $"`{p.Name}` is a field of the base `{b.Name}` that its constructor does not take, so the short form does not pass it on (K16, K17)"
+                        : $"`{p.Name}` is a field of the base `{b.Name}`, whose constructor takes it as its parameter {place + 1}, and the short form keeps that place (K16, K17)");
+                    if (place < 0)
+                    {
+                        own.Add(new ConstructorSlot(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line), symbol, p)); // no slot of the base stands for it
+                    }
+
+                    continue;
+                }
+
+                if (p.Mut != inherited.Mut)
+                {
+                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, K16)");
+                }
+                else if (shortForm && p.Default is not null)
+                {
+                    NotSupported(p.Line, $"a default on `{p.Name}`, which in the short form is the field of the base `{b.Name}` with the base's default (K16)");
+                }
+
+                if (!shortForm)
+                {
+                    own.Add(new ConstructorSlot(inherited, symbol, p));
+                }
+
+                continue;
+            }
+
             if (symbol.Field(p.Name) is not null)
             {
                 Report(ErrorIds.Redeclared, p.Line, $"the field `{p.Name}` is declared already (V9)");
             }
 
-            symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line));
+            var field = new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line);
+            symbol.Fields.Add(field);
+            own.Add(new ConstructorSlot(field, symbol, p));
+        }
+
+        if (shortForm)
+        {
+            symbol.Constructor.AddRange(b!.Constructor);
+        }
+
+        symbol.Constructor.AddRange(own);
+        if (b is not null && baseSpecifier!.Arguments is not null && d.PrimaryConstructor is not null)
+        {
+            symbol.BaseCall = new CallExpression(baseSpecifier.Line, new NameExpression(baseSpecifier.Line, b.Name), [], baseSpecifier.Arguments);
         }
 
         foreach (var f in (d.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0))
@@ -227,15 +313,24 @@ public sealed partial class Checker
             }
         }
 
+        if (b is not null && b.EqualBy.Count > 0)
+        {
+            symbol.EqualBy.AddRange(b.EqualBy); // K13: the base's clause is inherited, and the class's own adds its fields to it
+        }
+        else if (b is not null && d.EqualBy.Count > 0 && b.Fields.Count > 0)
+        {
+            NotSupported(d.Line, $"`equal by` on a class whose base `{b.Name}` has fields and no clause, where K13 does not say whether the base's fields count");
+        }
+
         foreach (var name in d.EqualBy)
         {
             if (symbol.Field(name) is not { } field)
             {
                 Report(ErrorIds.EqualByUnknown, d.Line, $"`{name}` is no field of `{symbol.Name}`: `equal by` names fields of the class (K15)");
             }
-            else if (field.Type is WeakRefType)
+            else if (Types.ReachesWeak(field.Type))
             {
-                NotSupported(d.Line, $"`equal by` that names the `weak` field `{name}`, which section 14 of the record leaves open (K8, R3)");
+                NotSupported(d.Line, $"`equal by` that names `{name}`, a field that holds a `weak` reference, which the record makes the error `equal-by-weak` (K8, R3)");
             }
             else if (!symbol.EqualBy.Contains(field))
             {
@@ -396,6 +491,74 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// K6, K7, K18: a field in the body or a <c>static</c> member of a class in a chain, one with a base or with classes derived from
+    /// it, is <c>not supported</c>, at the first such member of the class: how a derived class sees a field of the base without
+    /// <c>pub</c>, where its construction gives the base's fields of the body their defaults, and how it names the base's
+    /// <c>static</c> members, the meaning section 4 assumes from C#, the checker and the emitter do not read.
+    /// </summary>
+    private void RefuseChainMembers()
+    {
+        foreach (var symbol in classDeclared.Where(c => c.Base is not null || c.Derived))
+        {
+            var member = (symbol.Declaration.Members ?? []).FirstOrDefault(m => m is FieldDeclaration || (m is FunctionDeclaration f && (f.Modifiers & Modifiers.Static) != 0));
+            if (member is not null)
+            {
+                NotSupported(member.Line, $"a field in the body or a `static` member of `{symbol.Name}`, a class with a base or with classes derived from it (K6, K7, K18)");
+            }
+        }
+    }
+
+    /// <summary>
+    /// K6, K10: the base class a class names after <c>:</c>, resolved before the class, with the part of the declaration that names
+    /// it; null where it names none. What the checker does not read there is <c>not supported</c>: an interface, whose declaration
+    /// says so (K6), a type that is no class, a second class and a class that is its own base.
+    /// </summary>
+    private BaseSpecifier? ResolveClassBase(ClassSymbol symbol)
+    {
+        BaseSpecifier? taken = null;
+        foreach (var b in symbol.Declaration.Bases)
+        {
+            if (b.Type is not NamedType { TypeArguments.Count: 0 } named || !classes.TryGetValue(named.Name, out var baseSymbol))
+            {
+                var type = Resolve(b.Type); // a name that is no type is `unknown-name` there (V10), and an interface was said `not supported` at its declaration
+                if (!Types.IsError(type))
+                {
+                    NotSupported(b.Line, $"`{type}` after `:`, where a class names its base class and its interfaces (K6, K7)");
+                }
+
+                continue;
+            }
+
+            if (!InFolder(baseSymbol))
+            {
+                // W1 with K6: `std/`'s checker judged the class with no class derived from it, so the refusals of a class in a chain did not
+                // run on it, and its symbol is `std/`'s own, which the file's reading leaves as it is
+                NotSupported(b.Line, $"`{named.Name}` after `:`, a class of `std/` the prelude brings into the file (K6, W1)");
+                continue;
+            }
+
+            if (taken is not null)
+            {
+                NotSupported(b.Line, $"a second base class, `{named.Name}`, where a class inherits from one class (K6)");
+                continue;
+            }
+
+            taken = b;
+            if (classesResolving.Contains(baseSymbol))
+            {
+                NotSupported(b.Line, $"the base `{named.Name}`, which closes a cycle of bases (K6)");
+                return null;
+            }
+
+            ResolveClass(baseSymbol);
+            symbol.Base = baseSymbol;
+            baseSymbol.Derived = true;
+        }
+
+        return taken;
+    }
+
+    /// <summary>
     /// K7, F1: the parameter and result types of each method. A method takes no <c>mut</c> marker, which is for values (K9, M5): one
     /// written is text no rule gives a meaning (E4), and so is <c>naked</c> before a method (R12). Two methods of one name with the same
     /// parameters are <c>duplicate-function</c>, as two functions are (F12).
@@ -438,19 +601,112 @@ public sealed partial class Checker
                 }
             }
         }
+
+        foreach (var symbol in classDeclared)
+        {
+            foreach (var method in symbol.Methods.Values.SelectMany(list => list))
+            {
+                CheckOverride(symbol, method);
+            }
+        }
     }
 
-    /// <summary>F12, D11: the default of a field of a primary constructor is a constant expression, as a parameter's is.</summary>
+    /// <summary>
+    /// K7: a method with the name and the parameter types, in order, of a method of a base class that the class can see, the nearest
+    /// such, is marked <c>override</c>, and that method <c>virtual</c> or <c>override</c>; without the mark it is <c>hides-member</c>.
+    /// <c>override</c> where no such method is, or where it carries neither mark, is <c>override-without-virtual</c>, and an override
+    /// whose return type differs is <c>override-return-type</c>. The class sees a base method with <c>pub</c> or <c>prot</c>, and one
+    /// marked <c>internal</c> where its folder declared the base (F9); a base method the class cannot see, a private one, is hidden by
+    /// nothing (F9). An override is as visible as it writes, whatever the method it overrides writes: one without <c>pub</c> is private
+    /// to its class, which a call through the base reaches and a call on the derived type outside it is refused (F9; the owner,
+    /// 2026-11-02, #110, "allowed as written"). The checker does not read <c>virtual</c> on a private method, which no derived class sees,
+    /// or <c>virtual</c> and <c>override</c> on one method: <c>not supported</c>.
+    /// </summary>
+    private void CheckOverride(ClassSymbol symbol, FunctionSymbol method)
+    {
+        var d = method.Declaration!;
+        var marks = d.Modifiers & (Modifiers.Virtual | Modifiers.Override);
+        var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
+        if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
+        {
+            NotSupported(d.Line, marks == (Modifiers.Virtual | Modifiers.Override) ? "`virtual` and `override` on one method (K7)" : "`virtual` on a private method, which no derived class sees (K7, F9)");
+            return;
+        }
+
+        var overridden = symbol.Base?.Chain
+            .Select(c => c.Methods.TryGetValue(method.Name, out var list) ? list.FirstOrDefault(m => SameParameters(m, method) && SeenByDerived(m)) : null)
+            .FirstOrDefault(m => m is not null);
+        if ((d.Modifiers & Modifiers.Override) == 0)
+        {
+            if (overridden is not null)
+            {
+                Report(ErrorIds.HidesMember, d.Line, $"`{method.Name}` has the name and the parameter types of a method of `{overridden.Owner!.Name}`: an override is marked `override`, and the method it overrides `virtual` (K7)");
+            }
+
+            return;
+        }
+
+        if (overridden is null || !overridden.IsVirtual)
+        {
+            Report(ErrorIds.OverrideWithoutVirtual, d.Line, overridden is null
+                ? $"`{method.Name}` overrides nothing: no base class of `{symbol.Name}` has a method of this name and these parameter types that it sees (K7)"
+                : $"`{method.Name}` of `{overridden.Owner!.Name}` is marked neither `virtual` nor `override`, so nothing overrides it (K7)");
+            return;
+        }
+
+        if (!Types.IsError(method.ReturnType) && !Types.IsError(overridden.ReturnType) && !Types.Same(method.ReturnType, overridden.ReturnType))
+        {
+            Report(ErrorIds.OverrideReturnType, d.Line, $"`{method.Name}` returns `{method.ReturnType}`, and the method of `{overridden.Owner!.Name}` it overrides `{overridden.ReturnType}`: an override has the return type of the method it overrides (K7)");
+            return;
+        }
+
+        method.Overridden = overridden;
+    }
+
+    /// <summary>F9: whether a class derived from the class of <paramref name="method"/> sees it: with <c>pub</c> or <c>prot</c>, or <c>internal</c> in its folder.</summary>
+    private bool SeenByDerived(FunctionSymbol method) =>
+        (method.Declaration!.Modifiers & (Modifiers.Pub | Modifiers.Prot)) != 0
+        || ((method.Declaration.Modifiers & Modifiers.Internal) != 0 && InFolder(method.Owner!));
+
+    /// <summary>
+    /// F12, D11: the default of a parameter of a primary constructor is a constant expression, as a parameter's is. K10, K11, K17: the
+    /// explicit form's arguments of the base are a construction of the base over the class's parameters, and a parameter with a base
+    /// field's name and type is what the base receives for that field, else <c>base-field-clash</c>.
+    /// </summary>
     private void CheckClassDefaults()
     {
         foreach (var symbol in classDeclared)
         {
             frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = symbol.Line };
-            foreach (var (p, field) in (symbol.Declaration.PrimaryConstructor ?? []).Zip(symbol.Fields))
+            foreach (var slot in symbol.Constructor.Where(s => ReferenceEquals(s.Owner, symbol)))
             {
-                if (p.Default is not null)
+                if (slot.Declaration.Default is not null)
                 {
-                    CheckDefault(p.Default, field.Type, p.Line);
+                    CheckDefault(slot.Declaration.Default, slot.Field.Type, slot.Declaration.Line);
+                }
+            }
+
+            if (symbol.BaseCall is { } call && symbol.Base is { } b)
+            {
+                frame = new Frame { ReturnType = Types.Void, Line = symbol.Line, Reserved = reservedTopLevel };
+                foreach (var slot in symbol.Constructor)
+                {
+                    DeclareParameter(slot.Declaration.Name, slot.Field.Type, false, slot.Declaration.Line, slot.Declaration);
+                }
+
+                if (!CheckClassConstruction(b, call, null).IsError)
+                {
+                    var binding = model.CallOf(call).Binding;
+                    foreach (var slot in symbol.Constructor.Where(s => b.Fields.Contains(s.Field)))
+                    {
+                        // K11, K17: the parameter is the base's field, so the base receives it for that field
+                        var place = b.Constructor.FindIndex(s => ReferenceEquals(s.Field, slot.Field));
+                        var argument = binding.Select((j, i) => (j, i)).Where(x => x.j == place && place >= 0).Select(x => call.Arguments[x.i].Value).FirstOrDefault();
+                        if (argument is null || Unwrap(argument) is not NameExpression n || n.Name != slot.Declaration.Name)
+                        {
+                            Report(ErrorIds.BaseFieldClash, slot.Declaration.Line, $"`{slot.Declaration.Name}` has the name and the type of the field of the base `{b.Name}`, and the base receives {(argument is null ? "nothing" : "something else")} for it, so the field would hold another value than the parameter (K11, K17)");
+                        }
+                    }
                 }
             }
         }
@@ -605,12 +861,40 @@ public sealed partial class Checker
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
 
     /// <summary>
-    /// K7: inside a method, the methods of its class of a name a call names alone, of the instance and <c>static</c>; a field's default
-    /// names the <c>static</c> ones alone, as C# refuses an instance member in an initializer and no <c>static</c> one (V10).
+    /// K7: inside a method, the methods of its class of a name a call names alone, its bases' among them (<see cref="MethodsOf"/>), of
+    /// the instance and <c>static</c>; a field's default names the <c>static</c> ones alone, as C# refuses an instance member in an
+    /// initializer and no <c>static</c> one (V10).
     /// </summary>
     private List<FunctionSymbol>? ImplicitMethods(string name) =>
-        CurrentClass() is { } c && c.Methods.TryGetValue(name, out var list)
+        CurrentClass() is { } c && MethodsOf(c, name) is { } list
         && (Initializing() is null ? list : list.Where(f => f.IsStatic).ToList()) is { Count: > 0 } reached ? reached : null;
+
+    /// <summary>
+    /// K6, K7: the methods of a name a call on an instance of the class picks from (F13): its own, and those of each base up the chain
+    /// that no method nearer the class has the parameter types of, so that an override stands for what it overrides; null where the
+    /// chain has none.
+    /// </summary>
+    private static List<FunctionSymbol>? MethodsOf(ClassSymbol symbol, string name)
+    {
+        List<FunctionSymbol>? found = null;
+        foreach (var c in symbol.Chain)
+        {
+            if (!c.Methods.TryGetValue(name, out var list))
+            {
+                continue;
+            }
+
+            foreach (var m in list)
+            {
+                if (found is null || !found.Any(f => SameParameters(f, m)))
+                {
+                    (found ??= []).Add(m);
+                }
+            }
+        }
+
+        return found;
+    }
 
     /// <summary>K7: the field of a class body whose default is being read, through the lambdas around the place; null elsewhere.</summary>
     private FieldSymbol? Initializing()
@@ -660,7 +944,7 @@ public sealed partial class Checker
     }
 
     /// <summary>K7, V9: inside a method, whether a name is a member of its class, which a declaration of the name would hide.</summary>
-    private bool IsMemberName(string name) => CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || c.Methods.ContainsKey(name));
+    private bool IsMemberName(string name) => CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || MethodsOf(c, name) is not null);
 
     /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10), and a <c>static</c> member has none (K19).</summary>
     private Typed CheckThis(ThisExpression t)
@@ -687,9 +971,14 @@ public sealed partial class Checker
         return new Typed(new ClassType(CurrentClass()!));
     }
 
-    /// <summary>K7: the read-only property of the class of that name; null where the name is none.</summary>
+    /// <summary>
+    /// K7, K6: the read-only property of that name of the class or, as C# reads an inherited property, of the nearest base up the chain
+    /// that declares a method or a property of the name; null where that class's members of the name are methods, where a field has the
+    /// name, or where the chain has none.
+    /// </summary>
     private static FunctionSymbol? Property(ClassSymbol symbol, string name) =>
-        symbol.Methods.TryGetValue(name, out var list) ? list.Find(f => f.IsProperty) : null;
+        symbol.Field(name) is not null ? null
+        : symbol.Chain.FirstOrDefault(c => c.Methods.ContainsKey(name)) is { } declaring ? declaring.Methods[name].Find(f => f.IsProperty) : null;
 
     /// <summary>
     /// K7: <c>h.Count</c>, a read of a property, the call of its method that takes no arguments (section 4: the owner, 2026-11-03), recorded
@@ -903,7 +1192,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (type.Symbol.Methods.ContainsKey(member))
+        if (MethodsOf(type.Symbol, member) is not null)
         {
             NotSupported(line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
@@ -934,9 +1223,10 @@ public sealed partial class Checker
         return false;
     }
 
-    /// <summary>F9: a method without <c>pub</c> is private to its class, and one marked <c>internal</c> to the folder that declares its class; a call of it from outside the class is <c>not-visible</c>.</summary>
+    /// <summary>F9: a method without <c>pub</c> is private to its class, one marked <c>internal</c> to the folder that declares its class, and one with <c>prot</c> visible in the classes derived from it too; a call of it from elsewhere is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>
         (method.Declaration!.Modifiers & Modifiers.Pub) != 0 || ReferenceEquals(CurrentClass(), method.Owner)
+        || ((method.Declaration.Modifiers & Modifiers.Prot) != 0 && CurrentClass() is { } current && current.HasBaseOrIs(method.Owner!))
         || ((method.Declaration.Modifiers & Modifiers.Internal) != 0 && InFolder(method.Owner!));
 
     /// <summary>
@@ -967,7 +1257,7 @@ public sealed partial class Checker
             return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
         }
 
-        if (!type.Symbol.Methods.TryGetValue(m.Member, out var methods))
+        if (MethodsOf(type.Symbol, m.Member) is not { } methods)
         {
             if (type.Symbol.Field(m.Member) is { } field)
             {
@@ -1003,19 +1293,30 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        return PickMethod(instance, c, expected, m.Line, out _);
+        return PickMethod(instance, c, expected, m.Line, out _, type);
     }
 
     /// <summary>
     /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
-    /// <c>not-visible</c> where it is private and the call stands outside its class (F9).
+    /// <c>not-visible</c> where it is private and the call stands outside its class, or <c>prot</c> and outside the classes derived from
+    /// its class (F9). A <c>prot</c> method called in a derived class through a reference whose type is not that class or one derived
+    /// from it, which C# refuses (CS1540), is <c>not supported</c>.
     /// </summary>
-    private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked)
+    private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked, ClassType? receiver = null)
     {
         var typed = ResolveCall(methods, c, expected, out picked, CallKind.Method);
         if (picked is not null && !Visible(picked))
         {
-            Report(ErrorIds.NotVisible, line, Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, "a method"));
+            Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
+                ? $"`{picked.Name}` of `{picked.Owner!.Name}` is `prot`, visible in its class and the classes derived from it (F9)"
+                : Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, picked.IsProperty ? "a property" : "a method"));
+            return Typed.Error;
+        }
+
+        if (picked is not null && receiver is not null && (picked.Declaration!.Modifiers & (Modifiers.Pub | Modifiers.Prot)) == Modifiers.Prot
+            && !ReferenceEquals(CurrentClass(), picked.Owner) && !receiver.Symbol.HasBaseOrIs(CurrentClass()!))
+        {
+            NotSupported(line, $"the `prot` method `{picked.Name}` called through {Types.A(receiver)}, which is not the calling class or derived from it (F9)");
             return Typed.Error;
         }
 
@@ -1045,10 +1346,10 @@ public sealed partial class Checker
         return typed;
     }
 
-    /// <summary>K1: an instance made by the class's name, with the arguments of its primary constructor, bound as D11 binds them; a class without one takes none.</summary>
+    /// <summary>K1, K10: an instance made by the class's name, with the arguments of its primary constructor, bound as D11 binds them; a class without one takes none.</summary>
     private Typed CheckClassConstruction(ClassSymbol symbol, CallExpression c, KurzType? expected)
     {
-        var slots = symbol.Fields.Where(f => f.Body is null).Select(f => new Slot(f.Name, f.Type, false, f.HasDefault, false)).ToList(); // K7: a field of the body is no parameter
+        var slots = symbol.Constructor.Select(s => new Slot(s.Declaration.Name, s.Field.Type, false, s.Declaration.Default is not null, false)).ToList();
         var candidate = new Candidate { Slots = slots, Result = Types.Void };
         if (c.TypeArguments.Count > 0)
         {
@@ -1421,13 +1722,13 @@ public sealed partial class Checker
     private static IEnumerable<KurzType> HeldArguments(DataType d) =>
         d.Symbol.TypeParameters.Zip(d.TypeArguments).Where(p => d.Symbol.Fields.Any(f => Types.Mentions(f.Type, p.First))).Select(p => p.Second);
 
-    /// <summary>The classes a value of the type holds strongly: itself, the items of a list, the keys and values of a map, the cases of a union and the fields of a data value.</summary>
-    private static void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path)
+    /// <summary>The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values of a map, the cases of a union and the fields of a data value.</summary>
+    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path)
     {
         switch (type)
         {
             case ClassType c:
-                reached.Add(c.Symbol);
+                reached.UnionWith(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol))); // K6: an instance of a derived class stands where its base does
                 break;
             case ListType l:
                 ClassesHeld(l.Element, reached, path);
