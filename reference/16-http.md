@@ -2054,14 +2054,16 @@ more on a new connection, as .NET sends a request again on a connection the serv
 new connection given no second try; the reads and writes of a connection bounded by no time and its
 connect by the 5 seconds of `Connect` (C1), while `std/` holds no bound of the call's 100 seconds (§12), so that
 a server that accepts and never answers holds the call; the request a `GET` with `Host`, the port in it
-where it is not 80, and no other header; and the pool's times read from `timestamp.Now`, so that a jump
+where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
+the path of a call of `Get` needs `allow network` (S12); and the pool's times read from `timestamp.Now`, so that a jump
 of the wall clock moves the idle time and the life of a connection)*
 
 Case: [http/client-get.kz](../corpus/http/client-get.kz)
 ```kurz
 // a client's `Get` gives the status, the headers and the body of the response, and the next `Get` to the same host and port is
 // carried on the connection the first one opened, once its body was read to its end; a status that is no success is a response
-// like any other, which `EnsureSuccess` turns into an `HttpError` of the kind `Status`
+// like any other, which `EnsureSuccess` turns into an `HttpError` of the kind `Status`; the request a `GET` with `Host` alone, the
+// port in it
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -2070,7 +2072,8 @@ extern "C" {
 }
 
 // the server, in a child of the program's process: each connection in turn, each request answered with the number of its
-// connection, its path and its query, and the path `/missing` with `404`
+// connection, its path and its query, the path `/missing` with `404`, and the path `/request` with the count of the request's
+// headers and its `Host`
 void Serve(TcpListener on) {
     mut count = 0
     while true {
@@ -2092,6 +2095,11 @@ void Serve(TcpListener on) {
 HttpResponse Answer(int number, HttpRequest r) {
     if r.Path == "/missing" {
         return HttpResponse.Text(404, "none")
+    }
+
+    if r.Path == "/request" {
+        host = r.Headers.Get("Host") ?? "none"
+        return HttpResponse.Text(200, "{r.Headers.Count} {host}")
     }
 
     return HttpResponse.Text(200, "{number} {r.Path} {r.Query}".Trim())
@@ -2125,6 +2133,10 @@ void | IoError | HttpError | InvalidUtf8 Run(int port) {
     third = client.Get(Address(port, "/c"))
     third.EnsureSuccess()
     print("{third.Status} {third.IsSuccess} {third.Body.ReadAllText(100)}")
+
+    request = client.Get(Address(port, "/request"))
+    sent = request.Body.ReadAllText(100)
+    print("{request.Status} {sent.Replace(":{port}", ":PORT")}")
 }
 
 listener = TcpListener.Bind("127.0.0.1:0") else {
@@ -2375,6 +2387,150 @@ o = HttpClientOptions()
 print("{o.MaxConnectionsPerServer} {o.PooledConnectionIdleTimeout == 1min} {o.PooledConnectionLifetime == 9223372036854775807ns} {o.MaxAutomaticRedirections} {o.Limits == HttpLimits()}")
 ```
 
+Case: [http/client-malformed.kz](../corpus/http/client-malformed.kz)
+```kurz
+// a head that is no response of HTTP/1.x is an `HttpError` in the words of the server's for a request, `response` in place of
+// `request`, and a connection that ends before a byte of a response `malformed response: no status line`, a new connection that
+// ends so given no second try; a status line may leave its reason out
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, and the connection closed where the next is `close` or the client ends it
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    if next < answers.Count && answers[next] == "close" {
+                        next = next + 1
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its status and body, or its failure
+string Show(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient()
+    for i in 0..<18 {
+        print(Show(client, port))
+    }
+}
+
+Against([
+    "HTTX/1.1 200 OK\r\n\r\n",
+    "HTTP/2.0 200 OK\r\n\r\n",
+    "HTTP/1.1 20 OK\r\n\r\n",
+    "HTTP/1.1 099 Low\r\n\r\n",
+    "HTTP/1.1 200OK\r\n\r\n",
+    "HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nok",
+    "close",
+    "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n",
+    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\n\r\n",
+    "HTTP/1.1 200 OK\nX: y\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX: y",
+    "close",
+    "",
+    "close",
+    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nafter",
+], (int port) => Responses(port))
+```
+
+No case: of the port 80 left out of `Host`, since that case would listen on port 80, which a run of the suite may not be
+allowed to bind; of a server that accepts and never answers, since that case would wait without end (C1); and of the grant,
+since a case is a program and no package, and the program needs no grant (S12).
+
 ### W14 (decided, §12) Reading a response
 
 A response's body is an `HttpBody` (W6), read as a stream with `Read`, or by `ReadAll(max)` and
@@ -2551,143 +2707,6 @@ Against([
 ```
 
 Case: [http/client-malformed.kz](../corpus/http/client-malformed.kz)
-```kurz
-// a head that is no response of HTTP/1.x is an `HttpError` in the words of the server's for a request, `response` in place of
-// `request`, and a connection that ends before a byte of a response `malformed response: no status line`; a status line may leave
-// its reason out
-extern "C" {
-    int fork()
-    int kill(int pid, int signal)
-    int waitpid(int pid, long status, int options)
-    void _exit(int code)
-}
-
-// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
-// `answers`, each `#` in it the number of the connection, and the connection closed where the next is `close` or the client ends it
-void Serve(TcpListener on, List<string> answers) {
-    mut next = 0
-    mut number = 0
-    while next < answers.Count {
-        stream = on.Accept() else {
-            IoError e => return
-        }
-
-        number = number + 1
-        mut open = true
-        while open && next < answers.Count {
-            match HttpRequest.Read(stream) {
-                HttpRequest r => {
-                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
-                        IoError e => {
-                            open = false
-                        }
-                    }
-
-                    next = next + 1
-                    if next < answers.Count && answers[next] == "close" {
-                        next = next + 1
-                        open = false
-                    }
-                }
-                IoError e => {
-                    open = false
-                }
-                HttpError e => {
-                    open = false
-                }
-            }
-        }
-
-        stream.Close() else {
-            IoError e => {
-            }
-        }
-    }
-}
-
-// the server started in a child, the client's part run against it, and the child ended
-void Against(List<string> answers, (int) => void part) {
-    on = TcpListener.Bind("127.0.0.1:0") else {
-        IoError e => {
-            print(e)
-            return
-        }
-    }
-
-    mut child = 0
-    raw {
-        child = fork()
-    }
-
-    if child == 0 {
-        Serve(on, answers)
-        raw {
-            _exit(0)
-        }
-    }
-
-    part(on.Port)
-    raw {
-        kill(child, 9)
-        waitpid(child, 0, 0)
-    }
-}
-
-// the address of `path` on the server
-Uri Address(int port, string path) {
-    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
-        UriError e => return Uri()
-    }
-
-    return u
-}
-
-// a `GET` of `/` and its status and body, or its failure
-string Show(HttpClient client, int port) {
-    match client.Get(Address(port, "/")) {
-        HttpResponseMessage r => {
-            match r.Body.ReadAllText(100) {
-                string text => return "{r.Status} [{text}]"
-                IoError e => return "{r.Status} {e}"
-                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
-                InvalidUtf8 => return "{r.Status} not UTF-8"
-            }
-        }
-        IoError e => return "{e}"
-        HttpError e => return "{e.Kind}: {e.Detail}"
-    }
-}
-
-void Responses(int port) {
-    client = HttpClient()
-    for i in 0..<17 {
-        print(Show(client, port))
-    }
-}
-
-Against([
-    "HTTX/1.1 200 OK\r\n\r\n",
-    "HTTP/2.0 200 OK\r\n\r\n",
-    "HTTP/1.1 20 OK\r\n\r\n",
-    "HTTP/1.1 099 Low\r\n\r\n",
-    "HTTP/1.1 200OK\r\n\r\n",
-    "HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nok",
-    "close",
-    "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n",
-    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\n\r\n",
-    "HTTP/1.1 200 OK\nX: y\r\n\r\n",
-    "HTTP/1.1 200 OK\r\nX: y",
-    "close",
-    "",
-    "close",
-], (int port) => Responses(port))
-```
 
 Case: [http/client-limits.kz](../corpus/http/client-limits.kz)
 ```kurz

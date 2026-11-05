@@ -16,12 +16,13 @@
 // | Protocol: malformed response: line not ended by CR LF
 // | Protocol: malformed response: incomplete
 // | Protocol: malformed response: no status line
+// | 200 [after]
 // allow: raw native
-// rules: W14
+// rules: W13, W14
 
 // a head that is no response of HTTP/1.x is an `HttpError` in the words of the server's for a request, `response` in place of
-// `request`, and a connection that ends before a byte of a response `malformed response: no status line`; a status line may leave
-// its reason out
+// `request`, and a connection that ends before a byte of a response `malformed response: no status line`, a new connection that
+// ends so given no second try; a status line may leave its reason out
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -127,7 +128,7 @@ string Show(HttpClient client, int port) {
 
 void Responses(int port) {
     client = HttpClient()
-    for i in 0..<17 {
+    for i in 0..<18 {
         print(Show(client, port))
     }
 }
@@ -153,4 +154,5 @@ Against([
     "close",
     "",
     "close",
+    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nafter",
 ], (int port) => Responses(port))

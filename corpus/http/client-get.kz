@@ -4,12 +4,14 @@
 // | 404 false none
 // | Status: response status 404
 // | 200 true 1 /c
+// | 200 1 127.0.0.1:PORT
 // allow: raw native
 // rules: W13, W14
 
 // a client's `Get` gives the status, the headers and the body of the response, and the next `Get` to the same host and port is
 // carried on the connection the first one opened, once its body was read to its end; a status that is no success is a response
-// like any other, which `EnsureSuccess` turns into an `HttpError` of the kind `Status`
+// like any other, which `EnsureSuccess` turns into an `HttpError` of the kind `Status`; the request a `GET` with `Host` alone, the
+// port in it
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -18,7 +20,8 @@ extern "C" {
 }
 
 // the server, in a child of the program's process: each connection in turn, each request answered with the number of its
-// connection, its path and its query, and the path `/missing` with `404`
+// connection, its path and its query, the path `/missing` with `404`, and the path `/request` with the count of the request's
+// headers and its `Host`
 void Serve(TcpListener on) {
     mut count = 0
     while true {
@@ -40,6 +43,11 @@ void Serve(TcpListener on) {
 HttpResponse Answer(int number, HttpRequest r) {
     if r.Path == "/missing" {
         return HttpResponse.Text(404, "none")
+    }
+
+    if r.Path == "/request" {
+        host = r.Headers.Get("Host") ?? "none"
+        return HttpResponse.Text(200, "{r.Headers.Count} {host}")
     }
 
     return HttpResponse.Text(200, "{number} {r.Path} {r.Query}".Trim())
@@ -73,6 +81,10 @@ void | IoError | HttpError | InvalidUtf8 Run(int port) {
     third = client.Get(Address(port, "/c"))
     third.EnsureSuccess()
     print("{third.Status} {third.IsSuccess} {third.Body.ReadAllText(100)}")
+
+    request = client.Get(Address(port, "/request"))
+    sent = request.Body.ReadAllText(100)
+    print("{request.Status} {sent.Replace(":{port}", ":PORT")}")
 }
 
 listener = TcpListener.Bind("127.0.0.1:0") else {
