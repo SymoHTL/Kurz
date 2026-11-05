@@ -19,6 +19,8 @@ public static class SyntaxCopy
     /// A new block with the same text, every node of it new, but where <paramref name="rewrite"/> gives an expression its own: it is
     /// shown each expression before its copy, with the copier for the expressions inside it, and returns the expression to stand in
     /// its place or null for the copy. T33: a pass of a loop over <c>T.Fields</c>, in which <c>f.Get(value)</c> reads the field.
+    /// <paramref name="copied"/> is shown each expression the copier copies, and not one the rewrite gives, whose expressions inside are
+    /// copies the rewrite asks of the copier and are shown in turn: T34, a call inside <c>f.Get(value)</c> keeps its origin so.
     /// </summary>
     public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
         (Block)new Copier(null, rewrite, copied).Statement(b);

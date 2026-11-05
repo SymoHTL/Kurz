@@ -47,7 +47,7 @@ The two repairs differ in what they start:
 through the forge. Before it deletes anything:
 
 - It refuses a pull request that is not merged, a branch of another repository, and a branch whose
-  head is not the merged head: such a branch holds commits the merge did not take.
+  head is not the merged head, since such a branch can hold commits the merge did not take.
 - A branch that is already deleted is no error (exit 0).
 - It prints the branch's head, with the push that puts it back, and each open pull request on the
   branch, with the call that changes its base back. A Ready pull request, and one at its review cap,

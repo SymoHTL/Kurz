@@ -46,7 +46,9 @@
 - ci/Dockerfile: one FROM, its image named by its digest; the .NET SDK of compiler/global.json; each
   download checked before it is used, the LLVM key by its fingerprint, the SDK by its SHA-512 and gh
   by its SHA-256; clang of the LLVM major the file names, which is the major the compiler pins.
-`--self-test` breaks each fact in the real files, one token at a time, and expects its error."""
+`--self-test` breaks each fact in the real files, one token at a time, and expects its error.
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is read (tools/calls.py)."""
 import json
 import os
 import re
@@ -57,6 +59,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 WORKFLOWS = ".github/workflows"
 FILES = ["compiler-windows.yml", "gates.yml", "image.yml", "review.yml"]
@@ -761,10 +764,22 @@ def cases_in(base):
             cases.append(("lint: the count on the clean tree is of every workflow, so a capped count shows", read == len(FILES), read))
         if needle and "review.yml" in needle:
             cases.append(("lint: the count is of the workflows read, not of the ones expected", read == 1, read))
+    good = [[], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--slef-test"], [".github"], ["--self-test", "--self-test"], ["--self-test", "-v"]]
+    cases.append(("call: no argument and --self-test are its calls, each alone; --help, -h, a mistyped option, a positional "
+                  "argument and a second argument are not",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(cases)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"lint": (), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/lint_ci.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     errors, read = lint(kit.ROOT)
