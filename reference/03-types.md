@@ -1576,12 +1576,14 @@ arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copi
 text, and a cycle that grows there is refused at that call. The chain of copies stops at that
 call, so that it does not reach that bound, and the copies a call made before it report every
 other error of the function's body in the same build; a function that no call reaches has no copy,
-so its cycle is the one error it reports, as T33 reads such a function. A call in an arm of a
-`match` on `T.Kind` takes no part, in an arm inside such a loop as in one outside it, since each
-copy takes the one arm of its kind. A type argument of a call in a loop over `T.Fields` that is
-the field's type takes no part either, since the text does not give that type. A cycle
-that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
-bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
+so the refusals of its cycle are the only errors it reports, as T33 reads such a function. A call
+in an arm of a `match` on `T.Kind` takes no part where no loop over `T.Fields` is opened between the
+arm and the call, in an arm inside such a loop as in one outside it, since each copy takes the one
+arm of its kind; a call in a loop opened inside such an arm is the case of the assumed reading
+below. A type argument of a call in a loop over `T.Fields` that is the field's type takes no part
+either, since the text does not give that type. A cycle that grows in such an arm, at a call with
+no such loop between the arm and it, or that leaves the loop through a call outside it, shows only
+at that bound. *(assumed, §4: the id; a type argument grows where it holds a type parameter of
 the calling function inside any other form of a type, a map, a `data` type and a function type
 among them, and not where it is a case of a union, which holds each case once, so that a
 `T | string` for `T` makes no larger copy; a type argument that holds the field's type inside a
