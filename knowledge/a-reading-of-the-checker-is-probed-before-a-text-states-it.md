@@ -28,7 +28,9 @@ for a dotted name as a type that the build of fcc948e does not print, and the wa
 call at all. The text was held, and the case went to the owner as a question. The owner answered
 it on 2026-11-04 (comment 6643376941, item 4, answer (a)): `T` grows, and the call is refused at
 its line, since the walk types `f.Type` on the text. What the probe showed is a defect of the
-checker of fcc948e, which a type of its own for `f.Type` on the text ends.
+checker of fcc948e: with a type of its own for `f.Type` on the text, the walk refuses such a call at
+its line, and its chain of copies stops there. A chain that branches with no such call is the
+defect of the bound that comment 6623885460 records.
 
 **Why:** a reading of code follows the function it looks at, and what comes before that function
 decides whether it runs. A sentence of the reference or the record that says what the compiler

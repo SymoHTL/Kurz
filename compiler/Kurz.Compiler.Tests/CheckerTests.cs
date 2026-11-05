@@ -4660,12 +4660,19 @@ public sealed class CheckerTests
         // issue 156); one that holds it with no type parameter takes no part, as the field's type alone does
         const string Deep = "data Point(int X, int Y)\ndata Pair<A, B>(A First, B Second)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n"
             + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\nDeep(Point(1, 2), 3)";
+        // each form beside its control with `int` in place of the field's type, which the walk refused before
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Map<f.Type, T>(), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Map<int, T>(), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)")));
-        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<f.Type, T>(f.Get(x), x)], n - 1)")));
-        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, List<T>>(f.Get(x), [x]), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<int, T>(1, x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<f.Type, T>(f.Get(x), x)], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<int, T>(1, x)], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, List<T>>(f.Get(x), [x]), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<int, List<T>>(1, [x]), n - 1)")));
+        // the field's type with no type parameter takes no part: `Pair<f.Type, int>` runs, and `List<f.Type>` is left to the copies, where
+        // `Deep<List<int>>` reads `T.Fields` of a list and is `kind-not-read` at the outer call
         Clean(string.Format(Deep, "Deep(Pair<f.Type, int>(f.Get(x), 1), n - 1)"));
+        Assert.Equal([(ErrorIds.KindNotRead, 12)], Errors(string.Format(Deep, "Deep([f.Get(x)], n - 1)")));
     }
 
     [Fact]
