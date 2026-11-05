@@ -757,40 +757,135 @@ print(Negate(-9223372036854775808ns)) // one constant: the parameter's type take
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
 
-`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), a type
-of its own like the time types of T13 and a core word (L19) (§12, the owner, 2026-11-04, issue 110,
-comment 6643368937, the monotonic clock, Q1 (a)). `b - a` of two readings is a `duration`, negative
-where `a` is the later (§12, the same answer, Q2 (a)). A reading plus or less a `duration` is an
-`instant`, and `+` and `-` raise `overflow` (E3) where the result leaves the range, in every build,
-as T31 says of the other time types, so that a bound is checked by what has passed,
+`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), and a
+core word (L19) (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock,
+Q1 (a)). It is a time type with rules of its own: a rule that names the time types names a reading
+too, but for T29's widening and its conversions, which take none *(assumed, §12: a reading has no
+wide variant, a default of that round, below)*. `b - a` of two readings is a `duration`, negative
+where `a` is the later (§12, the same answer, Q2 (a)), and it raises `overflow` (E3) where the
+difference leaves the range of a `duration`, in every build, as T31 says of the time types (§12,
+the same answer, "the check of section 4 on the subtraction"). A reading plus or less a `duration`
+is an `instant`, and `+` and `-` raise `overflow` where the result leaves the range, in every
+build, as T31 says of the other time types, so that a bound is checked by what has passed,
 `instant.Now - start >= limit`, and not by the sum `start + limit` (§12, the same answer, Q3 (a)).
 *(assumed, §12: the defaults of that round, not objected to: a reading holds 64 bits of
-nanoseconds, signed, and has no wide variant; `<`, `<=`, `>`, `>=`, `==` and `!=` compare two
-readings, inside a `data` value and as a map's key too; and a reading converts to no `timestamp`
-and no integer, and from neither.)* So a reading where an integer or a `timestamp` is required, two
-readings added, a reading beside a `timestamp` or a `longduration`, and the unary `-` of a reading
-are `type-mismatch`. A duration plus a reading is a reading too, and a conversion written into
-`instant` is `type-mismatch` whatever it converts, as one from a `duration` into a `timestamp` is
-(T13) *(assumed, §12: a reading plus a duration in either order, as `+` takes a `timestamp` and a
-`duration`, and a reading that only the clock makes)*.
+nanoseconds, signed, counted from the clock's zero, and has no wide variant; `<`, `<=`, `>`, `>=`,
+`==` and `!=` compare two readings, inside a `data` value and as a map's key too; and a reading
+converts to no `timestamp` and no integer, and from neither.)*
 
-Case: [types/instant-arithmetic.kz](../corpus/types/instant-arithmetic.kz)
+A reading takes these forms and no other: `-` with a reading, `+` and `-` with a `duration` on its
+right, `+` with a `duration` on its left, and the six comparisons with a reading. Every other
+operator and operand is `type-mismatch` (T18): two readings added, a `duration` less a reading,
+`*`, `/` and `%` on a reading, a reading beside a `timestamp`, a `longduration`, a `longtimestamp`
+or an integer, the unary `-` of a reading, and a reading where an integer or a `timestamp` is
+required. A comparison of a reading with `null` is N6's error, and a conversion of one to `string`
+is `not supported` (T10), as for every time type. *(assumed, §12, each from the forms of the other
+time types: a `duration` plus a reading is a reading, as `+` takes a `timestamp` and a `duration`
+in either order; two readings added and a `duration` less a reading are refused, as C# adds no two
+`DateTime`s and takes no `DateTime` from a `TimeSpan`, and Rust's `Instant` takes neither; a
+reading beside the wide pair is refused, since a reading has no wide variant to widen into; and the
+unary `-` of a reading is refused, since the round gives a negated reading no meaning.)*
+
+A conversion written into `instant` from another type is `type-mismatch`, as one from a `duration`
+into a `timestamp` is (T13), and `instant(t)` of a reading is that reading, as a conversion of a
+time value into its own type is *(assumed, §12: a reading that only the clock makes)*. A `raw`
+block reads a reading's bits through a pointer as it reads any value's (R10), and the bits are the
+nanoseconds since the clock's zero *(assumed, §12: the 64 bits of nanoseconds of that round's
+default)*.
+
+Case: [types/instant-difference.kz](../corpus/types/instant-difference.kz)
 ```kurz
-instant start = instant.Now
-instant later = instant.Now
-duration taken = later - start
-print(taken >= 0s)
-print(start - later <= 0s)
-print(start + taken == later)
-print(later - taken == start)
-print(1ns + start > start)
-print(start + 90min - start)
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(5000000000)
+instant b = Reading(5405000000000)
+print(b - a == 90min)
+print(a - b == -90min)
+print(a - a == 0s)
+```
+
+Case: [types/instant-sum.kz](../corpus/types/instant-sum.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(5000000000)
+print(a + 90min - a == 90min)
+print(a - 5s - a == -5s)
+print(90min + a - a == 90min)
+```
+
+Case: [types/instant-comparison.kz](../corpus/types/instant-comparison.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(1)
+instant b = Reading(2)
+instant c = Reading(2)
+print(a < b)
+print(b <= c)
+print(b > a)
+print(a >= b)
+print(b == c)
+print(a != c)
+```
+
+Case: [types/instant-in-data.kz](../corpus/types/instant-in-data.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
 data Mark(instant At)
-print(Mark(start) == Mark(later - taken))
+
+print(Mark(Reading(7)) == Mark(Reading(7)))
+print(Mark(Reading(7)) == Mark(Reading(8)))
+```
+
+Case: [types/instant-map-key.kz](../corpus/types/instant-map-key.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
 mut seen = Map<instant, string>()
-seen[start] = "first"
-seen[later - taken] = "again"
+seen[Reading(7)] = "first"
+seen[Reading(7)] = "again"
+seen[Reading(8)] = "other"
 print(seen.Count)
+```
+
+Case: [types/instant-identity.kz](../corpus/types/instant-identity.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(42)
+print(instant(a) == a)
 ```
 
 Case: [types/instant-overflow-release.kz](../corpus/types/instant-overflow-release.kz)
@@ -804,22 +899,40 @@ raw {
 }
 ```
 
+Case: [types/instant-overflow-lower.kz](../corpus/types/instant-overflow-lower.kz)
+```kurz
+instant Earlier(instant t, duration d) => t - d
+
+long bits = -9223372036854775807 - 1
+raw {
+    instant first = *Ptr<instant>(&bits)
+    print(Earlier(first, 1ns))
+}
+```
+
 Case: [types/instant-not-integer.kz](../corpus/types/instant-not-integer.kz)
 ```kurz
-int n = instant.Now
-print(n)
+int Count(instant t) => t
 ```
 
 Case: [types/instant-not-timestamp.kz](../corpus/types/instant-not-timestamp.kz)
 ```kurz
-timestamp t = instant.Now
-print(t)
+timestamp At(instant t) => t
 ```
 
 Case: [types/instant-plus-instant.kz](../corpus/types/instant-plus-instant.kz)
 ```kurz
-instant start = instant.Now
-print(start + start)
+instant Twice(instant t) => t + t
+```
+
+Case: [types/instant-duration-less-reading.kz](../corpus/types/instant-duration-less-reading.kz)
+```kurz
+duration Back(instant t) => 1s - t
+```
+
+Case: [types/instant-times-integer.kz](../corpus/types/instant-times-integer.kz)
+```kurz
+instant Twice(instant t) => t * 2
 ```
 
 Case: [types/instant-conversion.kz](../corpus/types/instant-conversion.kz)
