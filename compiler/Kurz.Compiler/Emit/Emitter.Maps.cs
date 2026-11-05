@@ -39,15 +39,18 @@ public sealed partial class Emitter
 
     /// <summary>
     /// Whether a map of the key type keeps each entry's hash in its slot, the one definition every layout of an entry, every lookup
-    /// and every move of an entry follows. A key whose hash reads more than one word of its own keeps it, as .NET's
+    /// and every move of an entry follows. A key of a kind whose hash can read more than one word keeps it, as .NET's
     /// <c>Dictionary</c> keeps each entry's hash code, so that a growth does not hash the key again: a string's bytes, a time of 128
-    /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that compares by them. A
-    /// key of one word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an
-    /// instance that compares by identity, whose hash is the fast hash of the one word, its address for the instance
-    /// (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it again. Measured on issue 157
-    /// (item 14): without the hash a <c>Map&lt;int, int&gt;</c> of 1,000,000 entries took its million <c>Remove</c>s in half the time and its
-    /// walk in three quarters, while maps of 200,000 keys of a <c>data</c> value of two strings and of a list of 4 <c>int</c>s grew 36% and
-    /// 31% slower (the owner, 2026-11-01, "Allow, faster wins": no program sees the layout).
+    /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that does not compare by
+    /// identity, by its content (K4) or by the fields it names (K5); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
+    /// word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an instance
+    /// that compares by identity, whose hash is the fast hash of the one word, its address for the instance, or SipHash-1-3 under the
+    /// block's keys after the map switched (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it
+    /// again. Measured on issue 157 (item 14): without the hash a <c>Map&lt;int, int&gt;</c> of 1,000,000 entries took its million
+    /// <c>Remove</c>s in half the time and its walk in three quarters, while maps of 200,000 keys of a <c>data</c> value of two strings and
+    /// of a list of 4 <c>int</c>s grew 36% and 31% slower (the owner, 2026-11-02, answer (a) on pull request 210, comment 6573116036: the
+    /// bytes <c>allocation-failed</c> names for a map's block follow the layout, under "Allow, faster wins"; they are the one place a
+    /// program sees it, <c>compiler/README.md</c>).
     /// </summary>
     internal static bool KeepsHash(KurzType key) => key switch
     {
@@ -92,9 +95,12 @@ public sealed partial class Emitter
                 {
                     // K4: an instance that compares by identity hashes its address, which its count keeps while it is a key
                     var slot = fn.Alloca("i64", "key");
-                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {key} to i64")}, ptr {slot}");
+                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {Address(key, c.Symbol)} to i64")}, ptr {slot}");
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
                 }
+
+            case ClassType c when Layout.Fat(c.Symbol):
+                return HashThroughTable(block, key, c.Symbol); // K13: by the hash of the instance's class
 
             case DataType or ListType or UnionType or ClassType:
                 {
@@ -144,6 +150,16 @@ public sealed partial class Emitter
     /// <c>%a0</c> and the value in <c>%a1</c>: the SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag
     /// and its value's hash, and first the number of the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15, K5).
     /// </summary>
+    /// <summary>K13 with M9: the hash of an instance of the class by its address, <c>%a1</c>, under the keys of a map's block, <c>%a0</c>, as <see cref="KeyHash"/> gives it, which the class's table holds.</summary>
+    private string ClassHash(ClassSymbol symbol) => symbol.ComparesByIdentity
+        ? Helper("hash.identity", "i64", ["ptr", "ptr"], () =>
+        {
+            var slot = fn.Alloca("i64", "key");
+            fn.Emit($"store i64 {fn.Value("ptrtoint ptr %a1 to i64")}, ptr {slot}");
+            fn.Return($"i64 {fn.Value($"call i64 {StdFunction("MapHash")}(ptr %a0, ptr {slot}, i64 8)")}");
+        })
+        : Helper($"hash.class.{symbol.Name}", "i64", ["ptr", "ptr"], () => HashBody(new ClassType(symbol)));
+
     private void HashBody(KurzType type)
     {
         var state = fn.Alloca("[5 x i64]", "hash");
@@ -174,7 +190,7 @@ public sealed partial class Emitter
 
             case DataType d when layout.IsBlock(d):
                 {
-                    Add(fn.Value($"zext i32 {fn.Value("load i32, ptr %a1")} to i64"));
+                    Add(fn.Value($"zext i32 {BlockNumber("%a1", d.Symbol)} to i64"));
                     ByNumber("%a1", d.Symbol, held =>
                     {
                         var block = layout.Block(held);

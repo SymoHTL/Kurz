@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 5
+// rules: T36
+
+instant start = instant.Now
+print(start + start)
