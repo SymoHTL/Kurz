@@ -732,8 +732,10 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// F12, D11: the default of a parameter of a method, <c>static</c> or not, is a constant expression that fits the parameter, read as
-    /// a function's is, with no variable and no member of the class in sight, so that a field named there is <c>unknown-name</c> (V10).
+    /// F12, D11: the default of a parameter of a method, <c>static</c> or not, is a constant expression that fits the parameter, read
+    /// with the members of its class in sight, as C# reads it: a field, a <c>static</c> field or a method of the class named there, or
+    /// <c>this</c>, is no constant, so it is <c>default-not-constant</c>, as C# gives CS1736, and a field of an instance in a <c>static</c>
+    /// method's default is the <c>static-mismatch</c> of K19, as in its body (the owner, 2026-11-04, #156, comment 6643376941).
     /// </summary>
     private void CheckMethodDefaults()
     {
@@ -741,7 +743,14 @@ public sealed partial class Checker
         {
             foreach (var method in symbol.Methods.Values.SelectMany(list => list))
             {
-                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = method.Line };
+                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = method.Line, Class = symbol, Static = method.IsStatic };
+                if (!method.IsStatic)
+                {
+                    // K7: the members of the instance are read through `this`, as in the body, so that a read of one types and is no constant
+                    var receiver = new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, method.Line) { Read = true };
+                    frame.Scope.Variables[receiver.Name] = receiver;
+                }
+
                 foreach (var (p, parameter) in method.Declaration!.Parameters.Zip(method.Parameters))
                 {
                     if (p.Default is not null)

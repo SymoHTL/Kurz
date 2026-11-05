@@ -2309,10 +2309,6 @@ round can ask about it by the rule's id.
   A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
-- F12 with K7 and V10: the default of a parameter of a method, `static` or not, is read as a function's
-  is, a constant expression that fits the parameter, with no variable and no member of the class in
-  sight, so that a field or a `static` field of the class named there is `unknown-name`, as a top-level
-  variable is in a function's default.
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is

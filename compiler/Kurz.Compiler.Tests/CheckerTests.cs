@@ -3550,9 +3550,15 @@ public sealed class CheckerTests
         // F12: one that is no constant is `default-not-constant` at the parameter, and one of another type `type-mismatch`, as a function's
         Assert.Equal([(ErrorIds.DefaultNotConstant, 4)], Errors("int Other() => 1\n\nclass C(int V) {\n    pub static int F(int x = Other()) => x\n}\n\nprint(C.F(2))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("class C(int V) {\n    pub int G(int x = \"a\") => x\n}\n\nprint(C(1).G(2))"));
-        // V10: no variable and no member of the class is in sight there, as none is in a function's default
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int A) {\n    pub int G(int x = A) => x\n}\n\nprint(C(1).G(2))"));
-        Assert.Equal([(ErrorIds.UnknownName, 3)], Errors("class C(int V) {\n    pub static int Step = 1\n    pub static int F(int x = Step) => x\n}\n\nprint(C.F(2))"));
+        // F12 with K7: the members of the class are in sight there, as C# reads it, and a field, a `static` field, a method or `this`
+        // is no constant (CS1736); a field of an instance in a `static` method's default is K19's error, as in its body
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int A) {\n    pub int G(int x = A) => x\n}\n\nprint(C(1).G(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class C(int V) {\n    pub static int Step = 1\n    pub static int F(int x = Step) => x\n}\n\nprint(C.F(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class C(int V) {\n    pub static int One() => 1\n    pub int G(int x = One()) => x\n}\n\nprint(C(1).G(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int V) {\n    pub int G(C c = this) => c.V\n}\n\nprint(C(1).G())"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int A) {\n    pub static int F(int x = A) => x\n}\n\nprint(C.F(2))"));
+        // V10: no variable is in sight there, as none is in a function's default
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("n = 1\n\nclass C(int V) {\n    pub int G(int x = n) => x\n}\n\nprint(C(1).G(2) + n)"));
     }
 
     [Fact]

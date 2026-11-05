@@ -375,6 +375,11 @@ argument out)* (C# also takes `default`, which the record
 does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
+The default of a parameter of a method, `static` or not, is read with the members of its class in
+sight, as C# reads it: a field, a `static` field or a method of the class named there is no
+constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
+§8: `this` there is no constant either, and a field of an instance in the default of a `static`
+method is K19's `static-mismatch`, as in its body)*
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
