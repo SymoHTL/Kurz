@@ -4663,6 +4663,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Map<f.Type, T>(), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<f.Type, T>(f.Get(x), x)], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, List<T>>(f.Get(x), [x]), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<int, T>(1, x), n - 1)")));
         Clean(string.Format(Deep, "Deep(Pair<f.Type, int>(f.Get(x), 1), n - 1)"));
     }
@@ -4680,6 +4681,15 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+
+        // the arm nearest the call is the one the walk reads: an arm inside a loop opened inside another arm takes no part either, and its
+        // chain ends at the bound of T33, at the outer call (the control is the Fact of a loop opened inside an arm, below)
+        const string Nested = "data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n            for f in T.Fields {\n"
+            + "                match T.Kind {\n                    TypeKind.Data => Deep(Wrap(x), n - 1)\n                    else => print(n)\n                }\n            }\n        }\n"
+            + "        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)";
+        var nested = Assert.Single(NotSupported(Nested));
+        Assert.StartsWith("17: ", nested);
+        Assert.EndsWith("(T33)", nested);
     }
 
     [Fact]

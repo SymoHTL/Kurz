@@ -669,10 +669,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   generic functions that gives it back to that type parameter, is `growing-type-argument` at that
   call, read on the text of every generic function that reads no type and on the calls in a loop
   over `T.Fields` of one that does, called or not, and of no copy, but for a call in an arm of a
-  `match` on `T.Kind` outside any loop over `T.Fields` opened inside that arm; the text of a function
+  `match` on `T.Kind` outside any loop over `T.Fields` opened inside the nearest such arm around it; the text of a function
   that reads its type is read a second time for those calls alone where it reads `T.Fields`, and the
   chain of copies stops at a call so refused, the copies before it reporting what else their bodies
-  hold (T34);
+  hold; on the text, `f.Type` of such a loop is a type of its own, no type parameter of the function,
+  so that a type argument that holds it beside a type parameter of the function grows by that
+  parameter, `Map<f.Type, T>` for `T`, and one that holds it with none takes no part (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -1846,7 +1848,7 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is or holds the field's type (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+`match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
