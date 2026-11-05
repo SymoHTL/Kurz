@@ -477,14 +477,14 @@ as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read m
 `BytesReserve`, `BytesPiece`, `BytesEnd` and `BytesAdded`, and `ListClear` (S3, S6, M9), and the
 block of a map, its growth and the hash of its keys (M9, below).
 
-The Linux file also gives the command line, the environment and the clock (S13 to S15), which the
+The Linux file also gives the command line, the environment and the clocks (S13 to S15, S25), which the
 emitted code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them
 (S11). `Arguments` adds the arguments `Start` kept, from the one at its first parameter on, to a list,
 each a string `FromUtf8` makes of its bytes, and gives 0, or the number of the first that is not UTF-8;
 `Variable` reads `getenv` and gives 0 with the value, 1 for a name that is empty or holds `=` and for a
 variable that is not set, as Rust's `var_os` gives none for them, and 2 for a value that is not UTF-8;
 `Now` reads `clock_gettime` with `CLOCK_REALTIME` into the page `stat` fills, the nanoseconds from
-1970-01-01, and gives false where the page cannot be mapped; and `FileModified` reads `st_mtim` at
+1970-01-01, and gives false where the page cannot be mapped; `MonotonicNow` reads `CLOCK_MONOTONIC` so (S25); and `FileModified` reads `st_mtim` at
 byte 88 of `struct stat`, -4096, `InvalidData`, for a time the 64 bits of a `timestamp` do not hold
 (T24). `common/`'s `InvalidArgument` writes `error: invalid-argument` and ends the process with 1,
 with no place, as `random-failed` ends it.
@@ -708,6 +708,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   result leaves its type's range in every build (T31), the comparisons, `==` also on a field (D3), a
   narrow value widened beside or into the wide pair (T29), a conversion between the two widths, which
   raises `overflow` in every build where the value does not fit (T31), and their text (A12, A16);
+- a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
+  of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
+  `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
+  text, a duration's (S25);
 - `if`, `while`, `for` over a range, which raises `reversed-range-at-run-time` (C8), `break`,
   `continue` and `return` (chapter 10), and `throw` of a value (O6);
 - `data` types and their values, made with defaults and arguments by name (D1, D2, D8, D11), their
@@ -1013,7 +1017,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; a close in the block of a loop over its lines, which releases the
   descriptor at once, as `F_GETFD` shows, and the pull after it, the system's error 9; an assignment to the file in the block of a
   loop over its lines; and the refusal for Windows, at a call and at such a loop;
-- the command line, the environment and the clock (S13 to S15), in a build for Linux: `args` is a
+- the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
   on at its call; a number other than 0 calls `InvalidArgument` for `args` and raises
@@ -1021,7 +1025,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `CPath` does, a name with a NUL byte giving `NotPresent` without a call, and makes the value or the
   `EnvError` of `Variable`'s answer, whose text is the words of its kind and its name (S14);
   `timestamp.Now` calls `Now` and ends the program with `allocation-failed` of the page's 4096 bytes
-  where it gives false; and `File.Modified` is a call on a file (above) whose value is the
+  where it gives false, and `instant.Now` calls `MonotonicNow` so, `t.Elapsed` reading it after `t` (S25); and `File.Modified` is a call on a file (above) whose value is the
   nanoseconds `FileModified` read. `ProcessTests` pins what no case can: the words a process was
   given and the program's name, an argument that is not UTF-8 read by either form and by neither,
   and named by `args` only in a lambda's body or a branch that never runs,
