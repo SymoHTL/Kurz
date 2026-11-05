@@ -1,0 +1,43 @@
+// expect: output
+// | Unsupported: https is not supported: no TLS
+// | Unsupported: unsupported scheme
+// | ConnectionRefused
+// | 2147483647 true true 5 true
+// rules: W13
+
+// an address of `https` and one of another scheme than `http` are refused before any connect, the failure of a connect is the
+// network's `IoError`, and `HttpClientOptions()` holds .NET's defaults: no bound on the connections to one host, an idle
+// connection kept 1 minute, no bound on a connection's life, 5 redirects, and the limits of a request's head for a response's
+void Show(HttpClient client, string text) {
+    at = Uri.Parse(text) else {
+        UriError e => {
+            print("{e.Kind} {e.At}")
+            return
+        }
+    }
+
+    match client.Get(at) {
+        HttpResponseMessage r => print(r.Status)
+        IoError e => print(e.Kind)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+plain = HttpClient()
+Show(plain, "https://127.0.0.1:1/")
+Show(plain, "ftp://127.0.0.1:1/")
+listener = TcpListener.Bind("127.0.0.1:0") else {
+    IoError e => {
+        print(e)
+        return
+    }
+}
+
+port = listener.Port
+listener.Close() else {
+    IoError e => print(e)
+}
+
+Show(plain, "http://127.0.0.1:{port}/")
+o = HttpClientOptions()
+print("{o.MaxConnectionsPerServer} {o.PooledConnectionIdleTimeout == 1min} {o.PooledConnectionLifetime == 9223372036854775807ns} {o.MaxAutomaticRedirections} {o.Limits == HttpLimits()}")

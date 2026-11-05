@@ -1,0 +1,192 @@
+// expect: output
+// | 200 [1 /r/0]
+// | 200 [1 /r/0]
+// | 200 [1 /r/0]
+// | 200 [1 /r/0]
+// | 200 [1 /perm q=1]
+// | Unsupported: https is not supported: no TLS
+// | 302 []
+// | 302 []
+// | Protocol: too many redirects
+// | 200 [1 /r/0]
+// | 302 []
+// | 200 [1 /r/0]
+// | Protocol: too many redirects
+// | 200 [2 /r/0]
+// allow: raw native
+// rules: W15
+
+// a client follows up to 5 redirects of a `GET`, a `301`, `302`, `303`, `307` and `308` alike, each `Location` resolved against the
+// address it answers, on the connection the chain began on; a sixth is `too many redirects`, a redirect to `https` the error of an
+// address of `https`, and a redirect without a `Location`, or with one that is no `Uri`, is the response; `MaxAutomaticRedirections`
+// sets the count, 0 for none; and a redirect whose body is longer than `MaxDrainSize` closes its connection
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request answered by `Answer`
+void Serve(TcpListener on) {
+    mut count = 0
+    while true {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        count = count + 1
+        number = count
+        port = on.Port
+        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(port, number, r)) else {
+            IoError e => {
+            }
+            HttpError e => {
+            }
+        }
+    }
+}
+
+HttpResponse Redirect(int status, string location) {
+    response = HttpResponse.Empty(status)
+    response.Headers.Set("Location", location) else {
+        HttpError e => {
+        }
+    }
+
+    return response
+}
+
+// `/r/0` the number of the connection and the path, `/r/N` a `302` to `/r/N-1`, and the other paths their redirects
+HttpResponse Answer(int port, int number, HttpRequest r) {
+    path = r.Path
+    if path.StartsWith("/r/") {
+        n = path.Bytes[3] - 48
+        if n == 0 {
+            return HttpResponse.Text(200, "{number} {path}")
+        }
+
+        return Redirect(302, "/r/{n - 1}")
+    }
+
+    if path == "/see" {
+        return Redirect(303, "/r/0")
+    }
+
+    if path == "/moved" {
+        return Redirect(301, "http://127.0.0.1:{port}/r/0")
+    }
+
+    if path == "/dir/temp" {
+        return Redirect(307, "../r/0")
+    }
+
+    if path == "/perm" {
+        if r.Query == "q=1" {
+            return HttpResponse.Text(200, "{number} /perm q=1")
+        }
+
+        return Redirect(308, "?q=1")
+    }
+
+    if path == "/secure" {
+        return Redirect(302, "https://127.0.0.1/")
+    }
+
+    if path == "/bad" {
+        return Redirect(302, "http://a b/")
+    }
+
+    if path == "/long" {
+        response = HttpResponse.Text(302, "0123456789")
+        response.Headers.Set("Location", "/r/0") else {
+            HttpError e => {
+            }
+        }
+
+        return response
+    }
+
+    return HttpResponse.Empty(302)
+}
+
+// the server started in a child, the client's part run against it, and the child ended
+void Against((int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    if child == 0 {
+        Serve(on)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// a `GET` of `path` and its status and body, or its failure
+string Show(HttpClient client, int port, string path) {
+    at = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return "{e.Kind} {e.At}"
+    }
+
+    match client.Get(at) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Followed(int port) {
+    client = HttpClient()
+    print(Show(client, port, "/r/5"))
+    print(Show(client, port, "/see"))
+    print(Show(client, port, "/moved"))
+    print(Show(client, port, "/dir/temp"))
+    print(Show(client, port, "/perm"))
+    print(Show(client, port, "/secure"))
+    print(Show(client, port, "/none"))
+    print(Show(client, port, "/bad"))
+    print(Show(client, port, "/r/6"))
+    print(Show(client, port, "/r/0"))
+}
+
+void None(int port) {
+    print(Show(HttpClient(HttpClientOptions(MaxAutomaticRedirections: 0)), port, "/r/1"))
+}
+
+void One(int port) {
+    client = HttpClient(HttpClientOptions(MaxAutomaticRedirections: 1))
+    print(Show(client, port, "/r/1"))
+    print(Show(client, port, "/r/2"))
+}
+
+void Long(int port) {
+    print(Show(HttpClient(HttpClientOptions(Limits: HttpLimits(MaxDrainSize: 4))), port, "/long"))
+}
+
+Against((int port) => Followed(port))
+Against((int port) => None(port))
+Against((int port) => One(port))
+Against((int port) => Long(port))

@@ -1,0 +1,158 @@
+// expect: output
+// | 200 1 2 [wikipedia]
+// | 304 1 2 []
+// | 200 1 2 [ok]
+// | 204 1 1 []
+// | 200 1 1 [all of it]
+// | 200 2 2 [one]
+// | 200 3 3 [two]
+// | 200 3 3 [three]
+// | 200 4 TooLarge: response body over limit
+// | 200 5 TooLarge: response body over limit
+// | 200 6 Protocol: malformed response: unexpected end of body
+// | 200 7 Protocol: malformed response: bad chunk size
+// allow: raw native
+// rules: W14
+
+// a response's body is chunked, of its `Content-Length`, or read to the close where its head says neither, and a `1xx`, a `204` and
+// a `304` have none; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
+// `Connection: keep-alive`, and one with `Connection: close` or read to the close keeps it not; `ReadAllText(max)` past its bound and a
+// body that ends early or is malformed give the response's errors
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, and the connection closed where the next is `close` or the client ends it
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    if next < answers.Count && answers[next] == "close" {
+                        next = next + 1
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its response: the status, the server's number of the connection, the count of the headers and the body read
+// as text within `max` bytes, or the failure; the response let go of at the return
+string Show(HttpClient client, int port, int max) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            number = r.Headers.Get("X-Connection") ?? "-"
+            match r.Body.ReadAllText(max) {
+                string text => return "{r.Status} {number} {r.Headers.Count} [{text}]"
+                IoError e => return "{r.Status} {number} {e}"
+                HttpError e => return "{r.Status} {number} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} {number} not UTF-8"
+            }
+        }
+        IoError e => return "{e}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient()
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+    print(Show(client, port, 10))
+    print(Show(client, port, 10))
+    print(Show(client, port, 100))
+    print(Show(client, port, 100))
+}
+
+Against([
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwiki\r\n5\r\npedia\r\n0\r\n\r\n",
+    "HTTP/1.1 304 Not Modified\r\nX-Connection: #\r\nContent-Length: 5\r\n\r\n",
+    "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </s>\r\n\r\nHTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
+    "HTTP/1.1 204 No Content\r\nX-Connection: #\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\nall of it",
+    "close",
+    "HTTP/1.0 200 OK\r\nX-Connection: #\r\nContent-Length: 3\r\n\r\none",
+    "HTTP/1.0 200 OK\r\nX-Connection: #\r\nConnection: keep-alive\r\nContent-Length: 3\r\n\r\ntwo",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 5\r\nConnection: close\r\n\r\nthree",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 20\r\n\r\n01234567890123456789",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n14\r\n01234567890123456789\r\n0\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\nabc",
+    "close",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n",
+    "close",
+], (int port) => Responses(port))
