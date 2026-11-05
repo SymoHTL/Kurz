@@ -3003,6 +3003,8 @@ public sealed class CheckerTests
             + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `static` `NameAt`
         Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub void NameAt(int i) {\n        print(i)\n    }\n\n"
             + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `void` `NameAt`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub static int Count = 2\n\n" + Members + Walk)); // a `static` field named `Count`
+        Assert.Equal([$"12: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string s) => s\n\n" + Members + Walk)); // one `NameAt` of two fits
     }
 
     [Fact]
