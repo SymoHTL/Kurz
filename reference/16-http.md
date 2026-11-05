@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpBody` and `HttpWriter`, with `UriError`,
 `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -31,7 +31,8 @@ the list, against
 every `pub` type of `std/` and against a list written in `std/`, 2026-11-03, that `HttpBody` is one of
 them, against a body type no program can name, and 2026-11-03, that `HttpWriter` is another, the writer
 of the streamed response §12 gives, "A response can be streamed"; the two of `Uri`, and
-`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions).
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
+`HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a)).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -208,26 +209,38 @@ print(e.Text())
 ### W3 (decided, §12) A server's request sent to another actor moves with its body
 
 A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
-connection's socket: the handler keeps neither, and the connection waits for the handler's
-response, as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02,
-issue 110, comment 6573113786, against refusing a server's request that has a body as not
-sendable). The send is written with `move`, as the send of a mutable class instance is (§12, the
-owner, 2026-11-03, issue 110, comment 6600034158). The response is written when the handler
-returns. The moved body stays the other actor's to read to its end: every read gives the body's
-bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
-connection reads its next request only after that, with no new kind of error (§12, the owner,
-2026-11-03, issue 39, comment 6601737306). A `move` of the request ends every path into it,
-`b = r.Body` included, by the region check of the record's section 6 (§12). A read of a moved body
-that falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes;
-the `408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
-6603205575). A `copy` of a server's request is the compile error `copy-server-request`, which names
-`move`, and a send of it with no word is section 6's error (§12, the same answer) *(assumed, §12:
-the error's name)*. A request a client builds is sent as any value is (§12).
+connection's socket: the handler keeps neither, and the connection waits for the handler's response,
+as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02, issue 110,
+comment 6573113786, against refusing a server's request that has a body as not sendable). The send
+is written with `move`, as the send of a mutable class instance is (§12, the owner, 2026-11-03,
+issue 110, comment 6600034158), and the handler can send it, since it takes the request as a
+parameter written `move`, `(move HttpRequest r) => HttpResponse` (§12, the owner, 2026-11-04, issue
+156, comment 6643376941). The response is written when the handler returns. The moved body stays the
+other actor's to read to its end: every read that keeps to the body's rate gives the body's bytes,
+then `0` at its end. A body left unread is drained when its last owner drops it, and the connection
+reads its next request only after that, with no new kind of error (§12, the owner, 2026-11-03, issue
+39, comment 6601737306). The drain is a read of the server, bounded by the body's rate and the
+drain's 64 KiB, and where either ends it the connection closes, with no error to any reader (§12)
+*(assumed, §12: that reading)*. A `move` of the request ends every path into it, `b = r.Body`
+included, by the region check of the record's section 6, and is refused with `move-reachable` where
+section 6 refuses it (§12). Of the bounds of `HttpLimits`, a moved body's reads meet the body's rate
+and the limit of a declared body (§12) *(assumed, §12: that reading)*. A read of a moved body that
+falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes; the
+`408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
+6603205575), and after a `408` the response the handler returns is not written, with no error to any
+program (§12) *(assumed, §12: that reading)*. How the body's rate is timed on the socket of the
+actor that got the body stands open in §14 (§12). A `copy` of an `HttpRequest` is the compile error
+`copy-server-request`, which names `move`, and a send of it with no word is section 6's
+`send-needs-word` (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the
+error's name, `copy-server-request`; §6: the name `send-needs-word`)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any
+value is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
+6643376941).
 
-No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
-build, so that the move is not built either. No case expects `copy-server-request` for the same
-reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md), whose row
-comes with the case that expects it (§12, the owner, 2026-11-03, issue 156, comment 6603359338).
+No case: the compiler reads no `copy` or `move` of a send, so that no case can expect the move,
+`copy-server-request` or `send-needs-word`, and a send to another actor needs two actors, which the
+compiler does not build. The id `copy-server-request` stands in this rule and not in
+[12-errors.md](12-errors.md), since no case can expect it (§12, the owner, 2026-11-03, issue 156,
+comment 6603359338).
 
 ### W4 (decided, §12) `HttpHeaders`
 
