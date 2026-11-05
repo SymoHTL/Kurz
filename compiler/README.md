@@ -2110,7 +2110,8 @@ round can ask about it by the rule's id.
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
   itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, a class when a field of it can, as section 4
-  assumes, a field of a function type among them (R9), and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
+  assumes, a field of a function type among them (R9), or a field of a class of the file derived from it, which K6 lets stand where
+  its base does, and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.
@@ -2356,8 +2357,11 @@ round can ask about it by the rule's id.
   *(assumed)*. The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
-  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*, and
-  one no lambda of the file closes is `std/`'s own. A stored lambda is counted as a function value
+  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*. A ring
+  of classes of `std/` or of a folder alone, which a lambda of `std/` or of a folder closes through a
+  type argument that only a call of the file gives, is reported at the file's first such call (the
+  owner, 2026-11-05), since the checker of `std/` or of the folder does not see that call. One that
+  neither a lambda nor a call of the file closes is `std/`'s own, or the folder's. A stored lambda is counted as a function value
   is, a read of the field for a call takes a count of its own (K2), so a lambda that replaces the
   field it is called through runs on, and the instance's release lets go of the environment. Pinned
   by the function fields' programs of `ListTests`.

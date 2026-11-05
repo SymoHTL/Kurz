@@ -255,6 +255,19 @@ public sealed class RuntimeTests
     }
 
     [Fact]
+    public void A_ring_that_a_lambda_of_the_folder_closes_through_a_type_argument_of_the_file_is_reported_at_the_file_s_call()
+    {
+        // R9b with F10: the folder's checker does not see the file's calls, so a ring of the folder's classes alone, which a lambda of
+        // the folder's generic function closes through the type argument a call of the file gives, is the file's, at that call (the
+        // owner, 2026-11-05)
+        const string sys = "pub class Button(mut () => int OnClick)\n\npub Button Make() => Button(() => 1)\n\npub int Count(Button b) => 1\n\npub T Hold<T>(T x) {\n    f = () => x\n    return f()\n}\n";
+        var (_, _, ring) = WithSys(sys, "use sys\n\nb = sys.Make()\nprint(sys.Count(sys.Hold(b)))\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 4)], ring.Select(d => (d.Id, d.Line)));
+        // the positive control: a type argument that holds no class
+        Assert.Empty(WithSys(sys, "use sys\n\nprint(sys.Hold(1))\n").Diagnostics);
+    }
+
+    [Fact]
     public void A_use_of_a_folder_the_checker_is_not_given_is_not_supported()
     {
         var (_, _, diagnostics) = WithSys("pub long Write(int fd) => 0\n", "use other\n\nprint(1)\n");
