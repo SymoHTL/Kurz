@@ -40,7 +40,7 @@ public sealed partial class Checker
         var subjectPath = Types.NonNull(subjectType) is not null ? PathOf(subject) : null; // N3: a nullable variable or path of fields the arms test
         var nullNamed = false;
         var kind = KindMatch(subject, typed); // T33: a `match` on `T.Kind` in a copy reads the one arm that takes the copy's kind
-        var loops = fieldsLoopDepth; // T34: a call in an arm of a `match` on `T.Kind` of a function's text is read in the copies alone, in a loop over `T.Fields` too
+        var loops = fieldsLoopDepth; // T34: a call in an arm of a `match` on `T.Kind` of a function's text is read in the copies alone, the `match` inside a loop over `T.Fields` too; a loop opened in the arm counts again
         fieldsLoopDepth = KindOfTypeParameter(subject) ? 0 : loops;
         MatchArm? taken = null;
         foreach (var arm in arms)
