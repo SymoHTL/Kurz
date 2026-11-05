@@ -352,6 +352,18 @@ Run(x => print(x))
 // the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
 ```
 
+Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())
+```
+
 ### F12 (decided, §8) Overloads, default values, named arguments
 
 Functions may share a name when their parameters differ: in their number, or in the type of a

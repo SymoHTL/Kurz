@@ -1,0 +1,8 @@
+// expect: error static-mismatch at 8
+// rules: K7
+
+class C {
+    pub int Count => 1
+}
+
+print(C.Count)
