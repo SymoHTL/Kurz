@@ -415,6 +415,11 @@ print(e == Empty)
 constructor takes them in their order, and a value of it is made as a value of any type with
 fields (D2). Its bare name is its one value (D8) only where no base above it has a field either;
 where one has, the bare name stands for no value (D2).
+The cost is that this reading depends on every base above the type: where `Tag` of `data Mark : Tag`
+takes a first field, each bare `Mark` becomes `syntax` (D2) and each `Mark(...)` takes that field, in
+any file, with no edit to `Mark`. What softens it is that every use whose reading changes is a
+compile error at its line, and that a derived type that writes fields of its own meets the same when
+its base takes a field, since the fields of the base come first in its constructor (D7).
 
 Case: [data/inherit-no-own-fields.kz](../corpus/data/inherit-no-own-fields.kz)
 ```kurz

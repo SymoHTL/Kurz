@@ -37,4 +37,5 @@ as `std/` declares them, and whose own declaration in a file is `redeclared` wit
 names W1 (`corpus/http/http-error-redeclared.kz`). The second list holds only for a checker given
 `std/`'s checker, as a build gives it and as the corpus and semantic-model walks do: a checker
 made without it, as `CheckerTests`' `Check` makes one, sees neither name, and a test that uses one
-gives it `std/`'s checker (`CheckSeeingStd`). A name in neither list that a case uses with no declaration is undeclared.
+gives it `std/`'s checker (`CheckSeeingStd`; both in `compiler/Kurz.Compiler.Tests/CheckerTests.cs`,
+read on 2026-11-05). A name in neither list that a case uses with no declaration is undeclared.

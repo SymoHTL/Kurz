@@ -1,0 +1,26 @@
+// expect: output
+// | true
+// | true
+// | true
+// | true
+// | true
+// | 1h 30min
+// | true
+// | 1
+// rules: T36
+
+instant start = instant.Now
+instant later = instant.Now
+duration taken = later - start
+print(taken >= 0s)
+print(start - later <= 0s)
+print(start + taken == later)
+print(later - taken == start)
+print(1ns + start > start)
+print(start + 90min - start)
+data Mark(instant At)
+print(Mark(start) == Mark(later - taken))
+mut seen = Map<instant, string>()
+seen[start] = "first"
+seen[later - taken] = "again"
+print(seen.Count)

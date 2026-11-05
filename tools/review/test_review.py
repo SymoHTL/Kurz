@@ -9,11 +9,13 @@ way, with the write landed or not."""
 import contextlib
 import hashlib
 import io
+import itertools
 import json
 import os
 import sys
 import time
 import types
+import urllib.parse
 
 import kit
 import review as rv
@@ -138,6 +140,8 @@ class MemoryForge(rv.Forge):
         self.first_write = None  # how long the log was when the first write of a result reached the wire (the round's label is none)
         self.labels = []  # labels on the pull request, which a case may preload: pr() answers them, and a run adds to them
         self.refuse_labels = None  # the forge refuses a label write whose name starts with this
+        self.refuse_unlabel = False  # the forge refuses to take a label off
+        self.wire = []  # (method, path) of every write that reached the wire, in order
         self.read_back = 0  # how often the lows issue was read back after a comment on it failed
 
     def pr(self):
@@ -173,6 +177,7 @@ class MemoryForge(rv.Forge):
         return [{"body": body} for n, body in self.collected if n == number]
 
     def send(self, path, payload, method):
+        self.wire.append((method, path))
         body = payload.get("body") or ""
         counting = path == f"issues/{self.number}/labels" and all(n.startswith(kit.ROUND_LABEL) for n in payload["labels"])
         if self.first_write is None and hasattr(sys.stdout, "getvalue") and not counting:
@@ -195,6 +200,10 @@ class MemoryForge(rv.Forge):
             if self.refuse_labels is not None and any(n.startswith(self.refuse_labels) for n in payload["labels"]):
                 raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
             self.labels.extend(payload["labels"])
+        elif method == "DELETE" and path.startswith(f"issues/{self.number}/labels/"):
+            if self.refuse_unlabel:
+                raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
+            self.labels.remove(urllib.parse.unquote(path.rsplit("/", 1)[1]))
         elif path.startswith("issues/"):
             self.collected.append((int(path.split("/")[1]), body))
         elif path.startswith("statuses/"):
@@ -984,6 +993,75 @@ def suite(case):
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: the round's number follows the rounds the labels count, so one label counts the rounds before it",
          code == 0 and forge.labels[-1] == f"{kit.ROUND_LABEL}{kit.ROUND_CAP}", (code, forge.labels))
+
+    # A run the usage limit ends before any paid pass, no pass done and no call billed, is no round (the owner, 2026-11-02,
+    # issue 156): it takes its own label off again. A run that paid a pass, or that ended another way, stays a round.
+    def limited(paid, error=None):
+        """A model whose first `paid` calls answer, at 0.25 USD each, and whose every call after them raises `error`, the usage
+        limit unless named; the batches call it at the same time, and the count hands each call its own number."""
+        def call(prompt, paths, timeout_s):
+            call.batches.append(sorted(paths))
+            if next(call.count) >= paid:
+                raise error or rv.ReviewError("usage-limit", "resets at 1pm", 429)
+            return [], 0.25, 0
+        call.batches, call.count = [], itertools.count()
+        return call
+    rounds_of = lambda forge: [n for n in forge.labels if n.startswith(kit.ROUND_LABEL)]
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run the usage limit ends before any paid pass takes its own round label off again",
+         code == 3 and rounds_of(forge) == [] and "REVIEW DID NOT COMPLETE (usage-limit)" in out
+         and f"took the label {kit.ROUND_LABEL}1 off again" in out, (code, forge.labels, out[-300:]))
+    failure = [n["body"] for n in forge.notes if "did not complete" in n["body"]]
+    case("run: a run that took its round label off says so in its note and in its status",
+         len(failure) == 1 and f"its label `{kit.ROUND_LABEL}1` was taken off again" in failure[0]
+         and "no pass was paid, so this run is no review round" in failure[0]
+         and forge.statuses == error and forge.said == ["review did not complete: usage-limit, before any paid pass: no round counted"],
+         ([n["body"][:200] for n in forge.notes], forge.said))
+    at = lambda shape: [i for i, (method, path) in enumerate(forge.wire) if shape(method, path)]
+    removed, noted = at(lambda m, p: m == "DELETE" and "/labels/" in p), at(lambda m, p: m == "POST" and p == "issues/1/comments")
+    status = at(lambda m, p: p.startswith("statuses/"))
+    case("run: a run takes its round label off before its note and its status say that it did",
+         len(removed) == 1 and bool(noted) and bool(status) and removed[0] < noted[-1] and removed[0] < status[0], forge.wire)
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(1), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run the usage limit ends after one paid pass stays a round, and its label stays",
+         code == 3 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "off again" not in out and "1 passes" in out
+         and forge.said == ["review did not complete: usage-limit"], (code, forge.labels, forge.said))
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0, rv.ReviewError("usage-limit", "resets at 1pm", 429, cost=0.3)), ["--pr", "1"], ci=True,
+                           credential="x")
+    case("run: a run whose failed call was billed before the usage limit paid for it, and its label stays",
+         code == 3 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "off again" not in out, (code, forge.labels, out[-300:]))
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0, rv.ReviewError("api", "the API refused the call")), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run another failure ends before any pass stays a round, and its label stays",
+         code == 1 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "REVIEW DID NOT COMPLETE (api)" in out and "off again" not in out,
+         (code, forge.labels, out[-300:]))
+    forge = MemoryForge()
+    try:
+        cancelled = run_review(forge, limited(0, KeyboardInterrupt()), ["--pr", "1"], ci=True, credential="x")
+    except KeyboardInterrupt:  # what a cancel of the job raises in the process
+        cancelled = "cancelled"
+    case("run: a run cancelled after its label ends where it is: the label stays, and nothing is posted after it",
+         cancelled == "cancelled" and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and (forge.notes, forge.statuses) == ([], []),
+         (cancelled, forge.labels, [n["body"][:120] for n in forge.notes], forge.statuses))
+    forge = MemoryForge()
+    forge.refuse_unlabel = True
+    code, out = run_review(forge, limited(0), ["--pr", "1"], ci=True, credential="x")
+    case("run: a round label the forge refuses to take off ends the run as failed, in the words of a refused label, with the limit's line",
+         code == 1 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "REVIEW DID NOT COMPLETE (failed)" in out
+         and f"the label {kit.ROUND_LABEL}1 could not be taken off again" in out and "whether it was taken off is not known" in out
+         and "may count as a round of the" in out and "the usage limit ended the run before any paid pass (resets at 1pm" in out
+         and forge.statuses == error, (code, forge.labels, forge.statuses, out[-400:]))
+    forge = MemoryForge()
+    run_review(forge, scripted_model({"new.kz": rv.ReviewError("usage-limit", "resets at 1pm", 429)}), ["--pr", "1", "--local"])
+    forge.labels = [n for n in forge.labels if not n.startswith(kit.ROUND_LABEL)]  # edited: that run's label taken off by hand
+    again = limited(0)
+    code, out = run_review(forge, again, ["--pr", "1", "--local"])
+    case("run: a file replayed from the cache is no pass, so a run whose other files the usage limit stops at their first call is no round",
+         code == 3 and again.batches == [["new.kz"]] and rounds_of(forge) == [] and "3 replayed from the cache" in out,
+         (code, again.batches, forge.labels, out[:300]))
     forge, unused = MemoryForge(), scripted_model(found)
     forge.labels = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
