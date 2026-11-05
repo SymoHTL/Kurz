@@ -503,6 +503,7 @@ void | IoError All() {
     Show("GET / HTTP/1.1\r\nHost: h\r\nNoColon\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost : h\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost: h\r\nX: a\u0000b\r\n\r\n".Bytes)
+    Show("GET / HTTP/1.1\r\nHost: h\r\nX: a\rbc: d\r\n\r\n".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +5\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello".Bytes)
@@ -2167,6 +2168,15 @@ listener = TcpListener.Bind("127.0.0.1:0") else {
     }
 }
 
+// the listener's `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by
+// itself and does not hold the output the suite reads
+listener.SetAcceptTimeout(10s) else {
+    IoError e => {
+        print(e)
+        return
+    }
+}
+
 mut child = 0
 raw {
     child = fork()
@@ -2238,9 +2248,18 @@ HttpResponse Answer(int number, HttpRequest r) {
     return response
 }
 
-// a server started in a child on a port of its own, and the client's part run against it, and the child ended
+// a server started in a child on a port of its own, and the client's part run against it, and the child ended; the listener's
+// `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by itself and does not
+// hold the output the suite reads
 void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf8 part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2463,9 +2482,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2518,7 +2546,7 @@ string Show(HttpClient client, int port) {
 
 void Responses(int port) {
     client = HttpClient()
-    for i in 0..<18 {
+    for i in 0..<19 {
         print(Show(client, port))
     }
 }
@@ -2534,6 +2562,7 @@ Against([
     "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX: a\rbc: d\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
@@ -2637,9 +2666,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2784,9 +2822,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -2962,9 +3009,18 @@ HttpResponse Answer(int port, int number, HttpRequest r) {
     return HttpResponse.Empty(302)
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against((int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return

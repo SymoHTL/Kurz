@@ -8,6 +8,7 @@
 // | Protocol: malformed response: folded header
 // | Protocol: malformed response: space before a header's colon
 // | Protocol: malformed response: header without a colon
+// | Protocol: malformed response: control byte in a header
 // | Protocol: malformed response: bad Content-Length
 // | Protocol: malformed response: bad Content-Length
 // | Protocol: malformed response: Content-Length beside Transfer-Encoding
@@ -73,9 +74,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return
@@ -128,7 +138,7 @@ string Show(HttpClient client, int port) {
 
 void Responses(int port) {
     client = HttpClient()
-    for i in 0..<18 {
+    for i in 0..<19 {
         print(Show(client, port))
     }
 }
@@ -144,6 +154,7 @@ Against([
     "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX: a\rbc: d\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
     "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",

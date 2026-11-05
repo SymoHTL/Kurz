@@ -68,9 +68,18 @@ void Serve(TcpListener on, List<string> answers) {
     }
 }
 
-// the server started in a child, the client's part run against it, and the child ended
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
 void Against(List<string> answers, (int) => void part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
         IoError e => {
             print(e)
             return

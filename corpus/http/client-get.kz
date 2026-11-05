@@ -94,6 +94,15 @@ listener = TcpListener.Bind("127.0.0.1:0") else {
     }
 }
 
+// the listener's `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by
+// itself and does not hold the output the suite reads
+listener.SetAcceptTimeout(10s) else {
+    IoError e => {
+        print(e)
+        return
+    }
+}
+
 mut child = 0
 raw {
     child = fork()
