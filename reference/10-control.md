@@ -253,10 +253,15 @@ first step, since a range is a value, and each step reads `NameAt(i)` and `Value
 then, so that a removal inside the block gives `NameAt`'s own error once an index is out of range and
 an item added inside it is not walked (§4, the owner, 2026-11-04, "Index loop, Count once")
 *(proposed: that `Count` is an `int` member and `NameAt` and `ValueAt` take an `int`, the two names
-taking the types of their results)*. Two names over any other type, a list, a range and a class that
-lacks one of the three members among them, and one name over such a class, are `type-mismatch`
-*(proposed: the error; §4 gives the form over a map and §12 over such a class, and over nothing
-else)*. Over a list, a range and a map the loop runs over the collection as it was when
+taking the types of their results)*. A removal at or before the index shifts the items after it, so
+that the item after the removed one is not walked, with no error *(assumed, §4: a reading of that
+answer, which names the error at the end alone)*. The error at the end is the class's own `NameAt`'s:
+for `HttpHeaders` it is `index-out-of-range`, for an index below 0 or at `Count` or beyond, as for an
+index outside a list *(proposed: the error, which neither §12 nor the owner names)*. Two names over
+any other type, a list, a range and a class that lacks one of the three members, or whose `Count` is
+not an `int` or whose `NameAt` or `ValueAt` takes no `int`, among them, and one name over a class
+with all three members, are `type-mismatch` *(proposed: the error; §4 gives the form over a map and
+§12 over such a class, and over nothing else)*. Over a list, a range and a map the loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
 change to the variable, not to what the loop walks. For a map §4 states it, in the words of the option the owner
 chose, "The loop walks the map as it was when the loop started" (the owner, 2026-10-30, "Key and
