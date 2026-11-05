@@ -254,7 +254,7 @@ then, so that a removal inside the block gives `NameAt`'s own error once an inde
 an item added inside it is not walked (§4, the owner, 2026-11-04, "Index loop, Count once")
 *(proposed: that `Count` is an `int` member and `NameAt` and `ValueAt` take an `int`, the two names
 taking the types of their results)*. A removal at or before the index shifts the items after it, so
-that the item after the removed one is not walked, with no error *(assumed, §4: a reading of that
+that the item after the current one is not walked, with no error *(assumed, §4: a reading of that
 answer, which names the error at the end alone)*. The error at the end is the class's own `NameAt`'s:
 for `HttpHeaders` it is `index-out-of-range`, for an index below 0 or at `Count` or beyond, as for an
 index outside a list *(proposed: the error, which neither §12 nor the owner names)*. Two names over
