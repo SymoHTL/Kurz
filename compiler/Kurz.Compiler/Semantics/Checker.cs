@@ -1678,7 +1678,7 @@ public sealed partial class Checker
             data HexError(HexKind Kind, int At)
             enum TypeKind {
                 SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
-                LongDuration, LongTimestamp, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
+                LongDuration, LongTimestamp, Instant, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer
             }
             """));
 

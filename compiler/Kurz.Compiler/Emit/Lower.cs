@@ -32,7 +32,7 @@ internal static class Lower
             Primitive.SByte or Primitive.Byte => "i8",
             Primitive.Short or Primitive.UShort => "i16",
             Primitive.Int or Primitive.UInt or Primitive.Char => "i32",
-            Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp => "i64",
+            Primitive.Long or Primitive.ULong or Primitive.Duration or Primitive.Timestamp or Primitive.Instant => "i64",
             Primitive.LongDuration or Primitive.LongTimestamp => "i128",
             Primitive.Bool => "i1",
             Primitive.Float => "float",
@@ -74,7 +74,7 @@ internal static class Lower
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
             or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
-            or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp,
+            or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp or Primitive.Instant,
         VoidType or NullType or EnumType or HandleType or HasherType or VectorType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
