@@ -1,0 +1,11 @@
+// expect: throws overflow at 5
+// allow: raw
+// rules: T36
+
+instant Earlier(instant t, duration d) => t - d
+
+long bits = -9223372036854775807 - 1
+raw {
+    instant first = *Ptr<instant>(&bits)
+    print(Earlier(first, 1ns))
+}
