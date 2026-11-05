@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
@@ -171,6 +172,29 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void The_monotonic_clock_is_the_systems_CLOCK_MONOTONIC_and_shows_its_time_since_the_zero()
+    {
+        // S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q4 (a) and Q5 (a)): .NET's `Stopwatch` reads
+        // `clock_gettime(CLOCK_MONOTONIC)` on Linux (minipal_hires_ticks), so a reading taken between two of its reads lies between
+        // them, and the reading's text is a duration's (A12), from `days` down with each unit at most once
+        var before = Stopwatch.GetTimestamp();
+        if (Ran("print(instant.Now)\n", "monotonic", "") is { } read)
+        {
+            var after = Stopwatch.GetTimestamp();
+            Assert.Equal((0, ""), (read.Code, read.Error));
+            var text = Assert.Single(read.Output);
+            var parts = Regex.Match(text, @"^(?:(\d+)days)? ?(?:(\d+)h)? ?(?:(\d+)min)? ?(?:(\d+)s)? ?(?:(\d+)ms)? ?(?:(\d+)us)? ?(?:(\d+)ns)?$");
+            Assert.True(parts.Success && text.Length > 0, text);
+            long[] sizes = [86_400_000_000_000, 3_600_000_000_000, 60_000_000_000, 1_000_000_000, 1_000_000, 1_000, 1];
+            var nanoseconds = sizes.Select((size, i) => parts.Groups[i + 1].Success ? long.Parse(parts.Groups[i + 1].Value, CultureInfo.InvariantCulture) * size : 0).Sum();
+            Assert.InRange(nanoseconds, Nanoseconds(before), Nanoseconds(after));
+        }
+    }
+
+    /// <summary>A reading of <see cref="Stopwatch"/> in nanoseconds.</summary>
+    private static long Nanoseconds(long ticks) => (long)((Int128)ticks * 1_000_000_000 / Stopwatch.Frequency);
+
+    [Fact]
     public void Two_reads_of_the_clock_keep_their_order_and_a_file_just_written_has_a_time_of_this_minute()
     {
         // S15 gives no order where the system's clock is set back, so the corpus cases print none: this test assumes that nothing sets
@@ -265,6 +289,8 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Environment.Args())\n", 1)]
     [InlineData("print(Environment.Variable(\"HOME\") else {\n    EnvError e => \"{e}\"\n})\n", 1)]
     [InlineData("print(1)\nprint(timestamp.Now)\n", 2)]
+    [InlineData("print(1)\nprint(instant.Now)\n", 2)]
+    [InlineData("instant? t = null\nprint(1)\nif t != null {\n    print(t.Elapsed)\n}\n", 4)]
     public void A_build_for_windows_says_not_supported_at_a_read_of_the_command_line_the_environment_or_the_clock(string text, int line)
     {
         var refused = Compile(text, Builder.CheckRuntime(Target.Windows));

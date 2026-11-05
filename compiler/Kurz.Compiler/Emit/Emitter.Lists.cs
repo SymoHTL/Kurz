@@ -20,8 +20,8 @@ namespace Kurz.Compiler.Emit;
 /// it is made in, and the end of that region lets go of what no place took over. A value read from a variable, a field, an item
 /// or a parameter is borrowed: the place it goes to counts it once more. A variable lets go of its value at the end of its block,
 /// and at a <c>return</c>, a <c>break</c> and a <c>continue</c> that leave the block; a <c>throw</c> ends the process. A parameter
-/// is borrowed from the caller for the call. The blocks of data types in a relation of inheritance or that hold themselves are
-/// never freed, so what they hold keeps the count it was stored with. A function value is counted as a list is, by the
+/// is borrowed from the caller for the call. The block of a data value laid out as a block counts the values that hold it, and its
+/// last count lets go of what its fields hold and frees it off a work list, as an instance's does. A function value is counted as a list is, by the
 /// environment of its lambda (<see cref="EmitLambda"/>), a map and a hasher by their blocks, and a file or a socket by the block of its
 /// handle, which closes it at its last count (S5); values of every other type are not counted.
 /// </summary>
@@ -31,11 +31,12 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
         ListType or MapType or FunctionType or HandleType or HasherType or ClassType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
-        DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(Counted),
+        DataType d when layout.IsBlock(d) => true,
+        DataType d => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
         _ => false,
     };
@@ -202,15 +203,21 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType)
+        if (type is ClassType retained)
         {
-            fn.Emit($"call void {RetainInstance()}(ptr {value})");
+            fn.Emit($"call void {RetainInstance()}(ptr {Address(value, retained.Symbol)})");
             return;
         }
 
-        if (type is WeakRefType)
+        if (type is DataType block && layout.IsBlock(block))
         {
-            fn.Emit($"call void {RetainWeak()}(ptr {value})"); // R3
+            fn.Emit($"call void {RetainBlock(block.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType weak)
+        {
+            fn.Emit($"call void {RetainWeak()}(ptr {Address(value, weak.Target.Symbol)})"); // R3
             return;
         }
 
@@ -249,15 +256,33 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType c)
+        if (type is ClassType c && Layout.Fat(c.Symbol))
         {
-            fn.Emit($"call void {ReleaseInstance(c.Symbol)}(ptr {value})");
+            ReleaseThroughTable(value); // K6: the release of the instance's class
             return;
         }
 
-        if (type is WeakRefType w)
+        if (type is DataType block && layout.IsBlock(block))
         {
-            fn.Emit($"call void {ReleaseWeak(w.Target.Symbol)}(ptr {value})"); // R3
+            fn.Emit($"call void {ReleaseBlock(block.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is ClassType thin)
+        {
+            fn.Emit($"call void {ReleaseInstance(thin.Symbol)}(ptr {value})");
+            return;
+        }
+
+        if (type is WeakRefType w && Layout.Fat(w.Target.Symbol))
+        {
+            fn.Emit($"call void {ReleaseWeakThroughTable()}(%kz.obj {value})"); // R3 with K6
+            return;
+        }
+
+        if (type is WeakRefType w2)
+        {
+            fn.Emit($"call void {ReleaseWeak(w2.Target.Symbol)}(ptr {value})"); // R3
             return;
         }
 
@@ -1123,7 +1148,9 @@ public sealed partial class Emitter
     /// that makes the pair smaller (<see cref="PairLayout"/>); the pairs sorted by their keys, and by their positions where two keys are equal,
     /// so that items of equal keys keep their order, without a buffer
     /// (<see cref="UnstableSort"/>); then the items moved where the pairs say, through the place of the list as <c>Sort</c> takes it, and
-    /// the keys let go of. An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
+    /// the keys let go of. The place is taken once, before the keys: where a key gives a field on the way to the list another instance,
+    /// the field written is the one of the instance read before them, which that read holds to the end of its statement (X8, assumed).
+    /// An empty list makes no key and a list of one item one; a block for the pairs the system refuses raises
     /// <c>allocation-failed</c> (M9). The list is read with a count of its own while the keys are made, and every key is made over the
     /// items of the list as it was read (X8, assumed): a lambda changes no variable it captures (F11), but a key can change the list through an
     /// instance whose field holds it (K2), and the change then copies the block (M3) or replaces it while the keys go on reading this
@@ -3349,7 +3376,7 @@ public sealed partial class Emitter
             // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves
             InScope(() =>
             {
-                fn.Emit($"store ptr {Upgraded(item)}, ptr {slot}");
+                fn.Emit($"store {Ir(Types.Read(weak))} {Upgraded(item, weak)}, ptr {slot}");
                 Declare(slot, Types.Read(weak));
                 EmitBlock(f.Body);
             });

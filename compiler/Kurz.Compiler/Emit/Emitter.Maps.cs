@@ -95,9 +95,12 @@ public sealed partial class Emitter
                 {
                     // K4: an instance that compares by identity hashes its address, which its count keeps while it is a key
                     var slot = fn.Alloca("i64", "key");
-                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {key} to i64")}, ptr {slot}");
+                    fn.Emit($"store i64 {fn.Value($"ptrtoint ptr {Address(key, c.Symbol)} to i64")}, ptr {slot}");
                     return fn.Value($"call i64 {StdFunction("MapHash")}(ptr {block}, ptr {slot}, i64 8)");
                 }
+
+            case ClassType c when Layout.Fat(c.Symbol):
+                return HashThroughTable(block, key, c.Symbol); // K13: by the hash of the instance's class
 
             case DataType or ListType or UnionType or ClassType:
                 {
@@ -147,6 +150,16 @@ public sealed partial class Emitter
     /// <c>%a0</c> and the value in <c>%a1</c>: the SipHash-1-3 of words, one for each field's hash, each item's hash, or the union's tag
     /// and its value's hash, and first the number of the type a block holds, as <see cref="EqualBody"/> compares them (D3, D15, K5).
     /// </summary>
+    /// <summary>K13 with M9: the hash of an instance of the class by its address, <c>%a1</c>, under the keys of a map's block, <c>%a0</c>, as <see cref="KeyHash"/> gives it, which the class's table holds.</summary>
+    private string ClassHash(ClassSymbol symbol) => symbol.ComparesByIdentity
+        ? Helper("hash.identity", "i64", ["ptr", "ptr"], () =>
+        {
+            var slot = fn.Alloca("i64", "key");
+            fn.Emit($"store i64 {fn.Value("ptrtoint ptr %a1 to i64")}, ptr {slot}");
+            fn.Return($"i64 {fn.Value($"call i64 {StdFunction("MapHash")}(ptr %a0, ptr {slot}, i64 8)")}");
+        })
+        : Helper($"hash.class.{symbol.Name}", "i64", ["ptr", "ptr"], () => HashBody(new ClassType(symbol)));
+
     private void HashBody(KurzType type)
     {
         var state = fn.Alloca("[5 x i64]", "hash");
@@ -177,7 +190,7 @@ public sealed partial class Emitter
 
             case DataType d when layout.IsBlock(d):
                 {
-                    Add(fn.Value($"zext i32 {fn.Value("load i32, ptr %a1")} to i64"));
+                    Add(fn.Value($"zext i32 {BlockNumber("%a1", d.Symbol)} to i64"));
                     ByNumber("%a1", d.Symbol, held =>
                     {
                         var block = layout.Block(held);

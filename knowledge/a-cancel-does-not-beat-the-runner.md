@@ -38,7 +38,9 @@ winning that race spends money at random.
   a stale label matches nothing; `tools/lint_ci.py` pins the clause and the job's name
   (`review-run`, whose skip reports a check of that name and never the required status `review`),
   and the reviewer's self-test proves the label, its name, and that a label write the forge
-  refuses ends the run red. No tool removes a label.
+  refuses ends the run red. No tool removes that label; the reviewer takes off only its own round
+  label, after a usage limit before any paid pass ([[a-limit-before-any-paid-pass-is-no-round]]),
+  and a cancel keeps it.
 - A head whose review ran off the pipeline has no `review` status and is merged with the owner's
   approval for that head (`merge_pr.py --over-red`), as before; the label changes nothing there.
 - Findings that exist only in a running process are not yet a result. The reviewer prints its

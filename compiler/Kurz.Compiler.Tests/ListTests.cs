@@ -2588,6 +2588,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         class Link(int V, Link? Next)
         class Mark
         data Pair(Point A, Box B)
+        class Owner(string Name)
+        class Club(List<weak Owner?> Members)
 
         a = Point(1, 2)
         print(a == Point(1, 2))
@@ -2622,6 +2624,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         mut links = Map<Link, int>()
         links[Link(1, Link(2, null))] = 3
         print(links[Link(1, Link(2, null))] ?? 0)
+        ann = Owner("Ann")
+        club = Club([ann])
+        print("{club == Club([ann])} {club == club}")
+        mut clubs = Map<Club, int>()
+        clubs[club] = 1
+        clubs[Club([ann])] = 2
+        print("{clubs.Count} {clubs[club] ?? 0}")
         """;
 
     private static readonly string[] EqualityPrint =
@@ -2641,6 +2650,120 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "2 1", // a key that compares by identity hashes its address
         "1 second",
         "3",
+        "false true", // K4: a field whose type reaches a `weak` reference makes the class compare by identity (the owner, 2026-11-02)
+        "2 1", // and hash by its address
+    ];
+
+    // classes derived from a base, each instance a reference whose second word names its class's table (K6, K7): calls through the
+    // table, a base's method that calls an override, a `prot` method, base arguments computed from the derived class's parameters,
+    // a nullable and a `weak` reference of the base type, map keys whose class decides their equality (K13), and a list of `weak`
+    private const string Inheritance = """
+        class Shape(string Name) {
+            pub virtual int Area() => 0
+            pub virtual string Text() => "{Name} {Area()}"
+            prot int Twice(int x) => x * 2
+        }
+
+        class Square(int Side) : Shape("square") {
+            pub override int Area() => Side * Side
+        }
+
+        class Rect(int W, int H, List<string> Tags) : Shape("rect") {
+            pub override int Area() => W * H
+            pub int Double() => Twice(Area())
+        }
+
+        class Big(int Scale) : Rect(Scale * 10, Scale, ["big"]) {
+            pub override int Area() => W * H * 100
+        }
+
+        class Quiet(int K) : Shape("quiet") {
+            override int Area() => K
+            pub int Own() => Area() + 1
+        }
+
+        class Key(int Id) equal by Id
+        class Sub(string Tag) : Key
+        class Other(string Tag) : Key equal by Tag
+        class Box(mut int N)
+        class Lid(int Size) : Box
+        class Holder(mut Shape? Current, weak Shape? Seen, weak Rect? Last)
+
+        int Sum(List<Shape> all) {
+            mut total = 0
+            for s in all {
+                total = total + s.Area()
+            }
+            return total
+        }
+
+        int Read(Shape? s) {
+            if s == null {
+                return -1
+            }
+            return s.Area()
+        }
+
+        List<Shape> shapes = [Square(3), Rect(2, 5, ["a", "b"]), Shape("dot"), Big(1)]
+        print(Sum(shapes))
+        for s in shapes {
+            print(s)
+        }
+        print(Rect(4, 4, []).Double())
+        Shape big = Big(2)
+        print(big)
+        mut r = Rect(1, 2, ["x"])
+        mut h = Holder(Square(2), r, r)
+        print(Read(h.Current))
+        h.Current = shapes[1]
+        print(Read(h.Current))
+        h.Current = null
+        print(Read(h.Current))
+        print(Read(h.Seen))
+        r = Rect(3, 3, [])
+        print("{Read(h.Seen)} {Read(h.Last)}")
+        mut counts = Map<Key, int>()
+        counts[Key(1)] = 10
+        counts[Sub(1, "a")] = 20
+        counts[Other(1, "b")] = 30
+        counts[Sub(1, "c")] = 21
+        print("{counts.Count} {counts[Key(1)] ?? 0} {counts[Sub(1, "z")] ?? 0} {counts[Other(1, "b")] ?? 0} {counts[Other(1, "c")] ?? 0}")
+        Key a = Sub(1, "x")
+        Key c = Key(1)
+        print("{a == Sub(1, "y")} {a == c} {c == a} {Other(1, "q") == Other(5, "q")}")
+        mut lids = Map<Box, string>()
+        l = Lid(0, 4)
+        lids[l] = "lid"
+        Box asBox = l
+        print("{lids[asBox] ?? "none"} {lids[Lid(0, 4)] ?? "none"} {asBox == l}")
+        List<weak Shape?> seen = [shapes[0], Square(9)]
+        for w in seen {
+            print(Read(w))
+        }
+        Shape q = Quiet(5)
+        print("{q.Area()} {Quiet(5).Own()} {q}")
+        """;
+
+    private static readonly string[] InheritancePrint =
+    [
+        "1019", // each item's own `Area`, called through the table
+        "square 9", // the base's `Text` calls the override of the instance's class
+        "rect 10",
+        "dot 0",
+        "rect 1000", // an override of an override
+        "32", // a `prot` method of the base, called from the derived class
+        "rect 4000",
+        "4",
+        "10",
+        "-1",
+        "2", // a `weak` reference of the base type to a derived instance
+        "-1 -1", // both `weak` references let go of with the last count
+        "3 10 21 30 0", // K13: a derived class's instance is never equal to the base's, and `Other` compares by `Id` and `Tag`
+        "true false false false",
+        "lid none true", // a `mut` field of the base makes the derived class compare by identity
+        "9",
+        "-1",
+        "5 6 quiet 5", // an override without `pub`, called through the base, inside its class and by the base's `Text`
     ];
 
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
@@ -2706,6 +2829,280 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             mut bs = List<Box>()
             bs.Add(Make(100))
             total = total + Early(100) + p.Left.Count() + h() + bs[0].Count() - 400
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // instances of a derived class made and let go of as the base type, through every way out of a block: a variable, a field
+    // assigned over and a `weak` one, a `return`, a `break`, a `continue`, a result nothing holds, a lambda's environment, a list's
+    // item and a map's key, each holding a chain of links
+    private const string InheritanceRounds = """
+        class Link(int V, Link? Next)
+
+        class Shape(mut Link? Chain) {
+            pub virtual int Size() => 0
+
+            pub void Fill(int n) {
+                for i in 0..<n {
+                    Chain = Link(i, Chain)
+                }
+            }
+        }
+
+        class Square(List<int> Xs) : Shape {
+            pub override int Size() => Xs.Count
+        }
+
+        class Holder(mut Shape? Current, weak Shape? Seen)
+
+        Shape Make(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            s = Square(null, xs)
+            s.Fill(n)
+            return s
+        }
+
+        int Early(int n) {
+            Shape s = Make(n)
+            if n > 0 {
+                return s.Size()
+            }
+
+            return 0
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(100)
+            h = Holder(a, a)
+            h.Current = Make(100)
+            h.Current = null
+            for j in 0..<3 {
+                c = Make(100)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + c.Size()
+            }
+
+            for x in 0..<5 {
+                d = Make(100)
+                total = total + d.Size() - 100
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(100)
+            f = () => a.Size()
+            mut all = List<Shape>()
+            all.Add(Make(100))
+            all.Add(Shape(null))
+            mut keys = Map<Shape, int>()
+            keys[a] = 1
+            keys[Make(10)] = 2
+            total = total + Early(100) + f() + all[0].Size() + all[1].Size() + keys.Count - 302
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // values of data types laid out as blocks made and let go of through every way out of a block, as the lists' rounds take them: a
+    // variable, a variable assigned over, a `return`, a `break` and a `continue` that leave a block, a call's result nothing holds,
+    // the body of a `void` function, a lambda's environment, a list's item written over, a map's value written over, a plain value's
+    // field, a `with` of a block and of a plain value, a path assignment through a block, a union's case, a derived value through its
+    // base, the one value of a type without fields, and the string and the list a block holds
+    private const string DataRounds = """
+        data Shape
+        data Circle(string Name, List<int> Rs) : Shape
+        data Dot : Shape
+        data Tree(int V, Tree? Left, Tree? Right)
+        data Pair(Tree Left, int Right)
+
+        Tree Make(int depth) {
+            if depth == 0 {
+                return Tree(0, null, null)
+            }
+
+            return Tree(depth, Make(depth - 1), Make(depth - 1))
+        }
+
+        int Count(Tree t) {
+            mut n = 1
+            if t.Left != null {
+                n = n + Count(t.Left)
+            }
+
+            if t.Right != null {
+                n = n + Count(t.Right)
+            }
+
+            return n
+        }
+
+        int Early(int depth) {
+            t = Make(depth)
+            if depth > 0 {
+                return Count(t)
+            }
+
+            return 0
+        }
+
+        void Drop(int depth) => Make(depth)
+
+        Shape Pick(int i) {
+            if i % 3 == 0 {
+                return Dot
+            }
+
+            if i % 3 == 1 {
+                return Circle("c{i}", [i, i + 1])
+            }
+
+            return Shape
+        }
+
+        int Size(Shape s) => match s {
+            Circle c => c.Rs.Count
+            Dot => 0
+            Shape => 1
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(5)
+            mut b = Make(5)
+            b = Make(4)
+            p = Pair(Make(4), 1)
+            for j in 0..<3 {
+                c = Make(3)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + Count(c)
+            }
+
+            for x in 0..<5 {
+                d = Make(3)
+                total = total + Count(d) - 15
+                if x == 2 {
+                    break
+                }
+            }
+
+            Make(4)
+            Drop(4)
+            h = () => Count(a)
+            mut ts = List<Tree>()
+            ts.Add(Make(3))
+            ts.Add(Make(2))
+            ts[0] = ts[1]
+            mut m = Map<int, Tree>()
+            m[1] = Make(3)
+            m[1] = Make(2)
+            w = a with { V = 9 }
+            mut q = Make(7)
+            q.Left = Make(2)
+            Tree | Shape u = Make(2)
+            s = Pick(round)
+            k = Pair(Make(2), 2) with { Left = Make(1) }
+            total = total + Early(4) + Count(p.Left) + h() + Count(ts[0]) + Count(m[1] ?? a) + Count(w) + Count(q) + Size(s) + Count(b) + Count(k.Left) - 300
+            total = total + match u {
+                Tree t => Count(t)
+                Shape => 0
+            }
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // instances of a class held by data values laid out as blocks, a chain of 200 made and dropped each round, each instance holding
+    // a list
+    private const string HeldInstanceRounds = """
+        class Box(mut List<int> Xs)
+        data Tree(Box Item, Tree? Next)
+
+        Tree? Chain(int n) {
+            mut Tree? t = null
+            for i in 0..<n {
+                b = Box(List<int>())
+                b.Xs.Add(i)
+                t = Tree(b, t)
+            }
+
+            return t
+        }
+
+        int Count(Tree? t) {
+            mut Tree? at = t
+            mut n = 0
+            while at != null {
+                n = n + at.Item.Xs.Count
+                at = at.Next
+            }
+
+            return n
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            total = total + Count(Chain(200))
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // the same rounds, each tree also holding a `weak` reference to its box, read through it (R3): the end of a block lets go of the
+    // weak count as it lets go of the strong one
+    private static readonly string WeakHeldRounds = HeldInstanceRounds
+        .Replace("data Tree(Box Item, Tree? Next)", "data Tree(Box Item, weak Box? Seen, Tree? Next)", StringComparison.Ordinal)
+        .Replace("t = Tree(b, t)", "t = Tree(b, b, t)", StringComparison.Ordinal)
+        .Replace("n = n + at.Item.Xs.Count", "n = n + (at.Seen?.Xs.Count ?? 0)", StringComparison.Ordinal);
+
+    // copies of blocks that hold a list of 2000 items, round after round: a `with` of a block another variable holds too, whose copy
+    // starts at one count, a `with` that replaces the list, which the copy lets go of, and a write into the list through a path, whose
+    // copied block takes no count of the list beyond the copy's own: each count kept too many keeps a list of 8000 bytes each round
+    private const string BlockCopyRounds = """
+        data Big(List<int> Xs, Big? Next)
+
+        List<int> Fill(int n) {
+            mut xs = List<int>()
+            for i in 0..<n {
+                xs.Add(i)
+            }
+
+            return xs
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Big(Fill(2000), null)
+            b = a
+            c = a with { Next = null }
+            d = Big(Fill(2000), null) with { Xs = Fill(10) }
+            mut e = Big(Fill(2000), null)
+            e.Xs.Add(1)
+            total = total + b.Xs.Count + c.Xs.Count + d.Xs.Count + e.Xs.Count
         }
 
         print(round)
@@ -3117,6 +3514,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Fields, toolchain.Runtime, "field-collections"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Weak, toolchain.Runtime, "weak-values"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
+        Ran(BuildAndRun(Inheritance, toolchain.Runtime, "class-inheritance"), 0, InheritancePrint, "");
     }
 
     [Fact]
@@ -3184,6 +3582,61 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             .ToArray();
         Ran(BuildAndRun(text, toolchain.Runtime, "integer-texts"), 0, lines, "");
     }
+
+    /// <summary>D5, K2: <c>with</c> on a block read from a field of an instance through its path, while a method gives the field another block.</summary>
+    private const string WithFieldPath = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.B with { Xs = h.Change() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, K7: <c>with</c> on a block read from a field by its name alone in a method, while a method gives the field another block.</summary>
+    private const string WithFieldName = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B) {
+            pub List<int> Change() {
+                B = Big([9], null)
+                return [7]
+            }
+
+            pub Big Copy() => B with { Xs = Change() }
+        }
+
+        h = Holder(Big([1, 2, 3], null))
+        b = h.Copy()
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
+
+    /// <summary>D5, K2, F11: <c>with</c> on a block read from a field of an instance through its path, while a lambda gives the field another block.</summary>
+    private const string WithFieldLambda = """
+        data Big(List<int> Xs, Big? Next)
+
+        class Holder(mut Big B)
+
+        h = Holder(Big([1, 2, 3], null))
+        f = () => {
+            h.B = Big([9], null)
+            return [7]
+        }
+        b = h.B with { Xs = f() }
+        print(b.Xs)
+        print(h.B.Xs)
+
+        """;
 
     private const string HandleTarget = """
         class Log(mut File Out) {
@@ -3326,6 +3779,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "[1, 2, 3]", "[0]", "2", "[9, 3, 1, 1]", "0"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
+        Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
         Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
@@ -3334,6 +3788,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "string-rounds-fenced"), 0, ["20", "61460"], "");
         Ran(BuildAndRun(MapRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "map-rounds-fenced"), 0, ["20", "280"], "");
         Ran(BuildAndRun(ClassRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "class-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(InheritanceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "inheritance-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(DataRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "data-rounds-fenced"), 0, ["20", "2181"], "");
+        Ran(BuildAndRun(HeldInstanceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "held-instance-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(WeakHeldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "weak-held-rounds-fenced"), 0, ["20", "4000"], "");
+        Ran(BuildAndRun(BlockCopyRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "block-copy-rounds-fenced"), 0, ["20", "120220"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -3346,6 +3805,14 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
         }
+
+        // `with` on a block read from a field of a class instance, while a replaced value gives the field another block: through the
+        // instance's path by a method, by the field's name alone in a method (K7), and through the path by a lambda that assigns it
+        // (F11); the read takes a count held to the statement's end (K2), so the copy reads the block the field held when the `with`
+        // began, and the field keeps the new one (D5)
+        Ran(BuildAndRun(WithFieldPath, fenced, "with-field-path-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldName, fenced, "with-field-name-fenced"), 0, ["[7]", "[9]"], "");
+        Ran(BuildAndRun(WithFieldLambda, fenced, "with-field-lambda-fenced"), 0, ["[7]", "[9]"], "");
 
         // the positive control: a write into a freed block under the same allocator ends the process, and so does one into a freed
         // block of more than 262144 bytes, which the thread keeps outside the fence
@@ -3408,6 +3875,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(StringRounds, Budget(), "string-rounds"), 0, ["3000", "9219000"], "");
         Ran(BuildAndRun(MapRounds, Budget(), "map-rounds"), 0, ["3000", "42000"], "");
         Ran(BuildAndRun(ClassRounds, Budget(), "class-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(InheritanceRounds, Budget(), "inheritance-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(DataRounds, Budget(), "data-rounds"), 0, ["3000", "327000"], "");
+        Ran(BuildAndRun(HeldInstanceRounds, Budget(), "held-instance-rounds"), 0, ["3000", "600000"], "");
+        Assert.Contains("n = n + (at.Seen?.Xs.Count ?? 0)", WeakHeldRounds, StringComparison.Ordinal); // the variant reads through the weak field
+        Ran(BuildAndRun(WeakHeldRounds, Budget(), "weak-held-rounds"), 0, ["3000", "600000"], "");
+        Ran(BuildAndRun(BlockCopyRounds, Budget(), "block-copy-rounds"), 0, ["3000", "18033000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -3431,6 +3904,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var boxes = BuildAndRun(ClassRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    all.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "class-rounds-held");
         Assert.Equal(1, boxes.Code);
         Assert.StartsWith("error: allocation-failed (", boxes.Error, StringComparison.Ordinal);
+
+        // and the derived instances, each with a chain of 1000 links, all held as the base type
+        var shapes = BuildAndRun(InheritanceRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    held.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut held = List<Shape>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(held.Count)", StringComparison.Ordinal), Budget(), "inheritance-rounds-held");
+        Assert.Equal(1, shapes.Code);
+        Assert.StartsWith("error: allocation-failed (", shapes.Error, StringComparison.Ordinal);
+
+        // and the rounds' trees, each with a tree of 1023 nodes of 32 bytes, all held: about 100 megabytes
+        var trees = BuildAndRun(DataRounds.Replace("    a = Make(5)\n", "    a = Make(5)\n    all.Add(Make(9))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Tree>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(all.Count)", StringComparison.Ordinal), Budget(), "data-rounds-held");
+        Assert.Equal(1, trees.Code);
+        Assert.StartsWith("error: allocation-failed (", trees.Error, StringComparison.Ordinal);
+
+        // and the instances the trees hold, kept by a list of their boxes while each tree is dropped: about 40 megabytes
+        var instances = BuildAndRun(HeldInstanceRounds.Replace("        b.Xs.Add(i)\n", "        b.Xs.Add(i)\n        boxes.Add(b)\n", StringComparison.Ordinal).Replace("Tree? Chain(int n) {", "Tree? Chain(mut List<Box> boxes, int n) {", StringComparison.Ordinal).Replace("Count(Chain(200))", "Count(Chain(mut all, 200))", StringComparison.Ordinal).Replace("mut round = 0\n", "mut all = List<Box>()\nmut round = 0\n", StringComparison.Ordinal), Budget(), "held-instance-rounds-held");
+        Assert.Equal(1, instances.Code);
+        Assert.StartsWith("error: allocation-failed (", instances.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3448,6 +3936,33 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
         }
+    }
+
+    [Fact]
+    public void A_chain_of_a_million_data_values_is_freed_off_the_work_list_where_a_recursive_walk_of_it_overflows_the_stack()
+    {
+        // section 4, a reading of the owner's answer on classes of 2026-11-01, "Iterative, never crashes": the last count of a link's
+        // block that a release lets go of waits on its family's work list, as an instance's does, so no release calls itself once for
+        // each link
+        const string chain = "data Link(int V, Link? Next)\n\nLink? Build(int n) {\n    mut Link? head = null\n    for i in 0..<n {\n        head = Link(i, head)\n    }\n\n    return head\n}\n\nmut Link? all = Build(1000000)\nprint(all?.V ?? -1)\nall = null\nprint(\"freed\")\n";
+        Ran(BuildAndRun(chain, toolchain.Runtime, "data-chain-freed"), 0, ["999999", "freed"], "");
+
+        // the positive control: a function that walks the same chain by calling itself for each link ends with `stack-overflow`
+        var walked = BuildAndRun(chain.Replace("print(\"freed\")", "print(Depth(Build(1000000)))", StringComparison.Ordinal) + "\nint Depth(Link? l) {\n    if l == null {\n        return 0\n    }\n\n    return 1 + Depth(l.Next)\n}\n", toolchain.Runtime, "data-chain-walked");
+        Assert.NotEqual(0, walked.Code);
+        if (OperatingSystem.IsLinux())
+        {
+            Assert.StartsWith("error: stack-overflow", walked.Error, StringComparison.Ordinal); // on Windows the system ends it (section 6)
+        }
+    }
+
+    [Fact]
+    public void The_first_block_a_program_releases_may_hold_a_block_of_another_family()
+    {
+        // the release of `Outer`'s family, the first one built, builds `Inner`'s for its field before `Outer`'s work list is in the
+        // emitter's list of released families: the flag of a release under way is declared once all the same, as for a class
+        // (The_first_class_a_program_releases_may_hold_a_field_of_another_class)
+        Ran(BuildAndRun("data Inner(int V, Inner? Next)\ndata Outer(Inner I, Outer? Next)\n\nprint(Outer(Inner(1, null), null).I.V)\n", toolchain.Runtime, "release-nested-blocks"), 0, ["1"], "");
     }
 
     [Fact]

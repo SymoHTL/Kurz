@@ -1,0 +1,14 @@
+// expect: output
+// | woof
+// rules: K7
+
+class Animal {
+    pub virtual string Sound() => "quiet"
+}
+
+class Dog : Animal {
+    override string Sound() => "woof"
+}
+
+Animal a = Dog()
+print(a.Sound())
