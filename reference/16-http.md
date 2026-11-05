@@ -3109,26 +3109,28 @@ A call of the client ends with `IoError(TimedOut)` after 100 seconds, from the l
 last byte the helpers read, and the options change it, as .NET's `HttpClient.Timeout` (§12, the owner,
 2026-10-31, "100 s, as .NET"); each read on the client's sockets is bounded by what remains of the call's
 time, set before it, and a socket's 5 seconds do not apply inside the client (§12, the owner, 2026-11-01,
-"Reads use the 100 s budget"). *(assumed, §12: the member `Timeout` of `HttpClientOptions`, a `duration`,
-100 seconds by default, a time of zero or below making each call `TimedOut` at once, before any lookup or
-connect, and no value turning the bound off (issue 110, comment 6646809177, T1); every end of the call's
-time `IoError(TimedOut, 0, "")`, as the bound of `Connect` gives it, a read or a write that the system
-ended with its 11 among them (T2), and a `TimedOut` the system gives of its own while the call's time runs, its
-110, in the same form, since the client does not tell it from its own; one time for the whole call, its redirects (W15), the drains of their
-bodies and a request sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the
-whole of a send (T3); the client reading what remains before each step and giving `TimedOut` when nothing
-remains, so that it passes no time of zero or below to the setters and to `Connect`, which refuse it (S9);
-each write bounded by what remains in the same way, and the connect through the second form of `Connect`,
-given what remains, with no 5 seconds of its own; a body read with `Read` held to the call's time as the
-helpers' reads are; a request whose time ran out not sent once more on a new connection, and its
-connection not given back to the pool, closed when the program lets go of the response or, where the
-time ran out before a response, at once; the bound held by the socket's own times, `SO_RCVTIMEO` and
-`SO_SNDTIMEO`, set before each read and each write that calls the system, as the server holds its bounds
-(W10), how it holds on an actor's socket standing open (§14); the lookup of the name bounded by nothing
-and its time counted against the call's, how the call's time holds over it standing open (§14), so that a
-connect given what remains can end later than the call's time by the lookup's, and the step after it then
-finds nothing remaining; and the time read from `instant.Now` (S25) as the time passed against the bound,
-never as the sum of the start and the bound, which can overflow (T36))*
+"Reads use the 100 s budget"). The member `Timeout` of `HttpClientOptions`, a `duration`, sets the call's
+time, 100 seconds by default; a time of zero or below makes each call `TimedOut` at once, before any
+lookup or connect, and no value turns the bound off; every end of the call's time is `IoError(TimedOut,
+0, "")`, as the bound of `Connect` gives it, a read or a write that the system ended with its 11 among
+them; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
+sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
+the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). *(assumed, §12: a `TimedOut` the system
+gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
+since the client does not tell it from its own; the client reading what remains before each step and
+giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
+`Connect`, which refuse it (S9); each write bounded by what remains in the same way, and the connect
+through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
+`Read` held to the call's time as the helpers' reads are; a request whose time ran out not sent once more
+on a new connection, and its connection not given back to the pool, closed when the program lets go of
+the response or, where the time ran out before a response, at once; the bound held by the socket's own
+times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
+server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
+name bounded by nothing and its time counted against the call's, how the call's time holds over it
+standing open (§14), so that a connect given what remains can end later than the call's time by the
+lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
+as the time passed against the bound, never as the sum of the start and the bound, which can overflow
+(T36))*
 
 Case: [http/client-timeout.kz](../corpus/http/client-timeout.kz)
 ```kurz
