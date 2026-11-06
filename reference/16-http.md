@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `Uri`, `HttpResponseMessage`, `HttpBody` and
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpResponseMessage`, `HttpBody` and
 `HttpWriter`, with `UriError`, `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -28,10 +28,12 @@ scope is one, against every member so named, that a type parameter so named is o
 exception like a member's, as Rust's `fn f<String>(x: String)` shadows, that an expression inside a
 class finds a member so named first, as C# does, against a call's name looked up as a type first, and that the compiler holds
 the list, against
-every `pub` type of `std/` and against a list written in `std/`, and 2026-11-03, that `HttpBody` and
-`HttpWriter` are two of them, against a body type no program can name; the two of `Uri`, and
-`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions,
-and `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
+every `pub` type of `std/` and against a list written in `std/`, 2026-11-03, that `HttpBody` is one of
+them, against a body type no program can name, and 2026-11-03, that `HttpWriter` is another, the writer
+of the streamed response §12 gives, "A response can be streamed"; the two of `Uri`, and
+`HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
+`HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a); and
+`HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
 issue 110, comment 6657251329, C2)).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
@@ -216,26 +218,85 @@ print(e.Text())
 ### W3 (decided, §12) A server's request sent to another actor moves with its body
 
 A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
-connection's socket: the handler keeps neither, and the connection waits for the handler's
-response, as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02,
-issue 110, comment 6573113786, against refusing a server's request that has a body as not
-sendable). The send is written with `move`, as the send of a mutable class instance is (§12, the
-owner, 2026-11-03, issue 110, comment 6600034158). The response is written when the handler
-returns. The moved body stays the other actor's to read to its end: every read gives the body's
-bytes, then `0` at its end. A body left unread is drained when its last owner drops it, and the
-connection reads its next request only after that, with no new kind of error (§12, the owner,
-2026-11-03, issue 39, comment 6601737306). A `move` of the request ends every path into it,
-`b = r.Body` included, by the region check of the record's section 6 (§12). A read of a moved body
-that falls under the body's rate gives `IoError` with `IoKind.TimedOut` and the connection closes;
-the `408` is sent only while no response has begun (§12, the owner, 2026-11-03, issue 156, comment
-6603205575). A `copy` of a server's request is the compile error `copy-server-request`, which names
-`move`, and a send of it with no word is section 6's error (§12, the same answer) *(assumed, §12:
-the error's name)*. A request a client builds is sent as any value is (§12).
+connection's socket: the handler keeps neither, and the connection waits for the handler's response,
+as Rust moves a `hyper::Request<Incoming>` to another task (§12, the owner, 2026-11-02, issue 110,
+comment 6573113786, against refusing a server's request that has a body as not sendable). The send
+is written with `move`, as the send of a mutable class instance is (§12, the owner, 2026-11-03,
+issue 110, comment 6600034158), and the handler can send it, since the parameter of the handler's
+type is written `move`, `(move HttpRequest r) => HttpResponse` (§12, the owner, 2026-11-04, issue
+156, comment 6643376941).
 
-No case: a case runs one actor, and a send to another actor needs two, which the compiler does not
-build, so that the move is not built either. No case expects `copy-server-request` for the same
-reason, so that the id stands in this rule and not in [12-errors.md](12-errors.md), whose row
-comes with the case that expects it (§12, the owner, 2026-11-03, issue 156, comment 6603359338).
+The server calls the handler with the word at the argument, `handler(move r)`, as every call of a
+parameter written `move` does. An argument of such a parameter without the word is section 6's
+`move-at-call` (§6, the owner, 2026-11-05, issue 156, comment 6657251688, Q3), and so is `move` in
+front of an argument whose parameter is not written `move`, as `mut-at-call` is for `mut` (§6)
+*(assumed, §6: the name `move-at-call`, and the reading said back for the word in front of a
+parameter not written `move`)*. A lambda given for the handler whose parameter is written without
+`move` fits the type and sends nothing of its request: its check holds the parameter as its
+caller's, so that a send or a `move` of it is section 6's `move-reachable`. A lambda's parameter
+whose type is not written takes `move` from the type, and a lambda whose parameter is written with
+`move` fits no type without it, with `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
+6657251688, Q4). A named function given for the handler fits by the same rule (§6) *(assumed, §6:
+that reading)*.
+
+Of the connection's stream, the body takes the read half with it for its life, and the server keeps
+the write half, as tokio's `TcpStream::into_split` gives an `OwnedReadHalf` and an
+`OwnedWriteHalf`. The server's paths into the read half end at the call, and the half comes back to
+the server when the body ends, read to its end or drained when its last owner drops it, unless a
+read or the drain closed the connection (below) (§12, the owner, 2026-11-05, issue 156, comment
+6657251688, Q5, and comment 6666386552, Q7). The response, the `408` and the close stay the
+server's, on the write half, and a read of the body that timed out is reported back to the server
+at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). The response is
+written when the handler returns, while the moved body stays the other actor's to read to its end:
+every read that keeps to the body's rate gives the body's bytes, then `0` at its end. A body left
+unread is drained when its last owner drops it, and the connection reads its next request only after
+that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306).
+
+The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
+by `MaxDrainSize`, and where either ends it the connection closes, with no error to any reader, while
+a drain under the rate before any response has begun ends the body as a read that timed out does,
+so that the server sends the `408` (§12) *(assumed, §12: that reading)*. A `move` of the request
+ends every path into it, `b = r.Body` included, by the region check of the record's section 6, and
+is refused with `move-reachable` where section 6 refuses it (§12). Of the bounds of `HttpLimits`, a
+moved body's reads meet the body's rate, since the limit of a declared body is checked against
+`Content-Length` before the handler runs, and a body without a declared length, moved or not,
+counts its bytes against `MaxRequestBodySize` as it is read, as Kestrel counts them, a read past it
+giving `HttpError(TooLarge, "request body over limit")` (§12) *(assumed, §12: that reading)*. A read
+of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
+as a handler's read does, and the connection closes; the `408` is sent only while no response has
+begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the error
+`request timed out`, read from Q12 (b) of 2026-11-04 and from Q8)*, and after a `408` the response
+the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
+reading)*. The rate also runs between reads: a moved body held unread past the
+rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
+owner, 2026-11-05, issue 156, comment 6666386552, Q8). The timeout of a moved body's read is
+decided, and its timing is not: how the body's rate is timed on the socket of the actor that got the
+body stands open in §14, a timer in the poller's wait or a deadline the scheduler reads at each
+switch (§12).
+
+A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
+`move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
+issue 156, comment 6603205575) *(assumed, §12: the error's name, `copy-server-request`; §6: the name
+`send-needs-word`)*. A send with `copy` of any value whose type can hold an `HttpRequest`, a class
+instance, a list, a map, a union, a nullable `HttpRequest?` or a `data` type among them, is refused
+with the same error, and so is one of `r.Body`, while `r.Headers` copies (§12) *(assumed, §12: that
+reading)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any value
+is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
+6643376941). It is a `data` type with a body of `Bytes`, and a body that streams is given to the
+call, `client.Send(request, body)` (§12, the owner, 2026-11-05, issue 156, comment 6657251688, Q6).
+That body is an `HttpBody`, and a message whose `Bytes` body is not empty, sent with a body as well,
+gives `HttpError(Protocol, "request has two bodies")` before any byte is sent (§12, the owner,
+2026-11-05, issue 156, comment 6666386552, Q9) *(assumed, §12: the error's text)*.
+
+No case: the compiler reads no `copy` and no `move`, at a send, on a parameter or at a call (§6), so
+that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
+send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
+server or client of §12, which the halves of the stream, the rate between reads, the count of a
+body without a declared length and the two bodies of a client's call need. The id
+`copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
+section 6, as `move-reachable` does, and none of them in [12-errors.md](12-errors.md), since no case
+can expect them (§12, the owner, 2026-11-03, issue 156, comment 6603359338) *(assumed, §6: that
+answer's rule, which named the ids before it, applied to `move-at-call`)*.
 
 ### W4 (decided, §12) `HttpHeaders`
 
@@ -246,9 +307,14 @@ and is written back as it was spelled, and repeated headers, `Set-Cookie`, stay 
 hyper's `HeaderMap` keeps the values of a name apart and in their order but lowercases the name, and
 ASP.NET Core's `IHeaderDictionary` holds the values of a name as one `StringValues`, so that neither
 keeps one list of every name and value with each name's spelling (§12). `GetAll` gives a
-`List<string>`, `Set` replaces every value of the name by one, as ASP.NET Core's indexer does, and
-`Remove` removes every value of it *(assumed, §12: proposed with the product pass and not put to the
-owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, since a header's
+new `List<string>`, so that a change to it changes nothing in the headers; `Set` of a name the
+headers hold puts the value in the place of the name's first header, which keeps its spelling, and
+takes out the name's other headers, as hyper's `HeaderMap::insert` keeps the entry, and `Set` of a
+name they do not hold puts it after every header they hold; a name they do not hold gives `null`
+from `Get` and an empty list from `GetAll`, and its `Remove` changes nothing (§12, the owner,
+2026-11-02, the headers' pass, Q3 to Q7 at their defaults, #110, comment 6573113786, the questions
+in comment 6567534197). `Remove` removes every value of the name *(assumed, §12: proposed with the
+product pass and not put to the owner)*. `h.Add(name, value)` and `h.Set(name, value)` give `void | HttpError`, since a header's
 value often comes from outside input, and a CR or a LF in the name or the value is
 `HttpError(Protocol, "invalid header: CR or LF")`, refused where it is set, as Rust's `HeaderValue`
 and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110, comment
@@ -258,19 +324,24 @@ and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110
 is made by `HttpHeaders()`, which holds no header; its members are `string? Get(string name)`,
 `List<string> GetAll(string name)`, `void | HttpError Add(string name, string value)`,
 `void | HttpError Set(string name, string value)` and `void Remove(string name)`; a refused `Add` or
-`Set` changes nothing, `Set` checking before it removes; `Set` puts its value after every value the
-headers hold, as a `Remove` and then an `Add`; `Remove` of a name the headers do not hold changes
-nothing; an empty value is taken; a name is written back as it was spelled in the head that
+`Set` changes nothing, `Set` checking before it changes a header; an empty value is taken; a name is written back as it was spelled in the head that
 a writer of a request or a response writes; and `print(h)` gives the text of a class without a
 `Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
-empty start and the result of `Remove` among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
+empty start among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
 `h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
 map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
 `GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
 names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
+The compiler does not build this walk: it refuses `for name, value in h` with `type-mismatch`, as
+two names over any class, so the cases walk the headers by `h.Count`, `h.NameAt(i)` and
+`h.ValueAt(i)`.
 `h.Count` is the read-only property `int Count` (K7), and `h.NameAt(i)` and `h.ValueAt(i)` give a
 `string` and, with `i` outside 0 to `Count - 1`, stop the program with `index-out-of-range`, as a
 list's index does (T14) (§12, the owner, 2026-11-03, #110, comment 6615254370).
+The error line of that stop names `std/std.kz` and the line of the read inside it, and the trace
+below it names the program's call, as §6 gives every exception the file and the line that raised it
+*(assumed, §12: the default (a) parked on #110, comment 6616414692, against the program's line, as
+Rust's `#[track_caller]` gives it)*.
 
 Case: [http/http-headers.kz](../corpus/http/http-headers.kz)
 ```kurz
@@ -382,17 +453,21 @@ Case: [http/http-headers-set-order.kz](../corpus/http/http-headers-set-order.kz)
 void | HttpError Fill(HttpHeaders headers) {
     headers.Add("Host", "a")
     headers.Add("Accept", "text/plain")
+    headers.Add("HOST", "c")
     headers.Set("host", "b")
+    headers.Set("X-Id", "1")
 }
 
 h = HttpHeaders()
 Fill(h) else {
     HttpError e => print(e.Detail)
 }
-// `Set` takes out every value of the name and puts its value after every value the headers hold
-print(h.NameAt(0))
-print(h.NameAt(1))
-print(h.ValueAt(1))
+// `Set` puts its value in the place of the name's first header, which keeps its spelling, takes out the name's
+// other headers, and puts a name the headers do not hold after every header they hold
+print(h.Count)
+for i in 0..<h.Count {
+    print("{h.NameAt(i)}: {h.ValueAt(i)}")
+}
 ```
 
 Case: [http/http-headers-empty-name.kz](../corpus/http/http-headers-empty-name.kz)
@@ -862,15 +937,19 @@ A response is made by a function for each kind of body, `HttpResponse.Text(200, 
 rest is set through `response.Headers` (W4) (§12, the owner, 2026-11-01, Q1 (a)). Each sets the
 `Content-Type` ASP.NET Core's `Results` sets, `text/plain; charset=utf-8` for `Text`,
 `application/octet-stream` for `Bytes` and `File`, and none for `Empty`, which a handler replaces with
-`Set` (§12, the owner, 2026-11-03). A status outside 100 to 599 stops the program with a run-time
-error (§12, the owner, 2026-11-02, Q5). `response.Write(stream)` writes the status line, the headers
+`Set` (§12, the owner, 2026-11-03). A status outside 200 to 599 stops the program with a run-time
+error (§12, the owner, 2026-11-02, Q5, and 2026-11-05, S2: a `1xx` is interim, and the server alone sends
+`100 Continue`). `response.Write(stream)` writes the status line, the headers
 and the `Content-Length` of the body, which a `File` takes from its size when it is written, and then
 the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
 body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date` or `Connection`,
-which the server's loop adds (§12, assumed). A `1xx`, a `204` and a `304` get no body (§12, assumed),
-and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14). A response
-`Write` cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered
-`500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
+which the server's loop adds (§12, assumed). A `204` and a `304` get no body (§12, assumed),
+and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
+`HttpResponse.Text` and `HttpResponse.Bytes` given a `205` and a body that is not empty stop the
+program with the run-time error `status 205 takes no body`, as a status outside the range does,
+since they see the status and the body (§12, assumed: the reading said back with Q14). A response
+`Write` cannot write, a `File` of `205` whose file holds bytes or a `Content-Length` its body
+contradicts, is answered `500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
 owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
 added as its last coding where it does not end in it, and the body is chunked, a coding it names
 being announced and not applied; beside a `Content-Length` it gets no answer (§12, the owner,
@@ -879,7 +958,7 @@ being announced and not applied; beside a `Content-Length` it gets no answer (§
 program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
 headers written in the order they were set, the `Content-Type` first, and the `Content-Length` of
 the body after them where the handler set none; a handler's `Content-Length` contradicted when it is
-no number or another number than the body's length; no `Content-Length` for a `1xx`; a file whose
+no number or another number than the body's length; a file whose
 size cannot be read answered with that `500`, `Write` giving the `IoError` of the read; a
 `Transfer-Encoding` beside a `Content-Length` giving an `IoError` of the kind `InvalidInput`, nothing
 written; and a file whose size changes while it is sent giving one of the kind `InvalidData`)*
@@ -962,7 +1041,7 @@ All() else {
 
 Case: [http/response-bodiless.kz](../corpus/http/response-bodiless.kz)
 ```kurz
-// a `1xx`, a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
+// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
 // says `Content-Length: 0`
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -984,7 +1063,6 @@ void | IoError Wire(HttpResponse r) {
 void | IoError | HttpError All() {
     Wire(HttpResponse.Empty(204))
     Wire(HttpResponse.Text(304, "dropped"))
-    Wire(HttpResponse.Empty(100))
     Wire(HttpResponse.Empty(205))
     coded = HttpResponse.Text(204, "dropped")
     coded.Headers.Set("Transfer-Encoding", "gzip")
@@ -999,8 +1077,8 @@ All() else {
 
 Case: [http/response-unwritable.kz](../corpus/http/response-unwritable.kz)
 ```kurz
-// a response the writer cannot write, a `205` with a body or a `Content-Length` its body contradicts, is answered `500` with no
-// body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
+// a response the writer cannot write, a `205` whose file holds bytes or a `Content-Length` its body contradicts, is answered `500`
+// with no body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
 // failure
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -1023,7 +1101,9 @@ void | IoError Wire(HttpResponse r) {
 }
 
 void | IoError | HttpError All() {
-    Wire(HttpResponse.Text(205, "x"))
+    File.WriteAll("response-unwritable-205.txt", "x".Bytes)
+    Wire(HttpResponse.File(205, "response-unwritable-205.txt"))
+    File.Delete("response-unwritable-205.txt")
     cut = HttpResponse.Text(200, "hello")
     cut.Headers.Set("Content-Length", "4")
     Wire(cut)
@@ -1417,7 +1497,17 @@ string Wire(TcpStream client) {
     return "[{shown}]{after}"
 }
 
-hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+// a response the writer cannot write: its `Content-Length` contradicts its body
+HttpResponse Unwritable() {
+    response = HttpResponse.Text(200, "x")
+    response.Headers.Set("Content-Length", "2") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+hello =(HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
 closing = (HttpRequest r) => {
     response = HttpResponse.Text(200, "bye")
     response.Headers.Set("Connection", "close") else {
@@ -1428,10 +1518,10 @@ closing = (HttpRequest r) => {
 }
 
 failing = (HttpRequest r) => HttpResponse.Empty(500)
-unwritable = (HttpRequest r) => HttpResponse.Text(205, "x")
+unwritable = (HttpRequest r) => Unwritable()
 partly = (HttpRequest r) => {
     if r.Path == "/b" {
-        return HttpResponse.Text(205, "x")
+        return Unwritable()
     }
 
     return HttpResponse.Text(200, "hi {r.Path}")

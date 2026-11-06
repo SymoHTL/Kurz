@@ -287,6 +287,21 @@ public sealed record ConstantArgument(KurzType Of, Constant Value) : KurzType
 /// <summary>The one instance of each built-in type, and what the chapters say about them.</summary>
 public static class Types
 {
+    /// <summary>K4, K8, R3: whether a value of the type holds a <c>weak</c> reference in what <c>==</c> compares by content: the type itself,
+    /// an item, a key or a value, a case of a union, a field of a <c>data</c> value or a type argument of one. An instance of a class
+    /// compares as its own class does, so the walk ends there (the owner, 2026-11-02, #110, comments 6580085338 and 6580137405).</summary>
+    public static bool ReachesWeak(KurzType type) => ReachesWeak(type, []);
+
+    private static bool ReachesWeak(KurzType type, HashSet<DataSymbol> path) => type switch
+    {
+        WeakRefType => true,
+        ListType l => ReachesWeak(l.Element, path),
+        MapType m => ReachesWeak(m.Key, path) || ReachesWeak(m.Value, path),
+        UnionType u => u.Cases.Any(c => ReachesWeak(c, path)),
+        DataType d => d.TypeArguments.Any(a => ReachesWeak(a, path)) || (path.Add(d.Symbol) && d.Symbol.Fields.Any(f => ReachesWeak(f.Type, path))),
+        _ => false,
+    };
+
     public static readonly PrimitiveType SByte = new(Primitive.SByte);
     public static readonly PrimitiveType Byte = new(Primitive.Byte);
     public static readonly PrimitiveType Short = new(Primitive.Short);
@@ -548,7 +563,8 @@ public static class Types
 
         if (to is WeakRefType weak)
         {
-            return from is NullType || Assignable(from, Read(weak)); // R3: a `T`, a `T?` or `null` where a `weak T?` stands
+            // R3: a `T`, a `T?` or `null` where a `weak T?` stands, and with K6 a weak reference to a class derived from `T`
+            return from is NullType || (from is WeakRefType fw && Assignable(fw.Target, weak.Target)) || Assignable(from, Read(weak));
         }
 
         if (from is UnionType fu)
@@ -580,6 +596,11 @@ public static class Types
             }
 
             return false;
+        }
+
+        if (from is ClassType fc && to is ClassType tc)
+        {
+            return fc.Symbol.HasBaseOrIs(tc.Symbol); // K6: an instance of a derived class where its base is required
         }
 
         if (from is ListType fl && to is ListType tl)

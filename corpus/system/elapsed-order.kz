@@ -1,0 +1,15 @@
+// expect: output
+// | true
+// rules: S25
+
+instant Moved() {
+    instant first = instant.Now
+    mut later = instant.Now
+    while later == first {
+        later = instant.Now
+    }
+
+    return later
+}
+
+print(Moved().Elapsed >= 0s)

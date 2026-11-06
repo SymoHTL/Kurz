@@ -10,9 +10,13 @@ its low findings are collected on one issue and hold nothing.
                                       note instead of the status, so the merge still needs the owner
   review.py --pr N --dry-run          review and print, post nothing
   review.py --pr N --plan             a dry run that stops before its first pass: the batches a run
-                                      would read and the passes that is, so that the bill can be named
+                                      would read and the passes that is, so that the bill can be named.
+                                      It plans the run in CI, from the state the CI account stored
   review.py ... --passes N            with --local, --dry-run or --plan: the caller's limit for this run. A
-                                      batch gets at most N passes, where a run without it gives two to five
+                                      batch gets at most N passes, where a run without it gives two to five.
+                                      A plan with it plans a run off the pipeline, from its own login's state:
+                                      a run off the pipeline without it is planned with `--passes 5`, the
+                                      limit such a run has, since a plan without it plans the run in CI
   review.py --self-test               the unit suite in test_review.py
 
 Trust boundary: the pull request is data. The rules come from the default branch through the API,
@@ -21,7 +25,12 @@ no rules file). The model gets no tools, no MCP servers and an empty working dir
 is JSON checked here, and this script does all the posting. State is read back only from comments
 written by the account this run posts as. In CI that account is the Actions token's, which every
 workflow run of this repository shares, and the status `review` is posted with the same token:
-neither proves that this script wrote it (HAZARD #11).
+neither proves that this script wrote it (HAZARD #11). A plan of the run in CI (`--plan` without
+`--passes`) posts and pays nothing, and reads the state the CI account wrote, CI_ACCOUNT, as that
+run does, so that it counts what that run counts. A forged comment of that account misleads it as it
+misleads the run (HAZARD #11). Where that state exists and this checkout's review.py or kit.py is not
+the default branch's as it is now, which the run in CI is made of, the plan cannot know that run's key,
+whatever key the state carries: it says NOT CHECKED and exits 1, and never says `cap` (#300).
 
 What this script posts and prints is public. Every text that comes from the model, from an
 exception or from the caller goes through `public`, which replaces a credential-shaped or
@@ -31,7 +40,9 @@ The owner's cap (one since 2026-10-22, three from 2026-10-21): a pull request ge
 kit.ROUND_CAP review rounds. A run that
 posts (in CI or with --local) labels the pull request kit.ROUND_LABEL plus its round's number before
 its first pass, so a run that fails or is cancelled after it counts too, and a run with nothing to
-review counts none; `--dry-run` and `--plan` post nothing, that label included. On a pull request whose
+review counts none; `--dry-run` and `--plan` post nothing, that label included. A run that ends with
+`usage-limit` before any paid pass, no pass done and no call billed, takes its own label off again and
+counts none (the owner, 2026-11-02, issue 156); a refused removal ends the run as `failed`. On a pull request whose
 labels count kit.ROUND_CAP rounds (kit.review_rounds) every run with a file the replay cache does not
 answer ends before its first pass as `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `error`
 that names the cap: the refusal is inside the job, since a job its `if` skips reports success
@@ -58,6 +69,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 import yaml
 
@@ -157,6 +169,7 @@ Do not report again what is listed as already reported, not in other words and n
 FINDINGS_MARK = re.compile(r"<!-- kurz-review:findings (\[.*?\]) -->", re.S)
 STATE_MARK = re.compile(r"<!-- kurz-review:state (\{.*?\}) -->", re.S)
 NOTE_MARK = re.compile(r"<!-- kurz-review:note (\{.*?\}) -->", re.S)
+CI_ACCOUNT = "github-actions[bot]"  # the account a run in CI posts as, whose job token has no user endpoint; a plan of that run reads its state
 
 
 class ReviewError(Exception):
@@ -655,6 +668,11 @@ def block_hash(block):
     return hashlib.sha256(block.encode()).hexdigest()
 
 
+def blob_id(data):
+    """The id `git hash-object` gives these bytes."""
+    return hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()
+
+
 def replayable(state, key, files):
     """Paths whose diff block is byte-identical to one a converged batch already reviewed under the
     same key. Any doubt about the state means nothing is replayed."""
@@ -758,6 +776,14 @@ def note_wanted(existing, kind, reason=None, sha=None):
     return None if key in existing else key
 
 
+def label_unknown(name, done, landed, error):
+    """Why a run ends as `failed` when the forge refused a write of its round's label, the one text
+    of both writes: the label put on and the label taken off again. Whether it landed is not known."""
+    return (f"the label {name} could not be {done} ({public(str(error))[:200]}), and whether {landed} is "
+            f"not known, so this run may count as a round of the {kit.ROUND_CAP} or as none; read the "
+            f"labels of the pull request. Nothing was reviewed")
+
+
 # --- the forge --------------------------------------------------------------------------------
 
 class Forge:
@@ -802,11 +828,16 @@ class Forge:
             return kit.gh_json("user")["login"]
         except kit.Refused:
             if os.environ.get("GITHUB_ACTIONS") == "true":
-                return "github-actions[bot]"  # the job token has no user endpoint
+                return CI_ACCOUNT  # the job token has no user endpoint
             raise
 
     def default_branch(self):
         return kit.gh_json(f"repos/{self.repo}")["default_branch"]
+
+    def blob_id(self, branch, path):
+        """The id `git hash-object` gives the file at `path` on a branch: what a plan compares this
+        checkout's reviewer with."""
+        return kit.gh_json(f"repos/{self.repo}/contents/{path}?ref={branch}")["sha"]
 
     def rules(self, branch):
         """The rules file on a branch, or None when the branch has none."""
@@ -857,6 +888,10 @@ class Forge:
     def label(self, name):
         """Put a label on the pull request."""
         self.post(f"issues/{self.number}/labels", {"labels": [name]})
+
+    def unlabel(self, name):
+        """Take a label off the pull request."""
+        self.post(f"issues/{self.number}/labels/{urllib.parse.quote(name, safe='')}", {}, method="DELETE")
 
     def lows_issues(self):
         """The open issues that collect low findings, oldest first."""
@@ -969,13 +1004,14 @@ def fetch_diff(pr, number):
 # --- the run ----------------------------------------------------------------------------------
 
 def arguments(argv, environ):
-    """{pr, local, dry, plan, bootstrap, ci, bounds} of a call, or None when the call is not
+    """{pr, local, dry, plan, bootstrap, ci, bounds, passes} of a call, or None when the call is not
     understood. An option this script does not know is not understood: a mistyped --dry-run must
     not run as a review that posts. Outside CI the mode has to be named. `--plan` is a dry run
     that stops before its first pass. `bounds` is (the least, the most) passes of a batch.
     `--passes N` is the caller's limit for one run: a batch gets at most N passes and counts as
     converged when the last one it may have added nothing above low. It is taken only by a run
-    that posts no status: the status has to mean the same review on every head."""
+    that posts no status: the status has to mean the same review on every head. `passes` is that
+    N, or None without it: a plan with it plans a run off the pipeline, which only such a run takes."""
     got, rest = {}, list(argv)
     while rest:
         arg = rest.pop(0)
@@ -997,7 +1033,8 @@ def arguments(argv, environ):
         if not (local or dry) or got["--passes"] not in [str(n) for n in range(1, MAX_PASSES + 1)]:
             return None
         bounds = (min(MIN_PASSES, int(got["--passes"])), int(got["--passes"]))
-    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
+    return {"pr": int(raw), "local": local, "dry": dry, "plan": plan, "passes": int(got["--passes"]) if "--passes" in got else None,
+            "bootstrap": got.get("--bootstrap-rules"), "ci": ci, "bounds": bounds}
 
 
 def review(argv):
@@ -1016,13 +1053,14 @@ def review(argv):
     forge = Forge(kit.repo(), call["pr"])
     head, me, notes, told_any = None, None, [], False  # told_any: a post of findings landed, so a failure note says what stands
 
-    def stop(kind, detail, status=None):
+    def stop(kind, detail, status=None, uncounted=None):
         """Say that the review did not complete, here and on the pull request, and return the exit
         code. Each write goes through the forge's post(), which waits out the forge's rate limit
         while the run has a wait left; whatever a write raises is printed, never raised: a failure
         to report a failure must not start the reporting again. An oversized diff gets no note
         here: the skip note, posted once per reason, says it. `status` is the description of the
-        error status where the kind alone does not say enough."""
+        error status where the kind alone does not say enough. `uncounted` is the round's label
+        this run took off again, because it paid no pass: its note and its status say so."""
         detail = harmless(public(detail))
         print(f"REVIEW DID NOT COMPLETE ({kind}): {detail}")
         if kind == "usage-limit":
@@ -1031,11 +1069,14 @@ def review(argv):
             key = note_wanted(notes, "cap" if kind == "cap" else "failed", sha=head) if kind != "oversized" else None  # the cap's own note, past any failure
             tail = "What it posted before stands; the rest is in the log of the run." if told_any else \
                 "Its review rounds before stand; no further round runs." if kind == "cap" else \
+                (f"This pull request is not reviewed: no pass was paid, so this run is no review round, and its label "
+                 f"`{uncounted}` was taken off again. Run it again after the reset the message names.") if uncounted else \
                 "This pull request is not reviewed; what the run found, if anything, is in its log."
             writes = [lambda: forge.note(f"**Automated review did not complete** on `{head[:8]}` ({kind}): {detail[:500]}\n\n"
                                          f"{tail}\n\n{marker('note', key)}")] if key else []
             if in_ci and not local:  # a run off the pipeline posts no status, completed or not
-                writes.append(lambda: forge.status(head, "error", status or f"review did not complete: {kind}"))
+                writes.append(lambda: forge.status(head, "error", status or f"review did not complete: {kind}"
+                                                   + (", before any paid pass: no round counted" if uncounted else "")))
             for write in writes:
                 try:
                     write()
@@ -1094,10 +1135,25 @@ def review(argv):
         script = parts["review.py"] + parts["kit.py"]
         # the ids `git hash-object` gives these bytes: comparable with `git ls-tree` on the commit the run's
         # checkout held, and on the default branch for the rules; not on the reviewed head, whose code this is not
-        blobs = ", ".join(f"{name} `{hashlib.sha1(b'blob %d' % len(data) + bytes(1) + data).hexdigest()[:12]}`" for name, data in parts.items())
+        blobs = ", ".join(f"{name} `{blob_id(data)[:12]}`" for name, data in parts.items())
         key = cache_key(script, rules_text, pr["title"], pr["body"], bounds)
-        states = marked(issue_comments, me, STATE_MARK)
+        # A run reads the state its own account wrote. The plan of the run in CI, without --passes, reads the state
+        # the CI account wrote, as that run does, so that it counts what that run counts (#300).
+        reader = CI_ACCOUNT if call["plan"] and call["passes"] is None else me
+        states = marked(issue_comments, reader, STATE_MARK)
         state_comment, state = states[-1] if states else (None, None)
+        if reader != me and isinstance(state, dict):
+            # that run's key is made of the default branch's review.py and kit.py as they are now: this checkout's key,
+            # whether it is the stored one or not, is that run's only where this checkout's two files are those
+            mine = {"tools/review/review.py": parts["review.py"], "tools/kit.py": parts["kit.py"]}
+            other = [path for path, data in mine.items() if forge.blob_id(branch, path) != blob_id(data)]
+            if other:
+                print(f"NOT CHECKED: whether the cache of the run in CI answers this head. That run reads its state (comment "
+                      f"{state_comment['id']}, written by {CI_ACCOUNT}) with a key made of the default branch's review.py and "
+                      f"kit.py, and {' and '.join(other)} here {'is' if len(other) == 1 else 'are'} not the default branch's "
+                      f"({branch}) as it is now: that run's key, and what it replays, are not known here, whatever key the "
+                      f"state carries, so no batch is counted. Run the plan from a checkout of the default branch as it is now")
+                return 1
         replay = replayable(state, key, files)
         todo = [f for f in files if f["path"] not in replay]
         work = batches(todo)
@@ -1108,7 +1164,7 @@ def review(argv):
                     for f in fs if isinstance(f, dict) and isinstance(f.get("file"), str) and isinstance(f.get("title"), str)
                     and isinstance(f.get("severity"), str) and f["severity"] in RANK and a_line(f.get("line"))]
         cut = left_out(todo)
-        print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache, "
+        print(f"reviewing {pr['html_url']} at {head[:8]} as {me}: {len(files)} files, {len(replay)} replayed from the cache {reader} stored, "
               f"{len(todo)} to review in {len(work)} batches; rules from {rules_from}; model {MODEL}{limited}; "
               f"{rounds} review rounds before this run, the cap is {kit.ROUND_CAP}; {cut}")
         for path in sorted(replay):
@@ -1129,14 +1185,13 @@ def review(argv):
                   f"A pass whose answer could not be read is called once more and billed twice.")
             return 0
 
+        counted = None  # the round's label this run put on
         if work and not dry:  # the round is counted before its first pass: a run that fails or is cancelled after it is a bill all the same
             counted = f"{kit.ROUND_LABEL}{rounds + 1}"
             try:
                 forge.label(counted)
             except kit.Refused as e:
-                return stop("failed", f"the label {counted} could not be added ({public(str(e))[:200]}), and whether it landed is "
-                                      f"not known, so this run may count as a round of the {kit.ROUND_CAP} or as none; read the "
-                                      f"labels of the pull request. Nothing was reviewed")
+                return stop("failed", label_unknown(counted, "added", "it landed", e))
         suffix = fresh_suffix(diff, pr["title"], pr["body"])
 
         def call_of(index):
@@ -1235,6 +1290,16 @@ def review(argv):
                                   f"the log of this run; those files are not stored as reviewed, so the next run reviews them "
                                   f"again. Found: {summary}.{also}")
         if incomplete:
+            # A run the usage limit ended before any paid pass, no pass done and no call billed, is no round (the owner,
+            # 2026-11-02, issue 156): it takes its own label off again, before its note and its status say so.
+            if counted and incomplete[0] == "usage-limit" and not passes and not cost and not any(r["error"] and r["error"].cost for r in results):
+                try:
+                    forge.unlabel(counted)
+                except kit.Refused as refusal:  # a name of one letter before the colon reads as a drive in the ledger's anchor
+                    return stop("failed", f"the usage limit ended the run before any paid pass ({incomplete[1]}); then "
+                                          f"{label_unknown(counted, 'taken off again', 'it was taken off', refusal)}")
+                print(f"  took the label {counted} off again: no pass was paid, so this run is no review round")
+                return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}", uncounted=counted)
             return stop(incomplete[0], f"{incomplete[1]}. Posted so far: {summary}")
         if in_ci and not local:
             # A review at the pass cap completed: its findings are threads, and it says what it is.

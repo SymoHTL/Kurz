@@ -926,7 +926,7 @@ public sealed partial class Checker
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
             case ClassType c:
-                return ByFieldsThatCount(c, field => KeyOf(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => KeyOf(held, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -1032,7 +1032,7 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
-                return ByFieldsThatCount(c, field => HeldEquality(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1111,11 +1111,12 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the fields that count, each read by <paramref name="why"/>:
-    /// none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that compares by content. A
-    /// class met again inside its own fields was read where the walk met it first.
+    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
+    /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
+    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
     /// </summary>
-    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<FieldSymbol, (bool Mismatch, string Why)?> why)
+    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
         if (!classesCompared.Add(c.Symbol))
         {
@@ -1126,9 +1127,17 @@ public sealed partial class Checker
         {
             foreach (var field in c.Symbol.FieldsThatCount)
             {
-                if (why(field) is { } refused)
+                if (why(field.Type) is { } refused)
                 {
                     return refused with { Why = $"its field `{field.Name}`: {refused.Why}" };
+                }
+            }
+
+            foreach (var derived in classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)))
+            {
+                if (why(new ClassType(derived)) is { } refused)
+                {
+                    return refused with { Why = $"its derived class `{derived.Name}`: {refused.Why}" };
                 }
             }
 
@@ -1285,6 +1294,11 @@ public sealed partial class Checker
             if (IsHashName(n.Name))
             {
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
+            }
+
+            if (n.Name == "Hint")
+            {
+                return CheckHintFunction(m, c); // F18
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -1706,6 +1720,37 @@ public sealed partial class Checker
         }
 
         return Record(c, CallKind.StringJoin, typed, picked);
+    }
+
+    /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, the value itself, of any type, <c>T BlackBox&lt;T&gt;(T value)</c>, which the optimiser cannot see
+    /// through, as Rust's <c>std::hint::black_box</c> in Kurz's casing (section 12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "any
+    /// value"); any other member of <c>Hint</c> is no name (V10). It takes no type arguments, as <c>string.Join</c> takes none (assumed).
+    /// </summary>
+    private Typed CheckHintFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member != "BlackBox")
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Hint` has no function `{m.Member}` (F18, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Hint.BlackBox`"))
+        {
+            return Typed.Error;
+        }
+
+        var parameter = new TypeParameterSymbol("T", c.Line);
+        var value = new TypeParameterType(parameter);
+        var candidate = new Candidate
+        {
+            Slots = [new Slot("value", value, false, false, true)],
+            TypeParameters = [parameter],
+            Result = value,
+            Form = "T BlackBox<T>(T value)",
+        };
+        return Record(c, CallKind.BlackBox, Call([candidate], c, null, out var picked), picked);
     }
 
     /// <summary>
@@ -2758,8 +2803,45 @@ public sealed partial class Checker
             return;
         }
 
-        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required");
+        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required{LambdaAtTheCall(c, pre.Argument, own, parameter)}");
     }
+
+    /// <summary>
+    /// T1 with F11 and O10: the hint for a function value whose result is <c>void</c>, passed by its name where a function type whose
+    /// result's first case is <c>void</c> is required, <c>Run(say)</c> for a <c>() => void</c> where a <c>() => void | Oops</c> is: the
+    /// lambda written at the call fits, <c>Run(() => say())</c> (the owner, 2026-11-05, #110, comment 6664353093). Its parameters take
+    /// the first names nothing here takes (V9), the call's other arguments are written as a default is (F13), and <c>...</c> stands for
+    /// a callee or type arguments of another form (assumed).
+    /// </summary>
+    private string LambdaAtTheCall(CallExpression c, Argument argument, KurzType own, KurzType parameter)
+    {
+        if (argument.Value is not NameExpression name || own is not FunctionType from || !Types.IsVoid(from.Result)
+            || (Types.NonNull(parameter) ?? parameter) is not FunctionType to || !SuccessIsVoid(to.Result) || to.Parameters.Count != from.Parameters.Count
+            || to.Parameters.Where((p, i) => !Types.Assignable(p, from.Parameters[i])).Any() || !c.Arguments.Any(a => ReferenceEquals(a, argument)))
+        {
+            return "";
+        }
+
+        var names = FreeNames(to.Parameters.Count);
+        var lambda = $"{(names.Count == 1 ? names[0] : $"({string.Join(", ", names)})")} => {name.Name}({string.Join(", ", names)})";
+        var arguments = c.Arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Mut ? "mut " : "")}{(ReferenceEquals(a, argument) ? lambda : DefaultText(a.Value))}");
+        return $"; write a lambda at the call: `{CalleeText(c.Callee)}{(c.TypeArguments.Count > 0 ? "<...>" : "")}({string.Join(", ", arguments)})`";
+    }
+
+    private static readonly string[] FirstNames = ["x", "y", "z"];
+
+    /// <summary>The names of <paramref name="count"/> lambda parameters that no variable or declaration here takes (V9, F16): <c>x</c>, <c>y</c>, <c>z</c>, then <c>x1</c>, <c>x2</c> and on.</summary>
+    private List<string> FreeNames(int count) =>
+        FirstNames.Concat(Enumerable.Range(1, int.MaxValue - 1).Select(i => $"x{i}"))
+            .Where(n => Lookup(n, capture: false).Variable is null && !IsDeclaredName(n) && frame.Reserved?.Contains(n) != true).Take(count).ToList();
+
+    /// <summary>A callee for a message: a name or a member of one, <c>HttpResponse.Stream</c>; <c>...</c> for another form.</summary>
+    private static string CalleeText(Expression e) => e switch
+    {
+        NameExpression n => n.Name,
+        MemberAccess m => $"{CalleeText(m.Target)}{(m.Conditional ? "?." : ".")}{m.Member}",
+        _ => "...",
+    };
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
     private static string Signature(FunctionSymbol f)

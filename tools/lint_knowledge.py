@@ -38,7 +38,9 @@ CONFLICTS one a decision of the record sets aside, and neither must. What the ch
 the section exists, not what the section says: whether it holds a statement on the finding, and whether a change to
 the record names the finding it meets, are the review rule "design record" and node B4. A finding written in
 another shape is not read; the floors say when an entry, or the store, yields none.
-`--self-test` plants one case per rule, plus precision cases that must stay clean."""
+`--self-test` plants one case per rule, plus precision cases that must stay clean.
+Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
+anything is read (tools/calls.py)."""
 import datetime
 import hashlib
 import os
@@ -50,6 +52,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
+import calls  # noqa: E402
 
 # Every other rule is satisfied by finding nothing: a scan of the wrong tree prints "0 errors".
 # Keep the floor well below the real entry count and well above zero; raise it as the store grows.
@@ -650,10 +653,22 @@ def cases_in(base):
     errors, _ = lint(tree(good), today=today)
     results.append(("left to its defaults the lint demands the whole tree and the real floor",
                     any("CLAUDE.md is missing" in e for e in errors) and any("floor is 5" in e for e in errors), errors))
+    good = [[], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--slef-test"], ["knowledge"], ["--self-test", "--self-test"], ["--self-test", "-v"]]
+    results.append(("call: no argument and --self-test are its calls, each alone; --help, -h, a mistyped option, a positional "
+                    "argument and a second argument are not",
+                  [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
+                  ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
     return kit.report(results)
 
 
+# the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
+CALLS = {"lint": (), "self-test": ("--self-test",)}
+
+
 if __name__ == "__main__":
+    if calls.refused(sys.argv[1:], CALLS, "tools/lint_knowledge.py"):
+        sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     try:
