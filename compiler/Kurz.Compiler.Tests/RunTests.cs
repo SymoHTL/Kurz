@@ -64,10 +64,13 @@ public sealed class Toolchain : IDisposable
     /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable) => Run(executable, "0");
 
-    /// <summary>Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null.</summary>
+    /// <summary>
+    /// Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where
+    /// it is null, and <c>KURZ_LOG</c> taken away, so that a case with a log call runs at the default level (P3) wherever the suite runs.
+    /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace)
     {
-        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace });
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace, ["KURZ_LOG"] = null });
         return (code, Lines(output), error);
     }
 

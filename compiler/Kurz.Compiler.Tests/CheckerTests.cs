@@ -3512,6 +3512,24 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_member_named_log_of_a_type_is_no_redeclaration() =>
+        // P1: a method and a field of the name; `LogTests` holds the log call in the method's type
+        Clean("class A {\n    pub void Log() {\n        print(1)\n    }\n}\n\ndata P(int Log)\n\nA().Log()\nprint(P(2).Log)");
+
+    [Theory]
+    [InlineData("f = Log.Information\nprint(f)", ErrorIds.UnknownName)]
+    [InlineData("y = Log\nprint(y)", ErrorIds.UnknownName)]
+    [InlineData("x = Log.Information(\"a\")\nprint(x)", ErrorIds.Syntax)]
+    [InlineData("Log.Information()", ErrorIds.ArgumentMismatch)]
+    [InlineData("Log.Information(\"a\", \"b\")", ErrorIds.ArgumentMismatch)]
+    public void A_log_function_is_called_with_its_one_template_and_gives_nothing(string program, string id)
+    {
+        // P1 and P2: `Log` and a log function are no values, a log call is a statement, and it takes one argument
+        Assert.Equal([(id, 1)], Errors(program));
+        Clean("Log.Information(template: \"a\")"); // the positive control: the one parameter, named
+    }
+
+    [Fact]
     public void A_field_takes_x86_arm_vector128_or_vector256_as_a_field_takes_envError() =>
         // R18 as S14 reads a field `EnvError` (the owner, 2026-11-01): a field takes the name, as H1 says
         Clean("data P(int X86, int Arm, int Vector128, int Vector256)\n\np = P(1, 2, 3, 4)\nprint(p.X86 + p.Arm + p.Vector128 + p.Vector256)");
