@@ -1,0 +1,11 @@
+// expect: error type-mismatch at 11
+// rules: K7, F11
+
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())

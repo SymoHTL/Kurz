@@ -105,9 +105,10 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
     public void A_guarded_blocks_function_is_named_after_the_function_it_stands_in_in_the_trace_and_in_the_line_tables()
     {
         // section 13, the owner, 2026-11-02: `<function>.guarded`, in the pattern of a lambda's `main.lambda`, in the trace and in the
-        // line tables alike; a lambda written in a guarded block is named after the function the block stands in, as its symbol is, and so
-        // is a guarded block written in one, `Doubler.Twice.guarded` again; `Pick` takes its value from a list, not from the command line,
-        // which the runtime of Windows does not give (S11)
+        // line tables alike; section 13, the owner, 2026-11-03: a guarded block written in one adds its own mark,
+        // `Doubler.Twice.guarded.guarded`; section 13, assumed: a lambda written in a guarded block is named after the function the block
+        // stands in, as its symbol is; `Pick` takes its value from a list, not from the command line, which the runtime of Windows does
+        // not give (S11)
         HasTheSets();
         const string text = """
             int Pick(int n) {
@@ -164,10 +165,13 @@ public sealed partial class IntrinsicTests(Toolchain toolchain) : IClassFixture<
             .Distinct()
             .Order(StringComparer.Ordinal);
         Assert.Equal(
-            "Doubler.Twice.guarded Doubler.Twice.guarded, Pick.guarded Pick.guarded, main.guarded main.guarded, main.lambda main.lambda, main.lambda.guarded main.lambda.guarded",
+            "Doubler.Twice.guarded Doubler.Twice.guarded, Doubler.Twice.guarded.guarded Doubler.Twice.guarded.guarded, Pick.guarded Pick.guarded, main.guarded main.guarded, main.lambda main.lambda, main.lambda.guarded main.lambda.guarded",
             string.Join(", ", names));
-        // the block guarded by `X86.Sha` in the one of `Doubler.Twice` is a function of its own, so the name above is not the outer block's alone
-        Assert.Equal(2, Regex.Matches(ir, @"!DISubprogram\(name: ""Doubler\.Twice\.guarded"", linkageName: ""[^""]*""").Select(m => m.Value).Distinct().Count());
+        // the block guarded by `X86.Sha` in the one of `Doubler.Twice` is a function of its own under a name of its own, so each of the two
+        // names is one function's
+        int Subprograms(string name) => Regex.Matches(ir, $@"!DISubprogram\(name: ""{Regex.Escape(name)}"", linkageName: ""[^""]*""").Select(m => m.Value).Distinct().Count();
+        Assert.Equal(1, Subprograms("Doubler.Twice.guarded"));
+        Assert.Equal(1, Subprograms("Doubler.Twice.guarded.guarded"));
 
         Ran(
             Toolchain.Run(toolchain.Build(Compile(text, toolchain.Runtime).Program!, "guarded-trace-name"), null), // the trace on
