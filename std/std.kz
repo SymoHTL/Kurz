@@ -7174,15 +7174,16 @@ pub class Uri {
     }
 }
 
-// The options of a client, with .NET's names and defaults (design record, section 12; W13): the connections to one host, which no
-// number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the life of a connection, which no time
-// bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects followed, 5, and 0 for none; the
+// The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
+// connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
+// life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects
+// followed, 20, as browsers allow, where .NET follows 50 (W15), and 0 for none; the
 // limits of a response's head, a request's (W7); and the time of a call, 100 seconds, as .NET's `HttpClient.Timeout` (W16).
 pub data HttpClientOptions(
     int MaxConnectionsPerServer = 2147483647,
     duration PooledConnectionIdleTimeout = 1min,
     duration PooledConnectionLifetime = 9223372036854775807ns,
-    int MaxAutomaticRedirections = 5,
+    int MaxAutomaticRedirections = 20,
     HttpLimits Limits = HttpLimits(),
     duration Timeout = 100s)
 
@@ -7382,20 +7383,26 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             }
         }
 
-        mut k = idle.Count - 1
-        while k >= 0 {
+        mut pick = -1
+        mut k = 0
+        while k < idle.Count {
             c = idle[k]
-            if c.Key == key {
-                idle.RemoveAt(k)
-                c.ended = false
-                c.clean = false
-                return c
+            if c.Key == key && (pick < 0 || c.idleSince - idle[pick].idleSince >= 0s) {
+                pick = k
             }
 
-            k = k - 1
+            k = k + 1
         }
 
-        return null
+        if pick < 0 {
+            return null
+        }
+
+        chosen = idle[pick]
+        idle.RemoveAt(pick)
+        chosen.ended = false
+        chosen.clean = false
+        return chosen
     }
 
     // A new connection to the host and port of `uri`, its connect bounded by what remains of the `call` (W16), or the `HttpError` of

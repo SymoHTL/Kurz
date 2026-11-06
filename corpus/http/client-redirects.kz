@@ -16,10 +16,11 @@
 // allow: raw native
 // rules: W15
 
-// a client follows up to 5 redirects of a `GET`, a `301`, `302`, `303`, `307` and `308` alike, each `Location` resolved against the
-// address it answers, on the connection the chain began on; a sixth is `too many redirects`, a redirect to `https` the error of an
-// address of `https`, and a redirect without a `Location`, or with one that is no `Uri`, is the response; `MaxAutomaticRedirections`
-// sets the count, 0 for none; and a redirect whose body is longer than `MaxDrainSize` closes its connection
+// a client follows up to 20 redirects of a `GET`, a `301`, `302`, `303`, `307` and `308` alike, each `Location` resolved against
+// the address it answers, on the connection the chain began on; a twenty-first is `too many redirects`, a redirect to `https` the
+// error of an address of `https`, and a redirect without a `Location`, or with one that is no `Uri`, is the response;
+// `MaxAutomaticRedirections` sets the count, 0 for none; and a redirect whose body is longer than `MaxDrainSize` closes its
+// connection
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -61,7 +62,12 @@ HttpResponse Redirect(int status, string location) {
 HttpResponse Answer(int port, int number, HttpRequest r) {
     path = r.Path
     if path.StartsWith("/r/") {
-        n = path.Bytes[3] - 48
+        b = path.Bytes
+        mut n = 0
+        for i in 3..<b.Count {
+            n = n * 10 + (b[i] - 48)
+        }
+
         if n == 0 {
             return HttpResponse.Text(200, "{number} {path}")
         }
@@ -133,6 +139,12 @@ void Against((int) => void part) {
         child = fork()
     }
 
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
     if child == 0 {
         Serve(on)
         raw {
@@ -169,7 +181,7 @@ string Show(HttpClient client, int port, string path) {
 
 void Followed(int port) {
     client = HttpClient()
-    print(Show(client, port, "/r/5"))
+    print(Show(client, port, "/r/20"))
     print(Show(client, port, "/see"))
     print(Show(client, port, "/moved"))
     print(Show(client, port, "/dir/temp"))
@@ -177,7 +189,7 @@ void Followed(int port) {
     print(Show(client, port, "/secure"))
     print(Show(client, port, "/none"))
     print(Show(client, port, "/bad"))
-    print(Show(client, port, "/r/6"))
+    print(Show(client, port, "/r/21"))
     print(Show(client, port, "/r/0"))
 }
 

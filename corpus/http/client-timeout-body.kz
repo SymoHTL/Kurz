@@ -76,6 +76,19 @@ void Serve(TcpListener on, List<string> answers) {
             }
         }
     }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
 }
 
 // the bytes of `text` after its `~` written one at a time, 100 milliseconds apart, until a write fails
@@ -126,6 +139,12 @@ void Against(List<string> answers, (int) => void part) {
     mut child = 0
     raw {
         child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
     }
 
     if child == 0 {

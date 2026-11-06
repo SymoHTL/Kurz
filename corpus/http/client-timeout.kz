@@ -105,6 +105,12 @@ void Against((int) => void part) {
         child = fork()
     }
 
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
     if child == 0 {
         Serve(on)
         raw {
