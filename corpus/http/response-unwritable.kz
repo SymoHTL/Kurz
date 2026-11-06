@@ -1,0 +1,52 @@
+// expect: output
+// | HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||
+// | HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||
+// | HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||
+// | HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length:  5||hello
+// | not found: response-unwritable.txt
+// | HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||
+// rules: W8
+
+// a response the writer cannot write, a `205` whose file holds bytes or a `Content-Length` its body contradicts, is answered `500`
+// with no body and a close, and the write gives nothing more; a file that cannot be read is answered so too, and the write gives its
+// failure
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server) else {
+        IoError e => print(e)
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+void | IoError | HttpError All() {
+    File.WriteAll("response-unwritable-205.txt", "x".Bytes)
+    Wire(HttpResponse.File(205, "response-unwritable-205.txt"))
+    File.Delete("response-unwritable-205.txt")
+    cut = HttpResponse.Text(200, "hello")
+    cut.Headers.Set("Content-Length", "4")
+    Wire(cut)
+    words = HttpResponse.Text(200, "hello")
+    words.Headers.Set("Content-Length", "five")
+    Wire(words)
+    same = HttpResponse.Text(200, "hello")
+    same.Headers.Set("Content-Length", " 5")
+    Wire(same)
+    Wire(HttpResponse.File(200, "response-unwritable.txt"))
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}

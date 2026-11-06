@@ -1,0 +1,36 @@
+// expect: output
+// | a a
+// | ab ab
+// rules: S3
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a second `File.Open` of a file has its own descriptor, position and buffer: the first handle's read of one byte fills its buffer
+// with the file's 6 bytes, and the second handle's first read still starts at the file's first byte; each handle's next read takes
+// the byte after its own
+void | IoError Show() {
+    File.WriteAll("read-buffer-second.txt", "abcdef".Bytes)
+    f = File.Open("read-buffer-second.txt")
+    mut one = Bytes()
+    f.Read(mut one, 1)
+    h = File.Open("read-buffer-second.txt")
+    File.Delete("read-buffer-second.txt")
+    mut two = Bytes()
+    h.Read(mut two, 1)
+    print("{Text(one)} {Text(two)}")
+    f.Read(mut one, 1)
+    h.Read(mut two, 1)
+    print("{Text(one)} {Text(two)}")
+    f.Close()
+    h.Close()
+}
+
+Show() else {
+    IoError e => print(e)
+}
