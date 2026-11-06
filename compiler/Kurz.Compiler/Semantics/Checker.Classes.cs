@@ -12,8 +12,8 @@ namespace Kurz.Compiler.Semantics;
 /// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15), across inheritance (K13); its base class, in the
 /// short form and the explicit one (K6, K10, K11, K16, K17), and its <c>virtual</c>, <c>override</c> and <c>prot</c> methods (K7, F9).
 /// What else a class can write, an interface, a constructor in its body, a field there without a written type, a field in its body or
-/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18), type parameters, and a field that holds
-/// a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
+/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18) and type parameters,
+/// is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
@@ -1693,55 +1693,119 @@ public sealed partial class Checker
     // ---- the cycle rule ----------------------------------------------------------------------------
 
     /// <summary>
-    /// R2, R4: judged by types, over the file: a class that reaches itself through strong fields, one of them <c>mut</c>, is
+    /// R2, R4, R9: judged by types, over the file: a class that reaches itself through strong fields, one of them <c>mut</c>, is
     /// <c>reference-cycle</c>. A field reaches every class its type holds, through lists, maps, unions, nullable types and the fields of
-    /// data values; each ring is reported once, at the class of the ring declared first, the first class on the path (R9's case). A
-    /// class with a field whose type holds a function value is <c>not supported</c>: R9 counts such a field as reaching every class a
-    /// lambda of the program captures, which the checker does not judge.
+    /// data values, and a field whose type can hold a function value reaches every class an instance of which a lambda of the program
+    /// captures besides (R9), so the rule runs after every body, when the lambdas are known. Each ring is reported once, at the class of
+    /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
+    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring.
     /// </summary>
     private void CheckReferenceCycles()
     {
+        var firstLambda = new Dictionary<ClassSymbol, int>();
+        var captured = CapturedClasses(firstLambda);
         var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
-        foreach (var c in classDeclared)
+        List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
         {
-            var list = new List<(ClassSymbol, FieldSymbol)>();
-            foreach (var field in c.Fields)
+            if (!edges.TryGetValue(c, out var list))
             {
-                var reached = new HashSet<ClassSymbol>();
-                if (HoldsFunctionValue(field.Type, []))
+                // W1: a class of std/ or of a folder is read here too, since a field of a function type of it reaches the classes the
+                // file's lambdas capture
+                list = [];
+                foreach (var field in c.Fields)
                 {
-                    NotSupported(field.Line, "a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)");
-                    continue;
+                    var reached = new HashSet<ClassSymbol>();
+                    ClassesHeld(field.Type, reached, []);
+                    if (HoldsFunctionValue(field.Type, []))
+                    {
+                        reached.UnionWith(captured);
+                    }
+
+                    list.AddRange(reached.Select(r => (r, field)));
                 }
 
-                ClassesHeld(field.Type, reached, []);
-                list.AddRange(reached.Select(r => (r, field)));
+                edges[c] = list;
             }
 
-            edges[c] = list;
+            return list;
         }
 
         var reported = new HashSet<ClassSymbol>();
-        foreach (var start in classDeclared)
+        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstLambda.GetValueOrDefault(c, int.MaxValue))))
         {
             if (reported.Contains(start))
             {
                 continue;
             }
 
-            if (RingThroughMut(start, edges) is { } ring)
+            if (RingThroughMut(start, EdgesOf) is { } ring)
             {
                 var members = ring.Select(step => step.From).Distinct().ToList();
                 reported.UnionWith(members);
-                var first = members.MinBy(m => classDeclared.IndexOf(m))!;
                 var path = string.Join(", ", ring.Select(step => $"`{step.From.Name}.{step.Field.Name}`{(step.Field.Mut ? " (mut)" : "")}"));
-                Report(ErrorIds.ReferenceCycle, first.Line, $"`{first.Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring (R2)");
+                var rules = ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? "R2, R9" : "R2";
+                var first = members.Where(classDeclared.Contains).MinBy(classDeclared.IndexOf);
+                var line = first?.Line ?? members.Where(firstLambda.ContainsKey).Select(m => firstLambda[m]).DefaultIfEmpty(0).Min();
+                if (line > 0)
+                {
+                    // a ring of std/'s classes alone that no lambda of the file closes is std/'s, which std/'s checker judged
+                    Report(ErrorIds.ReferenceCycle, line, $"`{(first ?? members[0]).Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring ({rules})");
+                }
             }
         }
     }
 
+    /// <summary>
+    /// R9: the classes an instance of which a lambda of the program captures, the file's, std/'s and those of the folders the file uses:
+    /// every class the type of a captured variable holds (<see cref="ClassesHeld"/>), and of a type parameter every class a type argument
+    /// that a call of the program gives it holds. <paramref name="firstLambda"/> gets the line of the file's first lambda that captures
+    /// each class.
+    /// </summary>
+    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstLambda)
+    {
+        var models = new List<SemanticModel> { model };
+        models.AddRange(used.Values.Select(u => u.model));
+        if (std is not null)
+        {
+            models.Add(std.model);
+        }
+
+        var arguments = new Dictionary<TypeParameterSymbol, List<KurzType>>(ReferenceEqualityComparer.Instance);
+        foreach (var (parameter, argument) in models.SelectMany(m => m.Calls).SelectMany(c => c.Map))
+        {
+            if (!arguments.TryGetValue(parameter, out var list))
+            {
+                arguments[parameter] = list = [];
+            }
+
+            list.Add(argument);
+        }
+
+        var all = new HashSet<ClassSymbol>();
+        foreach (var m in models)
+        {
+            foreach (var (lambda, info) in m.Lambdas)
+            {
+                var reached = new HashSet<ClassSymbol>();
+                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                foreach (var v in info.Captures)
+                {
+                    ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
+                }
+
+                all.UnionWith(reached);
+                foreach (var c in reached.Where(_ => ReferenceEquals(m, model)))
+                {
+                    firstLambda[c] = Math.Min(firstLambda.GetValueOrDefault(c, int.MaxValue), lambda.Line);
+                }
+            }
+        }
+
+        return all;
+    }
+
     /// <summary>A ring of fields from <paramref name="start"/> back to it with a <c>mut</c> field on it; null where there is none.</summary>
-    private static List<(ClassSymbol From, FieldSymbol Field)>? RingThroughMut(ClassSymbol start, Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>> edges)
+    private static List<(ClassSymbol From, FieldSymbol Field)>? RingThroughMut(ClassSymbol start, Func<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>> edges)
     {
         // a search over (class, a `mut` field met yet) from the start, back to the start with one met
         var queue = new Queue<(ClassSymbol At, bool Mut)>();
@@ -1751,14 +1815,7 @@ public sealed partial class Checker
         while (queue.Count > 0)
         {
             var (at, mut) = queue.Dequeue();
-            if (!edges.TryGetValue(at, out var fields))
-            {
-                // W1: a class of std/ that the prelude brings into the file, whose fields std/'s checker judged; it names no class of
-                // the file, so no ring of the file runs through it
-                continue;
-            }
-
-            foreach (var (to, field) in fields)
+            foreach (var (to, field) in edges(at))
             {
                 var next = (to, mut || field.Mut);
                 if (ReferenceEquals(to, start) && next.Item2)
@@ -1791,39 +1848,51 @@ public sealed partial class Checker
     private static IEnumerable<KurzType> HeldArguments(DataType d) =>
         d.Symbol.TypeParameters.Zip(d.TypeArguments).Where(p => d.Symbol.Fields.Any(f => Types.Mentions(f.Type, p.First))).Select(p => p.Second);
 
-    /// <summary>The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values of a map, the cases of a union and the fields of a data value.</summary>
-    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path)
+    /// <summary>
+    /// The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values
+    /// of a map, the cases of a union and the fields of a data value, and where <paramref name="arguments"/> is given, what the types it
+    /// gives a type parameter hold (R9); it gives a type parameter met before none.
+    /// </summary>
+    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path, Func<TypeParameterSymbol, IEnumerable<KurzType>>? arguments = null)
     {
         switch (type)
         {
             case ClassType c:
+                reached.Add(c.Symbol); // a class of std/ or of a folder is in no table of the file's classes (W1)
                 reached.UnionWith(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol))); // K6: an instance of a derived class stands where its base does
                 break;
             case ListType l:
-                ClassesHeld(l.Element, reached, path);
+                ClassesHeld(l.Element, reached, path, arguments);
                 break;
             case MapType m:
-                ClassesHeld(m.Key, reached, path);
-                ClassesHeld(m.Value, reached, path);
+                ClassesHeld(m.Key, reached, path, arguments);
+                ClassesHeld(m.Value, reached, path, arguments);
                 break;
             case UnionType u:
                 foreach (var c in u.Cases)
                 {
-                    ClassesHeld(c, reached, path);
+                    ClassesHeld(c, reached, path, arguments);
                 }
 
                 break;
             case DataType d when path.Add(d.Symbol):
                 foreach (var f in d.Symbol.Fields)
                 {
-                    ClassesHeld(SubstituteData(d, f.Type), reached, path);
+                    ClassesHeld(SubstituteData(d, f.Type), reached, path, arguments);
                 }
 
                 break;
             case DataType d:
                 foreach (var a in HeldArguments(d))
                 {
-                    ClassesHeld(a, reached, path);
+                    ClassesHeld(a, reached, path, arguments);
+                }
+
+                break;
+            case TypeParameterType p when arguments is not null:
+                foreach (var a in arguments(p.Symbol))
+                {
+                    ClassesHeld(a, reached, path, arguments);
                 }
 
                 break;
