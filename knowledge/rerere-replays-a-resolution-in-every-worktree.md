@@ -33,7 +33,7 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
 - **The standing approval covers a conflict only of the kinds it names.** The over-red rule of
   `CLAUDE.md` names them, as set on 2026-11-06 (issue 39, comments 6680237539 and 6680659012):
   text whose two sides changed different words, every word kept, and the floor of `RunTests`, set
-  as that rule says. A conflict that rerere resolved is still a
+  as that rule says, under the bound the rule adds to the owner's words. A conflict that rerere resolved is still a
   conflict, read as any other.
 
 ## How to apply
