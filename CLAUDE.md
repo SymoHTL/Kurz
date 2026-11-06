@@ -465,11 +465,13 @@ Gate: review rule "rules for sessions".
   `review` at that head, when all of these hold:
   - its round at the cap completed, as in the first case;
   - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words and the merge keeps every word of both, or the floor of `RunTests` (`RunFloor`),
-    set to the count measured on the merged tree: on Linux in the image the `gates` job runs in, with
-    the floor at 999, and on Windows the side that changed it, held by the `compiler-windows` run; the
-    merge is made with rerere off (comment 6680237539), since a conflict that rerere resolves is still a
-    conflict
+    different words and the merge keeps every word of both, or the floor of `RunTests` (`RunFloor`):
+    on Linux the count of cases measured on the merged tree in the image the `gates` job runs in (the
+    floor set to 999 for that one run only, so that the test fails and names the count), when that
+    count is at least the higher of the two sides' Linux floors, and on Windows the higher of the two
+    sides' Windows floors, which the `compiler-windows` run holds; a measured count below the higher
+    floor needs the owner; the merge is made with rerere off (comment 6680237539), since a conflict
+    that rerere resolves is still a conflict
     ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
     the lines a conflict block joined and for the floor;
@@ -487,9 +489,10 @@ Gate: review rule "rules for sessions".
   and a red gate need the owner's approval for that head. Whether the conditions of either case hold
   is read by the caller, a `judgment step`: the merge tool takes `--over-red` as the caller's
   statement (HAZARD #3). Retired on 2026-10-21 by the cap of the first case: "An approval is never
-  standing" with no case. Retired on 2026-11-06 by issue 39, comment 6680237539: "a head that took
-  `main` after that round" needing the owner's approval as any other. The tool switches the whole
-  ruleset off for the one merge and restores it; while it is off nothing on the server holds any
+  standing" with no case. Narrowed on 2026-11-06 by pull request 358, which wrote down the owner's
+  approval of 2026-11-02 (issue 39, comments 6577407245 and 6577439799): "a head that took `main`
+  after that round" needs the owner's approval as any other, but for the second case. The tool
+  switches the whole ruleset off for the one merge and restores it; while it is off nothing on the server holds any
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
