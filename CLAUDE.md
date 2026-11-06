@@ -121,7 +121,8 @@ Each line names a trap; its evidence is in the entry it links.
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05
   ([knowledge/an-orphan-holds-the-output-of-its-program.md](knowledge/an-orphan-holds-the-output-of-its-program.md)).
   Gate: `compiler-tests`
-  (`CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`).
+  (`CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`, and
+  for the holders it ends, the other tests of `CaptureTests`).
 
 ## Tests: every decision is proven
 

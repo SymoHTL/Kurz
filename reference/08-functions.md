@@ -51,7 +51,11 @@ print(Sign(3))
 
 ### F4 (assumed, §8) `void`
 
-A function that has no result is declared with `void`, as in C# and in the record's samples.
+A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
+is no type of a value: a parameter a function declares, a field or a variable of type `void` is
+`syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
+`void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -60,6 +64,28 @@ void Greet(string name) {
 }
 
 Greet("Ann")
+```
+
+Case: [functions/void-parameter.kz](../corpus/functions/void-parameter.kz)
+```kurz
+// `void` is no type of a parameter
+void Show(void v) {
+    print("shown")
+}
+```
+
+Case: [functions/void-field.kz](../corpus/functions/void-field.kz)
+```kurz
+// `void` is no type of a field
+data Box(void Content)
+
+print("boxed")
+```
+
+Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
+```kurz
+// `void` is no type of a variable
+void done = 1
 ```
 
 ### F5 (decided, §8) Top-level statements
@@ -254,8 +280,11 @@ objected to)* A lambda whose body is a call with a `void` success, `x => print(x
 a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10). The `=>` of a function
 type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a union of a
 function type and another type is written `((int) => int) | NotFound`, as the nullable one is; such a
-lambda under a function type whose result is not `void`, `(int) => int`, is `type-mismatch` (T1) at
+lambda under a function type whose result is not `void` and whose first case is not `void` (O10), `(int) => int`, is `type-mismatch` (T1) at
 the lambda, since its result is `void` where an `int` is required (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+Under a result whose first case is `void`, `() => void | IoError`, it fits, as its block form
+`() => { print("x") }` does (O10), and gives that case; a function value of type `() => void` stays
+`type-mismatch` (T1) there (§4, the owner, 2026-11-05, #110, comment 6659026217).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -350,6 +379,32 @@ void Run((int) => void f) {
 
 Run(x => print(x))
 // the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
+```
+
+Case: [functions/function-type-void-union.kz](../corpus/functions/function-type-void-union.kz)
+```kurz
+data Oops
+
+void | Oops Run(() => void | Oops f) {
+    f()
+}
+
+Run(() => print("x")) else {
+    Oops => print("oops")
+}
+// the lambda's body is a call with a void success, under a result whose first case is void: it gives that case, as its block form does (F11, O10)
+```
+
+Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())
 ```
 
 ### F12 (decided, §8) Overloads, default values, named arguments
