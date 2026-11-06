@@ -1,0 +1,12 @@
+// expect: error assign-immutable at 11
+// rules: K7
+
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+b.Count = 3
+print(b.Count)

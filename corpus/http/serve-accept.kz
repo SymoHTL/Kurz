@@ -1,0 +1,41 @@
+// expect: output
+// | TimedOut
+// | hi /a
+// | hi /b
+// rules: W9
+
+// `Serve` accepts each connection and serves it, one at a time, until an `Accept` fails other than for one connection, here at the
+// time the listener gives its accepts
+void | IoError All() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    listener.SetAcceptTimeout(200ms)
+    first = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    second = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    first.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    first.ShutdownWrite()
+    second.Write("GET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    second.ShutdownWrite()
+    HttpServer.Serve(listener, (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")) else {
+        IoError e => print(e.Kind)
+    }
+
+    Body(first)
+    Body(second)
+}
+
+// the body of the response the client got
+void | IoError Body(TcpStream client) {
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Split("\r\n\r\n")[1])
+}
+
+All() else {
+    IoError e => print(e)
+}

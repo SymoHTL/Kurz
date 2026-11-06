@@ -1,0 +1,4 @@
+// expect: error type-mismatch at 4
+// rules: T36
+
+timestamp At(instant t) => t

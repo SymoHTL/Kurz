@@ -1,0 +1,10 @@
+// expect: error const-assert-failed at 10
+// rules: T37
+
+void Buffer<const int N>() {
+    const assert(N > 0, "a buffer of {N} items")
+    print(N)
+}
+
+Buffer<64>()
+Buffer<0>()

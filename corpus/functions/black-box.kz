@@ -1,0 +1,21 @@
+// expect: output
+// | 1001
+// | a haystack of 1000
+// | 3
+// | 4
+// | 3
+// rules: F18
+
+data Point(int X, int Y)
+
+n = Hint.BlackBox(1000)
+print(n + 1)
+hay = Hint.BlackBox("a haystack of {n}")
+print(hay)
+xs = Hint.BlackBox([3, 1, 2])
+mut ys = Hint.BlackBox(xs)    // the list the variable holds, which the change of `ys` leaves as it is (M3)
+ys.Add(4)
+print(xs.Count)
+print(ys.Count)
+p = Hint.BlackBox(Point(1, 2))
+print(p.X + p.Y)

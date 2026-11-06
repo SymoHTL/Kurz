@@ -495,6 +495,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (methods.Find(f => f.IsProperty) is { } property)
+            {
+                return ReadImplicitProperty(n, property); // K7: the property of `this`
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -646,6 +651,12 @@ public sealed partial class Checker
                 return new Typed(Types.Timestamp);
             }
 
+            if (n.Name == "instant" && m.Member == "Now")
+            {
+                model.RecordMonotonicRead(m); // S25: the monotonic clock (section 12, the owner, 2026-11-04, the monotonic clock, Q1 (a))
+                return new Typed(Types.Instant);
+            }
+
             if (IsBuiltInName(n.Name) || functions.ContainsKey(n.Name))
             {
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no member `{m.Member}` (V10)");
@@ -654,6 +665,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
+        {
+            return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
+        }
+
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
     }
 
@@ -731,6 +747,8 @@ public sealed partial class Checker
                 }
 
                 break;
+            case PrimitiveType { Kind: Primitive.Instant } when member == "Elapsed":
+                return new Typed(Types.Duration); // S25: `instant.Now - t` (section 12, assumed with the monotonic clock)
             case MapType when member == "Count":
                 return new Typed(Types.Int); // M9: the count of its entries, as C#'s `Dictionary.Count` (section 4, the owner, 2026-10-30)
             case DataType d:
@@ -1281,7 +1299,7 @@ public sealed partial class Checker
 
         if (type is null)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, T13)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "T13")})");
             return Typed.Error;
         }
 
@@ -1388,6 +1406,18 @@ public sealed partial class Checker
     {
         var wide = Types.IsWideTime(l) || Types.IsWideTime(r);
         var (ld, rd) = (Types.IsDuration(l), Types.IsDuration(r));
+        if (Types.IsInstant(l) || Types.IsInstant(r))
+        {
+            // T36: two readings give their signed difference, and a reading and a narrow duration a reading; a reading has no wide variant
+            return (op, Types.IsInstant(l), Types.IsInstant(r)) switch
+            {
+                (TokenKind.Minus, true, true) => Types.Duration,
+                (TokenKind.Plus or TokenKind.Minus, true, false) when rd && !wide => Types.Instant,
+                (TokenKind.Plus, false, true) when ld && !wide => Types.Instant,
+                _ => null,
+            };
+        }
+
         return (op, ld, rd) switch
         {
             (TokenKind.Plus, true, true) or (TokenKind.Minus, true, true) => wide ? Types.LongDuration : Types.Duration,
@@ -1448,7 +1478,7 @@ public sealed partial class Checker
         }
         else if (Types.IsTime(left.Type) && Types.IsTime(right.Type))
         {
-            ok = Types.IsDuration(left.Type) == Types.IsDuration(right.Type);
+            ok = Types.IsDuration(left.Type) == Types.IsDuration(right.Type) && Types.IsInstant(left.Type) == Types.IsInstant(right.Type); // T36: a reading beside a reading alone
         }
         else if (left.Type is PrimitiveType { Kind: Primitive.Char } && right.Type is PrimitiveType { Kind: Primitive.Char })
         {
@@ -1475,7 +1505,7 @@ public sealed partial class Checker
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is ListType && Types.Same(left.Type, right.Type))
-                || (left.Type is ClassType && Types.Same(left.Type, right.Type))
+                || (left.Type is ClassType && right.Type is ClassType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is UnionType && right.Type is UnionType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
@@ -1483,7 +1513,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => HeldEquality(left.Type, [], [], []),
+                ClassType => HeldEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type, [], [], []), // K13: the two as the base, whose derived classes it reads
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1510,7 +1540,7 @@ public sealed partial class Checker
 
         if (!ok)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, D3)");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "D3")})");
             return new Typed(Types.Bool);
         }
 
@@ -1540,7 +1570,9 @@ public sealed partial class Checker
     /// </summary>
     private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
     {
-        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ClassType c => seen.Add(c.Symbol)
+            && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))
+                || classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)).Any(x => ComparesByClause(new ClassType(x), seen))),
         ListType l => ComparesByClause(l.Element, seen),
         UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
         DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
@@ -1683,7 +1715,13 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        // O10: under a result whose first case is `void`, `void | IoError`, a call with a `void` success is the body its block
+                        // form `() => { print(x) }` already is, and the lambda gives that case (the owner, 2026-11-05, #110, comment 6659026217);
+                        // the refusal elsewhere names that rule (the owner, 2026-11-05, #110, comment 6664353093)
+                        if (!SuccessIsVoid(result))
+                        {
+                            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)}; a `void` call fits only where the first case is `void` (F11, O10, T1)");
+                        }
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
