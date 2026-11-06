@@ -1149,6 +1149,14 @@ def suite(case):
     case("plan: where this checkout's reviewer is the default branch's, a state under another key is the answer of the run in CI: "
          "at the cap it is cap, not NOT CHECKED",
          code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and "NOT CHECKED" not in out, (code, out[-300:]))
+    forge = stored_by(rv.CI_ACCOUNT, at_cap)  # stored under this checkout's key, as by a run of an older default branch
+    forge.other_blobs = {"tools/review/review.py": "0" * 40}
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where the state of the run in CI has this checkout's key and this checkout's reviewer is not the default branch's, "
+         "the plan says NOT CHECKED, not the replay of a key that run no longer makes",
+         code == 1 and "NOT CHECKED: whether the cache of the run in CI answers this head" in out
+         and "tools/review/review.py here is not the default branch's" in out and "whatever key the state carries" in out
+         and "replayed" not in out and "PLAN:" not in out and "(cap)" not in out, (code, out[-400:]))
     saved = kit.gh_json, os.environ.get("GITHUB_ACTIONS")
 
     def no_user(path):
@@ -1673,6 +1681,8 @@ def suite(case):
         kit_id = blob(f.read())
     case("run: the audit note names what reviewed by git blob ids", f"kit.py `{kit_id}`" in audit and f"rules `{blob(RULES.encode())}`" in audit,
          audit[:500])
+    case("run: the audit note's blob ids are git's: the empty blob has the id git gives it, which no formula of the cases computes",
+         rv.blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", rv.blob_id(b""))  # `git hash-object /dev/null`
     forge = MemoryForge()
     forge.rules = lambda branch: None
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local", "--bootstrap-rules", os.path.join(kit.ROOT, rv.RULES_PATH)])

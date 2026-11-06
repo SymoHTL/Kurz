@@ -573,6 +573,11 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.Name)
         {
+            if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen)
+            {
+                return ParseConstAssert(); // T37: a statement of its own; `const` and `assert` are names everywhere else (L18)
+            }
+
             if (Peek().Kind == TokenKind.Assign)
             {
                 Advance();
@@ -765,6 +770,25 @@ public sealed class Parser
         suppressNewlines--;
         Expect(TokenKind.RightParen, "`)`");
         return new AsmStatement(keyword.Line, templates, operands);
+    }
+
+    /// <summary>
+    /// T37: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
+    /// *(assumed, §4: as Rust's <c>assert!</c> takes its message as a literal)*.
+    /// </summary>
+    private ConstAssertStatement ParseConstAssert()
+    {
+        var keyword = Advance(); // `const`
+        Advance(); // `assert`
+        Expect(TokenKind.LeftParen, "`(`");
+        suppressNewlines++;
+        var condition = ParseExpression();
+        Expect(TokenKind.Comma, "`,` and the text of the `const assert`");
+        var text = Expect(TokenKind.StringLiteral, "the text of the `const assert`, a string literal");
+        suppressNewlines--;
+        SkipNewlines();
+        Expect(TokenKind.RightParen, "`)`");
+        return new ConstAssertStatement(keyword.Line, condition, ParseStringLiteral(text));
     }
 
     /// <summary>
