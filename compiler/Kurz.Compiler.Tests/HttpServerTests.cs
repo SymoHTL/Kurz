@@ -188,7 +188,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "served\n"), (code, error, output));
+        Ran((0, "", "served\n"), (code, error, output));
         var bytes = got.ToArray();
         var body = bytes.Length - (bytes.AsSpan().IndexOf("\r\n\r\n"u8) + 4);
         Assert.Equal((true, 33554432), (paused, body));
@@ -275,7 +275,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "served\n", 100, ""), (code, error, output, whole, failed));
+        Ran((0, "", "served\n"), (code, error, output));
+        Assert.True((whole, failed) == (100, ""), $"{whole} responses whole; client [{failed}]");
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 chunked files took {watch.Elapsed.TotalMilliseconds:F0} ms");
     }
 
@@ -337,7 +338,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "served\n"), (code, error, output));
+        Ran((0, "", "served\n"), (code, error, output));
         var response = System.Text.Encoding.ASCII.GetString(got.ToArray());
         Assert.StartsWith("HTTP/1.1 200 OK\r\n", response);
         Assert.EndsWith("\r\n\r\nabcd", response);
@@ -408,7 +409,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "TimedOut\nserved\n"), (code, error, output));
+        Ran((0, "", "TimedOut\nserved\n"), (code, error, output));
         var bytes = got.ToArray();
         var body = bytes.Length - (bytes.AsSpan().IndexOf("\r\n\r\n"u8) + 4);
         Assert.InRange(body, 1, 33554431);
@@ -474,7 +475,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         var (code, output, error) = await run;
         var response = System.Text.Encoding.ASCII.GetString(got.ToArray());
-        Assert.Equal((0, "", printed, (string?)null), (code, error, output, reset));
+        Ran((0, "", printed), (code, error, output));
+        Assert.Null(reset);
         Assert.StartsWith(status, response);
         Assert.Contains("\r\nConnection: close\r\n", response);
     }
@@ -544,7 +546,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "request timed out\nserved\n"), (code, error, output));
+        Ran((0, "", "request timed out\nserved\n"), (code, error, output));
         Assert.StartsWith("HTTP/1.1 408 Request Timeout\r\n", System.Text.Encoding.ASCII.GetString(got.ToArray()));
         Assert.InRange(answered, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(2500));
     }
@@ -617,7 +619,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         var (code, output, error) = await run;
-        Assert.Equal((0, "", "TimedOut\ntrue\nfalse\n"), (code, error, output));
+        Ran((0, "", "TimedOut\ntrue\nfalse\n"), (code, error, output));
     }
 
     [Fact]
@@ -662,6 +664,13 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             }
         }
     }
+
+    /// <summary>
+    /// The exit code, the error and the output of a server program's run held to what is expected, each text whole in the message: a
+    /// comparison of tuples cuts a long text, and what an error says last is cut first.
+    /// </summary>
+    private static void Ran((int Code, string Error, string Output) expected, (int Code, string Error, string Output) actual) =>
+        Assert.True(expected == actual, $"exit {actual.Code}, not {expected.Code}; error [{actual.Error}]; output [{actual.Output}]; expected output [{expected.Output}]");
 
     private static TcpClient Connect(int port, Task program)
     {
