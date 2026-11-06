@@ -30,9 +30,10 @@ public sealed class CaptureTests
             var held = Task.Run(() => Processes.Capture("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1"], null, Limit));
             Assert.True(await Task.WhenAny(held, Task.Delay(TimeSpan.FromSeconds(20))) == held, "the run waited past its limit on the output a child of its program holds");
             Assert.True(started.Elapsed >= Limit, $"the run ended after {started.Elapsed}, before its limit of {Limit}");
-            var (heldCode, _, heldError) = await held;
-            Assert.Equal(-1, heldCode);
-            Assert.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", heldError, StringComparison.Ordinal);
+            var (heldCode, heldOutput, heldError) = await held;
+            var heldSeen = $"output [{heldOutput}] error [{heldError}] after {started.Elapsed}"; // each assert below names what the run gave
+            Assert.True(heldCode == -1, $"the run ended with {heldCode}, not -1: {heldSeen}");
+            Assert.True(heldError.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", StringComparison.Ordinal), $"the error does not say that no holder was found: {heldSeen}");
             return;
         }
 
@@ -44,10 +45,11 @@ public sealed class CaptureTests
         Assert.True(clock.Elapsed >= Limit, $"the run ended after {clock.Elapsed}, before its limit of {Limit}");
         var (code, output, error) = await run;
         var child = output.Trim();
-        Assert.Equal(-1, code);
-        Assert.Matches("^[0-9]+$", child);
-        Assert.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", error, StringComparison.Ordinal);
-        Assert.False(Lives(child), $"the child {child} still runs");
+        var seen = $"output [{output}] error [{error}] after {clock.Elapsed}"; // each assert below names what the run gave
+        Assert.True(code == -1, $"the run ended with {code}, not -1: {seen}");
+        Assert.True(child.Length > 0 && child.All(char.IsAsciiDigit), $"the output holds no pid: {seen}");
+        Assert.True(error.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", StringComparison.Ordinal), $"the error does not say that the child {child} was ended: {seen}");
+        Assert.False(Lives(child), $"the child {child} still runs: {seen}");
     }
 
     [Fact]
