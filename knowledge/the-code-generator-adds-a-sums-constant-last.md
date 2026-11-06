@@ -57,10 +57,11 @@ The owner was not asked.
 
 ## What to do
 
-- Do not measure orders of the source against this, where each keeps each term added into the sum
-  on its own. A constant in a sum on a hot path is added last by the code generator, whatever that
-  order. Do measure a regrouping of the sum, or another form of the round's function: `op_g`'s
-  grouping of G cost 4.6 ms of 51.8, and F's terms added one at a time 1.5 ms (above). Read where
+- Do not measure another order of the same terms against this: a constant in a sum on a hot path is
+  added last by the code generator, whatever the order of the terms. Do measure a change to the terms
+  themselves or to their grouping, whatever its order, even where each term is still added into the
+  sum on its own: `op_g`'s grouping of G cost 4.6 ms of 51.8, and F's select written as its two terms
+  added into the sum one at a time 1.5 ms (above). Read where
   the constant lands in the machine code,
   not in the IR: the IR adds it first. The same holds for an option of clang
   ([[a-front-end-option-of-clang-does-not-reach-ir]]). `judgment step`: no job runs a benchmark or

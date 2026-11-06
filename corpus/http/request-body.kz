@@ -1,0 +1,78 @@
+// expect: output
+// | POST /len: 5 [hello]
+// | GET /next: 0 []
+// | POST /chunks: 11 [hello world]
+// | GET /after: 0 []
+// | GET /none: 0 []
+// | 2 2 1 0 0
+// | TooLarge: request body over limit
+// | hi
+// | not UTF-8
+// rules: W6
+
+// the body of a request is read from its stream as the client sends it: a declared length, chunks with their extensions and
+// trailer lines dropped, or none; the stream then holds the next request of the connection
+void | IoError | HttpError Body(TcpStream server) {
+    r = HttpRequest.Read(server)
+    body = r.Body.ReadAll(1000)
+    text = string.FromUtf8(body) else {
+        InvalidUtf8 => "?"
+    }
+
+    print("{r.Method} {r.Path}: {body.Count} [{text}]")
+}
+
+void | IoError | HttpError All() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("POST /len HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhelloGET /next HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Body(server)
+    Body(server)
+    client.Write("POST /chunks HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: Chunked\r\n\r\n5\r\nhello\r\n6;name=value\r\n world\r\n0\r\nX-Trailer: 1\r\n\r\n".Bytes)
+    client.Write("GET /after HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Body(server)
+    Body(server)
+    client.Write("GET /none HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Body(server)
+
+    // a read appends at most what it was asked for, and gives 0 at the end, again and again
+    client.Write("POST /parts HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
+    parts = HttpRequest.Read(server)
+    mut got = Bytes()
+    p1 = parts.Body.Read(mut got, 2)
+    p2 = parts.Body.Read(mut got, 2)
+    p3 = parts.Body.Read(mut got, 2)
+    p4 = parts.Body.Read(mut got, 2)
+    p5 = parts.Body.Read(mut got, 2)
+    print("{p1} {p2} {p3} {p4} {p5}")
+
+    // the whole body over the bound of `ReadAll`
+    client.Write("POST /big HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
+    big = HttpRequest.Read(server)
+    match big.Body.ReadAll(4) {
+        Bytes b => print(b.Count)
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+
+    // the whole body as text, and a body that is no UTF-8
+    client.Write("POST /text HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\nhi".Bytes)
+    mut bad = "POST /bad HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\n".Bytes
+    bad.Add(255)
+    client.Write(bad)
+    for i in 0..<2 {
+        r = HttpRequest.Read(server)
+        match r.Body.ReadAllText(10) {
+            string t => print(t)
+            IoError e => print(e)
+            HttpError e => print("{e.Kind}: {e.Detail}")
+            InvalidUtf8 => print("not UTF-8")
+        }
+    }
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}

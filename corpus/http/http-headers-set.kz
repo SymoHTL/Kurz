@@ -1,0 +1,18 @@
+// expect: output
+// | [c=3]
+// | text/plain
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("set-cookie", "b=2")
+    headers.Set("SET-COOKIE", "c=3")
+    headers.Set("Content-Type", "text/plain")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+print(h.GetAll("set-cookie"))
+print(h.Get("content-type") ?? "none")
