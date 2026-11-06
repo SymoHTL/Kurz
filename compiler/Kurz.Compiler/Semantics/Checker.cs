@@ -573,16 +573,26 @@ public sealed partial class Checker
             return;
         }
 
+        if (d.TypeParameters.FirstOrDefault(p => p.Constant is not null) is { } holding)
+        {
+            if (!clash)
+            {
+                // T35: a `data` type's copies are no part of the build, so the type is not read, and a use of it carries no error of its
+                // own (E1)
+                NotSupported(holding.Line, "a type parameter that holds a constant, of a `data` type (T35)");
+                unsupportedTypes.Add(d.Name);
+                unsupportedBases[d.Name] = "a data type with a type parameter that holds a constant, which a data type names (T35)";
+            }
+
+            return;
+        }
+
         var symbol = new DataSymbol(d.Name, d);
         model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
-            if (p.Constant is not null)
-            {
-                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T35)");
-            }
         }
 
         if (clash)
@@ -1111,6 +1121,11 @@ public sealed partial class Checker
         var parameter = TypeParameter(n.Name);
         if ((parameter?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
         {
+            if (Types.IsError(constant))
+            {
+                return Types.Error; // T35: its constant's type has its diagnostic already (E1)
+            }
+
             // T35: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
             Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T35)");
             return Types.Error;
@@ -1191,6 +1206,15 @@ public sealed partial class Checker
     /// </summary>
     private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
     {
+        if (argument is NamedType { TypeArguments.Count: 0 } n && BoundType(n.Name) is null
+            && (TypeParameter(n.Name)?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
+        {
+            // T35: the name of a type parameter that holds a constant, among type arguments where a type stands, is a constant there, as
+            // a literal and an enum's value are, and rustc refuses the three alike (E0747) (the owner, 2026-11-03)
+            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{constant.Text}`, where a type stands (T35, T1)");
+            return Types.Error;
+        }
+
         var type = Resolve(argument);
         if (Types.IsVoid(type))
         {
@@ -1230,7 +1254,7 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
         }
 
         if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
@@ -1291,18 +1315,22 @@ public sealed partial class Checker
 
     /// <summary>
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
-    /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. The record's list holds no other type, and a
-    /// function with a parameter of one is not read (E1).
+    /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
+    /// error of its own (the owner, 2026-11-03), and a function whose constant has no type of the list, or one that is no name, is not read (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
         var type = Resolve(p.Constant!);
-        if (Types.IsError(type) || HoldsConstant(type))
+        if (HoldsConstant(type))
         {
             return type;
         }
 
-        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an integer type, `bool`, `char` or an `enum` is read (T35)");
+        if (!Types.IsError(type))
+        {
+            Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
+        }
+
         modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
         return Types.Error;
     }
