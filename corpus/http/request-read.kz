@@ -1,0 +1,39 @@
+// expect: output
+// | GET /a [x=1] Host=example.com Accept=*/*
+// | GET /a [] Host=h Accept=none
+// | GET /a [] Host=h Accept=none
+// | OPTIONS * [] Host=h Accept=none
+// | GET http://h/a [b] Host=h Accept=none
+// | GET / [] Host=none Accept=none
+// | BREW /pot [] Host=h Accept=none
+// | GET / [] Host=h Accept=a, b
+// rules: W5
+
+// the request a client sends, as a server reads it from its connection: the method, the path, the query after the first `?`,
+// and the headers, each as the client sent it, a value without the spaces and tabs around it
+void | IoError Show(string request) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(request.Bytes)
+    match HttpRequest.Read(server) {
+        HttpRequest r => print("{r.Method} {r.Path} [{r.Query}] Host={r.Headers.Get("host") ?? "none"} Accept={r.Headers.Get("Accept") ?? "none"}")
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError All() {
+    Show("GET /a?x=1 HTTP/1.1\r\nHost: example.com\r\nAccept: */*\r\n\r\n")
+    Show("GET /a? HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("OPTIONS * HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("GET http://h/a?b HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("GET / HTTP/1.0\r\n\r\n")
+    Show("BREW /pot HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("GET / HTTP/1.1\r\nHost: h\r\nAccept: \t a, b \t\r\n\r\n")
+}
+
+All() else {
+    IoError e => print(e)
+}
