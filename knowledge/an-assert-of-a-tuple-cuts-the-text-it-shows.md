@@ -1,6 +1,6 @@
 ---
 name: an-assert-of-a-tuple-cuts-the-text-it-shows
-description: xunit's message for a failed `Assert.Equal` of two tuples shows each string member cut after 50 characters, at `···`, so a test that compares a program's exit code, output and error as one tuple loses, when it goes red, the error text that says why; a red run of a server test in CI lost so the program's error after its limit of 60 seconds (2026-11-06); a test that compares what a program gave asserts with a message that carries each text whole, as `CaptureTests` (pull request 356) and `HttpServerTests` (pull request 365) do
+description: xunit's message for a failed `Assert.Equal` of two tuples shows each string member cut after 50 characters, at `···`, so a test that compares a program's exit code, output and error as one tuple loses, when it goes red, the error text that says why; in a red run of a server test in CI, the program's error text, which said why the program ran to its limit of 60 seconds, was cut in this way (2026-11-06); a test that compares what a program gave asserts with a message that carries each text whole, as `CaptureTests` (pull request 356) and `HttpServerTests` (pull request 365) do
 metadata:
   type: reference
 ---
@@ -19,12 +19,16 @@ Actual:   Tuple (-1, "\n`<the build directory>/http-server-coded-file/p"···, 
 (The build directory's path is left out here; the log held it.)
 
 The program's error text, which says why the run ended at its limit, and the client's error were both cut at `···`. xunit's
-display of a value cuts a string to its first 50 characters. The red was not seen again, so its cause stayed undiagnosed. A test
+display of a value cuts a string to its first 50 characters. The later runs of `gates` on that pull request passed the test (42214208831 and 42215581934), so its cause stayed undiagnosed. A test
 of the same file lost the program's output another way: the client's `IOException` ended it before it read the program's result
 (run 42202044451, attempt 1, on pull request 317).
 
-A collection is cut too: its message shows the items around the first difference and `···` for the rest, as in
-`[···, "2 /b", "1 /a", "1 /c"]`.
+A collection is cut too: a red run of `client-pool`, with a hand mutation, showed the items before the difference as `···`:
+
+```
+Expected: List<string> [···, "2 /b", "2 /b", "2 /b", "1 /a", "1 /c"]
+Actual:   string[]     [···, "2 /b", "2 /b", "2 /b", "1 /a", "2 /c"]
+```
 
 ## What to do
 
