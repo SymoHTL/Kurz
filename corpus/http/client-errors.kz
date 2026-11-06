@@ -2,12 +2,13 @@
 // | Unsupported: https is not supported: no TLS
 // | Unsupported: unsupported scheme
 // | ConnectionRefused
-// | 2147483647 true true 5 true
+// | 2147483647 true true 20 true
 // rules: W13
 
 // an address of `https` and one of another scheme than `http` are refused before any connect, the failure of a connect is the
-// network's `IoError`, and `HttpClientOptions()` holds .NET's defaults: no bound on the connections to one host, an idle
-// connection kept 1 minute, no bound on a connection's life, 5 redirects, and the limits of a request's head for a response's
+// network's `IoError`, and `HttpClientOptions()` holds .NET's defaults, no bound on the connections to one host, an idle
+// connection kept 1 minute and no bound on a connection's life, and 20 redirects, the owner's count, as browsers allow, where
+// .NET follows 50, and the limits of a request's head for a response's
 void Show(HttpClient client, string text) {
     at = Uri.Parse(text) else {
         UriError e => {

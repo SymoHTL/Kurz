@@ -6211,6 +6211,7 @@ pub class HttpBody {
 
     // The connection of a client's response, told once when the body ends or fails, so that the pool takes it back (W13).
     internal mut HttpConnection? home = null
+    internal mut HttpCall? call = null
 
     // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
     internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed) {
@@ -6364,7 +6365,11 @@ pub class HttpBody {
         }
 
         if toEnd {
-            n = s.Read(mut into, max)
+            HttpCallReads(s, call)
+            n = s.Read(mut into, max) else {
+                IoError e => return HttpCallFailed(e, call)
+            }
+
             if n == 0 {
                 ended = true
             }
@@ -6390,7 +6395,11 @@ pub class HttpBody {
             want = int(remaining)
         }
 
-        n = s.Read(mut into, want)
+        HttpCallReads(s, call)
+        n = s.Read(mut into, want) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
             e = HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
             failed = e
@@ -6445,7 +6454,7 @@ pub class HttpBody {
     // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
     bool | IoError | HttpError NextChunk(TcpStream s) {
         if atChunkEnd {
-            end = HttpLine(s, 2, side)
+            end = HttpLine(s, 2, side, call)
             if end.Count != 0 {
                 return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk")
             }
@@ -6453,7 +6462,7 @@ pub class HttpBody {
             atChunkEnd = false
         }
 
-        line = HttpLine(s, sizeLine, side) else {
+        line = HttpLine(s, sizeLine, side, call) else {
             HttpError e => return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk size")
         }
 
@@ -6490,7 +6499,7 @@ pub class HttpBody {
         remaining = size
         if size == 0 {
             while true {
-                trailer = HttpLine(s, sizeLine, side)
+                trailer = HttpLine(s, sizeLine, side, call)
                 if trailer.Count == 0 {
                     ended = true
                     return true
@@ -7165,16 +7174,18 @@ pub class Uri {
     }
 }
 
-// The options of a client, with .NET's names and defaults (design record, section 12; W13): the connections to one host, which no
-// number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the life of a connection, which no time
-// bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects followed, 5, and 0 for none; and the
-// limits of a response's head, a request's (W7).
+// The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
+// connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
+// life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects
+// followed, 20, as browsers allow, where .NET follows 50 (W15), and 0 for none; the
+// limits of a response's head, a request's (W7); and the time of a call, 100 seconds, as .NET's `HttpClient.Timeout` (W16).
 pub data HttpClientOptions(
     int MaxConnectionsPerServer = 2147483647,
     duration PooledConnectionIdleTimeout = 1min,
     duration PooledConnectionLifetime = 9223372036854775807ns,
-    int MaxAutomaticRedirections = 5,
-    HttpLimits Limits = HttpLimits())
+    int MaxAutomaticRedirections = 20,
+    HttpLimits Limits = HttpLimits(),
+    duration Timeout = 100s)
 
 // A response a client got: its status, its headers, and its body, read as a stream as a request's is, which holds its connection
 // until it ends (design record, section 12; W14).
@@ -7220,10 +7231,11 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
     // The response to a `GET` of `uri`, with its redirects followed up to `MaxAutomaticRedirections` (W15), or the failure of the
     // network or of HTTP.
     pub HttpResponseMessage | IoError | HttpError Get(Uri uri) {
+        call = HttpCall(instant.Now, Options.Timeout)
         mut target = uri
         mut followed = 0
         while true {
-            response = Exchange(target)
+            response = Exchange(target, call)
             next = HttpRedirect(target, response)
             if next == null || Options.MaxAutomaticRedirections <= 0 {
                 return response
@@ -7243,8 +7255,8 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
 
     // One request and its response, on the connection the pool holds for the host and port that went idle last, or on a new one: a
     // connection of the pool that ends before the first byte of a response carries the request again on a new one, once, as .NET
-    // sends a request again on a connection the server shut down (W13).
-    HttpResponseMessage | IoError | HttpError Exchange(Uri uri) {
+    // sends a request again on a connection the server shut down (W13); all of it within what remains of the `call` (W16).
+    HttpResponseMessage | IoError | HttpError Exchange(Uri uri, HttpCall call) {
         scheme = uri.Scheme.ToLowerAscii()
         if scheme == "https" {
             return HttpError(HttpKind.Unsupported, "https is not supported: no TLS")
@@ -7258,7 +7270,7 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
         request = HttpGetHead(uri).Bytes
         pooled = Checkout(key)
         if pooled != null {
-            match Carry(pooled, request) {
+            match Carry(pooled, request, call) {
                 HttpResponseMessage r => return r
                 IoError e => return e
                 HttpError e => return e
@@ -7267,8 +7279,8 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             }
         }
 
-        c = Open(uri, key)
-        match Carry(c, request) {
+        c = Open(uri, key, call)
+        match Carry(c, request, call) {
             HttpResponseMessage r => return r
             IoError e => return e
             HttpError e => return e
@@ -7283,20 +7295,33 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
         }
     }
 
-    // The request written on the connection and the head of its response read: the connection is busy while the response's body is
-    // open, `HttpSilent` where it ended before the first byte of a head, and closed then, as on every failure.
-    HttpResponseMessage | IoError | HttpError | HttpSilent Carry(HttpConnection c, Bytes request) {
+    // The request written on the connection and the head of its response read, each under what remains of the `call`, whose time
+    // the body's reads keep (W16): the connection is busy while the response's body is open, `HttpSilent` where it ended before the
+    // first byte of a head, and closed then, as on every failure; the call's time running out is no such end.
+    HttpResponseMessage | IoError | HttpError | HttpSilent Carry(HttpConnection c, Bytes request, HttpCall call) {
         s = c.Stream
+        HttpCallWrites(s, call) else {
+            IoError e => {
+                HttpShut(s)
+                return e
+            }
+        }
+
         s.Write(request) else {
             IoError e => {
                 HttpShut(s)
+                if e.Kind == IoKind.TimedOut {
+                    return HttpCallTimedOut()
+                }
+
                 return HttpSilent(e)
             }
         }
 
-        match HttpReadResponse(s, Options.Limits) {
+        match HttpReadResponse(s, Options.Limits, call) {
             HttpResponseHead h => {
                 body = HttpBody.MakeResponse(s, h.Length, h.Chunked, h.ToEnd, Options.Limits.MaxChunkSizeLine)
+                body.call = call
                 c.body = body
                 c.keep = h.Keep
                 if body.Ended {
@@ -7358,25 +7383,31 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             }
         }
 
-        mut k = idle.Count - 1
-        while k >= 0 {
+        mut pick = -1
+        mut k = 0
+        while k < idle.Count {
             c = idle[k]
-            if c.Key == key {
-                idle.RemoveAt(k)
-                c.ended = false
-                c.clean = false
-                return c
+            if c.Key == key && (pick < 0 || c.idleSince - idle[pick].idleSince >= 0s) {
+                pick = k
             }
 
-            k = k - 1
+            k = k + 1
         }
 
-        return null
+        if pick < 0 {
+            return null
+        }
+
+        chosen = idle[pick]
+        idle.RemoveAt(pick)
+        chosen.ended = false
+        chosen.clean = false
+        return chosen
     }
 
-    // A new connection to the host and port of `uri`, its reads and writes bounded by no time (section 12), or the `HttpError` of a
-    // host whose connections reach `MaxConnectionsPerServer`, since in a program of one actor no other actor gives one back (W13).
-    HttpConnection | IoError | HttpError Open(Uri uri, string key) {
+    // A new connection to the host and port of `uri`, its connect bounded by what remains of the `call` (W16), or the `HttpError` of
+    // a host whose connections reach `MaxConnectionsPerServer`, since in a program of one actor no other actor gives one back (W13).
+    HttpConnection | IoError | HttpError Open(Uri uri, string key, HttpCall call) {
         mut count = 0
         for c in busy {
             if c.Key == key {
@@ -7388,9 +7419,11 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             return HttpError(HttpKind.TooLarge, "too many connections to the host")
         }
 
-        s = TcpStream.Connect("{uri.Host}:{uri.Port}")
-        s.SetReadTimeout(null)
-        s.SetWriteTimeout(null)
+        remains = HttpCallLeft(call)
+        s = TcpStream.Connect("{uri.Host}:{uri.Port}", remains) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         return HttpConnection(s, key, instant.Now)
     }
 
@@ -7741,12 +7774,17 @@ string HttpTwo(long n) {
 data HttpRefused(int Status, HttpError Error)
 
 // The next line of the stream without its CR LF, of at most `most` bytes with them, taken through the stream's buffer (S24), its
-// failures in the words of the `side`, `request` or `response`, whose body it reads.
-Bytes | IoError | HttpError HttpLine(TcpStream s, int most, string side) {
+// failures in the words of the `side`, `request` or `response`, whose body it reads, each read under what remains of a client's
+// `call` where one is given (W16).
+Bytes | IoError | HttpError HttpLine(TcpStream s, int most, string side, HttpCall? call) {
     mut line = Bytes()
     while true {
         start = line.Count
-        n = s.Fill(mut line)
+        HttpCallReads(s, call)
+        n = s.Fill(mut line) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
             return HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
         }
@@ -8272,8 +8310,9 @@ HttpError HttpHeadTooLarge() => HttpError(HttpKind.TooLarge, "response header to
 // The head of the next response of `s` that is no `1xx`, the `1xx` before it read past, as hyper reads past it (W14): taken through
 // the stream's buffer line by line, each line ended by CR LF, and held to the limits of a request's head, the status line to
 // `MaxRequestLineSize` bytes with its CR LF, the header lines to `MaxRequestHeadersTotalSize` bytes with theirs and the empty line's,
-// at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body.
-HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s, HttpLimits limits) {
+// at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body. Each read waits what
+// remains of the `call`, and its time running out is the call's `TimedOut` (W16).
+HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s, HttpLimits limits, HttpCall call) {
     mut any = false
     while true {
         mut head = Bytes()
@@ -8283,8 +8322,13 @@ HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s
         mut count = 0
         while end < 0 {
             start = head.Count
+            HttpCallReads(s, call)
             n = s.Fill(mut head) else {
                 IoError e => {
+                    if e.Kind == IoKind.TimedOut {
+                        return HttpCallTimedOut()
+                    }
+
                     if start == 0 && !any {
                         return HttpSilent(e)
                     }
@@ -8451,4 +8495,48 @@ HttpResponseHead | HttpError HttpParseResponseHead(Bytes head, int lineEnd, int 
     }
 
     return HttpResponseHead(status, headers, length, false, false, keep)
+}
+
+// The time of one call of a client (W16): when it began, read from the monotonic clock, and its bound, the options' `Timeout`.
+data HttpCall(instant Start, duration Limit)
+
+// The failure of a call whose time ran out, `TimedOut` with the number 0, as the bound of `Connect` and the server's own timeout
+// give it (S9, W10).
+IoError HttpCallTimedOut() => IoError(IoKind.TimedOut, 0, "")
+
+// What remains of the call's time, or the call's `TimedOut` where nothing does: what has passed is held against the bound, and
+// never the start and the bound added, which can pass the clock's range (T36).
+duration | IoError HttpCallLeft(HttpCall call) {
+    passed = instant.Now - call.Start
+    if passed >= call.Limit {
+        return HttpCallTimedOut()
+    }
+
+    return call.Limit - passed
+}
+
+// The stream's next read set to wait what remains of the `call`, where one is given, or the call's `TimedOut`, with no call of the
+// system, where nothing remains (W16).
+void | IoError HttpCallReads(TcpStream s, HttpCall? call) {
+    if call == null {
+        return
+    }
+
+    remains = HttpCallLeft(call)
+    s.SetReadTimeout(remains)
+}
+
+// The stream's next write set the same way (W16).
+void | IoError HttpCallWrites(TcpStream s, HttpCall call) {
+    remains = HttpCallLeft(call)
+    s.SetWriteTimeout(remains)
+}
+
+// A failure of a read or a connect under a `call`: the call's own `TimedOut` where the time the client set ran out (W16).
+IoError HttpCallFailed(IoError e, HttpCall? call) {
+    if call != null && e.Kind == IoKind.TimedOut {
+        return HttpCallTimedOut()
+    }
+
+    return e
 }
