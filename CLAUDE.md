@@ -116,6 +116,13 @@ Each line names a trap; its evidence is in the entry it links.
   workflow-skip literal in the head commit
   ([knowledge/a-skipped-job-reports-success.md](knowledge/a-skipped-job-reports-success.md)).
   Gate: the pre-push hook refuses a skip literal in a commit message; HAZARD (#4) where it is off.
+- A run of a program that comes back at its limit with "an orphan holds its output": a child the
+  program left running held its streams after the program ended, a forked server whose `kill` an
+  error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05
+  ([knowledge/an-orphan-holds-the-output-of-its-program.md](knowledge/an-orphan-holds-the-output-of-its-program.md)).
+  Gate: `compiler-tests`
+  (`CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`, and
+  for the holders it ends, the other tests of `CaptureTests`).
 
 ## Tests: every decision is proven
 
@@ -232,7 +239,9 @@ Each line names a trap; its evidence is in the entry it links.
   `oversized`, `empty`, `bad-diff`: the line says what to do. A run that labelled the pull
   request is a round whatever kind it ends with (that rule), so running it again after any of
   them, `budget`, `usage-limit`, `head-moved` and the reviewer's own defects among them, takes the
-  one round, and after it no run follows.
+  one round, and after it no run follows; but a run that `usage-limit` ended before any paid pass
+  took its label off again, says so in its note and its status, and is no round, so its run after
+  the reset is the round.
   `judgment step`
 - A branch behind `main` fails what `main` already fixed: update the branch before debugging. At
   the review cap the update is a new head outside the cap's approval: ask the owner first, unless
@@ -444,14 +453,42 @@ Gate: review rule "rules for sessions".
   tool's cases "delete:"); a deletion by hand or by a button skips the command, as a merge by the
   button skips the merge tool: HAZARD (#14).
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
-  head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
+  head**, passed as `--over-red`. An approval is never standing, but for two cases. The first: a pull request
   at the review cap (the rule "A pull request gets at most one review round" below) carries the
   owner's approval of 2026-10-21, which holds for the cap of one since 2026-10-22, to merge over red
   at the head its round at the cap reviewed, when that round completed, for the check `review` and for `gates` when its table shows `pr-findings` as its
   one FAIL; a round at the cap that did not complete, any other red check or gate, and a head that took
-  `main` after that round need the owner's approval for that head as for any other. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
-  takes `--over-red` as the caller's statement (HAZARD #3). Retired on
-  2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
+  `main` after that round need the owner's approval for that head as for any other, but for the second
+  case. The second: a head that took `main` after the round at the cap carries the owner's approval of
+  2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
+  6680237539, and for the floor on 2026-11-06, comment 6680659012), to merge over red for the check
+  `review` at that head, when all of these hold:
+  - its round at the cap completed, as in the first case;
+  - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
+    different words and the merge keeps every word of both, or the floor of `RunTests` (`RunFloor`),
+    set to the count measured on the merged tree: on Linux in the image the `gates` job runs in, with
+    the floor at 999, and on Windows the side that changed it, held by the `compiler-windows` run; the
+    merge is made with rerere off (comment 6680237539), since a conflict that rerere resolves is still a
+    conflict
+    ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
+  - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
+    the lines a conflict block joined and for the floor;
+  - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
+    before its push: every word kept does not keep every test
+    ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
+  - `gates` and `compiler-windows` are green on that head, read after the walk at the cap (the rule
+    "A pull request gets at most one review round" below), which resolves every thread of the round;
+  - every defect its round found is named on issue 39, and no high finding of it holds.
+
+  The round need not have converged (the owner, 2026-11-06, issue 39, comment 6680905808): for a
+  round that did not, this case is the owner's choice that the refusal of a branch behind `main` at
+  the cap (the rule below) asks for. Any other conflict, any
+  other change to its own diff, a round at the cap that did not complete, a high finding that holds
+  and a red gate need the owner's approval for that head. Whether the conditions of either case hold
+  is read by the caller, a `judgment step`: the merge tool takes `--over-red` as the caller's
+  statement (HAZARD #3). Retired on 2026-10-21 by the cap of the first case: "An approval is never
+  standing" with no case. Retired on 2026-11-06 by issue 39, comment 6680237539: "a head that took
+  `main` after that round" needing the owner's approval as any other. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
@@ -471,7 +508,12 @@ Gate: review rule "rules for sessions".
   converging ([knowledge/rounds-do-not-converge.md](knowledge/rounds-do-not-converge.md)). A round is a
   review run that labelled the pull request: a run with files to review, in CI or off the
   pipeline, puts the label `review-round-<n>` on before its first pass, and it is a round whatever
-  follows (a pass, a limit, a cut-off, a failure); a dry run, `--plan` and a run that ends before
+  follows (a pass, a cut-off, a failure, a limit after a paid pass), but for a run that the usage
+  limit ends before any paid pass, no pass done and no call billed: that run takes its own label off
+  again and is no round, and a refused removal ends it as `failed` (the owner, 2026-11-02, issue 156,
+  [knowledge/a-limit-before-any-paid-pass-is-no-round.md](knowledge/a-limit-before-any-paid-pass-is-no-round.md),
+  which retired "a limit" among what follows for a limit before any paid pass);
+  a dry run, `--plan` and a run that ends before
   the label (closed, the secret missing, nothing to review, the cap) put none on. The count is the
   highest `n`, the rounds before the cap count, and the rounds a pull request had before the labels
   are counted by one label put on by hand. At one every further run with a file to review ends before its first pass
@@ -505,7 +547,8 @@ Gate: review rule "rules for sessions".
   every file of the head, from the head's `review` status. Where it did not, or where the status does
   not show it, the refusal says that taking `main` makes the review of the new head end as `cap`
   before any pass and that the merge needs the owner's choice. Gate: `self-tests` (the count, the label before
-  the first pass, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
+  the first pass, the label taken off again at a limit before any paid pass and kept after a paid pass, after another failure
+  and on a cancel, a refused removal, the end at the cap and its status, the run at the cap that only replays; the move to the collection ticket in
   `pr-findings`, in the resolve command, in the cap command and in the merge tool, whose wiring of it is
   `merge_pr.held_by`; a section posted with no reading, which the cap command refuses; the merge tool's refusal of a
   branch behind `main` at the cap, `merge_pr.taking_main`); what the reading says,

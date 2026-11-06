@@ -1,0 +1,18 @@
+// expect: output
+// | true
+// | true
+// | true
+// allow: raw
+// rules: T36
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(5000000000)
+print(a + 90min - a == 90min)
+print(a - 5s - a == -5s)
+print(90min + a - a == 90min)

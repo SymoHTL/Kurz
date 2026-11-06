@@ -1,12 +1,11 @@
 // expect: output
 // | HTTP/1.1 204 No Content||
 // | HTTP/1.1 304 Not Modified|Content-Type: text/plain; charset=utf-8||
-// | HTTP/1.1 100 Continue||
 // | HTTP/1.1 205 Reset Content|Content-Length: 0||
 // | HTTP/1.1 204 No Content|Content-Type: text/plain; charset=utf-8||
 // rules: W8
 
-// a `1xx`, a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
+// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
 // says `Content-Length: 0`
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -28,7 +27,6 @@ void | IoError Wire(HttpResponse r) {
 void | IoError | HttpError All() {
     Wire(HttpResponse.Empty(204))
     Wire(HttpResponse.Text(304, "dropped"))
-    Wire(HttpResponse.Empty(100))
     Wire(HttpResponse.Empty(205))
     coded = HttpResponse.Text(204, "dropped")
     coded.Headers.Set("Transfer-Encoding", "gzip")

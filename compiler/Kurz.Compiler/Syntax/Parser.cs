@@ -573,6 +573,11 @@ public sealed class Parser
 
         if (token.Kind == TokenKind.Name)
         {
+            if (token.Text == "const" && Peek() is { Kind: TokenKind.Name, Text: "assert" } && Peek(2).Kind == TokenKind.LeftParen)
+            {
+                return ParseConstAssert(); // T37: a statement of its own; `const` and `assert` are names everywhere else (L18)
+            }
+
             if (Peek().Kind == TokenKind.Assign)
             {
                 Advance();
@@ -627,17 +632,23 @@ public sealed class Parser
         return ok;
     }
 
-    /// <summary><c>use</c> brings in another folder or a package (F10), named by a dotted path as the record's <c>use net.http</c> is; a core word in the path is <c>reserved-word</c> (L12).</summary>
+    /// <summary><c>use</c> brings in another folder or a package (F10), named by its path with <c>/</c> between its names, <c>use a/util</c>
+    /// (section 8); a core word in the path is <c>reserved-word</c> (L12), and a <c>.</c> or <c>..</c> where a name stands is <c>syntax</c>.</summary>
     private UseStatement ParseUse()
     {
         var use = Advance();
         var parts = new List<string> { ExpectName("a folder or package name").Text };
-        while (Match(TokenKind.Dot))
+        while (Match(TokenKind.Slash))
         {
             parts.Add(ExpectName("a name").Text);
         }
 
-        return new UseStatement(use.Line, string.Join('.', parts));
+        if (At(TokenKind.Dot))
+        {
+            throw new ParseError(ErrorLine(), $"a `use` path has `/` between its names, found {Current}");
+        }
+
+        return new UseStatement(use.Line, string.Join('/', parts));
     }
 
     /// <summary>The string after <c>extern</c>: the C calling convention, <c>"C"</c>, the one R16 and R17 write; another is text no rule gives a meaning (E4).</summary>
@@ -765,6 +776,25 @@ public sealed class Parser
         suppressNewlines--;
         Expect(TokenKind.RightParen, "`)`");
         return new AsmStatement(keyword.Line, templates, operands);
+    }
+
+    /// <summary>
+    /// T37: <c>const assert(condition, text)</c>, the text a string literal, whose holes the checker fills while the program compiles
+    /// *(assumed, §4: as Rust's <c>assert!</c> takes its message as a literal)*.
+    /// </summary>
+    private ConstAssertStatement ParseConstAssert()
+    {
+        var keyword = Advance(); // `const`
+        Advance(); // `assert`
+        Expect(TokenKind.LeftParen, "`(`");
+        suppressNewlines++;
+        var condition = ParseExpression();
+        Expect(TokenKind.Comma, "`,` and the text of the `const assert`");
+        var text = Expect(TokenKind.StringLiteral, "the text of the `const assert`, a string literal");
+        suppressNewlines--;
+        SkipNewlines();
+        Expect(TokenKind.RightParen, "`)`");
+        return new ConstAssertStatement(keyword.Line, condition, ParseStringLiteral(text));
     }
 
     /// <summary>

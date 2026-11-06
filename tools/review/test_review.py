@@ -9,11 +9,13 @@ way, with the write landed or not."""
 import contextlib
 import hashlib
 import io
+import itertools
 import json
 import os
 import sys
 import time
 import types
+import urllib.parse
 
 import kit
 import review as rv
@@ -138,7 +140,11 @@ class MemoryForge(rv.Forge):
         self.first_write = None  # how long the log was when the first write of a result reached the wire (the round's label is none)
         self.labels = []  # labels on the pull request, which a case may preload: pr() answers them, and a run adds to them
         self.refuse_labels = None  # the forge refuses a label write whose name starts with this
+        self.refuse_unlabel = False  # the forge refuses to take a label off
+        self.wire = []  # (method, path) of every write that reached the wire, in order
         self.read_back = 0  # how often the lows issue was read back after a comment on it failed
+        self.login = "bot"  # the account me() answers and a run's posts are written by: a case sets the CI account or a person
+        self.other_blobs = {}  # a file of the default branch whose id is not this checkout's: its path and that id
 
     def pr(self):
         # the captured payload, with the head and the base of this case; its state is open, like the real one's
@@ -148,10 +154,15 @@ class MemoryForge(rv.Forge):
                 "labels": [dict(LABEL or {}, name=name) for name in self.labels]}
 
     def me(self):
-        return "bot"
+        return self.login
 
     def default_branch(self):
         return "trunk"
+
+    def blob_id(self, branch, path):
+        # the default branch holds this checkout's reviewer, unless a case says otherwise
+        with open(os.path.join(kit.ROOT, path), "rb") as f:
+            return self.other_blobs.get(path) or rv.blob_id(f.read())
 
     def rules(self, branch):
         self.asked.append(branch)
@@ -173,13 +184,14 @@ class MemoryForge(rv.Forge):
         return [{"body": body} for n, body in self.collected if n == number]
 
     def send(self, path, payload, method):
+        self.wire.append((method, path))
         body = payload.get("body") or ""
         counting = path == f"issues/{self.number}/labels" and all(n.startswith(kit.ROUND_LABEL) for n in payload["labels"])
         if self.first_write is None and hasattr(sys.stdout, "getvalue") and not counting:
             self.first_write = len(sys.stdout.getvalue())
         if self.refuse_findings and (("kurz-review:findings" in body and path.startswith("pulls/")) or "low findings of pull request" in body):
             raise kit.Refused("`gh api` exited 1: gh: Validation Failed (HTTP 422)")  # written by hand: no capture holds this refusal
-        comment = {"id": len(self.notes) + 1, "user": {"login": "bot"}, "body": payload.get("body")}
+        comment = {"id": len(self.notes) + 1, "user": {"login": self.login}, "body": payload.get("body")}
         if method == "PATCH":
             next(c for c in self.notes if str(c["id"]) == path.rsplit("/", 1)[1])["body"] = payload["body"]
         elif path == "issues":
@@ -195,6 +207,10 @@ class MemoryForge(rv.Forge):
             if self.refuse_labels is not None and any(n.startswith(self.refuse_labels) for n in payload["labels"]):
                 raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
             self.labels.extend(payload["labels"])
+        elif method == "DELETE" and path.startswith(f"issues/{self.number}/labels/"):
+            if self.refuse_unlabel:
+                raise kit.Refused("`gh api` exited 1: gh: Not Found (HTTP 404)")
+            self.labels.remove(urllib.parse.unquote(path.rsplit("/", 1)[1]))
         elif path.startswith("issues/"):
             self.collected.append((int(path.split("/")[1]), body))
         elif path.startswith("statuses/"):
@@ -897,7 +913,8 @@ def suite(case):
     ci_env = {"GITHUB_ACTIONS": "true", "PR_NUMBER": "7"}
     understood = lambda argv, env: rv.arguments(argv, env) or {}
     case("args: a number and a mode are a call", understood(["--pr", "7", "--local"], {}) ==
-         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES)},
+         {"pr": 7, "local": True, "dry": False, "plan": False, "bootstrap": None, "ci": False, "bounds": (rv.MIN_PASSES, rv.MAX_PASSES),
+          "passes": None},
          understood(["--pr", "7", "--local"], {}))
     case("args: --plan is a dry run that stops before its first pass, and does not go with --local",
          [understood(["--pr", "7", "--plan"], {}).get(k) for k in ("dry", "plan")] == [True, True]
@@ -984,6 +1001,75 @@ def suite(case):
     code, out = run_review(forge, scripted_model(found), ["--pr", "1"], ci=True, credential="x")
     case("run: the round's number follows the rounds the labels count, so one label counts the rounds before it",
          code == 0 and forge.labels[-1] == f"{kit.ROUND_LABEL}{kit.ROUND_CAP}", (code, forge.labels))
+
+    # A run the usage limit ends before any paid pass, no pass done and no call billed, is no round (the owner, 2026-11-02,
+    # issue 156): it takes its own label off again. A run that paid a pass, or that ended another way, stays a round.
+    def limited(paid, error=None):
+        """A model whose first `paid` calls answer, at 0.25 USD each, and whose every call after them raises `error`, the usage
+        limit unless named; the batches call it at the same time, and the count hands each call its own number."""
+        def call(prompt, paths, timeout_s):
+            call.batches.append(sorted(paths))
+            if next(call.count) >= paid:
+                raise error or rv.ReviewError("usage-limit", "resets at 1pm", 429)
+            return [], 0.25, 0
+        call.batches, call.count = [], itertools.count()
+        return call
+    rounds_of = lambda forge: [n for n in forge.labels if n.startswith(kit.ROUND_LABEL)]
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run the usage limit ends before any paid pass takes its own round label off again",
+         code == 3 and rounds_of(forge) == [] and "REVIEW DID NOT COMPLETE (usage-limit)" in out
+         and f"took the label {kit.ROUND_LABEL}1 off again" in out, (code, forge.labels, out[-300:]))
+    failure = [n["body"] for n in forge.notes if "did not complete" in n["body"]]
+    case("run: a run that took its round label off says so in its note and in its status",
+         len(failure) == 1 and f"its label `{kit.ROUND_LABEL}1` was taken off again" in failure[0]
+         and "no pass was paid, so this run is no review round" in failure[0]
+         and forge.statuses == error and forge.said == ["review did not complete: usage-limit, before any paid pass: no round counted"],
+         ([n["body"][:200] for n in forge.notes], forge.said))
+    at = lambda shape: [i for i, (method, path) in enumerate(forge.wire) if shape(method, path)]
+    removed, noted = at(lambda m, p: m == "DELETE" and "/labels/" in p), at(lambda m, p: m == "POST" and p == "issues/1/comments")
+    status = at(lambda m, p: p.startswith("statuses/"))
+    case("run: a run takes its round label off before its note and its status say that it did",
+         len(removed) == 1 and bool(noted) and bool(status) and removed[0] < noted[-1] and removed[0] < status[0], forge.wire)
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(1), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run the usage limit ends after one paid pass stays a round, and its label stays",
+         code == 3 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "off again" not in out and "1 passes" in out
+         and forge.said == ["review did not complete: usage-limit"], (code, forge.labels, forge.said))
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0, rv.ReviewError("usage-limit", "resets at 1pm", 429, cost=0.3)), ["--pr", "1"], ci=True,
+                           credential="x")
+    case("run: a run whose failed call was billed before the usage limit paid for it, and its label stays",
+         code == 3 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "off again" not in out, (code, forge.labels, out[-300:]))
+    forge = MemoryForge()
+    code, out = run_review(forge, limited(0, rv.ReviewError("api", "the API refused the call")), ["--pr", "1"], ci=True, credential="x")
+    case("run: a run another failure ends before any pass stays a round, and its label stays",
+         code == 1 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "REVIEW DID NOT COMPLETE (api)" in out and "off again" not in out,
+         (code, forge.labels, out[-300:]))
+    forge = MemoryForge()
+    try:
+        cancelled = run_review(forge, limited(0, KeyboardInterrupt()), ["--pr", "1"], ci=True, credential="x")
+    except KeyboardInterrupt:  # what a cancel of the job raises in the process
+        cancelled = "cancelled"
+    case("run: a run cancelled after its label ends where it is: the label stays, and nothing is posted after it",
+         cancelled == "cancelled" and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and (forge.notes, forge.statuses) == ([], []),
+         (cancelled, forge.labels, [n["body"][:120] for n in forge.notes], forge.statuses))
+    forge = MemoryForge()
+    forge.refuse_unlabel = True
+    code, out = run_review(forge, limited(0), ["--pr", "1"], ci=True, credential="x")
+    case("run: a round label the forge refuses to take off ends the run as failed, in the words of a refused label, with the limit's line",
+         code == 1 and rounds_of(forge) == [f"{kit.ROUND_LABEL}1"] and "REVIEW DID NOT COMPLETE (failed)" in out
+         and f"the label {kit.ROUND_LABEL}1 could not be taken off again" in out and "whether it was taken off is not known" in out
+         and "may count as a round of the" in out and "the usage limit ended the run before any paid pass (resets at 1pm" in out
+         and forge.statuses == error, (code, forge.labels, forge.statuses, out[-400:]))
+    forge = MemoryForge()
+    run_review(forge, scripted_model({"new.kz": rv.ReviewError("usage-limit", "resets at 1pm", 429)}), ["--pr", "1", "--local"])
+    forge.labels = [n for n in forge.labels if not n.startswith(kit.ROUND_LABEL)]  # edited: that run's label taken off by hand
+    again = limited(0)
+    code, out = run_review(forge, again, ["--pr", "1", "--local"])
+    case("run: a file replayed from the cache is no pass, so a run whose other files the usage limit stops at their first call is no round",
+         code == 3 and again.batches == [["new.kz"]] and rounds_of(forge) == [] and "3 replayed from the cache" in out,
+         (code, again.batches, forge.labels, out[:300]))
     forge, unused = MemoryForge(), scripted_model(found)
     forge.labels = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
@@ -1009,6 +1095,85 @@ def suite(case):
          local[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in local[1] and forge.statuses == [] and unused.batches == []
          and planned[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in planned[1] and (plan_forge.notes, plan_forge.statuses) == ([], []),
          (local[0], planned[0], forge.statuses, unused.batches, plan_forge.notes))
+
+    # --- whose state a plan reads (#300). The plan of the run in CI reads the state the CI account stored, as that run
+    # does; a plan with --passes plans a run off the pipeline, which reads its own login's, as every run that posts does.
+    def stored_by(account, labels=()):
+        """A forge on which a run in CI, posting as `account`, converged on every file and stored its state,
+        seen afterwards from a person's login, with `labels` on the pull request."""
+        forge = MemoryForge()
+        forge.login = account
+        run_review(forge, scripted_model({}), ["--pr", "1"], ci=True, credential="x")
+        forge.login, forge.labels = "person", list(labels)
+        return forge
+
+    def under_another_key(forge):
+        """The stored state as if written under another key: the title, the rules or the reviewer changed since."""
+        for c in forge.notes:
+            if "kurz-review:state" in c["body"]:
+                c["body"] = c["body"].replace('"key": "', '"key": "0')
+        return forge
+    at_cap = [f"{kit.ROUND_LABEL}{kit.ROUND_CAP}"]
+    unused = scripted_model(found)
+    code, out = run_review(stored_by(rv.CI_ACCOUNT, at_cap), unused, ["--pr", "1", "--plan"])
+    case("plan: without --passes it plans the run in CI from the state the CI account stored, so at the cap a head that state "
+         "answers whole is 0 batches, not cap",
+         code == 0 and "PLAN: 0 batches, 0 passes" in out and "(cap)" not in out and unused.batches == []
+         and f"4 replayed from the cache {rv.CI_ACCOUNT} stored" in out, (code, out[-400:]))
+    code, out = run_review(stored_by("person", at_cap), scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: the plan of the run in CI does not read the state the person's own login stored, which that run would not read",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap): files of this head the cache does not answer: 4 of 4" in out, (code, out[-300:]))
+    passes = ["--pr", "1", "--plan", "--passes", str(rv.MAX_PASSES)]  # the limit a run without it has: the same key
+    own, theirs = run_review(stored_by("person", at_cap), scripted_model(found), passes), run_review(stored_by(rv.CI_ACCOUNT, at_cap), scripted_model(found), passes)
+    case("plan: with --passes it plans a run off the pipeline from the state its own login stored, and not from the CI account's",
+         understood(passes, {}).get("passes") == rv.MAX_PASSES and own[0] == 0 and "PLAN: 0 batches" in own[1]
+         and "4 replayed from the cache person stored" in own[1] and theirs[0] == 1 and "REVIEW DID NOT COMPLETE (cap)" in theirs[1],
+         (own[0], own[1][-300:], theirs[0], theirs[1][-300:]))
+    forge, local = stored_by(rv.CI_ACCOUNT), scripted_model({})
+    code, out = run_review(forge, local, ["--pr", "1", "--local"])
+    forge, again = stored_by(rv.CI_ACCOUNT), scripted_model({})
+    forge.login = rv.CI_ACCOUNT
+    replayed = run_review(forge, again, ["--pr", "1"], ci=True, credential="x")
+    case("run: a run off the pipeline replays nothing from the state the CI account stored, which the run in CI replays whole",
+         code == 0 and "0 replayed from the cache person stored" in out and sorted({p for b in local.batches for p in b}) == ["a.md", "b.md", "e.md", "new.kz"]
+         and replayed[0] == 0 and again.batches == [] and f"4 replayed from the cache {rv.CI_ACCOUNT} stored" in replayed[1],
+         (code, local.batches, replayed[0], again.batches))
+    forge = under_another_key(stored_by(rv.CI_ACCOUNT, at_cap))
+    forge.other_blobs = {"tools/kit.py": "0" * 40}
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where the state of the run in CI has another key and this checkout's reviewer is not the default branch's, the "
+         "plan says NOT CHECKED, exits 1, and says neither cap nor a count",
+         code == 1 and "NOT CHECKED: whether the cache of the run in CI answers this head" in out
+         and "tools/kit.py here is not the default branch's (trunk)" in out and "(cap)" not in out and "PLAN:" not in out, (code, out[-400:]))
+    code, out = run_review(under_another_key(stored_by(rv.CI_ACCOUNT, at_cap)), scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where this checkout's reviewer is the default branch's, a state under another key is the answer of the run in CI: "
+         "at the cap it is cap, not NOT CHECKED",
+         code == 1 and "REVIEW DID NOT COMPLETE (cap)" in out and "NOT CHECKED" not in out, (code, out[-300:]))
+    forge = stored_by(rv.CI_ACCOUNT, at_cap)  # stored under this checkout's key, as by a run of an older default branch
+    forge.other_blobs = {"tools/review/review.py": "0" * 40}
+    code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--plan"])
+    case("plan: where the state of the run in CI has this checkout's key and this checkout's reviewer is not the default branch's, "
+         "the plan says NOT CHECKED, not the replay of a key that run no longer makes",
+         code == 1 and "NOT CHECKED: whether the cache of the run in CI answers this head" in out
+         and "tools/review/review.py here is not the default branch's" in out and "whatever key the state carries" in out
+         and "replayed" not in out and "PLAN:" not in out and "(cap)" not in out, (code, out[-400:]))
+    saved = kit.gh_json, os.environ.get("GITHUB_ACTIONS")
+
+    def no_user(path):
+        raise kit.Refused("`gh api` exited 1: gh: Resource not accessible by integration (HTTP 403)")  # written by hand: no capture holds it
+    try:
+        kit.gh_json = no_user
+        os.environ["GITHUB_ACTIONS"] = "true"
+        in_ci = attempt(rv.Forge("o/r", 1).me)
+        os.environ["GITHUB_ACTIONS"] = ""
+        outside = attempt(rv.Forge("o/r", 1).me)
+    finally:
+        kit.gh_json = saved[0]
+        os.environ.pop("GITHUB_ACTIONS", None) if saved[1] is None else os.environ.__setitem__("GITHUB_ACTIONS", saved[1])
+    case("forge: in CI, where the job token has no user endpoint, a run posts as github-actions[bot], the account a plan of that "
+         "run reads; outside CI the refusal stands",
+         in_ci == rv.CI_ACCOUNT == "github-actions[bot]" and isinstance(outside, kit.Refused), (in_ci, outside))
+
     forge, unused = MemoryForge(), scripted_model(found)
     forge.refuse_labels = kit.ROUND_LABEL
     code, out = run_review(forge, unused, ["--pr", "1"], ci=True, credential="x")
@@ -1516,6 +1681,8 @@ def suite(case):
         kit_id = blob(f.read())
     case("run: the audit note names what reviewed by git blob ids", f"kit.py `{kit_id}`" in audit and f"rules `{blob(RULES.encode())}`" in audit,
          audit[:500])
+    case("run: the audit note's blob ids are git's: the empty blob has the id git gives it, which no formula of the cases computes",
+         rv.blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", rv.blob_id(b""))  # `git hash-object /dev/null`
     forge = MemoryForge()
     forge.rules = lambda branch: None
     code, out = run_review(forge, scripted_model(found), ["--pr", "1", "--local", "--bootstrap-rules", os.path.join(kit.ROOT, rv.RULES_PATH)])

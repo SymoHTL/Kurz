@@ -7,8 +7,9 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The decisions of the server's writer of responses (W8; design record, section 12) that no corpus case pins: a status outside
-/// 100 to 599 stops the program, and a streamed response of a status without a body (W11), which a case cannot hold since the error
-/// line names the line of std/ that throws; the member of a stream that std/'s writer of a streamed response calls and no program sees; a file whose
+/// 200 to 599 stops the program, a `1xx` among them, and so does a `205` given a body by <c>Text</c> or <c>Bytes</c>, and a streamed
+/// response of a status without a body (W11), which a case cannot hold since the error line names the line of std/ that throws; the
+/// member of a stream that std/'s writer of a streamed response calls and no program sees; a file whose
 /// size changes between the head and the body, which a program cannot time, read through a function an edited std/ adds; and a
 /// build for Windows, whose runtime gives no socket, says <c>not supported</c> at the line of the program whose write reaches the
 /// socket through std/.
@@ -31,15 +32,17 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
     [Theory]
     [InlineData("Text(600, \"x\")", 600)]
     [InlineData("Bytes(99, \"x\".Bytes)", 99)]
+    [InlineData("Empty(100)", 100)]
+    [InlineData("Text(199, \"x\")", 199)]
     [InlineData("Empty(-1)", -1)]
     [InlineData("File(1000, \"x.txt\")", 1000)]
     [InlineData("Stream(600, (HttpWriter w) => w.Write(\"x\"))", 600)]
-    public void A_status_outside_100_to_599_stops_the_program_with_its_text(string make, int status)
+    public void A_status_outside_200_to_599_stops_the_program_with_its_text(string make, int status)
     {
-        // the edges 100 and 599 make a response, the positive control; the status past them is thrown from std/, and nothing after it
+        // the edges 200 and 599 make a response, the positive control; the status past them is thrown from std/, and nothing after it
         // runs
         var text = $"""
-            print(HttpResponse.Empty(100).Status)
+            print(HttpResponse.Empty(200).Status)
             print(HttpResponse.Empty(599).Status)
             HttpResponse.{make}
             print("after")
@@ -55,10 +58,36 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-response-status"));
         Assert.Equal(1, code);
-        Assert.Equal(["100", "599"], output);
+        Assert.Equal(["200", "599"], output);
         var lines = error.Split('\n');
         Assert.StartsWith("error: thrown at std/std.kz:", lines[0], StringComparison.Ordinal);
-        Assert.Equal([$"status {status} is outside 100 to 599", ""], lines[1..]);
+        Assert.Equal([$"status {status} is outside 200 to 599", ""], lines[1..]);
+    }
+
+    [Theory]
+    [InlineData("Text(205, \"x\")")]
+    [InlineData("Bytes(205, \"x\".Bytes)")]
+    public void A_205_given_a_body_by_Text_or_Bytes_stops_the_program_with_its_text(string make)
+    {
+        // an empty 205 from each of the four functions, a file's among them, whose length is taken when it is written, makes a
+        // response, the positive control; a body given with it is thrown from std/ (design record, section 12: the owner,
+        // 2026-11-02, Q14, and the reading said back with it, assumed), and nothing after it runs
+        var text = $"""
+            print(HttpResponse.Text(205, "").Status)
+            print(HttpResponse.Bytes(205, Bytes()).Status)
+            print(HttpResponse.Empty(205).Status)
+            print(HttpResponse.File(205, "none.txt").Status)
+            HttpResponse.{make}
+            print("after")
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-response-205"));
+        Assert.Equal(1, code);
+        Assert.Equal(["205", "205", "205", "205"], output);
+        var lines = error.Split('\n');
+        Assert.StartsWith("error: thrown at std/std.kz:", lines[0], StringComparison.Ordinal);
+        Assert.Equal(["status 205 takes no body", ""], lines[1..]);
     }
 
     [Theory]
