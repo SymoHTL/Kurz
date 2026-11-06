@@ -357,10 +357,11 @@ The runtime a built program links is written in Kurz, in `runtime/` at the top o
 code is in `std/`: the allocator of section 3 and the blocks of a list and of a string (the owner, 2026-10-24, "A std/ directory now"),
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
-`HttpError` with its `HttpKind` (W2) and the class `HttpHeaders` (W4), types every program sees (W1: the checker of a program is given
+`HttpError` with its `HttpKind` (W2), the class `HttpHeaders` (W4), and `HttpRequest` with its `HttpBody`, `HttpLimits` with its `HttpRate`, and
+the reader of a request from a `TcpStream` (W5 to W7), `HttpResponse`, the writer of a response to one (W8), and `HttpServer`, the loop that serves a connection's requests with a handler (W9) and holds each to its bounds of time (W10), types every program sees (W1: the checker of a program is given
 `std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
-members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, where the built-in types every file sees, `IoError` among them, are
-the checker's own declarations, made again for each file), at
+members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, and the built-in types every file sees, `IoError` among them, are
+the symbols `std/`'s checker made of them, so that the `IoError` a function of `std/` gives is the program's), at
 the top of the repository beside `runtime/` (an assumption of the record, section 2). The build of the compiler embeds every `.kz` file of
 both, by its path from the top of the repository (`Build/Runtime.cs`, `Runtime.Files`), and a build
 compiles `std/` with every program as it compiles the runtime. Code in `common/` reaches the functions of the target it is built for as the
@@ -433,7 +434,8 @@ giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` calli
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
 The Linux file also gives the calls on files and sockets of chapter 13 (section 12), which the emitted
-code calls and nothing of `common/` or `std/` does, so that the Windows file gives none of them (S11). Each takes
+code of a program and of `std/`'s reader of requests (W5) calls and nothing of `common/` does, so that the Windows file gives none of
+them (S11). Each takes
 a path as the address of its bytes ended by a NUL byte, which `common/`'s `CPath` copies from a string,
 null where the string holds a NUL, and `FreePath` gives back; each returns a number of 0 or more, or a
 failure below 0, the system's error number negated, -4096 for the name of a directory's entry that
@@ -697,7 +699,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type, `Order.Source`, where a pass made the copy; `T.Make(f => ...)` in a copy that binds a
   `data` type becomes one call of its primary constructor, with an argument for each field in order,
   each a copy of the lambda's body read as a pass of such a loop reads its body, and checked and
-  emitted as that call, a type with no fields giving its value;
+  emitted as that call, a type with no fields giving its value; a variable, a parameter, a loop's
+  variable, a binding of a `match` arm or a lambda's parameter named like a type parameter of the function around it, one that
+  holds a constant among them (T35), is `redeclared` (V9), so that `T.Kind`, `T.Fields` and `T.Make` read the type a copy binds;
   no such function is checked where no call makes a copy, and a generic function that calls one for a
   type of its own is checked as any generic function (T33);
 - a type parameter that holds a constant of an integer type, `bool`, `char` or an `enum`, `const int N` or `const Mode M`,
@@ -1464,7 +1468,10 @@ map, a field or a union and a lambda that reads a variable of a vector's type, w
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
-does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use").
+does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
+function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of
+functions to emit carries with each function, so that `HttpRequest.Read(s)`, `response.Write(s)` and `HttpServer.ServeConnection(s, handler)` in a build for Windows are
+`not supported` where the program calls them (W5, W8, W9, S11).
 The reference counting of section 3 is emitted for lists, strings, maps, the environments of lambdas,
 instances of classes, values of block types and the values that hold them (above), and a plain value and
 a union take no count of their own. Retired by the owner's answer of 2026-11-01 ("Implements section 3"):
@@ -1752,8 +1759,9 @@ the lane operations the emitter emits, `IsSupported` of every class of C#'s unde
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
-types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError` and `HttpHeaders`, which a program checked with `std/`'s
-checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an `HttpError`, and W4; the other names of W1 are no types of `std/`, and a
+types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
+`HttpBody`, `HttpResponse` and `HttpServer`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
+`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, and W10, its bounds of time; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
