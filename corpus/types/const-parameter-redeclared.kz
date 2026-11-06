@@ -1,0 +1,11 @@
+// expect: error redeclared at 7
+// rules: T35
+
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    M = Mode.Loud
+    print("{text} {M}")
+}
+
+Say<Mode.Plain>("a")

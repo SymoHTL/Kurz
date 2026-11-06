@@ -59,13 +59,16 @@ public static class Processes
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             var answered = process.WaitForExit((int)limit.TotalMilliseconds);
+            var stood = string.Empty;
             if (!answered)
             {
+                // read before the end, which takes the program's entry away
+                stood = OperatingSystem.IsLinux() ? Stood("/proc", process.Id) : string.Empty;
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit();
             }
 
-            var ending = answered ? "ended" : $"gave no answer within {limit.TotalSeconds} s and was ended";
+            var ending = answered ? "ended" : $"gave no answer within {limit.TotalSeconds} s and was ended{stood}";
             var rest = limit - clock.Elapsed;
             if (!Task.WaitAll([output, error], rest > Drain ? rest : Drain))
             {
@@ -237,6 +240,35 @@ public static class Processes
         }
 
         return ended;
+    }
+
+    /// <summary>
+    /// Where the process <paramref name="pid"/> stood when its run's limit passed, as Linux shows it under <paramref name="proc"/>, for the
+    /// error of a run that ends a program at its limit: its state, the first field after the name in its <c>stat</c>; the kernel function
+    /// it sleeps in, its <c>wchan</c>; and its <c>syscall</c>, the number of the call it is in with the call's six arguments, without the
+    /// stack pointer and the program counter that follow them, or <c>-1</c> alone for a process that waits outside a call, or
+    /// <c>running</c> (proc(5)). Where an entry cannot be read, it says so.
+    /// </summary>
+    internal static string Stood(string proc, int pid)
+    {
+        var entry = Path.Combine(proc, pid.ToString(CultureInfo.InvariantCulture));
+        try
+        {
+            var stat = File.ReadAllText(Path.Combine(entry, "stat"));
+            var close = stat.LastIndexOf(')');
+            var state = close < 0 || close + 2 >= stat.Length ? string.Empty : stat[(close + 2)..].Split(' ')[0];
+            var wchan = File.ReadAllText(Path.Combine(entry, "wchan")).Trim();
+            var words = File.ReadAllText(Path.Combine(entry, "syscall")).Trim().Split(' ');
+            var call = words[0] == "-1" ? "-1" : string.Join(' ', words.Take(7));
+            return state.Length == 0 || call.Length == 0
+                ? "; where it stood could not be read"
+                : $"; where it stood, as /proc gave it: state {state}, wchan {wchan}, syscall {call}";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // an entry gone, the process having ended at the limit, or one this user may not read
+            return "; where it stood could not be read";
+        }
     }
 
     /// <summary>

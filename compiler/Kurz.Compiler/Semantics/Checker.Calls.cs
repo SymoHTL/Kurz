@@ -122,7 +122,8 @@ public sealed partial class Checker
                         return CallValue(value.Type, c);
                     }
 
-                    if (ImplicitMethods(n.Name) is { } methods && methods.Find(f => f.IsProperty) is { } property && !InStaticMember())
+                    var named = BesideField(ImplicitMethods(n.Name), ImplicitField(n.Name) is not null);
+                    if (ImplicitPropertyOf(n.Name) is { } property && !InStaticMember())
                     {
                         var read = ReadImplicitProperty(n, property);
                         if (read.IsError)
@@ -135,7 +136,7 @@ public sealed partial class Checker
                         return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
                     }
 
-                    if (ImplicitMethods(n.Name) is { } named)
+                    if (named is not null)
                     {
                         return CallImplicitMethod(named, n, c, expected); // K7: a method of `this`
                     }

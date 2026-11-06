@@ -1,0 +1,25 @@
+// expect: output
+// | 3
+// | Host: b
+// | Accept: text/plain
+// | X-Id: 1
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Host", "a")
+    headers.Add("Accept", "text/plain")
+    headers.Add("HOST", "c")
+    headers.Set("host", "b")
+    headers.Set("X-Id", "1")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// `Set` puts its value in the place of the name's first header, which keeps its spelling, takes out the name's
+// other headers, and puts a name the headers do not hold after every header they hold
+print(h.Count)
+for i in 0..<h.Count {
+    print("{h.NameAt(i)}: {h.ValueAt(i)}")
+}
