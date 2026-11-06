@@ -20,7 +20,8 @@ namespace Kurz.Compiler.Tests;
 /// allow it, which a case could only show by a run of that length; and what needs a client beside the loop for its time or its
 /// socket: the bound of a write held across the calls of the system it makes, the close in stages after the server's answer, the
 /// time of a body's read set before each refill, and a file whose write fails closed, with the refusal of the bounded write to a
-/// program, which only std/ is given.
+/// program, which only std/ is given; and how long a bound of time waits at most, a bound of the wall's time that a corpus case,
+/// which shows each bound's outcome and that it waited at least its length, does not hold.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -341,6 +342,80 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var response = System.Text.Encoding.ASCII.GetString(got.ToArray());
         Assert.StartsWith("HTTP/1.1 200 OK\r\n", response);
         Assert.EndsWith("\r\n\r\nabcd", response);
+    }
+
+    [Theory]
+    [InlineData("head", "RequestHeadersTimeout: 300ms, KeepAliveTimeout: 300ms", "GET /a HTTP/1.1\r\nHost: h\r\n", "request timed out\nserved\n")]
+    [InlineData("first", "KeepAliveTimeout: 300ms", "", "served\n")]
+    [InlineData("idle", "KeepAliveTimeout: 300ms", "GET /a HTTP/1.1\r\nHost: h\r\n\r\n", "served\n")]
+    [InlineData("response", "MinResponseDataRate: HttpRate(1_000_000_000, 300ms)", "GET /large HTTP/1.1\r\nHost: h\r\n\r\n", "TimedOut\nserved\n")]
+    public async Task A_bound_of_time_ends_its_connection_within_its_length(string name, string limits, string sent, string printed)
+    {
+        // W10 (section 12, the owner, 2026-11-01, "Kestrel's bounds" and "Add Kestrel's response rate", and 2026-10-31, "Persistent,
+        // 100 req, 5 s"): a head that stops coming is answered `408` at `RequestHeadersTimeout`, its close in stages waiting
+        // `KeepAliveTimeout` more for a client that sends nothing; a connection that sends no first byte, or none after a request, closes
+        // at `KeepAliveTimeout`; and a response the client does not take ends at the grace of `MinResponseDataRate`. Each bound is
+        // 300 ms against defaults of 5 or 30 seconds, and the connection ends, the program with it, within 2.5 seconds of the client's
+        // last byte; the cases `serve-timeouts` and `serve-keep-alive` show each outcome and that it waited at least its bound
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                mut piece = Bytes()
+                while piece.Count < 65536 {
+                    piece.Add(122)
+                }
+
+                mut body = Bytes()
+                while body.Count < 33554432 {
+                    body.AddRange(piece)
+                }
+
+                large = HttpResponse.Bytes(200, body)
+                handler = (HttpRequest r) => {
+                    if r.Path == "/large" {
+                        return large
+                    }
+
+                    return HttpResponse.Text(200, "hi")
+                }
+
+                server = listener.Accept()
+                HttpServer.ServeConnection(server, handler, HttpLimits(LIMITS)) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text.Replace("LIMITS", limits, StringComparison.Ordinal), toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, $"http-server-bound-{name}");
+        var port = FreePort();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        TimeSpan ended;
+        (int Code, string Output, string Error) result;
+        using (var client = Connect(port, run))
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            client.GetStream().Write(System.Text.Encoding.ASCII.GetBytes(sent));
+            result = await run;
+            ended = watch.Elapsed;
+        }
+
+        Assert.Equal((0, "", printed), (result.Code, result.Error, result.Output));
+        Assert.InRange(ended, TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(2500));
     }
 
     [Fact]
