@@ -460,7 +460,9 @@ the owner, 2026-11-03, issue 110, comment 6615355264, against such an `n` clampe
 0 raises before the call enters the handle, as a `Read`'s `max` below 0 does, so that it raises
 through a holder of a closed handle too, and an `n` past the bytes held is found under the handle's
 lock, after the call entered, so that through a holder of a closed handle it gets the closed handle's
-error, as C#'s `FileStream.Read` checks its arguments before it finds the stream closed.
+error, as C#'s `FileStream.Read` checks its arguments before it finds the stream closed (§12, the
+owner, 2026-11-04, issue 39, comment 6643376941, Q2 of issue 156, comment 6621376360, against the
+closed handle first and against the order left unwritten).
 
 `Fill` returns the count it appended, `int | IoError`, 0 at the end of a file or of a connection its
 peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A pull of a line (S16)
@@ -473,7 +475,7 @@ returned with no byte after the mark gets the closed handle's error, as a stream
 *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
 of a line starting after the bytes consumed, `Fill` as a call in flight whose fill
 holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does, giving all it read
-where a `Read`'s fill gives at most `max`, and the order of `Consume`'s failures on a closed handle)*
+where a `Read`'s fill gives at most `max`)*
 
 Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
 ```kurz
@@ -1106,7 +1108,12 @@ against 0 for a read and a write too). The bound of a read and a write holds for
 system, so that a `Write` of many bytes to a peer that takes them slowly can take longer than the
 bound in all, as Rust's `write_all` does, and a peer that stops reading gives `TimedOut` after the
 bound (§12, the owner, 2026-11-02, "per system call", against one deadline for the whole `Write`, as
-Go's `SetWriteDeadline`). The socket options `SO_RCVTIMEO` and
+Go's `SetWriteDeadline`). The bound of a read holds for the read of the system alone: a call that
+waits for the handle's lock behind another holder's fill (S3, S24) waits with no bound, as Rust's
+`Mutex::lock` waits while `set_read_timeout` bounds the `recv` (§12, the owner, 2026-11-04, issue 39,
+comment 6643376941, Q1 of issue 156, comment 6621376360, against a bound counted from the call's
+start with the wait included, and against a second call in flight refused; the cost is that a holder
+whose fill waits with no bound keeps every other holder waiting as long). The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
 the bound holds for an actor's socket, which runs without blocking, stands open (§14). The bound of
 `TcpStream.Connect` starts once the lookup of the name has given its addresses, the lookup waiting
