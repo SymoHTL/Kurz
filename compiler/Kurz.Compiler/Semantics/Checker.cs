@@ -335,6 +335,7 @@ public sealed partial class Checker
         CheckClassDefaults();
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
+        RefuseReservedTypeParameters(); // F16
         CheckFieldDefaults(); // K7
 
         FindReaders();
@@ -500,6 +501,23 @@ public sealed partial class Checker
                     break;
                 default:
                     break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// F16 with S13: a type parameter of a function, one that holds a constant among them (T35), takes no name a variable at the
+    /// outermost level of the top-level code reserves, as a variable of the function takes none (section 4, the owner, 2026-11-05),
+    /// so that a body never chooses which of the two it reads. The refusal is of the declaration, whether or not a call makes a copy
+    /// (T33), and the parameter stands for the rest of the function, so that its uses report nothing more (E1).
+    /// </summary>
+    private void RefuseReservedTypeParameters()
+    {
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
+        {
+            foreach (var p in f.TypeParameters.Where(p => reservedTopLevel.Contains(p.Name)))
+            {
+                Report(ErrorIds.Redeclared, p.Line, $"`{p.Name}` is a top-level variable, whose name a type or constant parameter of a function cannot take (S13, F16)");
             }
         }
     }
@@ -1638,7 +1656,8 @@ public sealed partial class Checker
     /// <summary>
     /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
     /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
-    /// refuses it (CS0412) (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
+    /// refuses a method's parameter, local and <c>foreach</c> variable so named (CS0412), and a lambda's parameter as C# did up to its
+    /// language version 7.3 (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
     /// </summary>
     private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
 

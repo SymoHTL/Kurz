@@ -1434,17 +1434,20 @@ declares (F9, D16), in the order of their declaration, and never a field the bod
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
 "for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
 type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
-a generic function lists every outcome any of its copies can give, and a copy that gives one its
+a generic function lists every outcome that the copies its calls make can give, and a copy that gives one its
 function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
 2026-11-02, "a generic function lists every outcome any of its copies can give", an option that named the id and its
-place); the outcomes are those of the copies calls make, each checked at the call that made it, as each copy is
-checked alone, so that
+place, which the answer of 2026-11-03 narrows to the copies calls make); each copy is checked at the call that made it,
+as each copy is checked alone, so that
 a function whose calls make no copy that gives `Invalid` need not list it, `Remake` below among them, while that
 call can be a caller's in another package than the function (§4, the owner, 2026-11-03, "checked at each copy a call
 makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
 type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
-CS0412 refuses it (§4, the owner, 2026-11-03, "redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same
-reading for both"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
+refused a lambda's parameter so named up to its language version 7.3 (§4, the owner, 2026-11-03, "redeclared, as C#'s
+CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
+text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
+a function. *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1462,10 +1465,13 @@ the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: th
 same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
 fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
-`match` on `T.Kind` that a copy does not read; a failure in a body leaves the function as from any argument of a call (§5),
+`match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
 the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
+*(assumed, with the build: a copy is made at the first call that names its type arguments, and a later call with the
+same type arguments reads that copy, so that an error of the copy is reported once, and one reported at the call,
+`kind-not-read` or `unlisted-case`, shows at that first call, the call that made it)*
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
 does not read that arm)*
 
@@ -1863,8 +1869,11 @@ type parameter with a default comes after every one without, and one without aft
 where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
-loop's variable, a binding of a `match` arm or a lambda's parameter of the parameter's name in the function is
-`redeclared`, as for any type parameter (V9, T33; §4, the owner, 2026-11-04, "the same reading for both").
+loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
+`redeclared`, as for any type parameter, in each copy a call makes, so not at all where no call reaches the function
+(V9, T33; §4, the owner, 2026-11-04, "the same reading for both"); `M = Mode.Loud` with that name is such a
+declaration (V8, V9). The type parameter itself takes no name of a variable at the outermost level of the top-level
+code, whether or not a call makes a copy (F16).
 
 A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
 where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
