@@ -4134,7 +4134,7 @@ ulong FiveDigits(int word) => match word {
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1 for SipHash-1-3 under its
 // keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), the count of the
-// loops over a map that hold the block, 4 bytes (`MapWalk`),
+// loops over a map and the texts of a map that hold the block, 4 bytes (`MapWalk`),
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
 // entry: the hash of its key, 8 bytes, then the key and the value, for a key of a kind the emitter's
@@ -4539,7 +4539,9 @@ pub bool MapTripped(byte* block) {
 // a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
 // (`MapLongLookup`). A loop counts itself where it starts and lets go where it ends: at its end, a `break`,
 // a `return` or a case propagated out of its body. A write inside it finds the block shared, since the
-// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`).
+// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`). The
+// text of a map counts itself so while it walks the block, since a class's `Text()` it calls for a key or
+// a value can look a key up in a map that holds the block.
 pub void MapWalk(byte* block, int change) {
     raw {
         if block != null {
@@ -4550,9 +4552,9 @@ pub void MapWalk(byte* block, int change) {
 
 // For a lookup whose probe passed more than 512 slots, 65 groups of 8 without a slot of 255: whether the
 // block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
-// over a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the block is then marked
-// as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code moves the entries
-// under their new hashes (`MapRehashMark`, `MapRehashPlace`).
+// over a map and no text of a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the
+// block is then marked as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code
+// moves the entries under their new hashes (`MapRehashMark`, `MapRehashPlace`).
 pub bool MapLongLookup(byte* block) {
     mut bool rehash = false
     raw {
