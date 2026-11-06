@@ -415,7 +415,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             ended = watch.Elapsed;
         }
 
-        Assert.Equal((0, "", printed), (result.Code, result.Error, result.Output));
+        Ran((0, "", printed), (result.Code, result.Error, result.Output));
         Assert.InRange(ended, TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(2500));
     }
 
