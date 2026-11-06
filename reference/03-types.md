@@ -1722,7 +1722,8 @@ in an arm of a `match` on `T.Kind` takes no part where no loop over `T.Fields` i
 call and the nearest such arm around it, in an arm inside such a loop as in one outside it, since
 each copy takes the one arm of its kind; a call in a loop opened inside the nearest such arm is the
 case of the assumed reading below. A type argument of a call in a loop over `T.Fields` that is the
-field's type takes no part either, since the text does not give that type. One that holds the
+field's type takes no part either, since on the text that type is a type of its own, no type
+parameter of the function, and each copy reads the field's real type. One that holds the
 field's type beside a type parameter of the calling function inside a form of a type, as
 `Map<f.Type, T>` for `T`, grows by that parameter, and the call is refused at its line: the walk
 types `f.Type` on the text as a type of its own, which is no type parameter of the function. A
@@ -1735,7 +1736,12 @@ a type argument that holds the field's type inside a form of a type with no type
 calling function, `List<f.Type>` and `Pair<f.Type, int>`, takes no part, as the field's type
 itself; one that holds the field's type and a type parameter of the calling function grows by that
 parameter wherever the form holds it, `List<Pair<f.Type, T>>` and `Pair<f.Type, List<T>>` among
-them, and the error names it as it is written; a call in a loop over `T.Fields` opened inside the
+them, and the error names it as the call gives it, written or inferred, with the field's type as
+the loop's variable writes it, `List<Pair<f.Type, T>>` for `Deep([Pair(f.Get(x), x)], n - 1)`; a
+type argument inferred from `f.Get(value)`, a value of the field's type, holds that type as a
+written one does, `Pair(f.Get(x), x)` as `Pair<f.Type, T>`; the field's type stands on the text
+where a type must meet a condition, as a map's key, and each copy checks the field's real type
+with its own error (T33); a call in a loop over `T.Fields` opened inside the
 nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
 every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
@@ -1879,6 +1885,24 @@ void Deep<T>(T x, int n) {
     for f in T.Fields {
         if n > 0 {
             Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)
+        }
+    }
+}
+
+Deep(Point(1, 2), 3)
+print("done")
+```
+
+Case: [types/generic-growing-cycle-fields-inferred.kz](../corpus/types/generic-growing-cycle-fields-inferred.kz)
+```kurz
+data Point(int X, int Y)
+data Pair<A, B>(A First, B Second)
+
+// `Deep` gives `Pair(f.Get(x), x)` for `T` in its loop over `T.Fields`: the type arguments of `Pair` are inferred, `f.Get(x)` is of the field's type, and the `T` beside it grows
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Pair(f.Get(x), x), n - 1)
         }
     }
 }
