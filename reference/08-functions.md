@@ -219,15 +219,20 @@ line, in every file of the project, those of the folder `json` included, and wit
 `use json as j` (§8, the owner, 2026-11-02). The reading reads a project's files: the runtime's `use sys` and `use std`
 stand as §2 makes them, and in a program's file they are paths like any other, which a folder at
 the top or a line of `project.kz` of that name answers, `unknown-name` where the project has neither
-(§8, the owner, 2026-11-03, "the runtime's names only"). *(assumed, §8, §13: the two ids; a type of the file's own
+(§8, the owner, 2026-11-03, "the runtime's names only"). A `.` or `..` where a name of the path stands,
+`use ../util`, is `syntax` (§8, the owner, 2026-11-04, "as built"). A path longer than a package's line name
+reaches that package's folder: with a line `json` of `project.kz` and no folder `json` at the top,
+`use json/schema` reaches the folder `schema` of that package (§8, §13, the owner, 2026-11-04, "with only a
+`json` dependency line, `use json/schema` reaches that package's subfolder"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
 the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
-nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+nothing through that line and being `unknown-name` where no other `use` line of the file, and no
+declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
-the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
-and a path that holds `.` or `..` are `unknown-name` at the `use` line; a longer
+the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
+which that package's line alone reaches, are `unknown-name` at the `use` line; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
 folder of the project, so that `use json` beside it names the line)*
@@ -246,9 +251,15 @@ use sys
 print(1)
 ```
 
+Case: [functions/use-path-with-dots.kz](../corpus/functions/use-path-with-dots.kz)
+```kurz
+use ../util
+
+print(1)
+```
+
 No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
-file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
-before the checker reads it.
+file with none.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
@@ -280,8 +291,11 @@ objected to)* A lambda whose body is a call with a `void` success, `x => print(x
 a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10). The `=>` of a function
 type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a union of a
 function type and another type is written `((int) => int) | NotFound`, as the nullable one is; such a
-lambda under a function type whose result is not `void`, `(int) => int`, is `type-mismatch` (T1) at
+lambda under a function type whose result is not `void` and whose first case is not `void` (O10), `(int) => int`, is `type-mismatch` (T1) at
 the lambda, since its result is `void` where an `int` is required (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+Under a result whose first case is `void`, `() => void | IoError`, it fits, as its block form
+`() => { print("x") }` does (O10), and gives that case; a function value of type `() => void` stays
+`type-mismatch` (T1) there (§4, the owner, 2026-11-05, #110, comment 6659026217).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -378,6 +392,20 @@ Run(x => print(x))
 // the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
 ```
 
+Case: [functions/function-type-void-union.kz](../corpus/functions/function-type-void-union.kz)
+```kurz
+data Oops
+
+void | Oops Run(() => void | Oops f) {
+    f()
+}
+
+Run(() => print("x")) else {
+    Oops => print("oops")
+}
+// the lambda's body is a call with a void success, under a result whose first case is void: it gives that case, as its block form does (F11, O10)
+```
+
 Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
 ```kurz
 class Bag {
@@ -413,6 +441,15 @@ argument out)* (C# also takes `default`, which the record
 does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
+The default of a parameter of a method, `static` or not, is read with the members of its class in
+sight, as C# reads it: a field, a `static` field or a method of the class named there is no
+constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
+§8: `this` there is no constant either, and a field of an instance in the default of a `static`
+method is K19's `static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+takes the default of the method its receiver's static type names, and runs the body the object's
+type gives, as C# does, so one object's call passes different values by the type of the variable it
+is read through; an override without a default has none of its own, and a call on the derived type
+that leaves the argument out is `argument-mismatch` (D11) (§8, the owner, 2026-11-05).
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
@@ -519,6 +556,51 @@ void Greet(string name, string word = "hello") {
 Greet("Ann")
 Greet("Ann", "bye")
 Greet("Ann", word: "bye")
+```
+
+Case: [classes/method-default.kz](../corpus/classes/method-default.kz)
+```kurz
+data Rate(int PerSecond = 1)
+
+class Meter(int Scale) {
+    pub static int Unit(Rate r = Rate()) => r.PerSecond
+
+    pub int Read(int n, Rate r = Rate(PerSecond: 2)) => Scale * n * r.PerSecond
+}
+
+print(Meter.Unit())
+print(Meter.Unit(Rate(5)))
+m = Meter(10)
+print(m.Read(1))
+print(m.Read(1, r: Rate(3)))
+```
+
+Case: [classes/method-default-not-constant.kz](../corpus/classes/method-default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+class Greeter {
+    pub static void Greet(string name, string word = Pick()) {
+        print("{word} {name}")
+    }
+}
+
+Greeter.Greet("Ann")
+```
+
+Case: [classes/method-default-virtual.kz](../corpus/classes/method-default-virtual.kz)
+```kurz
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x = 2) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
 ```
 
 ### F13 (decided, §8) Which overload a call picks
@@ -924,14 +1006,18 @@ if args.Count == 0 {
 
 ### F18 (decided, §12) `Hint.BlackBox`
 
-`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)`, as
-Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "Any value,
-as Rust's"). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`.
-Every program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
+`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)` with
+`T` inferred from the argument, as Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03,
+"`Hint.BlackBox(x)`" and "Any value, as Rust's"). An argument with no type of its own is refused as
+for any generic function: `Hint.BlackBox([])` is `cannot-infer` (M11, T27). `Hint` is a name every
+file sees, so a file's own declaration of it is `redeclared`. Every program may call it, without
+`raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
 the call, as best effort, the way Rust's does, with no promise of constant time (§12, the owner,
-2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments are refused, as
-`string.Join` refuses them, and a member of `Hint` other than `BlackBox` is `unknown-name` (V10), as
-a function `Sha256` lacks is)*
+2026-11-03, "The defaults of the round stand"). *(assumed, §12: `Hint.BlackBox(null)` is
+`type-mismatch`, as N6 assumes of a `null` with no nullable type, and a call with another count of
+arguments than one is `argument-mismatch`, the id D11 proposes; type arguments are refused with
+`syntax` (E4), as `string.Join` refuses them, and a member of `Hint` other than `BlackBox` is
+`unknown-name` (V10), as a function `Sha256` lacks is)*
 
 No case for what the optimiser sees: a case sees only the value the call gives back.
 
@@ -963,5 +1049,29 @@ print(1)
 Case: [functions/black-box-unknown-member.kz](../corpus/functions/black-box-unknown-member.kz)
 ```kurz
 x = Hint.Opaque(1)
+print(x)
+```
+
+Case: [functions/black-box-type-arguments.kz](../corpus/functions/black-box-type-arguments.kz)
+```kurz
+x = Hint.BlackBox<int>(1)
+print(x)
+```
+
+Case: [functions/black-box-two-arguments.kz](../corpus/functions/black-box-two-arguments.kz)
+```kurz
+x = Hint.BlackBox(1, 2)
+print(x)
+```
+
+Case: [functions/black-box-empty-list.kz](../corpus/functions/black-box-empty-list.kz)
+```kurz
+x = Hint.BlackBox([])
+print(x)
+```
+
+Case: [functions/black-box-null.kz](../corpus/functions/black-box-null.kz)
+```kurz
+x = Hint.BlackBox(null)
 print(x)
 ```
