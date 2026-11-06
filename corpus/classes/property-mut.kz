@@ -1,0 +1,18 @@
+// expect: error mut-at-call at 14
+// rules: K7
+
+void Bump(mut int n) {
+    n = n + 1
+}
+
+class Counter {
+    mut int count = 0
+
+    pub int Count => count
+
+    pub void Run() {
+        Bump(mut Count)
+    }
+}
+
+Counter().Run()

@@ -59,6 +59,7 @@ public sealed partial class Emitter
     private Unit unit;
     private IrFunction fn = null!;
     private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
+    private string? guardedDisplay; // the guarded block being emitted as a trace names it, which names a guarded block in it
     private Dictionary<VariableSymbol, string> slots = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyDictionary<TypeParameterSymbol, KurzType> map = NoMap;
     private KurzType returnType = Types.Void;
@@ -695,6 +696,8 @@ public sealed partial class Emitter
                 break;
             case FunctionDeclaration or ExternBlock or UseStatement or TypeDeclaration:
                 break; // declared at the top level and emitted when called, a data type laid out where a value of it is made; a `use` brings in a folder for the checker alone
+            case ConstAssertStatement:
+                break; // T37: checked while the program compiles, and nothing of it runs
             default:
                 throw Unsupported(statement.Line, StatementName(statement));
         }
