@@ -270,6 +270,20 @@ public sealed class RuntimeTests
     }
 
     [Fact]
+    public void A_borrow_through_a_class_of_the_folder_derived_from_the_held_class_is_changed_while_held()
+    {
+        // M7 with K6 and F10: a value of the folder's `Shape` can be the folder's `Timed`, whose field holds the lambda that reads
+        // `ss` while `Add` changes it; the classes derived from a class are read from the folders the file uses too, every class
+        // that has it as its base (the owner, 2026-11-05)
+        const string shape = "pub class Shape {\n    pub virtual int Area() => 0\n}\n\npub Shape Plain() => Shape()\n\n";
+        const string file = "use sys\n\nmut ss = [sys.Plain()]\nss.Add(sys.Keep(() => ss.Count))\nprint(ss.Count)\n";
+        var (_, _, held) = WithSys(shape + "pub class Timed(() => int Run) : Shape()\n\npub Shape Keep(() => int g) => Timed(g)\n", file);
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 4)], held.Select(d => (d.Id, d.Line)));
+        // the positive control: the folder's derived class holds no function value, and its lambda is called, not kept
+        Assert.Empty(WithSys(shape + "pub class Square(int Side) : Shape()\n\npub Shape Keep(() => int g) => Square(g())\n", file).Diagnostics);
+    }
+
+    [Fact]
     public void A_use_of_a_folder_the_checker_is_not_given_is_not_supported()
     {
         var (_, _, diagnostics) = WithSys("pub long Write(int fd) => 0\n", "use other\n\nprint(1)\n");

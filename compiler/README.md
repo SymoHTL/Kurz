@@ -2148,8 +2148,8 @@ round can ask about it by the rule's id.
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
   itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, a class when a field of it can, as section 4
-  assumes, a field of a function type among them (R9), or a field of a class of the file derived from it, which K6 lets stand where
-  its base does, and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
+  assumes, a field of a function type among them (R9), or a field of a class derived from it, of the file, of a folder it uses or of
+  `std/`, which K6 lets stand where its base does, and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.
