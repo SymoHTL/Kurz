@@ -2423,8 +2423,9 @@ public sealed partial class Checker
     /// <summary>
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// C#"); two names over an instance of a class that <see cref="WalkedByIndex"/> holds are <c>not supported</c>, the walk of a class
+    /// that section 12 decides and the build does not make (C6), and two names over anything else but a map are <c>type-mismatch</c>, as
+    /// the loop over a value it does not walk is (C6, proposed: section 4 gives the form over a map, section 12 over such a class). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
     /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
@@ -2466,6 +2467,7 @@ public sealed partial class Checker
                     ErrorType or VoidType => Types.Error,
                     MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                     MapType m => m.Key,
+                    ClassType c when f.Second is not null && WalkedByIndex(c.Symbol) => WalkOfClass(f.Collection.Line, t.Type),
                     _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                     _ => Report(f.Collection.Line, t.Type),
                 };
@@ -2509,6 +2511,29 @@ public sealed partial class Checker
             this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not {Types.A(type)} (C6, C8)");
             return Types.Error;
         }
+
+        KurzType WalkOfClass(int line, KurzType type)
+        {
+            NotSupported(line, $"two names over {Types.A(type)}, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)");
+            return Types.Error; // the two names take the error type, so that the body reports nothing more of them (E1)
+        }
+    }
+
+    /// <summary>
+    /// C6: a class that two names walk, its chain holding a <c>Count</c> that is a field or a property of the instance and the methods
+    /// <c>NameAt</c> and <c>ValueAt</c> of the instance that take one <c>int</c> (section 12, the owner, 2026-11-02, "any class with
+    /// <c>Count</c>, <c>NameAt(i)</c> and <c>ValueAt(i)</c>"; proposed: the <c>int</c>s); a class of <c>std/</c> is read through its
+    /// symbol, as one of the file.
+    /// </summary>
+    private static bool WalkedByIndex(ClassSymbol c)
+    {
+        return c.Chain.Any(k => k.Field("Count") is not null || (k.Methods.TryGetValue("Count", out var counts) && counts.Any(m => m.IsProperty && !m.IsStatic)))
+            && c.Chain.Any(k => TakesAnIndex(k, "NameAt"))
+            && c.Chain.Any(k => TakesAnIndex(k, "ValueAt"));
+
+        static bool TakesAnIndex(ClassSymbol k, string name) =>
+            k.Methods.TryGetValue(name, out var methods)
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1 && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int });
     }
 
     private void CheckReturn(ReturnStatement r)
