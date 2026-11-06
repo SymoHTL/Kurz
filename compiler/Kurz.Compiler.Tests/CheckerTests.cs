@@ -4913,8 +4913,13 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+    }
 
-        // a loop over `T.Fields` opened inside such an arm is read as a loop's calls are, and a cycle that grows there is refused at its call
+    [Fact]
+    public void A_call_in_a_loop_over_T_Fields_opened_inside_an_arm_of_a_match_on_T_Kind_is_read_as_a_call_of_that_loop()
+    {
+        // T34, its assumed reading: a loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a loop's calls are,
+        // and a cycle that grows there is refused at its call
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors("data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n"
             + "            for f in T.Fields {\n                Deep(Wrap(x), n - 1)\n            }\n        }\n        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)"));
     }
