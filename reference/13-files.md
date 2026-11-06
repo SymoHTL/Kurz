@@ -1576,6 +1576,17 @@ data EnvError(int Code)
 print(1)
 ```
 
+Case: [system/environment-field.kz](../corpus/system/environment-field.kz)
+```kurz
+// a field takes the name `EnvError`, `EnvKind` or `Environment`, a parameter of a primary constructor among them (S14)
+data Failure(int EnvError, int EnvKind)
+class Process(int Environment)
+
+failure = Failure(1, 2)
+print(failure.EnvError + failure.EnvKind)
+print(Process(4).Environment)
+```
+
 ### S15 (decided, §12) The clock and the time of a file
 
 `timestamp.Now` is the time of the wall clock, a `timestamp` (T24), read from
