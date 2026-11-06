@@ -703,6 +703,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
   the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
   in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
+- `const assert(condition, text)`, checked while the program compiles and emitting nothing: its condition and the holes of its
+  text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
+  holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
+  outermost copy with the text, a hole naming a type parameter giving the name of the copy's type; outside a generic function it is
+  checked once where it stands (T37);
 - the arithmetic and the comparisons of chapter 3, which in a test build raise `overflow` where a
   value leaves its type (T5) and `divide-by-zero` (T14, T25) and wrap in a release build (T4), the
   operators on bits and the shifts (T22, T28), and the conversions written as calls (T10, T20); on a
@@ -744,7 +749,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   method, and an assignment into a `mut` field of an instance, its value first, then the instance, then
   the field, which lets go of its old value (K2, K9, M4); each `mut` member of a list, a map or a hasher
   held by a field of an instance, and an item or an entry written into one (M4, M5, M9); a method, a function of the module whose first parameter is
-  the instance, `this`, borrowed from the caller as a parameter is (K7); the text of an instance, which
+  the instance, `this`, borrowed from the caller as a parameter is (K7); a read of a property, `b.Count` or `Count` inside its
+  class, the call of its method, whose result is a temporary of its statement, as a call's is (K7); the text of an instance, which
   its `Text()` gives (A5); a class some class derives from (K6), whose reference is two words, the
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
@@ -1226,7 +1232,8 @@ its own, a temporary of the region, since a call can assign a `mut` field throug
 while the expression still uses what it read (K2, K9), which neither M7 nor a parameter's borrow sees; a
 read of an instance from a variable or a parameter is borrowed, as a list's is, which M7 holds for it,
 and so is `this`. The last count lets go of the fields in their order, as Rust drops them (section 3:
-the owner, 2026-11-04, issue 156, comment 6643376941), then of the
+the owner, 2026-11-04, issue 156, comment 6643376941), a derived class's base's fields first, as they
+come first in its `Fields` *(assumed, section 3: a reading of the answer of 2026-11-05)*, then of the
 weak count all the strong ones held, whose last gives the block back to `Free`, as Rust's `Rc` and
 `Weak` do. A `weak` reference takes a weak count where it is stored and lets go of it where a strong one
 lets go of its count, so the block of an instance whose strong count ended stays while a `weak`
@@ -1251,7 +1258,7 @@ Rust's `Rc` holds its count in front of its value *(assumed, section 4: the coun
 immutable data, as the owner's answer of 2026-11-01, "Implements section 3", issue 180, comment
 6561898721, marks it)*. Its last count lets go of the counted values in its fields in their order, as
 Rust drops a value's fields (section 4: the owner, 2026-11-04, as an instance's), by the number of the type the block holds, so that a derived value lets go of its own
-fields too, and gives the block back to `Free` with that type's size. A block whose last count another
+fields too, after its base's (section 4: the owner, 2026-11-05, as a reading of D7), and gives the block back to `Free` with that type's size. A block whose last count another
 release lets go of waits on the work list of its family, the type at the top of its relation of
 inheritance, as an instance waits on its class's, and the same release works it off, so that a chain
 of any length is freed with no stack deeper than the nesting of the types in it (a reading of the
@@ -1401,8 +1408,9 @@ its sets, and the start check's against the machine where fewer than 20 of its t
 present or none reads as missing, since a path no test runs must not look clean; the CPU of the hosted runner the jobs run on is pinned by nothing: HAZARD (#168).
 A trace and the line tables name a guarded block's function `<function>.guarded`, `main.guarded`
 (section 13, the owner, 2026-11-02), the trace from its symbol without the numbers and the line
-tables as the function's name; a lambda made in the block is named after the function the block
-stands in, `main.lambda`, as its symbol is. A trace names a copy by its whole symbol,
+tables as the function's name; a guarded block made in the block adds its own mark, `main.guarded.guarded`
+(section 13, the owner, 2026-11-03); a lambda made in the block is named after the function the block
+stands in, `main.lambda`, as its symbol is (section 13, assumed). A trace names a copy by its whole symbol,
 `Next.1.for.X86.Sse41`, since its numbers do not end it: the name the emitter gives, which the record
 leaves open (section 14).
 
@@ -1784,8 +1792,9 @@ which is the complete one: an `interface` or a `flags` type and a value of one (
 D17, D19, and the A-rules of their text); of a class, type parameters (T19), an interface among its
 bases (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
-other than `pub`, `internal` and `mut` (K18, R13), a method that is `extern` or that has type parameters of its own (K7,
-section 4), each of which leaves the class, every class derived from it and every value of them unread, and of a
+other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type
+parameters of its own (K7, section 4) and a property that is `static`, `virtual`, `override` or `prot`, which section 14
+leaves open (K7), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
 (K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
 (K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
@@ -1799,7 +1808,9 @@ of a class derived from a case, which tests the instance's class at run time (C4
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
 but for one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
-cycle R9 judges by the lambdas of the program (R9), a method as a value, an assignment into a
+cycle R9 judges by the lambdas of the program (R9), a method as a value, a property of `void` or
+of a type that lists cases beside its success, which section 14 leaves open (K7, O2, O10), a
+property read after `?.` (K7, N5) or after `&`, where the checker reads a field alone (K7, R10), an assignment into a
 `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
 method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a field that holds a
@@ -1856,12 +1867,15 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is or holds the field's type (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+`match` on `T.Kind`, or with a type argument that is or holds the field's type, the first such chain ending every copy of the
+same outer call (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
-which is read before the overload is picked (T35, F12); and `use` (F10) of any folder but the runtime's `sys`;
+which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the
+program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
+text among them (T37); and `use` (F10) of any folder but the runtime's `sys`;
 a second file of a program and what F9 makes visible across files, since the checker reads one
 file; a map's key of a `decimal` or a pointer, which `==` takes and the compiler does not hash, and of
 a type parameter, and a key that holds one of them as the value of its nullable type, as a list's item

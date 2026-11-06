@@ -16,6 +16,18 @@ go of the head of a million links frees all of them before it returns, where a r
 one sweep only for the memory of a message (§13, "Region per message", the research verdict on
 Goose's data stacks).
 
+The end of an instance or of a block lets go of what its fields hold in the order of the fields, as
+Rust drops a value's fields (§3, §4, the owner, 2026-11-04, issue 156, comment 6643376941), a derived
+block's base's fields first (§4, the owner, 2026-11-05, issue 110, comment 6657251329, recorded as a
+reading of that answer from D7), an instance of a derived class its base's fields first too, and a
+value whose last count a field held ends after the value that held it, from the work list.
+*(assumed, §3, §4: the end after its holder, a reading of the owner's answer on classes of
+2026-11-01, "Iterative, never crashes", issue 110, comment 6560107950; a derived class's base's
+fields first, a reading of the answer of 2026-11-05, given for a derived block, as K6 lays the
+base's fields out first)* No case shows the
+order: a release runs no code of the program between two fields, and a handle that closes at its
+last count (S5) shows it only outside the program.
+
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
 class Link(int Value, Link? Next)
@@ -1074,8 +1086,7 @@ of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (�
 2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
 types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
 and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`; one for a
-parameter that names a lane, the `index` of `X86.Sse41.Extract`, the one such parameter of the intrinsics the
-compiler builds, that fits and lies past the lanes
+parameter that names a lane, the `index` of `X86.Sse41.Extract`, that fits and lies past the lanes
 is the compile error `lane-out-of-range` at its line, whose text names the lane and the count of the
 lanes, so `X86.Sse41.Extract(v, 255)` of four lanes builds nothing (§13, the owner, 2026-11-02); any
 other constant is read as the instruction reads it, a count of 32 bytes or more giving 0 in
@@ -1175,8 +1186,9 @@ A trace and the line tables name the function a guarded block is compiled
 into after the function it stands in, `<function>.guarded`, `Pick.guarded` for a block in `Pick`, in the
 pattern of a lambda's `main.lambda` (§13, the owner, 2026-11-02). The function is the one written in the
 source: a block in the method `Twice` of `Doubler` is `Doubler.Twice.guarded`, one in a lambda written in
-`main` is `main.lambda.guarded`, one in a guarded block of `Pick` is `Pick.guarded` again, and a lambda
-written in a guarded block of `main` is `main.lambda`, as outside it *(assumed: as §13 marks them)*.
+`main` is `main.lambda.guarded`, and a lambda written in a guarded block of `main` is `main.lambda`, as
+outside it *(assumed: as §13 marks them)*. A guarded block written in a guarded block adds its own mark:
+one in a guarded block of `Pick` is `Pick.guarded.guarded` (§13, the owner, 2026-11-03).
 
 Case: [memory/intrinsic-guarded.kz](../corpus/memory/intrinsic-guarded.kz)
 ```kurz
