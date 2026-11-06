@@ -1381,21 +1381,27 @@ public sealed partial class Checker
     /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
     /// <c>not-visible</c> where it is private and the call stands outside its class, or <c>prot</c> and outside the classes derived from
     /// its class (F9). A <c>prot</c> method called in a derived class through a reference whose type is not that class or one derived
-    /// from it, which C# refuses (CS1540), is <c>not supported</c>. A method the place of the call does not see is no candidate where
-    /// it sees one (F13), so that a call that fits only a base's method or property the class does not see gets the error of the methods it sees,
-    /// as C# leaves an inaccessible member out of overload resolution; where it sees none, the pick is among all, and the call is
-    /// <c>not-visible</c>.
+    /// from it, which C# refuses (CS1540), is <c>not supported</c>. A method or a property the place of the call does not see is no
+    /// candidate where it sees one of the name (F13), so that a call that fits only a base's method or property the class does not see
+    /// gets the error of the methods the place sees, as C# leaves an inaccessible member out of overload resolution; where it sees none,
+    /// the call is <c>not-visible</c> whatever its arguments, at the nearest of them, as C#'s CS0122 and Rust's E0624 report a hidden
+    /// method before its arguments, and its arguments are checked for their own defects.
     /// </summary>
     private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked, ClassType? receiver = null)
     {
-        var typed = ResolveCall(methods.Where(Visible).ToList() is { Count: > 0 } seen ? seen : methods, c, expected, out picked, CallKind.Method);
-        if (picked is not null && !Visible(picked))
+        var seen = methods.Where(Visible).ToList();
+        if (seen.Count == 0)
         {
-            Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
-                ? $"`{picked.Name}` of `{picked.Owner!.Name}` is `prot`, visible in its class and the classes derived from it (F9)"
-                : Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, picked.IsProperty ? "a property" : "a method"));
+            var hidden = methods[0];
+            Report(ErrorIds.NotVisible, line, (hidden.Declaration!.Modifiers & Modifiers.Prot) != 0
+                ? $"`{hidden.Name}` of `{hidden.Owner!.Name}` is `prot`, visible in its class and the classes derived from it (F9)"
+                : Hidden(hidden.Name, hidden.Owner!, (hidden.Declaration!.Modifiers & Modifiers.Internal) != 0, hidden.IsProperty ? "a property" : "a method"));
+            CheckArgumentsLoosely(c);
+            picked = null;
             return Typed.Error;
         }
+
+        var typed = ResolveCall(seen, c, expected, out picked, CallKind.Method);
 
         if (picked is not null && receiver is not null && (picked.Declaration!.Modifiers & (Modifiers.Pub | Modifiers.Prot)) == Modifiers.Prot
             && !ReferenceEquals(CurrentClass(), picked.Owner) && !receiver.Symbol.HasBaseOrIs(CurrentClass()!))
