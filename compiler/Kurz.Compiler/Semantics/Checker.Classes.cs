@@ -667,7 +667,7 @@ public sealed partial class Checker
             return;
         }
 
-        var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
+        var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot | Modifiers.Internal);
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
             NotSupported(d.Line, marks == (Modifiers.Virtual | Modifiers.Override) ? "`virtual` and `override` on one method (K7)" : "`virtual` on a private method, which no derived class sees (K7, F9)");

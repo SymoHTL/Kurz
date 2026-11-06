@@ -3858,6 +3858,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "\nprint(Dog().Sound())"));
         Assert.Equal([(ErrorIds.NotVisible, 10)], Errors(animal + "class Dog : Animal {\n    prot override string Sound() => \"woof\"\n}\n\nprint(Dog().Sound())"));
         Clean("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nprint(B().Get())");
+        // an `internal` method is seen by a class derived from it in its folder (F9), so it is no private method that `virtual` is refused on
+        Clean("class A {\n    internal virtual int Get() => 1\n}\nclass B : A {\n    internal override int Get() => 2\n}\n\nA x = B()\nprint(x.Get())\nprint(B().Get())");
         Assert.Equal([(ErrorIds.NotVisible, 9)], Errors("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nA x = B()\nprint(x.Get())"));
         Assert.Equal([(ErrorIds.NotVisible, 12)], Errors(animal + bare + "class Puppy : Dog\n\nprint(Puppy().Sound())"));
         Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "class Puppy : Dog {\n    pub string Call() => Sound()\n}\n\nprint(Puppy().Call())"));
