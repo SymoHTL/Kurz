@@ -786,6 +786,37 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// F12, D11: the default of a parameter of a method, <c>static</c> or not, is a constant expression that fits the parameter, read
+    /// with the members of its class in sight, as C# reads it: a field, a <c>static</c> field or a method of the class named there, or
+    /// <c>this</c>, is no constant, so it is <c>default-not-constant</c>, as C# gives CS1736, and a field of an instance in a <c>static</c>
+    /// method's default is the <c>static-mismatch</c> of K19, as in its body (the owner, 2026-11-04, #156, comment 6643376941).
+    /// </summary>
+    private void CheckMethodDefaults()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            foreach (var method in symbol.Methods.Values.SelectMany(list => list))
+            {
+                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = method.Line, Class = symbol, Static = method.IsStatic };
+                if (!method.IsStatic)
+                {
+                    // K7: the members of the instance are read through `this`, as in the body, so that a read of one types and is no constant
+                    var receiver = new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, method.Line) { Read = true };
+                    frame.Scope.Variables[receiver.Name] = receiver;
+                }
+
+                foreach (var (p, parameter) in method.Declaration!.Parameters.Zip(method.Parameters))
+                {
+                    if (p.Default is not null)
+                    {
+                        CheckDefault(p.Default, parameter.Type, p.Line);
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>K7: the body of each method, with its instance as the variable <c>this</c>, through which its fields and methods are read by their names.</summary>
     private void CheckMethodBodies()
     {

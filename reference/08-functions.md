@@ -441,6 +441,15 @@ argument out)* (C# also takes `default`, which the record
 does not name); one that is not is the compile error `default-not-constant`, at the parameter (the owner, 2026-10-10, against
 `type-mismatch` (T1) and `syntax` (E4); the spelling of the id and its line are *(assumed: proposed on
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
+The default of a parameter of a method, `static` or not, is read with the members of its class in
+sight, as C# reads it: a field, a `static` field or a method of the class named there is no
+constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
+§8: `this` there is no constant either, and a field of an instance in the default of a `static`
+method is K19's `static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+takes the default of the method its receiver's static type names, and runs the body the object's
+type gives, as C# does, so one object's call passes different values by the type of the variable it
+is read through; an override without a default has none of its own, and a call on the derived type
+that leaves the argument out is `argument-mismatch` (D11) (§8, the owner, 2026-11-05).
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
@@ -547,6 +556,51 @@ void Greet(string name, string word = "hello") {
 Greet("Ann")
 Greet("Ann", "bye")
 Greet("Ann", word: "bye")
+```
+
+Case: [classes/method-default.kz](../corpus/classes/method-default.kz)
+```kurz
+data Rate(int PerSecond = 1)
+
+class Meter(int Scale) {
+    pub static int Unit(Rate r = Rate()) => r.PerSecond
+
+    pub int Read(int n, Rate r = Rate(PerSecond: 2)) => Scale * n * r.PerSecond
+}
+
+print(Meter.Unit())
+print(Meter.Unit(Rate(5)))
+m = Meter(10)
+print(m.Read(1))
+print(m.Read(1, r: Rate(3)))
+```
+
+Case: [classes/method-default-not-constant.kz](../corpus/classes/method-default-not-constant.kz)
+```kurz
+string Pick() => "hi"
+
+class Greeter {
+    pub static void Greet(string name, string word = Pick()) {
+        print("{word} {name}")
+    }
+}
+
+Greeter.Greet("Ann")
+```
+
+Case: [classes/method-default-virtual.kz](../corpus/classes/method-default-virtual.kz)
+```kurz
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x = 2) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
 ```
 
 ### F13 (decided, §8) Which overload a call picks

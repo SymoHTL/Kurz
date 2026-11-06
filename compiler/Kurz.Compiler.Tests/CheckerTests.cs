@@ -3660,6 +3660,31 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_default_of_a_method_s_parameter_is_a_constant_that_fits_it_as_a_function_s_is()
+    {
+        // F12, D11: the default of a `static` and of an instance method, a literal and data values of constants, left out and by name
+        Clean("data R(int A = 1)\n\nclass C(int V) {\n    pub static int F(R r = R()) => r.A\n\n    pub int G(int x = 2, R r = R(A: 3)) => V + x + r.A\n}\n\nprint(C.F())\nprint(C(1).G())\nprint(C(1).G(r: R(4)))");
+        // F12: one that is no constant is `default-not-constant` at the parameter, and one of another type `type-mismatch`, as a function's
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 4)], Errors("int Other() => 1\n\nclass C(int V) {\n    pub static int F(int x = Other()) => x\n}\n\nprint(C.F(2))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("class C(int V) {\n    pub int G(int x = \"a\") => x\n}\n\nprint(C(1).G(2))"));
+        // F12 with K7: the members of the class are in sight there, as C# reads it, and a field, a `static` field, a method or `this`
+        // is no constant (CS1736); a field of an instance in a `static` method's default is K19's error, as in its body
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int A) {\n    pub int G(int x = A) => x\n}\n\nprint(C(1).G(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class C(int V) {\n    pub static int Step = 1\n    pub static int F(int x = Step) => x\n}\n\nprint(C.F(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 3)], Errors("class C(int V) {\n    pub static int One() => 1\n    pub int G(int x = One()) => x\n}\n\nprint(C(1).G(2))"));
+        Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int V) {\n    pub int G(C c = this) => c.V\n}\n\nprint(C(1).G())"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int A) {\n    pub static int F(int x = A) => x\n}\n\nprint(C.F(2))"));
+        // F12: a call takes the default of the method its receiver's static type names, so an override without one has none on its
+        // own type, while a call through the base takes the base's (the owner, 2026-11-05, #156, comment 6659240390)
+        Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors("class A {\n    pub virtual int F(int x = 1) => x\n}\n\nclass B : A {\n"
+            + "    pub override int F(int x) => x * 10\n}\n\nA a = B()\nprint(B().F() + a.F())"));
+        Clean("class A {\n    pub virtual int F(int x) => x\n}\n\nclass B : A {\n    pub override int F(int x = 2) => x * 10\n}\n\n"
+            + "A a = B()\nprint(B().F() + a.F(3))");
+        // V10: no variable is in sight there, as none is in a function's default
+        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("n = 1\n\nclass C(int V) {\n    pub int G(int x = n) => x\n}\n\nprint(C(1).G(2) + n)"));
+    }
+
+    [Fact]
     public void A_static_field_holds_a_constant_that_nothing_assigns()
     {
         // K18, K20: a constant of each type the checker reads, and one that reads a `static` field of its class declared above it, by its
