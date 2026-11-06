@@ -1,0 +1,33 @@
+// expect: output
+// | 10
+// | 0
+// rules: S9, S24
+
+// a stream's close drops the bytes its buffer holds, and the peer reads the end of the stream, where bytes left in the system's queue
+// would have reset it: the server reads one byte, then fills and consumes until all 10 of the client's bytes were read from the system,
+// whatever each read of the system gave, so that the queue is empty and the buffer holds the last of them when the server closes
+void | IoError Show() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("abcdefghij".Bytes)
+    mut got = Bytes()
+    mut taken = server.Read(mut got, 1)
+    mut look = Bytes()
+    mut held = server.Fill(mut look)
+    while taken + held < 10 {
+        server.Consume(held)
+        taken = taken + held
+        look.Clear()
+        held = server.Fill(mut look)
+    }
+
+    print(taken + held)
+    server.Close()
+    mut last = Bytes()
+    print(client.Read(mut last, 16))
+}
+
+Show() else {
+    IoError e => print(e)
+}

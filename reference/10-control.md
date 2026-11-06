@@ -245,11 +245,18 @@ does (T27), and that `Entry<string, long>("Ann", 31)` takes the types it names; 
 Over a map,
 `for key, value in map { }` names the key and the value together, under any two names (§4, the owner,
 2026-10-30). Over an instance of a class with `Count`, `NameAt(i)` and `ValueAt(i)`, `HttpHeaders`
-among them (W1), `for name, value in h { }` names each name and value in their order, as C#'s
+among them (W1, W4), `for name, value in h { }` names each name and value in their order, as C#'s
 `foreach` takes any type with `GetEnumerator()` (§12, the owner, 2026-11-02, against the compiler
-knowing `HttpHeaders` by name and against an iteration interface). Two names over a list or a range
-are `type-mismatch` *(proposed: the error; §4 gives the form over a map and §12 over such a class,
-and over nothing else)*. The loop runs over the collection as it was when
+knowing `HttpHeaders` by name and against an iteration interface). It is the index loop
+`for i in 0..<h.Count { name = h.NameAt(i); value = h.ValueAt(i) }`: `Count` is read once, before the
+first step, since a range is a value, and each step reads `NameAt(i)` and `ValueAt(i)` as they are
+then, so that a removal inside the block gives `NameAt`'s own error once an index is out of range and
+an item added inside it is not walked (§4, the owner, 2026-11-04, "Index loop, Count once")
+*(proposed: that `Count` is an `int` member and `NameAt` and `ValueAt` take an `int`, the two names
+taking the types of their results)*. Two names over any other type, a list, a range and a class that
+lacks one of the three members among them, and one name over such a class, are `type-mismatch`
+*(proposed: the error; §4 gives the form over a map and §12 over such a class, and over nothing
+else)*. Over a list, a range and a map the loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
 change to the variable, not to what the loop walks. For a map §4 states it, in the words of the option the owner
 chose, "The loop walks the map as it was when the loop started" (the owner, 2026-10-30, "Key and

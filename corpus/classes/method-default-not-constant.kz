@@ -1,0 +1,12 @@
+// expect: error default-not-constant at 7
+// rules: K7, F12
+
+string Pick() => "hi"
+
+class Greeter {
+    pub static void Greet(string name, string word = Pick()) {
+        print("{word} {name}")
+    }
+}
+
+Greeter.Greet("Ann")

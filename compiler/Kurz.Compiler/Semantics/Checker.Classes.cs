@@ -12,8 +12,8 @@ namespace Kurz.Compiler.Semantics;
 /// by content (K4) or by the fields an <c>equal by</c> clause names (K5, K8, K12, K15), across inheritance (K13); its base class, in the
 /// short form and the explicit one (K6, K10, K11, K16, K17), and its <c>virtual</c>, <c>override</c> and <c>prot</c> methods (K7, F9).
 /// What else a class can write, an interface, a constructor in its body, a field there without a written type, a field in its body or
-/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18), type parameters, and a field that holds
-/// a function value, whose cycle R9 judges by the lambdas of the program, is <c>not supported</c> (<c>compiler/README.md</c>).
+/// a <c>static</c> member of a class with a base or with classes derived from it (K6, K7, K18) and type parameters,
+/// is <c>not supported</c> (<c>compiler/README.md</c>).
 /// </summary>
 public sealed partial class Checker
 {
@@ -84,8 +84,12 @@ public sealed partial class Checker
                     break; // K7: read with the class (ResolveClass)
                 case ConstructorDeclaration c:
                     return (c.Line, "a constructor declared in the body of a class (K14)");
+                case FunctionDeclaration { Property: true } f when (f.Modifiers & Modifiers.Static) != 0:
+                    return (f.Line, "a `static` property (K7, K19)"); // section 14 of the record: open
+                case FunctionDeclaration { Property: true } f when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)) != 0:
+                    return (f.Line, $"the modifier `{(f.Modifiers & (Modifiers.Virtual | Modifiers.Override | Modifiers.Prot)).ToString().ToLowerInvariant()}` of a property, which section 14 leaves open (K7)");
                 case FunctionDeclaration f when (f.Modifiers & Modifiers.Extern) != 0:
-                    return (f.Line, "the modifier `extern` of a method (K7, R16)");
+                    return (f.Line, $"the modifier `extern` of a {(f.Property ? "property" : "method")} (K7, R16)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
                     return (f.Line, "a method with type parameters of its own (section 4, T19)");
                 case FunctionDeclaration:
@@ -192,7 +196,7 @@ public sealed partial class Checker
             }
             else if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -264,7 +268,7 @@ public sealed partial class Checker
             var type = Resolve(f.Type!);
             if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -291,6 +295,16 @@ public sealed partial class Checker
             if (symbol.Field(name) is not null || symbol.StaticField(name) is not null)
             {
                 Report(ErrorIds.Redeclared, methods[0].Line, $"`{name}` is a field of `{symbol.Name}` already (V9)");
+            }
+
+            for (var i = 1; i < methods.Count; i++)
+            {
+                if (methods[i].IsProperty || methods.Take(i).Any(f => f.IsProperty))
+                {
+                    // K7: a property is one member of its name, as a field is; a method of that name is no overload of it (V9)
+                    var earlier = methods.Take(i).Any(f => f.IsProperty) ? "a property" : "a method";
+                    Report(ErrorIds.Redeclared, methods[i].Line, $"`{name}` is {earlier} of `{symbol.Name}` already (V9)");
+                }
             }
 
             if (name is "Equals" or "GetHashCode")
@@ -367,7 +381,7 @@ public sealed partial class Checker
         }
         else if (Types.IsVoid(s.Type))
         {
-            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (K1, F4)");
+            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (F4)");
             s.Refused = true;
         }
         else if (held.Count > 0)
@@ -558,7 +572,9 @@ public sealed partial class Checker
                 var d = method.Declaration!;
                 if ((d.Modifiers & Modifiers.Mut) != 0)
                 {
-                    Report(ErrorIds.Syntax, d.Line, $"a method of a class takes no `mut` marker: it assigns the `mut` fields of its instance without one (K9, M5; E4)");
+                    Report(ErrorIds.Syntax, d.Line, d.Property
+                        ? "a property takes no `mut` marker: it has no setter, and its body assigns the `mut` fields of its instance without one (K7, K9; E4)"
+                        : $"a method of a class takes no `mut` marker: it assigns the `mut` fields of its instance without one (K9, M5; E4)");
                 }
 
                 if ((d.Modifiers & Modifiers.Naked) != 0)
@@ -567,9 +583,14 @@ public sealed partial class Checker
                 }
 
                 ResolveTypes(method, d);
+                if (method.IsProperty && (Types.IsVoid(method.ReturnType) || method.ReturnType is UnionType u && Types.NonNull(u) is null))
+                {
+                    // K7: a read gives a value; a `void` success (O10) and cases beside the success (O2) are section 14's, open
+                    NotSupported(d.Line, "a property of `void` or of a type that lists cases beside its success (K7, O2, O10)");
+                }
             }
 
-            foreach (var list in symbol.Methods.Values)
+            foreach (var list in symbol.Methods.Values.Where(list => !list.Any(f => f.IsProperty))) // a property's name: `redeclared` above
             {
                 for (var i = 1; i < list.Count; i++)
                 {
@@ -587,7 +608,36 @@ public sealed partial class Checker
             {
                 CheckOverride(symbol, method);
             }
+
+            foreach (var field in symbol.Fields.Skip(symbol.Base?.Fields.Count ?? 0))
+            {
+                HidesProperty(symbol, field.Name, false, field.Line); // K7: a field of the class's own, its bases' fields coming first (K6)
+            }
         }
+    }
+
+    /// <summary>
+    /// K7 <i>(assumed)</i>: a property has no override (section 14: open), so a member of a derived class with the name of a property of a
+    /// base that the class sees (F9), a field or a method whatever its parameters, is <c>hides-member</c>, as a method of a property's name
+    /// is no overload of it in one class (V9); so is a property with the name of a method of a base that the class sees.
+    /// </summary>
+    private bool HidesProperty(ClassSymbol symbol, string name, bool isProperty, int line)
+    {
+        if (symbol.Base?.Chain.FirstOrDefault(c => c.Methods.TryGetValue(name, out var list) && list.Any(SeenByDerived)) is not { } b)
+        {
+            return false;
+        }
+
+        var ofProperty = b.Methods[name].Any(f => f.IsProperty);
+        if (!ofProperty && !isProperty)
+        {
+            return false;
+        }
+
+        Report(ErrorIds.HidesMember, line, ofProperty
+            ? $"`{name}` has the name of a property of `{b.Name}`: a derived class gives no member of its own the name of a property it inherits (K7)"
+            : $"`{name}` is a property, and `{b.Name}` has a method of this name: a derived class gives no property the name of a method it inherits (K7)");
+        return true;
     }
 
     /// <summary>
@@ -609,6 +659,11 @@ public sealed partial class Checker
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
             NotSupported(d.Line, marks == (Modifiers.Virtual | Modifiers.Override) ? "`virtual` and `override` on one method (K7)" : "`virtual` on a private method, which no derived class sees (K7, F9)");
+            return;
+        }
+
+        if (HidesProperty(symbol, method.Name, method.IsProperty, d.Line))
+        {
             return;
         }
 
@@ -731,6 +786,37 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// F12, D11: the default of a parameter of a method, <c>static</c> or not, is a constant expression that fits the parameter, read
+    /// with the members of its class in sight, as C# reads it: a field, a <c>static</c> field or a method of the class named there, or
+    /// <c>this</c>, is no constant, so it is <c>default-not-constant</c>, as C# gives CS1736, and a field of an instance in a <c>static</c>
+    /// method's default is the <c>static-mismatch</c> of K19, as in its body (the owner, 2026-11-04, #156, comment 6643376941).
+    /// </summary>
+    private void CheckMethodDefaults()
+    {
+        foreach (var symbol in classDeclared)
+        {
+            foreach (var method in symbol.Methods.Values.SelectMany(list => list))
+            {
+                frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = method.Line, Class = symbol, Static = method.IsStatic };
+                if (!method.IsStatic)
+                {
+                    // K7: the members of the instance are read through `this`, as in the body, so that a read of one types and is no constant
+                    var receiver = new VariableSymbol("this", new ClassType(symbol), false, VariableKind.Parameter, method.Line) { Read = true };
+                    frame.Scope.Variables[receiver.Name] = receiver;
+                }
+
+                foreach (var (p, parameter) in method.Declaration!.Parameters.Zip(method.Parameters))
+                {
+                    if (p.Default is not null)
+                    {
+                        CheckDefault(p.Default, parameter.Type, p.Line);
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>K7: the body of each method, with its instance as the variable <c>this</c>, through which its fields and methods are read by their names.</summary>
     private void CheckMethodBodies()
     {
@@ -828,11 +914,13 @@ public sealed partial class Checker
 
     /// <summary>K19: a method of an instance named through its class, <c>Counter.Next()</c> or <c>Counter.Next</c>.</summary>
     private void InstanceMethodThroughClass(ClassSymbol symbol, string name, int line) =>
-        Report(ErrorIds.StaticMismatch, line, $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
+        Report(ErrorIds.StaticMismatch, line, Property(symbol, name) is not null
+            ? $"`{name}` is a property of an instance of `{symbol.Name}`, not of the class: read it from an instance (K7, K19)"
+            : $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
 
     /// <summary>K19: a method of an instance named alone, with a call or without one, in a <c>static</c> member, which has no instance.</summary>
     private void InstanceMethodInStatic(string name, int line) =>
-        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a method of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a {(Property(CurrentClass()!, name) is not null ? "property" : "method")} of an instance of `{CurrentClass()!.Name}` (K7, K19)");
 
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
@@ -947,6 +1035,49 @@ public sealed partial class Checker
         model.RecordImplicitField(t, ThisVariable(), null);
         return new Typed(new ClassType(CurrentClass()!));
     }
+
+    /// <summary>
+    /// K7, K6: the read-only property of that name of the class or, as C# reads an inherited property, of the nearest base up the chain
+    /// that declares a method or a property of the name; null where that class's members of the name are methods, where a field has the
+    /// name, or where the chain has none.
+    /// </summary>
+    private static FunctionSymbol? Property(ClassSymbol symbol, string name) =>
+        symbol.Field(name) is not null ? null
+        : symbol.Chain.FirstOrDefault(c => c.Methods.ContainsKey(name)) is { } declaring ? declaring.Methods[name].Find(f => f.IsProperty) : null;
+
+    /// <summary>
+    /// K7: <c>h.Count</c>, a read of a property, the call of its method that takes no arguments (section 4: the owner, 2026-11-03), recorded
+    /// as that call with the read as its callee; its body runs at every read, so no test of an earlier read narrows it (N9). A property
+    /// without <c>pub</c> read from outside its class is <c>not-visible</c> (F9).
+    /// </summary>
+    private Typed ReadProperty(MemberAccess m, ClassType owner, FunctionSymbol property)
+    {
+        if (!Visible(property))
+        {
+            Report(ErrorIds.NotVisible, m.Line, Hidden(property.Name, owner.Symbol, (property.Declaration!.Modifiers & Modifiers.Internal) != 0, "a property"));
+            return Typed.Error;
+        }
+
+        var call = new CallExpression(m.Line, m, [], []);
+        var typed = ResolveCall([property], call, null, out _, CallKind.Method);
+        CallRan(); // N9: the body can assign a `mut` field through another reference (K2) and free the target of a `weak` one (R3)
+        model.RecordPropertyRead(m, call);
+        return typed;
+    }
+
+    /// <summary>K7: <c>Count</c>, a property of the class read by its name inside a method, the property of <c>this</c>, read as <see cref="ReadProperty"/> reads it.</summary>
+    private Typed ReadImplicitProperty(NameExpression n, FunctionSymbol property)
+    {
+        var call = new CallExpression(n.Line, n, [], []);
+        var typed = CallImplicitMethod([property], n, call, null);
+        CallRan(); // N9, as ReadProperty
+        model.RecordPropertyRead(n, call);
+        return typed;
+    }
+
+    /// <summary>K7: an assignment of a property, which has no setter.</summary>
+    private void AssignProperty(ClassSymbol owner, string name, int line) =>
+        Report(ErrorIds.AssignImmutable, line, $"`{name}` is a property of `{owner.Name}`, which has no setter (K7)");
 
     /// <summary>K7: a read of a field by its name inside a method, the field of <c>this</c>.</summary>
     private Typed ReadImplicitField(NameExpression n, FieldSymbol field)
@@ -1120,6 +1251,12 @@ public sealed partial class Checker
             return FieldVisible(field, type.Symbol, line) ? new Typed(Types.Read(field.Type)) : Typed.Error; // R3: a `weak` field reads as a strong `T?`
         }
 
+        if (Property(type.Symbol, member) is not null)
+        {
+            NotSupported(line, "a property read where the checker reads a field alone (K7)");
+            return Typed.Error;
+        }
+
         if (MethodsOf(type.Symbol, member) is not null)
         {
             NotSupported(line, "a method as a value, named without a call (K7, F11)");
@@ -1142,7 +1279,7 @@ public sealed partial class Checker
     /// </summary>
     private bool FieldVisible(FieldSymbol field, ClassSymbol owner, int line)
     {
-        if (field.IsPub || ReferenceEquals(CurrentClass(), owner) || (field.IsInternal && InFolder(owner)))
+        if (Visible(field, owner))
         {
             return true;
         }
@@ -1150,6 +1287,10 @@ public sealed partial class Checker
         Report(ErrorIds.NotVisible, line, Hidden(field.Name, owner, field.IsInternal, "a field"));
         return false;
     }
+
+    /// <summary>F9: whether a field of <paramref name="owner"/> is visible at the place the checker reads: one with <c>pub</c>, any inside its class, and one marked <c>internal</c> in the folder that declares its class.</summary>
+    private bool Visible(FieldSymbol field, ClassSymbol owner) =>
+        field.IsPub || ReferenceEquals(CurrentClass(), owner) || (field.IsInternal && InFolder(owner));
 
     /// <summary>F9: a method without <c>pub</c> is private to its class, one marked <c>internal</c> to the folder that declares its class, and one with <c>prot</c> visible in the classes derived from it too; a call of it from elsewhere is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>
@@ -1172,6 +1313,19 @@ public sealed partial class Checker
     /// <summary>K7, F13: a call of a method on an instance, <c>c.Add(1)</c>, the one of its name whose parameters fit; a private one from outside its class is <c>not-visible</c> (F9).</summary>
     private Typed CallMethod(ClassType type, MemberAccess m, CallExpression c, KurzType? expected)
     {
+        if (Property(type.Symbol, m.Member) is { } property)
+        {
+            var read = ReadProperty(m, type, property);
+            if (read.IsError)
+            {
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            model.RecordType(m, read);
+            return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
+        }
+
         if (MethodsOf(type.Symbol, m.Member) is not { } methods)
         {
             if (type.Symbol.Field(m.Member) is { } field)
@@ -1224,7 +1378,7 @@ public sealed partial class Checker
         {
             Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
                 ? $"`{picked.Name}` of `{picked.Owner!.Name}` is `prot`, visible in its class and the classes derived from it (F9)"
-                : Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, "a method"));
+                : Hidden(picked.Name, picked.Owner!, (picked.Declaration!.Modifiers & Modifiers.Internal) != 0, picked.IsProperty ? "a property" : "a method"));
             return Typed.Error;
         }
 
@@ -1340,7 +1494,15 @@ public sealed partial class Checker
             return;
         }
 
-        if (owner.Symbol.Field(last.Member) is not { } field)
+        var field = owner.Symbol.Field(last.Member);
+        if (field is null && Property(owner.Symbol, last.Member) is not null)
+        {
+            AssignProperty(owner.Symbol, last.Member, a.Line);
+            CheckExpression(a.Value, Untyped(a.Value));
+            return;
+        }
+
+        if (field is null)
         {
             ClassMember(owner, last.Member, last.Line);
             CheckExpression(a.Value, Untyped(a.Value));
@@ -1414,6 +1576,11 @@ public sealed partial class Checker
         var owner = (ClassType)PathType(members[^1].Target)!;
         if (owner.Symbol.Field(members[^1].Member) is not { } field)
         {
+            if (Property(owner.Symbol, members[^1].Member) is not null)
+            {
+                PropertyReceiver(members[^1].Member, line, what); // K7: read without an error, so reported here
+            }
+
             return true; // reported where the receiver was read
         }
 
@@ -1438,6 +1605,13 @@ public sealed partial class Checker
         MutReceiverThroughInstance(index.Target, fields, a.Line, what);
         return true;
     }
+
+    /// <summary>K7: inside a method, whether a name without a variable and without a field is a property of the class.</summary>
+    private bool ImplicitProperty(string name) => ImplicitField(name) is null && ImplicitMethods(name)?.Find(f => f.IsProperty) is not null;
+
+    /// <summary>K7, M5: a change of the value a property gives, which is a call's value: no place holds it, so no change reaches it.</summary>
+    private void PropertyReceiver(string name, int line, string what) =>
+        Report(ErrorIds.MutRequired, line, $"{what}, and `{name}` is a property, whose value no change reaches: only a value reachable through a `mut` variable changes (M5, K7)");
 
     private bool MutField(FieldSymbol field, int line, string what)
     {
@@ -1519,55 +1693,119 @@ public sealed partial class Checker
     // ---- the cycle rule ----------------------------------------------------------------------------
 
     /// <summary>
-    /// R2, R4: judged by types, over the file: a class that reaches itself through strong fields, one of them <c>mut</c>, is
+    /// R2, R4, R9: judged by types, over the file: a class that reaches itself through strong fields, one of them <c>mut</c>, is
     /// <c>reference-cycle</c>. A field reaches every class its type holds, through lists, maps, unions, nullable types and the fields of
-    /// data values; each ring is reported once, at the class of the ring declared first, the first class on the path (R9's case). A
-    /// class with a field whose type holds a function value is <c>not supported</c>: R9 counts such a field as reaching every class a
-    /// lambda of the program captures, which the checker does not judge.
+    /// data values, and a field whose type can hold a function value reaches every class an instance of which a lambda of the program
+    /// captures besides (R9), so the rule runs after every body, when the lambdas are known. Each ring is reported once, at the class of
+    /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
+    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring.
     /// </summary>
     private void CheckReferenceCycles()
     {
+        var firstLambda = new Dictionary<ClassSymbol, int>();
+        var captured = CapturedClasses(firstLambda);
         var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
-        foreach (var c in classDeclared)
+        List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
         {
-            var list = new List<(ClassSymbol, FieldSymbol)>();
-            foreach (var field in c.Fields)
+            if (!edges.TryGetValue(c, out var list))
             {
-                var reached = new HashSet<ClassSymbol>();
-                if (HoldsFunctionValue(field.Type, []))
+                // W1: a class of std/ or of a folder is read here too, since a field of a function type of it reaches the classes the
+                // file's lambdas capture
+                list = [];
+                foreach (var field in c.Fields)
                 {
-                    NotSupported(field.Line, "a field that holds a function value, which the cycle rule judges by the lambdas of the program (R9)");
-                    continue;
+                    var reached = new HashSet<ClassSymbol>();
+                    ClassesHeld(field.Type, reached, []);
+                    if (HoldsFunctionValue(field.Type, []))
+                    {
+                        reached.UnionWith(captured);
+                    }
+
+                    list.AddRange(reached.Select(r => (r, field)));
                 }
 
-                ClassesHeld(field.Type, reached, []);
-                list.AddRange(reached.Select(r => (r, field)));
+                edges[c] = list;
             }
 
-            edges[c] = list;
+            return list;
         }
 
         var reported = new HashSet<ClassSymbol>();
-        foreach (var start in classDeclared)
+        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstLambda.GetValueOrDefault(c, int.MaxValue))))
         {
             if (reported.Contains(start))
             {
                 continue;
             }
 
-            if (RingThroughMut(start, edges) is { } ring)
+            if (RingThroughMut(start, EdgesOf) is { } ring)
             {
                 var members = ring.Select(step => step.From).Distinct().ToList();
                 reported.UnionWith(members);
-                var first = members.MinBy(m => classDeclared.IndexOf(m))!;
                 var path = string.Join(", ", ring.Select(step => $"`{step.From.Name}.{step.Field.Name}`{(step.Field.Mut ? " (mut)" : "")}"));
-                Report(ErrorIds.ReferenceCycle, first.Line, $"`{first.Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring (R2)");
+                var rules = ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? "R2, R9" : "R2";
+                var first = members.Where(classDeclared.Contains).MinBy(classDeclared.IndexOf);
+                var line = first?.Line ?? members.Where(firstLambda.ContainsKey).Select(m => firstLambda[m]).DefaultIfEmpty(0).Min();
+                if (line > 0)
+                {
+                    // a ring of std/'s classes alone that no lambda of the file closes is std/'s, which std/'s checker judged
+                    Report(ErrorIds.ReferenceCycle, line, $"`{(first ?? members[0]).Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring ({rules})");
+                }
             }
         }
     }
 
+    /// <summary>
+    /// R9: the classes an instance of which a lambda of the program captures, the file's, std/'s and those of the folders the file uses:
+    /// every class the type of a captured variable holds (<see cref="ClassesHeld"/>), and of a type parameter every class a type argument
+    /// that a call of the program gives it holds. <paramref name="firstLambda"/> gets the line of the file's first lambda that captures
+    /// each class.
+    /// </summary>
+    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstLambda)
+    {
+        var models = new List<SemanticModel> { model };
+        models.AddRange(used.Values.Select(u => u.model));
+        if (std is not null)
+        {
+            models.Add(std.model);
+        }
+
+        var arguments = new Dictionary<TypeParameterSymbol, List<KurzType>>(ReferenceEqualityComparer.Instance);
+        foreach (var (parameter, argument) in models.SelectMany(m => m.Calls).SelectMany(c => c.Map))
+        {
+            if (!arguments.TryGetValue(parameter, out var list))
+            {
+                arguments[parameter] = list = [];
+            }
+
+            list.Add(argument);
+        }
+
+        var all = new HashSet<ClassSymbol>();
+        foreach (var m in models)
+        {
+            foreach (var (lambda, info) in m.Lambdas)
+            {
+                var reached = new HashSet<ClassSymbol>();
+                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                foreach (var v in info.Captures)
+                {
+                    ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
+                }
+
+                all.UnionWith(reached);
+                foreach (var c in reached.Where(_ => ReferenceEquals(m, model)))
+                {
+                    firstLambda[c] = Math.Min(firstLambda.GetValueOrDefault(c, int.MaxValue), lambda.Line);
+                }
+            }
+        }
+
+        return all;
+    }
+
     /// <summary>A ring of fields from <paramref name="start"/> back to it with a <c>mut</c> field on it; null where there is none.</summary>
-    private static List<(ClassSymbol From, FieldSymbol Field)>? RingThroughMut(ClassSymbol start, Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>> edges)
+    private static List<(ClassSymbol From, FieldSymbol Field)>? RingThroughMut(ClassSymbol start, Func<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>> edges)
     {
         // a search over (class, a `mut` field met yet) from the start, back to the start with one met
         var queue = new Queue<(ClassSymbol At, bool Mut)>();
@@ -1577,14 +1815,7 @@ public sealed partial class Checker
         while (queue.Count > 0)
         {
             var (at, mut) = queue.Dequeue();
-            if (!edges.TryGetValue(at, out var fields))
-            {
-                // W1: a class of std/ that the prelude brings into the file, whose fields std/'s checker judged; it names no class of
-                // the file, so no ring of the file runs through it
-                continue;
-            }
-
-            foreach (var (to, field) in fields)
+            foreach (var (to, field) in edges(at))
             {
                 var next = (to, mut || field.Mut);
                 if (ReferenceEquals(to, start) && next.Item2)
@@ -1617,39 +1848,51 @@ public sealed partial class Checker
     private static IEnumerable<KurzType> HeldArguments(DataType d) =>
         d.Symbol.TypeParameters.Zip(d.TypeArguments).Where(p => d.Symbol.Fields.Any(f => Types.Mentions(f.Type, p.First))).Select(p => p.Second);
 
-    /// <summary>The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values of a map, the cases of a union and the fields of a data value.</summary>
-    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path)
+    /// <summary>
+    /// The classes a value of the type holds strongly: itself and every class derived from it, the items of a list, the keys and values
+    /// of a map, the cases of a union and the fields of a data value, and where <paramref name="arguments"/> is given, what the types it
+    /// gives a type parameter hold (R9); it gives a type parameter met before none.
+    /// </summary>
+    private void ClassesHeld(KurzType type, HashSet<ClassSymbol> reached, HashSet<DataSymbol> path, Func<TypeParameterSymbol, IEnumerable<KurzType>>? arguments = null)
     {
         switch (type)
         {
             case ClassType c:
+                reached.Add(c.Symbol); // a class of std/ or of a folder is in no table of the file's classes (W1)
                 reached.UnionWith(classDeclared.Where(x => x.HasBaseOrIs(c.Symbol))); // K6: an instance of a derived class stands where its base does
                 break;
             case ListType l:
-                ClassesHeld(l.Element, reached, path);
+                ClassesHeld(l.Element, reached, path, arguments);
                 break;
             case MapType m:
-                ClassesHeld(m.Key, reached, path);
-                ClassesHeld(m.Value, reached, path);
+                ClassesHeld(m.Key, reached, path, arguments);
+                ClassesHeld(m.Value, reached, path, arguments);
                 break;
             case UnionType u:
                 foreach (var c in u.Cases)
                 {
-                    ClassesHeld(c, reached, path);
+                    ClassesHeld(c, reached, path, arguments);
                 }
 
                 break;
             case DataType d when path.Add(d.Symbol):
                 foreach (var f in d.Symbol.Fields)
                 {
-                    ClassesHeld(SubstituteData(d, f.Type), reached, path);
+                    ClassesHeld(SubstituteData(d, f.Type), reached, path, arguments);
                 }
 
                 break;
             case DataType d:
                 foreach (var a in HeldArguments(d))
                 {
-                    ClassesHeld(a, reached, path);
+                    ClassesHeld(a, reached, path, arguments);
+                }
+
+                break;
+            case TypeParameterType p when arguments is not null:
+                foreach (var a in arguments(p.Symbol))
+                {
+                    ClassesHeld(a, reached, path, arguments);
                 }
 
                 break;
