@@ -273,9 +273,10 @@ corrects the reading said back on issue 156, comment 6644555381, item 2, as the 
 2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. A read
 of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
 as a handler's read does, and the connection closes; the `408` is sent only while no response has
-begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575) *(assumed, §12: the error
-`request timed out`, read from Q12 (b) of 2026-11-04 and from Q8, and the close and the `408`
-decided by the server at the report of that read, which ends the body)*, and after a `408` the
+begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575); the error is the server's own,
+in place of the `IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull
+request 347, comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at
+the report of that read, which ends the body)*, and after a `408` the
 response the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
@@ -288,12 +289,12 @@ runs, the server times nothing: it times the grace once the call has returned, a
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
 2026-11-05, issue 156, comment 6669908509). The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
-(§12) *(assumed, §12: where the grace starts, and that it does not start again)*. The time between
+(§12, the owner, 2026-11-06, pull request 347, P2). The time between
 reads counts in the body's rate as the time a read waits does, and a
 time past the grace since the last read ends the body at once; a body that the handler reads
 itself counts only the time a read waits, since Q8 was asked of a moved body (§12) *(assumed, §12:
 those readings)*. That a moved body's read under the rate ends the body and closes the connection
-is decided, its error is a reading (above), and the timing of a read's wait is open: how it is
+is decided, as is its error (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
 wait or a deadline the scheduler reads at each switch, while the time between reads is the
 server's, timed from the body's last read (above) (§12).
