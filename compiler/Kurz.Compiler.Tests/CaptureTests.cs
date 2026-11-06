@@ -15,6 +15,9 @@ public sealed class CaptureTests
 {
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(3);
 
+    // the limit of a control, a program whose streams end with it: a cold start of `cmd.exe` on a CI runner took all of `Limit`
+    private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(60);
+
     [Fact]
     public async Task A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit()
     {
@@ -22,18 +25,19 @@ public sealed class CaptureTests
         {
             // `start /b` leaves `ping` running with the output it took from `cmd`, which ends at once; no list of a process's handles
             // is read on Windows, so the run ends at its limit and says that it found no holder, and `ping` ends by itself
-            Assert.Equal(0, Processes.Capture("cmd.exe", ["/c", "echo done"], null, Limit).Code); // a program whose streams end with it
+            Assert.Equal(0, Processes.Capture("cmd.exe", ["/c", "echo done"], null, ControlLimit).Code); // a program whose streams end with it
             var started = Stopwatch.StartNew();
             var held = Task.Run(() => Processes.Capture("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1"], null, Limit));
             Assert.True(await Task.WhenAny(held, Task.Delay(TimeSpan.FromSeconds(20))) == held, "the run waited past its limit on the output a child of its program holds");
             Assert.True(started.Elapsed >= Limit, $"the run ended after {started.Elapsed}, before its limit of {Limit}");
-            var (heldCode, _, heldError) = await held;
-            Assert.Equal(-1, heldCode);
-            Assert.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", heldError, StringComparison.Ordinal);
+            var (heldCode, heldOutput, heldError) = await held;
+            var heldSeen = $"output [{heldOutput}] error [{heldError}] after {started.Elapsed}"; // each assert below names what the run gave
+            Assert.True(heldCode == -1, $"the run ended with {heldCode}, not -1: {heldSeen}");
+            Assert.True(heldError.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", StringComparison.Ordinal), $"the error does not say that no holder was found: {heldSeen}");
             return;
         }
 
-        Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, Limit)); // a program whose streams end with it
+        Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, ControlLimit)); // a program whose streams end with it
 
         var clock = Stopwatch.StartNew();
         var run = Task.Run(() => Processes.Capture("/bin/sh", ["-c", "sleep 60 & echo $!"], null, Limit));
@@ -41,10 +45,11 @@ public sealed class CaptureTests
         Assert.True(clock.Elapsed >= Limit, $"the run ended after {clock.Elapsed}, before its limit of {Limit}");
         var (code, output, error) = await run;
         var child = output.Trim();
-        Assert.Equal(-1, code);
-        Assert.Matches("^[0-9]+$", child);
-        Assert.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", error, StringComparison.Ordinal);
-        Assert.False(Lives(child), $"the child {child} still runs");
+        var seen = $"output [{output}] error [{error}] after {clock.Elapsed}"; // each assert below names what the run gave
+        Assert.True(code == -1, $"the run ended with {code}, not -1: {seen}");
+        Assert.True(child.Length > 0 && child.All(char.IsAsciiDigit), $"the output holds no pid: {seen}");
+        Assert.True(error.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", StringComparison.Ordinal), $"the error does not say that the child {child} was ended: {seen}");
+        Assert.False(Lives(child), $"the child {child} still runs: {seen}");
     }
 
     [Fact]
