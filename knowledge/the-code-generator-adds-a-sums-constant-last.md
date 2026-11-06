@@ -1,6 +1,6 @@
 ---
 name: the-code-generator-adds-a-sums-constant-last
-description: LLVM's code generator moves the constant of a sum to the sum's last add, whatever order the source and the optimised IR give it. Each step of MD5 (`Md5F` to `Md5I` in `std/std.kz`) adds its constant t after the round's function, which puts one add more on the path from b to the next step than in OpenSSL's assembly, whose `lea` adds the constant off that path. A probe that hid the constants from LLVM took 46.80 ms where std's form took 51.79 (issue 157, 2026-11-03), and no order of the source changes where the constant lands
+description: LLVM's code generator moves the constant of a sum to the sum's last add, whatever order the source and the optimised IR give it. In MD5 (`Md5F` to `Md5I` in `std/std.kz`) that added each step's constant t after the round's function, one add more on the path from b to the next step than in OpenSSL's assembly, whose `lea` adds the constant off that path, and no order of the source moved it (51.79 ms). A value LLVM cannot see through, passed at the call, keeps the constant off that path: with `Hint.BlackBox(t)` at each of `Md5Block`'s 64 calls MD5 took 42.55 ms against 51.78 (issue 157, 2026-11-03, the best of 15), while the same hint inside `Md5F` to `Md5I` leaves the add last
 metadata:
   type: reference
 ---
@@ -57,19 +57,40 @@ The owner was not asked.
 
 ## What to do
 
-- Do not measure orders of the source against this, where each keeps each term added into the sum
-  on its own. A constant in a sum on a hot path is added last by the code generator, whatever that
-  order. Do measure a regrouping of the sum, or another form of the round's function: `op_g`'s
-  grouping of G cost 4.6 ms of 51.8, and F's terms added one at a time 1.5 ms (above). Read where
+- Do not measure another order of the same terms against this: a constant in a sum on a hot path is
+  added last by the code generator, whatever the order of the terms. Do measure a change to the terms
+  themselves or to their grouping, whatever its order, even where each term is still added into the
+  sum on its own: `op_g`'s grouping of G cost 4.6 ms of 51.8, and F's select written as its two terms
+  added into the sum one at a time 1.5 ms (above). Read where
   the constant lands in the machine code,
   not in the IR: the IR adds it first. The same holds for an option of clang
   ([[a-front-end-option-of-clang-does-not-reach-ir]]). `judgment step`: no job runs a benchmark or
   reads the machine code of std.
-- Use an opaque value to keep a constant off the path. The clean way is a value the optimiser
-  cannot see through: in Kurz `Hint.BlackBox(t)` (F18), Rust's `core::hint::black_box`, which the
-  owner chose on 2026-11-03 after this probe (issue 157), and in C an empty `asm` barrier. With it
-  at each of MD5's 64 constants, MD5 took 42.60 ms where std's form took 51.78 (issue 157, the best
-  of 15). `judgment step`.
+- Use an opaque value to keep a constant off the path, and pass it at the call, not inside the
+  helper. The clean way is a value the optimiser cannot see through: in Kurz `Hint.BlackBox(t)`
+  (F18), Rust's `core::hint::black_box`, which the owner chose on 2026-11-03 after this probe
+  (issue 157), and in C an empty `asm` barrier. `Md5Block` in `std/std.kz` hands each of MD5's 64
+  constants to its step through `Hint.BlackBox` in the call. Its machine code then adds the constant
+  to a and m before the round's function, as OpenSSL's `lea` does: and, xor, add, rol and add, 5
+  operations on the path from b, against 6 before. With the same hint inside `Md5F` to `Md5I`, the
+  optimised IR adds the value read back last, after the round's function, and the machine code keeps
+  the 6 operations. `judgment step`: no job reads the machine code of std.
+- What the hint at the call gives, on 2026-11-03. Each row is the least of 15 rounds of the bytes
+  bench's runner (issue 157), with the builds alternating in each round, built with clang 23.1.4 at
+  `-O2`. The bench's `hashes` program hashes a file of 16 MiB three times, changing its first byte
+  each time. A second program hashes a message of 64 bytes 200000 times and one of 1 KiB 20000
+  times, in the same way. The builds print the same digests, and for the short messages Python's
+  `hashlib` gives them too.
+
+  | Build | MD5, 16 MiB | MD5, 64 B | MD5, 1 KiB | SHA-256, 16 MiB | SHA-256, 64 B | SHA-256, 1 KiB |
+  |---|---|---|---|---|---|---|
+  | std before the change | 51.78 ms | 27.04 ms | 22.72 ms | 19.15 ms | 13.85 ms | 8.67 ms |
+  | the same build again, the noise band | 51.75 ms | 27.01 ms | 22.72 ms | 18.87 ms | 13.85 ms | 8.37 ms |
+  | `Hint.BlackBox(t)` at each of `Md5Block`'s calls | 42.55 ms | 22.57 ms | 18.68 ms | 19.14 ms | 13.85 ms | 8.67 ms |
+
+  SHA-256's blocks go through `HashBlock` too, the function that MD5's steps are inlined into. The
+  slots grow its stack frame from 312 to 536 bytes, and SHA-256 stays within the noise band. .NET
+  took 44.57 ms for 16 MiB in the run of the probe above.
 - Whether std may hide a constant behind a value of the program that LLVM cannot know, such as a
   word of the state or a count, is open. Its correctness rests on the program's state, and its
   speed on what LLVM happens not to see. It was not taken for #258 (above), and the owner has not

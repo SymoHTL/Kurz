@@ -3896,6 +3896,30 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");
+        // K7, K2, section 3 (#286's round, M7): a property and a method whose body replaces the list a field holds, called in a statement that
+        // read an item of that list before the call, an argument the call does not take as `mut`: the item read is held across the call,
+        // and the list read after it is the new one
+        const string propertyChange = """
+            int Size(List<int> xs, int n) => xs.Count + n
+
+            class Bag(mut List<List<int>> Items) {
+                pub int Reset => Swap()
+
+                pub int Swap() {
+                    Items = [[7]]
+                    return 0
+                }
+            }
+
+            b = Bag([[1, 2, 3]])
+            print(Size(b.Items[0], b.Reset))
+            print(b.Items[0])
+            c = Bag([[1, 2]])
+            print(Size(c.Items[0], c.Swap()))
+            print(c.Items[0])
+
+            """;
+        Ran(BuildAndRun(propertyChange, fenced, "property-change-fenced"), 0, ["3", "[7]", "2", "[7]"], "");
         Ran(BuildAndRun(FunctionFields, fenced, "function-fields-fenced"), 0, FunctionFieldsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
