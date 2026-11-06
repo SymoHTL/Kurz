@@ -1805,7 +1805,9 @@ base has fields and no clause, where K13 does not say whether the base's fields 
 `override` on one method, and `virtual` on a private method (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
 of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
-over an instance of a class with `Count`, `NameAt` and `ValueAt`, the walk of a class that section 12 decides (C6), a `static` field
+over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one
+`int` with a result, each of the instance and visible at the loop (F9), the walk of a class that section 12 decides and section 4
+reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
 but for one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
@@ -1924,8 +1926,8 @@ round can ask about it by the rule's id.
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
   variable or parameter or on a path of data fields from one, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are
-  `type-mismatch` at the collection (C6, a proposal), and over an instance of a class with `Count`, `NameAt` and `ValueAt` they
-  are `not supported` (C6, the list of what the checker does not read). A read of a map in the key of its own `Remove` is a
+  `type-mismatch` at the collection (C6, a proposal), and over an instance of a class of the shape the list of what the checker
+  does not read names they are `not supported` (C6, that list), and over a class of another shape `type-mismatch` (C6, a proposal). A read of a map in the key of its own `Remove` is a
   value of its own and holds nothing of the map, so a map's methods need none of `Add`'s exception, which
   every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
   and `Insert` among them (M7). A map that
