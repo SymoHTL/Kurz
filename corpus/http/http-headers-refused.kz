@@ -1,0 +1,23 @@
+// expect: output
+// | Protocol: invalid header: CR or LF
+// | Protocol: invalid header: CR or LF
+// | Protocol: invalid header: CR or LF
+// | none
+// | [a=1]
+// rules: W4
+
+h = HttpHeaders()
+h.Add("X-Name", "a\r\nInjected: 1") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Add("X-Na\nme", "a") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Add("Set-Cookie", "a=1") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+h.Set("Set-Cookie", "b=2\r") else {
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}
+print(h.Get("X-Name") ?? "none")
+print(h.GetAll("Set-Cookie"))
