@@ -1584,6 +1584,10 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
         }
+        else if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+        }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
@@ -1630,6 +1634,15 @@ public sealed partial class Checker
             f = f.Outer;
         }
     }
+
+    /// <summary>
+    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
+    /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
+    /// refuses it (CS0412) (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
+    /// </summary>
+    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
+
+    private static string TypeParameterClash(string name) => $"`{name}` is a type parameter of the function around it (V9)";
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
@@ -1767,6 +1780,12 @@ public sealed partial class Checker
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
+            return true;
+        }
+
+        if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
             return true;
         }
 
@@ -2203,10 +2222,10 @@ public sealed partial class Checker
             return;
         }
 
-        if (IsDeclaredName(a.Name))
+        if (IsTypeParameterName(a.Name) || IsDeclaredName(a.Name))
         {
             // E1: the declaration is the one error, and a read of the name after it reports nothing more, as F16's branch above
-            Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is visible already (V9)");
+            Report(ErrorIds.Redeclared, a.Line, IsTypeParameterName(a.Name) ? TypeParameterClash(a.Name) : $"`{a.Name}` is visible already (V9)");
             DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
