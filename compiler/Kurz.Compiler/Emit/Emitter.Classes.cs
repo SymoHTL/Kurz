@@ -27,6 +27,10 @@ public sealed partial class Emitter
     // list (the owner, 2026-11-01, "Iterative, never crashes")
     private readonly List<(string Drop, string List)> released = [];
 
+    // whether a helper holds the work lists while it lets go of several values (`Hold`), which reads the flag of a release under way
+    // and calls the function that works the lists off, so that both are emitted even when no class and no family was released
+    private bool holds;
+
     // K6: the classes whose tables the program names, in the order first named, and the classes whose values `==` and a map's hash
     // read through the table (K13)
     private readonly List<ClassSymbol> tabled = [];
@@ -410,6 +414,28 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// In a release helper that may run outside a release under way: <paramref name="walk"/>, which lets go of several values, with the
+    /// work lists held, so that each value whose last count it lets go of waits on its list, and then, unless a release was already
+    /// under way, the lists worked off (<see cref="EmitDrain"/>): the values end in the order of their lists, as they do inside a
+    /// release, not each one at its last count (R1, the owner, 2026-11-05, issue 39, comment 6659239659).
+    /// </summary>
+    private void Hold(Action walk)
+    {
+        holds = true;
+        var under = fn.Value("load i1, ptr @\"kz.releasing\"");
+        fn.Emit("store i1 true, ptr @\"kz.releasing\"");
+        walk();
+        var drain = fn.Label("held.drain");
+        var done = fn.Label("held.done");
+        fn.CondBranch(under, done, drain);
+        fn.Block(drain);
+        fn.Emit("call void @\"kz.drain\"()");
+        fn.Emit("store i1 false, ptr @\"kz.releasing\"");
+        fn.Branch(done);
+        fn.Block(done);
+    }
+
+    /// <summary>
     /// R3: one more weak count of the block a <c>weak</c> reference points at, none for <c>null</c>, as Rust's <c>Weak::clone</c>
     /// counts: the block stays while a weak reference to it is held, for the reference's read to find its strong count.
     /// </summary>
@@ -635,19 +661,14 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// The end of an instance whose last strong count was let go of: its fields let go of in their order, as Rust drops them, and then
-    /// the weak count all the strong ones held, whose last frees the block, as Rust's <c>Rc</c> and <c>Weak</c> do (section 3).
+    /// The end of an instance whose last strong count was let go of: its fields let go of in their order, as Rust drops them, those
+    /// that put a value on a work list in the reverse order, which ends those values in the fields' order (<see cref="ReleaseInOrder"/>),
+    /// and then the weak count all the strong ones held, whose last frees the block, as Rust's <c>Rc</c> and <c>Weak</c> do (section 3).
     /// </summary>
     private string DropInstance(ClassSymbol symbol) => Helper($"drop.class.{symbol.Name}", "void", ["ptr"], () =>
     {
-        for (var i = 0; i < symbol.Fields.Count; i++)
-        {
-            var type = symbol.Fields[i].Type;
-            if (Counted(type))
-            {
-                Release(fn.Value($"load {Ir(type)}, ptr {InstanceFieldPointer(symbol, "%a0", i)}"), type);
-            }
-        }
+        var types = symbol.Fields.Select(f => f.Type).ToList();
+        ReleaseInOrder(types, i => fn.Value($"load {Ir(types[i])}, ptr {InstanceFieldPointer(symbol, "%a0", i)}"));
 
         var block = layout.ClassBlock(symbol);
         var weakCount = fn.Value($"getelementptr {block}, ptr %a0, i32 0, i32 1");
@@ -668,7 +689,7 @@ public sealed partial class Emitter
     /// The function that works the lists off: each instance on a class's list, and each block on its family's, is taken off, its
     /// count set back to 0, and ended (<see cref="DropInstance"/>, <see cref="DropBlock"/>), which may put more on the lists, until
     /// every list is empty. Emitted after the last function, when every class whose instances are released and every family whose
-    /// blocks are is known; it calls only the helpers made with them.
+    /// blocks are is known, or a helper holds the lists (<see cref="Hold"/>); it calls only the helpers made with them.
     /// </summary>
     private void EmitDrain()
     {

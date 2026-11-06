@@ -55,19 +55,44 @@ public sealed partial class Emitter
         var environment = $"%\"env.{key}\"";
         module.Global($"{environment} = type {{ i64, ptr{string.Concat(types.Select(t => ", " + Ir(t)))} }}");
         lambdas.Enqueue(new PendingLambda(unit, l, map, name, environment, captures, display) { Features = features });
-        var drop = Helper($"drop.{key}", "void", ["ptr"], () =>
+        var drop = Helper($"drop.{key}", "void", ["ptr", "i32"], () =>
         {
-            for (var i = 0; i < types.Count; i++)
+            // R1: the captures that end at once in their order, then, back to front, those that put a value on a work list, then the
+            // split containers, freed with the environment: all three walks at 0, and the one walk a split release asks for at 1 to 3
+            // (SplitBody)
+            string Load(int i) => fn.Value($"load {Ir(types[i])}, ptr {Capture(environment, "%a0", i)}");
+            void FreeEnvironment()
             {
-                if (Counted(types[i]))
-                {
-                    Release(fn.Value($"load {Ir(types[i])}, ptr {Capture(environment, "%a0", i)}"), types[i]);
-                }
+                var end = fn.Value($"getelementptr {environment}, ptr null, i32 1");
+                fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");
             }
 
-            var end = fn.Value($"getelementptr {environment}, ptr null, i32 1");
-            fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");
+            var all = fn.Label("all");
+            var walks = Walks.Select(w => fn.Label(w.ToString().ToLowerInvariant())).ToList();
+            fn.Terminate($"switch i32 %a1, label %{all} [{string.Concat(walks.Select((w, i) => $" i32 {Number(i + 1)}, label %{w}"))} ]");
+            fn.Block(all);
+            if (types.Any(t => Holds(t, Walk.Listed)))
+            {
+                Hold(() => ReleaseInOrder(types, Load));
+            }
+            else
+            {
+                ReleaseInOrder(types, Load);
+            }
+
+            FreeEnvironment();
             fn.Return(null);
+            for (var w = 0; w < Walks.Length; w++)
+            {
+                fn.Block(walks[w]);
+                ReleaseWalk(types, Load, Walks[w]);
+                if (Walks[w] == Walk.Free)
+                {
+                    FreeEnvironment();
+                }
+
+                fn.Return(null);
+            }
         });
         var p = Allocate(environment);
         fn.Emit($"store i64 1, ptr {p}");
@@ -168,7 +193,7 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp eq i64 {count}, 0"), last, held);
         fn.Block(last);
         var drop = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {{ i64, ptr }}, ptr {environment}, i32 0, i32 1")}");
-        fn.Emit($"call void {drop}(ptr {environment})");
+        fn.Emit($"call void {drop}(ptr {environment}, i32 0)");
         fn.Return(null);
         fn.Block(held);
         fn.Return(null);
