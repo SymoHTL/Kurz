@@ -5456,6 +5456,19 @@ public sealed class CheckerTests
         Clean(Shapes + "(int) => int inc = N => N + 1\n\nint Thrice<const int N>() => N * 3\n\nprint(inc(Thrice<2>()))");
     }
 
+    [Fact]
+    public void A_copy_two_calls_share_reports_at_the_first_and_a_case_of_a_body_of_make_leaves_its_function()
+    {
+        // T33 (assumed, with the build): a later call with the same type arguments reads the copy the first call made, so an error
+        // at the call shows at that first call alone; a case that a call in a body of `T.Make` gives beside the field's type leaves
+        // the function that holds `T.Make`, as one of any argument of a call does (section 5), and a return type that lists it reads
+        // clean
+        Assert.Equal([(ErrorIds.KindNotRead, 3)], Errors("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<int>())\nprint(Bad<int>())"));
+        const string get = "data P(int A)\ndata NotFound\n\nint | NotFound Get(int x) => x\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 6)], Errors(get + "T Build<T>() => T.Make(f => Get(1))\n\nprint(Build<P>())"));
+        Clean(get + "T | NotFound Build<T>() => T.Make(f => Get(1))\n\nmatch Build<P>() {\n    P p => print(p)\n    NotFound => print(\"nf\")\n}");
+    }
+
     [Theory]
     [InlineData("T Bad<T>() => T.Make(f => \"x\")\n\nprint(Bad<Point>())", "7: type-mismatch: a `string` where an `int` is required (T1)")]
     [InlineData("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<Named>())", "7: type-mismatch: an `int` where a `string` is required (T1)")]
