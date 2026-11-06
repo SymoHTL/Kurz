@@ -590,6 +590,33 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void A_property_in_a_type_body_is_a_method_without_parameters_read_without_a_call()
+    {
+        // K7 (section 4: the owner, 2026-11-03): `Type Name => expression` in a type body is a read-only property
+        var (tree, diagnostics) = Parse("class Bag {\n    pub int Count => 3\n}");
+        Assert.Empty(diagnostics.Items);
+        var property = Assert.IsType<FunctionDeclaration>(Assert.Single(Assert.IsType<TypeDeclaration>(Assert.Single(tree.Statements)).Members!));
+        Assert.Equal((true, "Count", Modifiers.Pub, 0, true), (property.Property, property.Name, property.Modifiers, property.Parameters.Count, property.ExpressionBody is not null));
+
+        // the positive control: a method of no parameters is no property
+        var (methods, _) = Parse("class Bag {\n    pub int Count() => 3\n}");
+        Assert.False(Assert.IsType<FunctionDeclaration>(Assert.IsType<TypeDeclaration>(methods.Statements[0]).Members![0]).Property);
+    }
+
+    [Theory]
+    [InlineData("class Bag {\n    pub int Count { get; }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count {\n        get => 3\n    }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count { set; }\n}", 2)]
+    [InlineData("class Bag {\n    pub int Count[int i] => i\n}", 2)]
+    [InlineData("int Count => 3", 1)]
+    public void A_property_is_written_with_its_arrow_in_a_type_body_alone(string program, int line)
+    {
+        // K7: `Type Name => expression` is the one form of a property (the product pass's question 3, at its default), and it stands in a
+        // type body alone: C#'s accessors, and the form outside a type, are `syntax` (E4)
+        Assert.Equal((ErrorIds.Syntax, line), Errors(program).First());
+    }
+
+    [Fact]
     public void The_core_words_are_the_lists_of_l18_and_l19()
     {
         // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
@@ -913,8 +940,9 @@ public sealed class ParserTests
     [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
     public void A_type_parameter_that_holds_a_constant_is_written_with_const(string program, string tree)
     {
-        // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type alone and a
-        // name elsewhere, as `thread` is a word before `static` alone (L18), so a type parameter named `const` and a variable stand; the
+        // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type, as it is
+        // before `assert(` (T37) and among the words of an `asm`, and a name elsewhere, as `thread` is a word before `static` alone (L18),
+        // so a type parameter named `const` and a variable stand; the
         // call writes the constant among its type arguments; the order of a default is the checker's
         Assert.Equal(tree, Tree(program));
     }
@@ -951,6 +979,31 @@ public sealed class ParserTests
     {
         // T35: `const Mode` with no name is no type parameter
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Say<const Mode>() {\n}").Distinct());
+    }
+
+    [Theory]
+    [InlineData("const assert(T.Kind == TypeKind.Data, \"{T} is no data type\")", "(const-assert (== (. T Kind) (. TypeKind Data)) (string T \" is no data type\"))")]
+    [InlineData("const assert(\n    true,\n    \"a\"\n)", "(const-assert true (string \"a\"))")]
+    [InlineData("assert = 1", "(assign-or-declare assert (int 1))")]
+    [InlineData("assert(true)", "(call assert true)")]
+    [InlineData("const assert = 1", "(declare const assert (int 1))")]
+    public void A_const_assert_is_a_statement_of_its_own(string program, string tree)
+    {
+        // T37: `const assert(condition, text)` at the start of a statement, with newlines inside its parentheses; `assert` is a name
+        // elsewhere, and `const assert` with no `(` after it is a declaration whose type is named `const` (L18)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("const assert(true, 5)")]
+    [InlineData("const assert(true, n)")]
+    [InlineData("const assert(true)")]
+    [InlineData("const assert(true \"a\")")]
+    [InlineData("const assert(true, \"a\", \"b\")")]
+    public void A_const_assert_takes_a_condition_and_a_string_literal(string program)
+    {
+        // T37: the text is a string literal, as Rust's `assert!` takes its message as one
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program).Distinct());
     }
 
     [Theory]

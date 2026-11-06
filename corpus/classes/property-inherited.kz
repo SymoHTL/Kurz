@@ -1,0 +1,22 @@
+// expect: output
+// | 2
+// | 2
+// | 4
+// | Ann (2)
+// rules: K7
+
+class Bag(List<int> Items) {
+    pub int Count => Items.Count
+}
+
+class Named(string Name) : Bag {
+    pub int Twice() => Count * 2
+    pub string Label => "{Name} ({Count})"
+}
+
+n = Named([1, 2], "Ann")
+print(n.Count)
+Bag b = n
+print(b.Count)
+print(n.Twice())
+print(n.Label)
