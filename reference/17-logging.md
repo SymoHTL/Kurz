@@ -93,7 +93,7 @@ as Rust's `RUST_LOG` is read: a level alone sets the level of every category, an
 the level of each category that starts with the prefix, the longest matching prefix winning, as
 ASP.NET's `Logging:LogLevel`. A `Logging` part of the program's settings type, with a level for
 each prefix of a category, wins where the program declares one (§12, the owner, 2026-11-04,
-Q9 (c)); how the part and `KURZ_LOG` combine stands open (P10). An unknown level or a malformed filter refuses the start with `log-filter`.
+Q9 (c)); the part and `KURZ_LOG` combine entry by entry (P10). An unknown level or a malformed filter refuses the start with `log-filter`.
 *(assumed, §12: `log-filter`)*
 
 No case: a case gives its program no environment and declares no settings type, and its header
@@ -186,9 +186,12 @@ lines dropped after the last line written are named by no line. *(proposed)*
 
 No case: as P6's.
 
-### P10 (open) The settings' levels beside `KURZ_LOG`
+### P10 (decided, §12) The settings' levels beside `KURZ_LOG`
 
-Where a program declares a `Logging` part of its settings type, which wins (P4), how it and
-`KURZ_LOG` combine nobody chose (§12, §14): (a) the part in place of the variable, which the program
-then does not read; (b) entry by entry, the part's entry winning for its prefix and the variable's
-entries standing for the rest, as ASP.NET's configuration layers its providers key by key.
+Where a program declares a `Logging` part of its settings type, which wins (P4), the part and
+`KURZ_LOG` combine entry by entry: the part's entry wins for its prefix, and the variable's entries
+stand for every prefix the part does not name, as ASP.NET's configuration layers its providers key
+by key. The two lists are merged once, before the program's first statement (§12, the owner,
+2026-11-06, answer P10).
+
+No case: as P4's.
