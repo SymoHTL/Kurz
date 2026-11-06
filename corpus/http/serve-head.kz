@@ -1,0 +1,101 @@
+// expect: output
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /b]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>|Connection: close||hello]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Transfer-Encoding: gzip, chunked|Date: <29>||5|hello|0||]
+// rules: W9
+
+// a `HEAD` is answered with the head of the response alone, its `Content-Length` that of the body; to a request of HTTP/1.0 a
+// handler's `Transfer-Encoding` is dropped and the body goes with its length
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+coded = (HttpRequest r) => {
+    response = HttpResponse.Text(200, "hello")
+    response.Headers.Set("Transfer-Encoding", "gzip") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+Exchange("HEAD /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", hello, HttpLimits())
+Exchange("GET /a HTTP/1.0\r\n\r\n", coded, HttpLimits())
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", coded, HttpLimits())

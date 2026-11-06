@@ -1,0 +1,19 @@
+// expect: output
+// | []
+// | example.com
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("Set-Cookie", "a=1")
+    headers.Add("Host", "example.com")
+    headers.Add("set-cookie", "b=2")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+h.Remove("SET-COOKIE")
+h.Remove("Accept")
+print(h.GetAll("set-cookie"))
+print(h.Get("host") ?? "none")

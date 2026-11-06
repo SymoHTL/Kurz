@@ -1436,7 +1436,15 @@ declares (F9, D16), in the order of their declaration, and never a field the bod
 type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
 a generic function lists every outcome any of its copies can give, and a copy that gives one its
 function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
-2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+2026-11-02, "a generic function lists every outcome any of its copies can give", an option that named the id and its
+place); the outcomes are those of the copies calls make, each checked at the call that made it, as each copy is
+checked alone, so that
+a function whose calls make no copy that gives `Invalid` need not list it, `Remake` below among them, while that
+call can be a caller's in another package than the function (§4, the owner, 2026-11-03, "checked at each copy a call
+makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
+type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
+CS0412 refuses it (§4, the owner, 2026-11-03, "redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same
+reading for both"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1453,7 +1461,9 @@ that `T.Fields` in its branch, in a copy whose type is not a `data` type, is tha
 the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
 same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
-fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
+fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
+`match` on `T.Kind` that a copy does not read; a failure in a body leaves the function as from any argument of a call (§5),
+the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
@@ -1862,7 +1872,9 @@ type parameter with a default comes after every one without, and one without aft
 `syntax`; the parameter's name stands as a value of its type; a value of another type or a type
 where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
-parameter is checked in each copy a call makes, as one that reads its type is (T33))*
+parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
+loop's variable, a binding of a `match` arm or a lambda's parameter of the parameter's name in the function is
+`redeclared`, as for any type parameter (V9, T33; §4, the owner, 2026-11-04, "the same reading for both").
 
 A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
 where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
@@ -1964,6 +1976,18 @@ void Keep<const Mode M>(M value) {
 }
 
 Keep<Mode.Plain>(Mode.Plain)
+```
+
+Case: [types/const-parameter-redeclared.kz](../corpus/types/const-parameter-redeclared.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    M = Mode.Loud
+    print("{text} {M}")
+}
+
+Say<Mode.Plain>("a")
 ```
 
 Case: [types/const-parameter-not-inferred.kz](../corpus/types/const-parameter-not-inferred.kz)
