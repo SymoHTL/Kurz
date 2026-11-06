@@ -741,6 +741,36 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((x, y) => x, 4))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("y = 5\nint Apply((int) => int f, int n) => f(n)\n\nprint(Apply((a, b) => y, 4))")); // the body is read after the error: `y` counts as read
         Clean("void Run((int) => void f) {\n    f(1)\n}\n\nRun(x => print(x))");
+        // F11 with O10: under a result whose first case is `void`, a lambda whose body is a call with a `void` success fits, as its block
+        // form does, under a nullable function type and beside more than one other case too; under a result whose first case is not
+        // `void`, a body of another type and a function value of type `() => void` stay `type-mismatch` (the owner, 2026-11-05, #110,
+        // comment 6659026217)
+        var run = "data Oops\n\nvoid | Oops Run(() => void | Oops f) {\n    f()\n}\n\n";
+        Clean(run + "Run(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}");
+        Clean("void | IoError Run((int) => void | IoError f) {\n    f(1)\n}\n\nRun(n => print(n)) else {\n    IoError e => print(\"io\")\n}");
+        Clean("data Oops\n\nvoid | Oops Run((() => void | Oops)? f) {\n    if f != null {\n        f()\n    }\n}\n\nRun(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}");
+        Clean("data Oops\ndata Nope\n\nvoid | Oops | Nope Run(() => void | Oops | Nope f) {\n    f()\n}\n\nRun(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n    Nope => print(\"nope\")\n}");
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(run + "Run(() => 5) else {\n    Oops => print(\"oops\")\n}"));
+        // the refusals that stay: the lambda's names the rule that lets a `void` call fit, and a function value's names the lambda written
+        // at the call that fits, its parameters by the first names nothing here takes, the other arguments as a default is written and a
+        // member's callee in full (the owner, 2026-11-05, #110, comment 6664353093; the forms beyond `Run(() => say())` assumed); a
+        // function value that such a lambda would not make fit gets no hint
+        string Said(string program) => string.Join("|", Check(program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        var fits = "; a `void` call fits only where the first case is `void` (F11, O10, T1)";
+        Assert.Equal("5: type-mismatch: the lambda's result is `void` where `(int) => int` requires an `int`" + fits, Said("int Apply((int) => int f, int n) => f(n)\n\nvoid Show(int x) {\n}\nprint(Apply(x => Show(x), 4))"));
+        var get = "data Oops\n\nint | Oops Get(() => int | Oops f) => f()\n\n";
+        Assert.Equal("5: type-mismatch: the lambda's result is `void` where `() => (int | Oops)` requires an `int | Oops`" + fits, Said(get + "x = Get(() => print(\"x\")) else {\n    Oops => 0\n}\nprint(x)"));
+        var hint = " where a `() => (void | Oops)` is required; write a lambda at the call: ";
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(() => say())` (T1)", Said(run + "say = () => print(\"x\")\nRun(say) else {\n    Oops => print(\"oops\")\n}")); // a function value
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(() => g())` (T1)", Said(run + "void | Oops Twice(() => void g) {\n    Run(g)\n}\n\nTwice(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(f: () => say())` (T1)", Said(run + "say = () => print(\"x\")\nRun(f: say) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("11: type-mismatch: a `() => void`" + hint + "`r.Go(() => say())` (T1)", Said("data Oops\n\nclass Runner {\n    pub void | Oops Go(() => void | Oops f) {\n        f()\n    }\n}\n\nr = Runner()\nsay = () => print(\"x\")\nr.Go(say) else {\n    Oops => print(\"oops\")\n}"));
+        var each = "data Oops\n\nvoid | Oops Each(int n, (int) => void | Oops f) {\n    f(n)\n}\n\n";
+        Assert.Equal("10: type-mismatch: a `(int) => void` where a `(int) => (void | Oops)` is required; write a lambda at the call: `Each(3, y => show(y))` (T1)", Said(each + "x = 1\nprint(x)\nshow = (int n) => print(n)\nEach(3, show) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `(int, string) => void` where a `(int, string) => (void | Oops)` is required; write a lambda at the call: `Pair((x, y) => both(x, y))` (T1)", Said("data Oops\n\nvoid | Oops Pair((int, string) => void | Oops f) {\n    f(1, \"a\")\n}\n\nboth = (int n, string s) => print(s)\nPair(both) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `() => int` where a `() => (void | Oops)` is required (T1)", Said(run + "five = () => 5\nRun(five) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `(string) => void` where a `(int) => (void | Oops)` is required (T1)", Said(each + "show = (string s) => print(s)\nEach(3, show) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("6: type-mismatch: a `() => void` where a `() => (int | Oops)` is required (T1)", Said(get + "say = () => print(\"x\")\nx = Get(say) else {\n    Oops => 0\n}\nprint(x)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((string s) => 1, 4))"));
     }
 
@@ -2938,6 +2968,46 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void Two_names_over_a_class_with_Count_NameAt_and_ValueAt_are_not_supported()
+    {
+        // C6: two names over an instance of a class walk it as the index loop `for i in 0..<p.Count { name = p.NameAt(i); value = p.ValueAt(i) }`
+        // (section 4, the owner, 2026-11-04; section 12, the owner, 2026-11-02), which the build does not make: `not supported` at the
+        // collection, and nothing more of the two names (E1), where that loop, read at the loop's place, finds a `Count` field or property
+        // and methods `NameAt` and `ValueAt` of one `int`, each of the instance and visible there (F9; proposed, C6: a `Count` of an `int`
+        // and a result of each method); one name over such a class, and two names over a class of another shape, stay `type-mismatch`
+        // (C6, proposed)
+        const string Members = "    pub string NameAt(int i) => \"n\"\n\n    pub string ValueAt(int i) => \"v\"\n}\n\n";
+        const string Walk = "p = Pairs()\nfor name, value in p {\n    int n = name\n    print(\"{n}={value}\")\n}";
+        const string Text = "two names over a `Pairs`, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)";
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n" + Members + Walk)); // a property
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count = 2\n\n" + Members + Walk)); // a field
+        Assert.Equal([$"12: {Text}"], NotSupported("class Base {\n    pub int Count => 2\n}\n\nclass Pairs : Base {\n" + Members + Walk)); // from the base
+        Assert.Equal([$"9: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n\n    pub void Show(Pairs p) {\n        for name, value in p {\n            print(\"{name}={value}\")\n"
+            + "        }\n    }\n}\n\nPairs().Show(Pairs())")); // a private `NameAt`, inside its class
+
+        // the controls: two names over a map are read, and the other shapes stay `type-mismatch`
+        Clean("mut m = Map<string, int>()\nm[\"a\"] = 1\nfor key, value in m {\n    print(\"{key}={value}\")\n}");
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n" + Members + "p = Pairs()\nfor item in p {\n    print(item)\n}"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 8)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(int i) => \"n\"\n}\n\n" + Walk));
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count() => 2\n\n" + Members + Walk)); // `Count` a method
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // `NameAt` of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    int Count = 2\n\n" + Members + Walk)); // a private `Count` field
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    int Count => 2\n\n" + Members + Walk)); // a private `Count` property
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub string Count = \"2\"\n\n" + Members + Walk)); // a `Count` field of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub string Count => \"2\"\n\n" + Members + Walk)); // a `Count` property of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a private `NameAt`, outside its class
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub static string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `static` `NameAt`
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub void NameAt(int i) {\n        print(i)\n    }\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `void` `NameAt`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub static int Count = 2\n\n" + Members + Walk)); // a `static` field named `Count`
+        Assert.Equal([$"12: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string s) => s\n\n" + Members + Walk)); // one `NameAt` of two fits
+    }
+
+    [Fact]
     public void A_double_or_a_float_key_compares_as_C_s_Equals()
     {
         // M9: a `double` or a `float` key, alone or in a field of a data key, NaN finding NaN and -0.0 finding 0.0 (section 4, the owner,
@@ -3804,7 +3874,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_method_is_checked_as_a_function_and_a_field_as_a_variable_of_its_class()
     {
-        // K1: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
+        // F4: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("class C(void N)\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C(int N) {\n    pub int Get()\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("class C(int N)\n\nprint(C<int>(1).N)"));
@@ -4629,41 +4699,49 @@ public sealed class CheckerTests
         Assert.Equal([expected], NotSupported(program));
 
     [Theory]
-    [InlineData("print(instant.Now + instant.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(-instant.Now)", "type-mismatch", 1, "(T18, T22)")]
-    [InlineData("longduration d = 5s\nprint(instant.Now + d)", "type-mismatch", 2, "(T18, T36)")]
-    [InlineData("longduration d = 5s\nprint(instant.Now - d)", "type-mismatch", 2, "(T18, T36)")]
-    [InlineData("print(instant.Now - timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(timestamp.Now - instant.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now < timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now == timestamp.Now)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(instant.Now < 5s)", "type-mismatch", 1, "(T18, T36)")]
-    [InlineData("print(long(instant.Now))", "type-mismatch", 1, "(T10, T36)")]
-    [InlineData("print(instant(5))", "type-mismatch", 1, "(T10, T36)")]
-    [InlineData("print(instant(5s))", "type-mismatch", 1, "(T36)")]
-    [InlineData("print(timestamp(instant.Now))", "type-mismatch", 1, "(T36)")]
-    [InlineData("print(duration(instant.Now))", "type-mismatch", 1, "(T36)")]
-    [InlineData("instant t = 5s\nprint(t)", "type-mismatch", 1, "(T1)")]
-    [InlineData("int n = instant.Now\nprint(n)", "type-mismatch", 1, "(T1)")]
-    [InlineData("print(instant.Later)", "unknown-name", 1, "(V10)")]
-    [InlineData("print(5s.Elapsed)", "unknown-name", 1, "(V10)")]
-    public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line, string cites)
+    [InlineData("print(instant.Now + instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(-instant.Now)", "type-mismatch", 1)]
+    [InlineData("longduration d = 5s\nprint(instant.Now + d)", "type-mismatch", 2)]
+    [InlineData("longduration d = 5s\nprint(instant.Now - d)", "type-mismatch", 2)]
+    [InlineData("print(instant.Now - timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(timestamp.Now - instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now < timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now == timestamp.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now < 5s)", "type-mismatch", 1)]
+    [InlineData("print(long(instant.Now))", "type-mismatch", 1)]
+    [InlineData("print(instant(5))", "type-mismatch", 1)]
+    [InlineData("print(instant(5s))", "type-mismatch", 1)]
+    [InlineData("print(timestamp(instant.Now))", "type-mismatch", 1)]
+    [InlineData("print(duration(instant.Now))", "type-mismatch", 1)]
+    [InlineData("instant t = 5s\nprint(t)", "type-mismatch", 1)]
+    [InlineData("int n = instant.Now\nprint(n)", "type-mismatch", 1)]
+    [InlineData("print(1s - instant.Now)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now * 2)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now / 2)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now % 5s)", "type-mismatch", 1)]
+    [InlineData("print(instant.Now / 5s)", "type-mismatch", 1)]
+    [InlineData("longtimestamp w = timestamp.Now\nprint(instant.Now - w)", "type-mismatch", 2)]
+    [InlineData("longtimestamp w = timestamp.Now\nprint(instant.Now < w)", "type-mismatch", 2)]
+    [InlineData("print(instant.Now == null)", "type-mismatch", 1)]
+    [InlineData("print(instant.Later)", "unknown-name", 1)]
+    [InlineData("print(5s.Elapsed)", "unknown-name", 1)]
+    public void A_reading_of_the_monotonic_clock_takes_only_what_its_rule_gives(string program, string id, int line)
     {
-        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no unary
-        // `-`, no wide variant, no mixing with a `timestamp` or a duration's order, no conversion into or out of it, no member but
-        // `Elapsed`; the type's name as a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`). The message
-        // names T36 where an operator or a conversion meets a reading, and the rule of the refusal where the form is not the reading's own
+        // T36, S25 (section 12, the owner, 2026-11-04, the monotonic clock, Q1 to Q3 and their defaults): no sum of two readings, no
+        // duration less a reading, no `*`, `/` or `%`, no unary `-`, no wide variant, no mixing with a `timestamp`, a `longtimestamp` or a
+        // duration's order, no `null` (N6), no conversion into or out of it from another type, no member but `Elapsed`; the type's name as
+        // a name is the parser's `reserved-word` (L19, `corpus/source/instant-as-name.kz`)
         Assert.Equal([(id, line)], Errors(program));
-        Assert.EndsWith(cites, Assert.Single(Check(program).Diagnostics.Sorted).Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void A_reading_of_the_monotonic_clock_takes_its_differences_sums_comparisons_and_places()
     {
-        // T36: the positive control of the refusals above, with a reading in a `data` value, as a map's key and in a sorted list
-        Clean("instant a = instant.Now\ninstant b = a + 5s - 1ns\nduration d = b - a\ninstant c = 1s + a\n"
+        // T36: the positive control of the refusals above, with a reading in a `data` value, as a map's key, in a sorted list and
+        // converted into its own type
+        Clean("instant a = instant.Now\ninstant b = a + 5s - 1ns\nduration d = b - a\ninstant c = 1s + a\ninstant same = instant(a)\n"
             + "print(d < 5s && a < b && c >= a && a != c && a.Elapsed >= 0s)\ndata Mark(instant At)\nprint(Mark(a) == Mark(b))\n"
-            + "mut seen = Map<instant, int>()\nseen[a] = 1\nmut readings = [b, a]\nreadings.Sort()\nprint(\"{a} {readings} {seen.Count}\")");
+            + "mut seen = Map<instant, int>()\nseen[a] = 1\nmut readings = [b, a]\nreadings.Sort()\nprint(\"{a} {readings} {seen.Count} {same == a}\")");
     }
 
     [Fact]
@@ -4905,8 +4983,13 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+    }
 
-        // a loop over `T.Fields` opened inside such an arm is read as a loop's calls are, and a cycle that grows there is refused at its call
+    [Fact]
+    public void A_call_in_a_loop_over_T_Fields_opened_inside_an_arm_of_a_match_on_T_Kind_is_read_as_a_call_of_that_loop()
+    {
+        // T34, its assumed reading: a loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a loop's calls are,
+        // and a cycle that grows there is refused at its call
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors("data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n"
             + "            for f in T.Fields {\n                Deep(Wrap(x), n - 1)\n            }\n        }\n        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)"));
     }

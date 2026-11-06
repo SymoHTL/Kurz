@@ -1,0 +1,14 @@
+// expect: output
+// | x
+// rules: F11
+
+data Oops
+
+void | Oops Run(() => void | Oops f) {
+    f()
+}
+
+Run(() => print("x")) else {
+    Oops => print("oops")
+}
+// the lambda's body is a call with a void success, under a result whose first case is void: it gives that case, as its block form does (F11, O10)

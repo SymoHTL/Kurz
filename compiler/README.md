@@ -303,12 +303,14 @@ ask about it.
   `ClangTests.A_file_whose_answer_names_no_clang_release_is_refused`.
 - A program that a run captures, clang, a built case or the command in the tests, has its streams
   waited for within what remains of the run's limit. On Linux each process that still holds the write
-  end of one of them then, a child the program left running, is ended while its start is still the one
-  it was found with, and the run answers -1 with its pid. A process that holds only a read end is no
-  holder. Pinned by
+  end of one of them then, a child the program left running, is ended, alone, while its start is still
+  the one it was found with, and the run answers -1 with each one's pid and whether it was ended. A
+  process that holds only a read end is no holder. Pinned by
   `CaptureTests.A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`,
-  `CaptureTests.Only_a_process_that_holds_the_write_end_of_a_pipe_of_the_run_is_its_holder` and
-  `CaptureTests.A_holder_whose_id_another_process_took_since_is_not_ended`.
+  `CaptureTests.Only_a_process_that_holds_the_write_end_of_a_pipe_of_the_run_is_its_holder`,
+  `CaptureTests.A_holder_whose_id_another_process_took_since_is_not_ended`,
+  `CaptureTests.A_holder_is_ended_alone_and_not_the_processes_it_started` and
+  `CaptureTests.The_error_names_each_holder_and_whether_it_was_ended`.
 - `build` takes its options before or after the file, each once, `--cpu` with the word after it as
   its name, and nothing else; the words of its own failures are this directory's, in the record's
   form, but for those of the CPU's question, which are the owner's. Pinned by `CommandTests`.
@@ -1802,7 +1804,10 @@ field's, or with a default, where the base's default is the field's (K11, K16), 
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
 `override` on one method, and `virtual` on a private method (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
-of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), a `static` field
+of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
+over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one
+`int` with a result, each of the instance and visible at the loop (F9), the walk of a class that section 12 decides and section 4
+reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
 but for one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
@@ -1921,7 +1926,8 @@ round can ask about it by the rule's id.
   `map[key] = value` and `list[i] = value` are assignments into a path (M4) and stand on a `mut`
   variable or parameter or on a path of data fields from one, with M4's order, the value before the key or the index; an index of a type
   other than an integer is `type-mismatch` (T2). Two names in a `for` loop over a list or a range are
-  `type-mismatch` at the collection (C6, a proposal). A read of a map in the key of its own `Remove` is a
+  `type-mismatch` at the collection (C6, a proposal), and over an instance of a class of the shape the list of what the checker
+  does not read names they are `not supported` (C6, that list), and over a class of another shape `type-mismatch` (C6, a proposal). A read of a map in the key of its own `Remove` is a
   value of its own and holds nothing of the map, so a map's methods need none of `Add`'s exception, which
   every `mut` method that stores what its argument gave before it changes its receiver takes, `AddRange`
   and `Insert` among them (M7). A map that
@@ -1950,7 +1956,13 @@ round can ask about it by the rule's id.
   or a `void` lambda (F2, F4, F11), which no rule gives an id, where F3 makes `return` with a value
   in a `void` function's block `type-mismatch`; a call with a `void` success where a value stands
   (O10), an argument at any parameter included, except as the body of a lambda under a function
-  type whose result is not `void`, which F11 makes `type-mismatch` at the lambda; `Name()` on a
+  type whose result is not `void`, which F11 makes `type-mismatch` at the lambda where the result's
+  first case is not `void`, and takes as the lambda's body where it is (O10), the `type-mismatch`
+  naming O10, and a function value whose result is `void`, passed there by its name, gets T1's
+  `type-mismatch` with the lambda that fits written at the call, `Run(() => say())` (the owner, 2026-11-05,
+  #110, comment 6664353093), its parameters named by the first of `x`, `y`, `z`, `x1`, ... that
+  nothing in scope takes and the call's other arguments as F13's message writes a default
+  (assumed); `Name()` on a
   data type without fields, its bases' fields included (D21), whose value D8 writes as the bare name; a second data type among the
   bases of a data type, which D6 gives one base; a count of type arguments the type or function
   does not have (T17, T19), in a type as in a call, one on a callee without type parameters
