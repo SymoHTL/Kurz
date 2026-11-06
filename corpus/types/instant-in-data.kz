@@ -1,0 +1,17 @@
+// expect: output
+// | true
+// | false
+// allow: raw
+// rules: T36
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+data Mark(instant At)
+
+print(Mark(Reading(7)) == Mark(Reading(7)))
+print(Mark(Reading(7)) == Mark(Reading(8)))

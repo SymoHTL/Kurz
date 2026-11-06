@@ -18,9 +18,10 @@ public static class Processes
     /// the code -1 and says so on its error stream. The variables given are set for it, a null one
     /// taken away. The streams are waited for within what remains of the limit: a child the program
     /// left running holds them past the program's end, and no end of the program's tree reaches it once
-    /// the first process of the system has taken it over, so on Linux each process that holds them then
-    /// is found by the pipes it holds and ended, and the run answers -1 with its pid on the error stream
-    /// (knowledge/an-orphan-holds-the-output-of-its-program.md).
+    /// its new parent has taken it over, the nearest ancestor marked as a subreaper or else the first
+    /// process of the system, so on Linux each process that holds the write end of one of them then is
+    /// found by the pipes it holds and ended, and the run answers -1 with each one's pid on the error
+    /// stream, and whether it was ended (knowledge/an-orphan-holds-the-output-of-its-program.md).
     /// </summary>
     public static (int Code, string Output, string Error) Capture(string file, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan limit, IReadOnlyDictionary<string, string?>? environment = null)
     {
@@ -58,20 +59,23 @@ public static class Processes
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             var answered = process.WaitForExit((int)limit.TotalMilliseconds);
+            var stood = string.Empty;
             if (!answered)
             {
+                // read before the end, which takes the program's entry away
+                stood = OperatingSystem.IsLinux() ? Stood("/proc", process.Id) : string.Empty;
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit();
             }
 
-            var ending = answered ? "ended" : $"gave no answer within {limit.TotalSeconds} s and was ended";
+            var ending = answered ? "ended" : $"gave no answer within {limit.TotalSeconds} s and was ended{stood}";
             var rest = limit - clock.Elapsed;
             if (!Task.WaitAll([output, error], rest > Drain ? rest : Drain))
             {
-                var orphans = Holders(pipes);
-                End(orphans);
+                var orphans = Holders("/proc", pipes, Environment.ProcessId);
+                var ended = End("/proc", orphans);
                 var drained = Task.WaitAll([output, error], Drain);
-                var held = orphans.Count == 0 ? "no process that holds it was found" : $"pid {string.Join(", ", orphans)}, ended";
+                var held = Held(orphans, ended);
                 return (-1, drained ? output.Result : string.Empty, (drained ? error.Result : string.Empty) + $"\n`{file}` {ending}, and an orphan holds its output: {held}");
             }
 
@@ -111,27 +115,39 @@ public static class Processes
         return pipes;
     }
 
-    /// <summary>Each process other than this one that holds one of the <paramref name="pipes"/>, read from its handles in <c>/proc</c>.</summary>
-    private static List<int> Holders(HashSet<string> pipes)
+    /// <summary>
+    /// A process that holds the write end of one of a run's pipes, with its start as <c>/proc/&lt;pid&gt;/stat</c> gives it (its 22nd
+    /// field, in clock ticks after the boot), by which its end tells it from a process that took its id since.
+    /// </summary>
+    internal readonly record struct Holder(int Pid, ulong Start);
+
+    /// <summary>
+    /// Each process under <paramref name="proc"/> other than <paramref name="self"/> that holds the write end of one of the
+    /// <paramref name="pipes"/>, read from its handles: <c>fd/&lt;n&gt;</c> names the pipe, which both of its ends share, and
+    /// <c>fdinfo/&lt;n&gt;</c> says which end it is, by the access mode of its flags. A child that another thread of this process
+    /// forked holds this process's read ends until its exec, and is no holder.
+    /// </summary>
+    internal static List<Holder> Holders(string proc, HashSet<string> pipes, int self)
     {
-        var found = new List<int>();
+        var found = new List<Holder>();
         if (pipes.Count == 0)
         {
             return found;
         }
 
-        foreach (var entry in Directory.EnumerateDirectories("/proc"))
+        foreach (var entry in Directory.EnumerateDirectories(proc))
         {
-            if (!int.TryParse(Path.GetFileName(entry), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) || pid == Environment.ProcessId)
+            if (!int.TryParse(Path.GetFileName(entry), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) || pid == self)
             {
                 continue;
             }
 
             try
             {
-                if (Directory.EnumerateFileSystemEntries(Path.Combine(entry, "fd")).Any(fd => new FileInfo(fd).LinkTarget is { } name && pipes.Contains(name)))
+                if (Directory.EnumerateFileSystemEntries(Path.Combine(entry, "fd")).Any(fd => HoldsWriteEnd(fd, Path.Combine(entry, "fdinfo", Path.GetFileName(fd)), pipes))
+                    && Start(entry) is { } start)
                 {
-                    found.Add(pid);
+                    found.Add(new Holder(pid, start));
                 }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -143,22 +159,124 @@ public static class Processes
         return found;
     }
 
-    /// <summary>Ends each of the processes, with what they started; one that ended first is passed over.</summary>
-    private static void End(List<int> processes)
+    /// <summary>
+    /// Whether the handle <paramref name="fd"/> is one of the <paramref name="pipes"/>, open for writing as its <c>fdinfo</c> file at
+    /// <paramref name="info"/> says. A handle that closed while it was read is no writer, and the process's other handles are read.
+    /// </summary>
+    internal static bool HoldsWriteEnd(string fd, string info, HashSet<string> pipes)
     {
-        foreach (var pid in processes)
+        try
+        {
+            return new FileInfo(fd).LinkTarget is { } name && pipes.Contains(name) && Writes(info);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the handle that the <c>fdinfo</c> file at <paramref name="info"/> describes is open for writing: the access mode of its
+    /// flags, written in octal, is 1 or 2, which their last digit holds. Flags that are no octal number are no writer's.
+    /// </summary>
+    private static bool Writes(string info)
+    {
+        foreach (var line in File.ReadLines(info))
+        {
+            if (line.StartsWith("flags:", StringComparison.Ordinal))
+            {
+                var flags = line["flags:".Length..].Trim();
+                return flags.Length > 0 && flags.All(c => c is >= '0' and <= '7') && ((flags[^1] - '0') & 3) is 1 or 2;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The start of the process whose <c>/proc</c> entry is <paramref name="entry"/>: the 22nd field of its <c>stat</c>, counted from
+    /// the end of its name in brackets, which may hold a space; none where the field is not a number, or the text ends first.
+    /// </summary>
+    private static ulong? Start(string entry)
+    {
+        var stat = File.ReadAllText(Path.Combine(entry, "stat"));
+        var close = stat.LastIndexOf(')');
+        if (close < 0 || close + 2 > stat.Length)
+        {
+            return null;
+        }
+
+        var fields = stat[(close + 2)..].Split(' ');
+        return fields.Length > 19 && ulong.TryParse(fields[19], NumberStyles.None, CultureInfo.InvariantCulture, out var start) ? start : null;
+    }
+
+    /// <summary>
+    /// Ends each of the <paramref name="holders"/>, where its entry under <paramref name="proc"/> still gives the start it was found
+    /// with, and gives back the ones it ended; one that ended first, or whose id another process took since, is passed over. It ends
+    /// the holder alone and not its tree: a process of the tree that holds a write end is a holder of its own, and one that holds
+    /// none holds nothing the run waits on.
+    /// </summary>
+    internal static List<Holder> End(string proc, List<Holder> holders)
+    {
+        var ended = new List<Holder>();
+        foreach (var holder in holders)
         {
             try
             {
-                using var orphan = Process.GetProcessById(pid);
-                orphan.Kill(entireProcessTree: true);
+                if (Start(Path.Combine(proc, holder.Pid.ToString(CultureInfo.InvariantCulture))) != holder.Start)
+                {
+                    continue;
+                }
+
+                using var orphan = Process.GetProcessById(holder.Pid);
+                orphan.Kill();
+                ended.Add(holder);
             }
-            catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                // it ended before the end reached it
+                // IOException and UnauthorizedAccessException: its entry was gone or could not be read; ArgumentException and
+                // InvalidOperationException: it ended; Win32Exception: it could not be ended. The run answers with what it has.
             }
         }
+
+        return ended;
     }
+
+    /// <summary>
+    /// Where the process <paramref name="pid"/> stood when its run's limit passed, as Linux shows it under <paramref name="proc"/>, for the
+    /// error of a run that ends a program at its limit: its state, the first field after the name in its <c>stat</c>; the kernel function
+    /// it sleeps in, its <c>wchan</c>; and its <c>syscall</c>, the number of the call it is in with the call's six arguments, without the
+    /// stack pointer and the program counter that follow them, or <c>-1</c> alone for a process that waits outside a call, or
+    /// <c>running</c> (proc(5)). Where an entry cannot be read, it says so.
+    /// </summary>
+    internal static string Stood(string proc, int pid)
+    {
+        var entry = Path.Combine(proc, pid.ToString(CultureInfo.InvariantCulture));
+        try
+        {
+            var stat = File.ReadAllText(Path.Combine(entry, "stat"));
+            var close = stat.LastIndexOf(')');
+            var state = close < 0 || close + 2 >= stat.Length ? string.Empty : stat[(close + 2)..].Split(' ')[0];
+            var wchan = File.ReadAllText(Path.Combine(entry, "wchan")).Trim();
+            var words = File.ReadAllText(Path.Combine(entry, "syscall")).Trim().Split(' ');
+            var call = words[0] == "-1" ? "-1" : string.Join(' ', words.Take(7));
+            return state.Length == 0 || call.Length == 0
+                ? "; where it stood could not be read"
+                : $"; where it stood, as /proc gave it: state {state}, wchan {wchan}, syscall {call}";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // an entry gone, the process having ended at the limit, or one this user may not read
+            return "; where it stood could not be read";
+        }
+    }
+
+    /// <summary>
+    /// What the error stream of a run says of the <paramref name="found"/> holders: each one's pid, and whether it is among the
+    /// <paramref name="ended"/>, as <c>pid 100, ended; pid 101, not ended</c>.
+    /// </summary>
+    internal static string Held(List<Holder> found, List<Holder> ended) =>
+        found.Count == 0 ? "no process that holds it was found" : string.Join("; ", found.Select(h => $"pid {h.Pid}, {(ended.Contains(h) ? "ended" : "not ended")}"));
 
     /// <summary>
     /// How <c>kurz run</c> and <c>kurz exec</c> start the program: in the caller's directory, with the words after <c>--</c> as its

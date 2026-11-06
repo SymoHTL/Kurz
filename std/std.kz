@@ -5335,9 +5335,10 @@ pub uint LittleEndianWord(byte* p) {
 // 157, 2026-11-03, the best of 9). G adds each of its two terms into the sum, where RFC 1321 joins them
 // with an or and `op_g` adds them together first: with F as above, MD5 took 51.81 ms so, 56.37 with the
 // or and 56.43 in `op_g`'s form (the best of 9, each beside a copy of its build), and 56.41 with G as the
-// select `((b ^ c) & d) ^ c`. In every step LLVM's code generator adds the constant `t` after the round's
-// function, one add more on the path from b than in OpenSSL's code
-// (knowledge/the-code-generator-adds-a-sums-constant-last.md).
+// select `((b ^ c) & d) ^ c`. LLVM's code generator adds a constant `t` it knows after the round's function,
+// one add more on the path from b than in OpenSSL's code
+// (knowledge/the-code-generator-adds-a-sums-constant-last.md), so `Md5Block` hands each step its constant
+// through `Hint.BlackBox` (below).
 uint Md5F(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
     uint sum = a +% m +% t +% (((c ^ d) & b) ^ d)
     return (sum << r | sum >> (32 - r)) +% b
@@ -5361,7 +5362,11 @@ uint Md5I(uint a, uint b, uint c, uint d, uint m, uint t, int r) {
 // One block of 64 bytes at `p` through the 64 steps of MD5 into the words at `s` (RFC 1321, 3.4), in the
 // form of RustCrypto's `md-5` 0.11.0 (`compress/soft.rs`): the 16 words of the block, each read with its
 // lowest byte first, before the first step; and the 64 steps written out, each with its word, its constant
-// T and its shift in the code.
+// T and its shift in the code. Each constant passes through `Hint.BlackBox` (F18) in its call, so that LLVM
+// adds it to a and m before the round's function, off the path from b, as OpenSSL's `lea` does: one
+// operation fewer on that path than a constant LLVM knows leaves. With the hint inside `Md5F` to `Md5I`
+// instead, the optimised IR adds the value read back last, after the round's function, and the operation
+// stays (clang 23.1.4, 2026-11-03).
 void Md5Block(byte* s, byte* p) {
     raw {
         uint* words = Ptr<uint>(s)
@@ -5385,70 +5390,70 @@ void Md5Block(byte* s, byte* p) {
         mut uint b = words[1]
         mut uint c = words[2]
         mut uint d = words[3]
-        a = Md5F(a, b, c, d, m0, 0xd76aa478, 7)
-        d = Md5F(d, a, b, c, m1, 0xe8c7b756, 12)
-        c = Md5F(c, d, a, b, m2, 0x242070db, 17)
-        b = Md5F(b, c, d, a, m3, 0xc1bdceee, 22)
-        a = Md5F(a, b, c, d, m4, 0xf57c0faf, 7)
-        d = Md5F(d, a, b, c, m5, 0x4787c62a, 12)
-        c = Md5F(c, d, a, b, m6, 0xa8304613, 17)
-        b = Md5F(b, c, d, a, m7, 0xfd469501, 22)
-        a = Md5F(a, b, c, d, m8, 0x698098d8, 7)
-        d = Md5F(d, a, b, c, m9, 0x8b44f7af, 12)
-        c = Md5F(c, d, a, b, m10, 0xffff5bb1, 17)
-        b = Md5F(b, c, d, a, m11, 0x895cd7be, 22)
-        a = Md5F(a, b, c, d, m12, 0x6b901122, 7)
-        d = Md5F(d, a, b, c, m13, 0xfd987193, 12)
-        c = Md5F(c, d, a, b, m14, 0xa679438e, 17)
-        b = Md5F(b, c, d, a, m15, 0x49b40821, 22)
-        a = Md5G(a, b, c, d, m1, 0xf61e2562, 5)
-        d = Md5G(d, a, b, c, m6, 0xc040b340, 9)
-        c = Md5G(c, d, a, b, m11, 0x265e5a51, 14)
-        b = Md5G(b, c, d, a, m0, 0xe9b6c7aa, 20)
-        a = Md5G(a, b, c, d, m5, 0xd62f105d, 5)
-        d = Md5G(d, a, b, c, m10, 0x02441453, 9)
-        c = Md5G(c, d, a, b, m15, 0xd8a1e681, 14)
-        b = Md5G(b, c, d, a, m4, 0xe7d3fbc8, 20)
-        a = Md5G(a, b, c, d, m9, 0x21e1cde6, 5)
-        d = Md5G(d, a, b, c, m14, 0xc33707d6, 9)
-        c = Md5G(c, d, a, b, m3, 0xf4d50d87, 14)
-        b = Md5G(b, c, d, a, m8, 0x455a14ed, 20)
-        a = Md5G(a, b, c, d, m13, 0xa9e3e905, 5)
-        d = Md5G(d, a, b, c, m2, 0xfcefa3f8, 9)
-        c = Md5G(c, d, a, b, m7, 0x676f02d9, 14)
-        b = Md5G(b, c, d, a, m12, 0x8d2a4c8a, 20)
-        a = Md5H(a, b, c, d, m5, 0xfffa3942, 4)
-        d = Md5H(d, a, b, c, m8, 0x8771f681, 11)
-        c = Md5H(c, d, a, b, m11, 0x6d9d6122, 16)
-        b = Md5H(b, c, d, a, m14, 0xfde5380c, 23)
-        a = Md5H(a, b, c, d, m1, 0xa4beea44, 4)
-        d = Md5H(d, a, b, c, m4, 0x4bdecfa9, 11)
-        c = Md5H(c, d, a, b, m7, 0xf6bb4b60, 16)
-        b = Md5H(b, c, d, a, m10, 0xbebfbc70, 23)
-        a = Md5H(a, b, c, d, m13, 0x289b7ec6, 4)
-        d = Md5H(d, a, b, c, m0, 0xeaa127fa, 11)
-        c = Md5H(c, d, a, b, m3, 0xd4ef3085, 16)
-        b = Md5H(b, c, d, a, m6, 0x04881d05, 23)
-        a = Md5H(a, b, c, d, m9, 0xd9d4d039, 4)
-        d = Md5H(d, a, b, c, m12, 0xe6db99e5, 11)
-        c = Md5H(c, d, a, b, m15, 0x1fa27cf8, 16)
-        b = Md5H(b, c, d, a, m2, 0xc4ac5665, 23)
-        a = Md5I(a, b, c, d, m0, 0xf4292244, 6)
-        d = Md5I(d, a, b, c, m7, 0x432aff97, 10)
-        c = Md5I(c, d, a, b, m14, 0xab9423a7, 15)
-        b = Md5I(b, c, d, a, m5, 0xfc93a039, 21)
-        a = Md5I(a, b, c, d, m12, 0x655b59c3, 6)
-        d = Md5I(d, a, b, c, m3, 0x8f0ccc92, 10)
-        c = Md5I(c, d, a, b, m10, 0xffeff47d, 15)
-        b = Md5I(b, c, d, a, m1, 0x85845dd1, 21)
-        a = Md5I(a, b, c, d, m8, 0x6fa87e4f, 6)
-        d = Md5I(d, a, b, c, m15, 0xfe2ce6e0, 10)
-        c = Md5I(c, d, a, b, m6, 0xa3014314, 15)
-        b = Md5I(b, c, d, a, m13, 0x4e0811a1, 21)
-        a = Md5I(a, b, c, d, m4, 0xf7537e82, 6)
-        d = Md5I(d, a, b, c, m11, 0xbd3af235, 10)
-        c = Md5I(c, d, a, b, m2, 0x2ad7d2bb, 15)
-        b = Md5I(b, c, d, a, m9, 0xeb86d391, 21)
+        a = Md5F(a, b, c, d, m0, Hint.BlackBox(0xd76aa478U), 7)
+        d = Md5F(d, a, b, c, m1, Hint.BlackBox(0xe8c7b756U), 12)
+        c = Md5F(c, d, a, b, m2, Hint.BlackBox(0x242070dbU), 17)
+        b = Md5F(b, c, d, a, m3, Hint.BlackBox(0xc1bdceeeU), 22)
+        a = Md5F(a, b, c, d, m4, Hint.BlackBox(0xf57c0fafU), 7)
+        d = Md5F(d, a, b, c, m5, Hint.BlackBox(0x4787c62aU), 12)
+        c = Md5F(c, d, a, b, m6, Hint.BlackBox(0xa8304613U), 17)
+        b = Md5F(b, c, d, a, m7, Hint.BlackBox(0xfd469501U), 22)
+        a = Md5F(a, b, c, d, m8, Hint.BlackBox(0x698098d8U), 7)
+        d = Md5F(d, a, b, c, m9, Hint.BlackBox(0x8b44f7afU), 12)
+        c = Md5F(c, d, a, b, m10, Hint.BlackBox(0xffff5bb1U), 17)
+        b = Md5F(b, c, d, a, m11, Hint.BlackBox(0x895cd7beU), 22)
+        a = Md5F(a, b, c, d, m12, Hint.BlackBox(0x6b901122U), 7)
+        d = Md5F(d, a, b, c, m13, Hint.BlackBox(0xfd987193U), 12)
+        c = Md5F(c, d, a, b, m14, Hint.BlackBox(0xa679438eU), 17)
+        b = Md5F(b, c, d, a, m15, Hint.BlackBox(0x49b40821U), 22)
+        a = Md5G(a, b, c, d, m1, Hint.BlackBox(0xf61e2562U), 5)
+        d = Md5G(d, a, b, c, m6, Hint.BlackBox(0xc040b340U), 9)
+        c = Md5G(c, d, a, b, m11, Hint.BlackBox(0x265e5a51U), 14)
+        b = Md5G(b, c, d, a, m0, Hint.BlackBox(0xe9b6c7aaU), 20)
+        a = Md5G(a, b, c, d, m5, Hint.BlackBox(0xd62f105dU), 5)
+        d = Md5G(d, a, b, c, m10, Hint.BlackBox(0x02441453U), 9)
+        c = Md5G(c, d, a, b, m15, Hint.BlackBox(0xd8a1e681U), 14)
+        b = Md5G(b, c, d, a, m4, Hint.BlackBox(0xe7d3fbc8U), 20)
+        a = Md5G(a, b, c, d, m9, Hint.BlackBox(0x21e1cde6U), 5)
+        d = Md5G(d, a, b, c, m14, Hint.BlackBox(0xc33707d6U), 9)
+        c = Md5G(c, d, a, b, m3, Hint.BlackBox(0xf4d50d87U), 14)
+        b = Md5G(b, c, d, a, m8, Hint.BlackBox(0x455a14edU), 20)
+        a = Md5G(a, b, c, d, m13, Hint.BlackBox(0xa9e3e905U), 5)
+        d = Md5G(d, a, b, c, m2, Hint.BlackBox(0xfcefa3f8U), 9)
+        c = Md5G(c, d, a, b, m7, Hint.BlackBox(0x676f02d9U), 14)
+        b = Md5G(b, c, d, a, m12, Hint.BlackBox(0x8d2a4c8aU), 20)
+        a = Md5H(a, b, c, d, m5, Hint.BlackBox(0xfffa3942U), 4)
+        d = Md5H(d, a, b, c, m8, Hint.BlackBox(0x8771f681U), 11)
+        c = Md5H(c, d, a, b, m11, Hint.BlackBox(0x6d9d6122U), 16)
+        b = Md5H(b, c, d, a, m14, Hint.BlackBox(0xfde5380cU), 23)
+        a = Md5H(a, b, c, d, m1, Hint.BlackBox(0xa4beea44U), 4)
+        d = Md5H(d, a, b, c, m4, Hint.BlackBox(0x4bdecfa9U), 11)
+        c = Md5H(c, d, a, b, m7, Hint.BlackBox(0xf6bb4b60U), 16)
+        b = Md5H(b, c, d, a, m10, Hint.BlackBox(0xbebfbc70U), 23)
+        a = Md5H(a, b, c, d, m13, Hint.BlackBox(0x289b7ec6U), 4)
+        d = Md5H(d, a, b, c, m0, Hint.BlackBox(0xeaa127faU), 11)
+        c = Md5H(c, d, a, b, m3, Hint.BlackBox(0xd4ef3085U), 16)
+        b = Md5H(b, c, d, a, m6, Hint.BlackBox(0x04881d05U), 23)
+        a = Md5H(a, b, c, d, m9, Hint.BlackBox(0xd9d4d039U), 4)
+        d = Md5H(d, a, b, c, m12, Hint.BlackBox(0xe6db99e5U), 11)
+        c = Md5H(c, d, a, b, m15, Hint.BlackBox(0x1fa27cf8U), 16)
+        b = Md5H(b, c, d, a, m2, Hint.BlackBox(0xc4ac5665U), 23)
+        a = Md5I(a, b, c, d, m0, Hint.BlackBox(0xf4292244U), 6)
+        d = Md5I(d, a, b, c, m7, Hint.BlackBox(0x432aff97U), 10)
+        c = Md5I(c, d, a, b, m14, Hint.BlackBox(0xab9423a7U), 15)
+        b = Md5I(b, c, d, a, m5, Hint.BlackBox(0xfc93a039U), 21)
+        a = Md5I(a, b, c, d, m12, Hint.BlackBox(0x655b59c3U), 6)
+        d = Md5I(d, a, b, c, m3, Hint.BlackBox(0x8f0ccc92U), 10)
+        c = Md5I(c, d, a, b, m10, Hint.BlackBox(0xffeff47dU), 15)
+        b = Md5I(b, c, d, a, m1, Hint.BlackBox(0x85845dd1U), 21)
+        a = Md5I(a, b, c, d, m8, Hint.BlackBox(0x6fa87e4fU), 6)
+        d = Md5I(d, a, b, c, m15, Hint.BlackBox(0xfe2ce6e0U), 10)
+        c = Md5I(c, d, a, b, m6, Hint.BlackBox(0xa3014314U), 15)
+        b = Md5I(b, c, d, a, m13, Hint.BlackBox(0x4e0811a1U), 21)
+        a = Md5I(a, b, c, d, m4, Hint.BlackBox(0xf7537e82U), 6)
+        d = Md5I(d, a, b, c, m11, Hint.BlackBox(0xbd3af235U), 10)
+        c = Md5I(c, d, a, b, m2, Hint.BlackBox(0x2ad7d2bbU), 15)
+        b = Md5I(b, c, d, a, m9, Hint.BlackBox(0xeb86d391U), 21)
         words[0] = words[0] +% a
         words[1] = words[1] +% b
         words[2] = words[2] +% c
@@ -5998,10 +6003,13 @@ pub enum HttpKind { Protocol, TooLarge, Status, Unsupported }
 
 pub data HttpError(HttpKind Kind, string Detail)
 
-// The headers of a request or a response, an ordered list of names and values (design record, section 12:
-// the owner, 2026-10-31, "Ordered list type"), as hyper's `HeaderMap` and ASP.NET Core's
-// `IHeaderDictionary` keep them: a name compares without regard to ASCII case and stays as it was spelled,
-// and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came (W1, W4).
+// The headers of a request or a response, one ordered list of names and values (design record, section 12:
+// the owner, 2026-10-31, "Ordered list type"): a name compares without regard to ASCII case and stays as it
+// was spelled, and a repeated name, `Set-Cookie`, keeps each of its values apart, in the order they came
+// (W1, W4). hyper's `HeaderMap` keeps a name's values apart and in order but lowercases the name, and
+// ASP.NET Core's `IHeaderDictionary` holds a name's values as one `StringValues`: neither keeps one list.
+// A CR or a LF in a name or a value is refused where it is set, as the http crate's `HeaderValue` refuses
+// it, so that no header splits the head a writer writes (section 12: the owner, 2026-11-02, Q5).
 pub class HttpHeaders {
     mut List<string> names = List<string>()
     mut List<string> values = List<string>()
@@ -6030,15 +6038,44 @@ pub class HttpHeaders {
     }
 
     // A value of the name after every value the headers hold, as a repeated header of a message.
-    pub void Add(string name, string value) {
+    pub void | HttpError Add(string name, string value) {
+        if Breaks(name) || Breaks(value) {
+            return Refused()
+        }
+
         names.Add(name)
         values.Add(value)
     }
 
-    // The one value of the name: every value it had is taken out, as ASP.NET Core's indexer replaces them.
-    pub void Set(string name, string value) {
-        Remove(name)
-        Add(name, value)
+    // The one value of the name, as hyper's `HeaderMap::insert` keeps the entry and its key (section 12: the owner,
+    // 2026-11-02, the headers' pass, Q4 (a), Q5 and Q6 (b), at their defaults): the value takes the place of the name's
+    // first header, which keeps its spelling, and the name's other headers are taken out; a name the headers do not
+    // hold goes after every value they hold. A refused value changes nothing.
+    pub void | HttpError Set(string name, string value) {
+        if Breaks(name) || Breaks(value) {
+            return Refused()
+        }
+
+        mut first = -1
+        mut i = 0
+        while i < names.Count {
+            if !SameName(names[i], name) {
+                i = i + 1
+            } else if first < 0 {
+                first = i
+                i = i + 1
+            } else {
+                names.RemoveAt(i)
+                values.RemoveAt(i)
+            }
+        }
+
+        if first < 0 {
+            names.Add(name)
+            values.Add(value)
+        } else {
+            values[first] = value
+        }
     }
 
     // Takes out every value of the name.
@@ -6052,6 +6089,33 @@ pub class HttpHeaders {
                 i = i + 1
             }
         }
+    }
+
+    // How many names and values the headers hold, each value of a repeated name counted: a read-only property (K7; section 12:
+    // the owner, 2026-11-03).
+    pub int Count => names.Count
+
+    // The name at the index, in the order the headers hold them: an index outside 0 to `Count - 1` stops the program
+    // with index-out-of-range, as a list's index does (W4; section 12: the owner, 2026-11-03).
+    pub string NameAt(int i) => names[i]
+
+    // The value at the index, the value of the name `NameAt(i)` gives, and outside them the same stop.
+    pub string ValueAt(int i) => values[i]
+
+    // Whether a name or a value holds a CR or a LF, which would end its line in the head.
+    static bool Breaks(string text) {
+        for i in 0..<text.Bytes.Count {
+            if text.Bytes[i] == 13 || text.Bytes[i] == 10 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    // The refusal of a name or a value that holds a CR or a LF (section 12: the owner, 2026-11-03).
+    static HttpError Refused() {
+        return HttpError(HttpKind.Protocol, "invalid header: CR or LF")
     }
 
     // Whether two names are the same without regard to ASCII case, byte by byte, as Rust's `eq_ignore_ascii_case`.
@@ -6076,4 +6140,1482 @@ pub class HttpHeaders {
 
         return c
     }
+}
+
+// A lowest rate of data, in bytes a second after a grace, as Kestrel's `MinDataRate` holds both (design record, section 12: the
+// owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
+pub data HttpRate(int BytesPerSecond, duration Grace)
+
+// The limits of a request, with Kestrel's names, types and defaults (design record, section 12: the owner, 2026-10-31, "HttpLimits
+// data", and 2026-11-03, Kestrel's member names and types, the four fixed numbers made members), a type every file sees (W1, W5).
+// The bounds of time are held and read by nothing yet: they wait for the monotonic clock (section 12).
+pub data HttpLimits(
+    int MaxRequestLineSize = 8kb,
+    int MaxRequestHeadersTotalSize = 32kb,
+    int MaxRequestHeaderCount = 100,
+    long MaxRequestBodySize = 30_000_000,
+    duration RequestHeadersTimeout = 30s,
+    HttpRate MinRequestBodyDataRate = HttpRate(240, 5s),
+    HttpRate MinResponseDataRate = HttpRate(240, 5s),
+    int MaxRequestsPerConnection = 100,
+    duration KeepAliveTimeout = 5s,
+    int MaxDrainSize = 64kb,
+    int MaxChunkSizeLine = 4096)
+
+// A request a server reads from a stream: its method, its target split at the first `?`, its headers and its body, each as the
+// client sent it (design record, section 12; W1, W5). `HttpRequest.Read(stream)` reads one with the limits of `HttpLimits()`, and a
+// server's loop with the limits it is given (W7).
+pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Headers, HttpBody Body) {
+    // The minor version of the request, 0 for HTTP/1.0 and 1 for HTTP/1.1, for the server's loop (F9).
+    internal mut int minor = 1
+
+    // Whether the request has no body and the head of the next request stood whole in the stream's buffer after its own, so
+    // that the loop reads the next one without a wait and may hold this one's response until it writes the next (F9).
+    internal mut bool next = false
+
+    // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
+    // failure of the network, or the request the server refuses (W5), read under the limits of `HttpLimits()`: the limits a server
+    // is given reach the parser through `HttpReadRequest`, which no program calls, with no second public form (W7; section 12, Q3).
+    pub static HttpRequest | IoError | HttpError Read(TcpStream stream) {
+        match HttpReadRequest(stream, HttpLimits()) {
+            HttpRequest r => return r
+            IoError e => return e
+            HttpRefused no => return no.Error
+        }
+    }
+}
+
+// The body of a request, read from its stream as the client sends it: `Read` appends at most `max` bytes and gives 0 at the end,
+// `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
+// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it. A failure of HTTP stays: every read after it
+// gives it again.
+pub class HttpBody {
+    mut TcpStream? stream = null
+    mut long remaining = 0
+    mut bool chunked = false
+    mut bool atChunkEnd = false
+    mut bool ended = true
+    mut bool expects = false
+    mut long taken = 0
+    mut long most = 0
+    mut int sizeLine = 4096
+    mut HttpError? failed = null
+    mut bool timed = false
+    mut HttpRate rate = HttpRate(240, 5s)
+    mut long waited = 0
+    mut long arrived = 0
+    mut bool timedOut = false
+
+    // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
+    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed) {
+        b = HttpBody()
+        b.stream = s
+        b.remaining = length
+        b.chunked = isChunked
+        b.ended = !isChunked && length == 0
+        b.expects = expectsContinue && (isChunked || length > 0)
+        b.most = limits.MaxRequestBodySize
+        b.sizeLine = limits.MaxChunkSizeLine
+        b.timed = isTimed
+        b.rate = limits.MinRequestBodyDataRate
+        return b
+    }
+
+    // Whether the body is empty or read to its end (F9).
+    internal bool Ended => ended
+
+    // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
+    internal bool AwaitsContinue => expects
+
+    // Whether a read of the body ran out of its time, which the server answers `408` (F9).
+    internal bool TimedOut => timedOut
+
+    // Whether a read of the body failed, so that what the stream holds after it is not known (F9).
+    internal bool Failed => failed != null
+
+    // Reads and drops what is left of the body, at most `bound` bytes: true where the body ended within them, so that the stream
+    // holds the connection's next request (F9).
+    internal bool | IoError | HttpError Drain(int bound) {
+        mut dropped = Bytes()
+        mut room = bound + 1
+        while room > 0 {
+            dropped.Clear()
+            mut piece = 65536
+            if room < piece {
+                piece = room
+            }
+
+            n = Read(mut dropped, piece)
+            if n == 0 {
+                return true
+            }
+
+            room = room - n
+        }
+
+        return false
+    }
+
+    // Appends at most `max` bytes of the body to `into` and gives their count, 0 at the end of the body.
+    pub int | IoError | HttpError Read(mut Bytes into, int max) {
+        s = stream
+        if !timed || s == null || ended || failed != null || max <= 0 {
+            return Take(mut into, max)
+        }
+
+        // the rate, as Kestrel holds `MinRequestBodyDataRate`: after the grace, the bytes that arrived over the time the reads
+        // waited, so that a read may wait until that falls under the rate (section 12, Q11 (a)); below it the read gives the
+        // server's own `request timed out` (Q12 (b))
+        bound = HttpNanosAt(arrived, rate.BytesPerSecond)
+        mut allowed = HttpNanosOf(rate.Grace)
+        if bound > allowed {
+            allowed = bound
+        }
+
+        spare = allowed - waited
+        if spare <= 0 {
+            timedOut = true
+            return HttpTimedOut()
+        }
+
+        s.SetReadTimeout(HttpNanos(spare))
+        start = instant.Now
+        n = Take(mut into, max) else {
+            IoError e => {
+                waited = waited + HttpNanosOf(instant.Now - start)
+                if e.Kind == IoKind.TimedOut {
+                    timedOut = true
+                    return HttpTimedOut()
+                }
+
+                return e
+            }
+            HttpError e => return e
+        }
+
+        waited = waited + HttpNanosOf(instant.Now - start)
+        arrived = arrived + n
+        return n
+    }
+
+    // `Read` with no bound of time.
+    int | IoError | HttpError Take(mut Bytes into, int max) {
+        f = failed
+        if f != null {
+            return f
+        }
+
+        s = stream
+        if s == null || ended || max <= 0 {
+            return 0
+        }
+
+        if expects {
+            expects = false
+            s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+        }
+
+        if chunked && remaining == 0 {
+            NextChunk(s) else {
+                HttpError e => {
+                    failed = e
+                    return e
+                }
+            }
+
+            if ended {
+                return 0
+            }
+        }
+
+        mut want = max
+        if remaining < want {
+            want = int(remaining)
+        }
+
+        n = s.Read(mut into, want)
+        if n == 0 {
+            e = HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+            failed = e
+            return e
+        }
+
+        remaining = remaining - n
+        if remaining == 0 {
+            if chunked {
+                atChunkEnd = true
+            } else {
+                ended = true
+            }
+        }
+
+        return n
+    }
+
+    // The whole body, or `request body over limit` where it holds more than `max` bytes.
+    pub Bytes | IoError | HttpError ReadAll(int max) {
+        if !chunked && remaining > max {
+            return HttpError(HttpKind.TooLarge, "request body over limit")
+        }
+
+        mut all = Bytes()
+        while true {
+            mut piece = 65536
+            if max - all.Count + 1 < piece {
+                piece = max - all.Count + 1
+            }
+
+            n = Read(mut all, piece)
+            if n == 0 {
+                return all
+            }
+
+            if all.Count > max {
+                return HttpError(HttpKind.TooLarge, "request body over limit")
+            }
+        }
+
+        return all
+    }
+
+    // The whole body as text, or `InvalidUtf8` where it is no UTF-8, as `string.FromUtf8` gives it.
+    pub string | IoError | HttpError | InvalidUtf8 ReadAllText(int max) {
+        all = ReadAll(max)
+        return string.FromUtf8(all)
+    }
+
+    // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
+    // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
+    bool | IoError | HttpError NextChunk(TcpStream s) {
+        if atChunkEnd {
+            end = HttpLine(s, 2)
+            if end.Count != 0 {
+                return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+            }
+
+            atChunkEnd = false
+        }
+
+        line = HttpLine(s, sizeLine) else {
+            HttpError e => return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+        }
+
+        mut size = 0L
+        mut digits = 0
+        for i in 0..<line.Count {
+            c = line[i]
+            mut d = -1
+            if c >= 48 && c <= 57 {
+                d = c - 48
+            } else if c >= 97 && c <= 102 {
+                d = c - 87
+            } else if c >= 65 && c <= 70 {
+                d = c - 55
+            } else if c == 59 || c == 32 || c == 9 {
+                break
+            } else {
+                return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+            }
+
+            if most - taken - d < 0 || size > (most - taken - d) / 16 {
+                return HttpError(HttpKind.TooLarge, "request body over limit")
+            }
+
+            size = size * 16 + d
+            digits = digits + 1
+        }
+
+        if digits == 0 {
+            return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+        }
+
+        taken = taken + size
+        remaining = size
+        if size == 0 {
+            while true {
+                trailer = HttpLine(s, sizeLine)
+                if trailer.Count == 0 {
+                    ended = true
+                    return true
+                }
+            }
+        }
+
+        return true
+    }
+}
+
+// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, or none (design
+// record, section 12; W8). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
+// out of range does, since a status is a literal in code, and set the `Content-Type` ASP.NET Core's `Results` sets, which the
+// headers can replace. `Write` writes the response, and `WriteHead` its head alone, for a `HEAD`; neither adds `Date` or
+// `Connection`, which the server's loop adds where the handler set none.
+pub class HttpResponse {
+    mut int code = 200
+    mut HttpHeaders headers = HttpHeaders()
+    mut bool isFile = false
+    mut Bytes held = HttpNoBytes()
+    mut string filePath = ""
+
+    // The status, from 200 to 599.
+    pub int Status => code
+
+    // The headers, which a handler changes with `Add`, `Set` and `Remove` (W4).
+    pub HttpHeaders Headers => headers
+
+    // A response whose body is `text` in UTF-8, as `text/plain; charset=utf-8`.
+    pub static HttpResponse Text(int status, string text) {
+        r = Of(status, "text/plain; charset=utf-8")
+        r.held = text.Bytes
+        r.NoBodyOn205()
+        return r
+    }
+
+    // A response whose body is `bytes`, as `application/octet-stream`.
+    pub static HttpResponse Bytes(int status, Bytes bytes) {
+        r = Of(status, "application/octet-stream")
+        r.held = bytes
+        r.NoBodyOn205()
+        return r
+    }
+
+    // A response whose body is the file at `path`, as `application/octet-stream`, its length taken and its bytes read when the
+    // response is written.
+    pub static HttpResponse File(int status, string path) {
+        r = Of(status, "application/octet-stream")
+        r.isFile = true
+        r.filePath = path
+        return r
+    }
+
+    // A response with no body and no `Content-Type`.
+    pub static HttpResponse Empty(int status) => Of(status, "")
+
+    // Writes the status line, the headers and the body to `stream` (W8).
+    pub void | IoError Write(TcpStream stream) {
+        mut none = HttpNoBytes()
+        Send(stream, true, "", false, false, null, mut none, false)
+    }
+
+    // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
+    pub void | IoError WriteHead(TcpStream stream) {
+        mut none = HttpNoBytes()
+        Send(stream, false, "", false, false, null, mut none, false)
+    }
+
+    // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
+    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
+    // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
+    // write, and where `hold` a response of 64 KiB or less, with them, is held there in place of a write (F9).
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold) => Send(stream, withBody, date, close, plain, pace, mut pending, hold)
+
+    // A response of `status` with its `Content-Type`, none where `type` is empty.
+    static HttpResponse Of(int status, string type) {
+        if status < 200 || status > 599 {
+            throw "status {status} is outside 200 to 599"
+        }
+
+        r = HttpResponse()
+        r.code = status
+        if type != "" {
+            r.headers.Add("Content-Type", type) else {
+                HttpError e => return r
+            }
+        }
+
+        return r
+    }
+
+    // A `205` given a body stops the program, as a status outside the range does: the function that makes the response sees the
+    // status and the body (design record, section 12: the owner, 2026-11-02, the writer's pass, Q14, and the reading said back with
+    // it, assumed). A `File`'s length is taken when it is written, so a `205` whose file holds bytes reaches `Send`'s `500`.
+    void NoBodyOn205() {
+        if code == 205 && held.Count > 0 {
+            throw "status 205 takes no body"
+        }
+    }
+
+    // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` whose file holds
+    // bytes or a `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
+    // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
+        bodiless = code == 204 || code == 304
+        mut length = 0L
+        if !bodiless && isFile {
+            length = HttpFileSize(filePath) else {
+                IoError e => {
+                    HttpUnwritable(s, mut pending, date)
+                    return e
+                }
+            }
+        } else if !bodiless {
+            length = held.Count
+        }
+
+        codings = headers.GetAll("Transfer-Encoding")
+        lengths = headers.GetAll("Content-Length")
+        chunked = !bodiless && !plain && codings.Count > 0
+        if chunked && lengths.Count > 0 {
+            HttpFlush(s, mut pending)
+            return IoError(IoKind.InvalidInput, 0, "")
+        }
+
+        if code == 205 && length > 0 {
+            HttpUnwritable(s, mut pending, date)
+            return false
+        }
+
+        if !bodiless {
+            for text in lengths {
+                if HttpLength(text) != length {
+                    HttpUnwritable(s, mut pending, date)
+                    return false
+                }
+            }
+        }
+
+        mut out = "HTTP/1.1 {code} {HttpReason(code)}\r\n".Bytes
+        mut codingsLeft = codings.Count
+        for i in 0..<headers.Count {
+            name = headers.NameAt(i)
+            value = headers.ValueAt(i)
+            if name.ToLowerAscii() == "transfer-encoding" {
+                if bodiless || plain {
+                    continue
+                }
+
+                codingsLeft = codingsLeft - 1
+                if codingsLeft == 0 && !HttpEndsInChunked(value) {
+                    out.AddRange("{name}: {value}, chunked\r\n".Bytes)
+                    continue
+                }
+            }
+
+            out.AddRange("{name}: {value}\r\n".Bytes)
+        }
+
+        if !bodiless && !chunked && lengths.Count == 0 {
+            out.AddRange("Content-Length: {length}\r\n".Bytes)
+        }
+
+        out.AddRange(date.Bytes)
+        if close {
+            out.AddRange("Connection: close\r\n".Bytes)
+        }
+
+        out.AddRange("\r\n".Bytes)
+        if pending.Count > 0 {
+            pending.AddRange(out)
+            out = pending
+            pending = HttpNoBytes()
+        }
+
+        if !withBody || bodiless {
+            if hold && out.Count <= 65536 {
+                pending = out
+                return true
+            }
+
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+            return true
+        }
+
+        if isFile {
+            HttpSendFile(s, out, filePath, length, chunked, pace)
+            return true
+        }
+
+        if chunked && held.Count > 0 {
+            out.AddRange("{HttpHex(held.Count)}\r\n".Bytes)
+        }
+
+        if held.Count <= 65536 {
+            out.AddRange(held)
+        } else {
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+            out = HttpNoBytes()
+            HttpPace(s, pace, held.Count)
+            s.Write(held)
+        }
+
+        if chunked {
+            if held.Count > 0 {
+                out.AddRange("\r\n".Bytes)
+            }
+
+            out.AddRange("0\r\n\r\n".Bytes)
+        }
+
+        if hold && held.Count <= 65536 && out.Count <= 65536 {
+            pending = out
+            return true
+        }
+
+        if out.Count > 0 {
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+        }
+
+        return true
+    }
+}
+
+// An empty `Bytes`, for a place inside `HttpResponse`, where the name `Bytes` in an expression is the function that makes a response.
+Bytes HttpNoBytes() => Bytes()
+
+// The length of the file at `path`, for `HttpResponse`, where the name `File` in an expression is the function that makes a response.
+long | IoError HttpFileSize(string path) => File.Size(path)
+
+// What the writer answers a response that it cannot write: `500` with no body and a close (W8).
+void | IoError HttpUnwritable(TcpStream s, mut Bytes pending, string date) {
+    pending.AddRange("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+    HttpFlush(s, mut pending)
+}
+
+// The responses `pending` holds written, and `pending` emptied.
+void | IoError HttpFlush(TcpStream s, mut Bytes pending) {
+    if pending.Count > 0 {
+        out = pending
+        pending = HttpNoBytes()
+        s.Write(out)
+    }
+}
+
+// The head `out` and then the file at `path` of `length` bytes, in pieces of 64 KiB, each a chunk where `chunked`; a file that
+// gives fewer bytes than its length had, or more, is `InvalidData` once its head is out, and the connection is the caller's to close.
+void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked) => HttpSendFile(s, out, path, length, chunked, null)
+
+// The same, each write held to `pace` where it is given (W10).
+void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bool chunked, HttpRate? pace) {
+    f = File.Open(path)
+    mut sent = 0L
+    mut piece = out
+    while true {
+        mut read = Bytes()
+        n = f.Read(mut read, 65536)
+        if n == 0 {
+            break
+        }
+
+        sent = sent + n
+        if sent > length {
+            f.Close()
+            return IoError(IoKind.InvalidData, 0, path)
+        }
+
+        if chunked {
+            piece.AddRange("{HttpHex(n)}\r\n".Bytes)
+        }
+
+        piece.AddRange(read)
+        if chunked {
+            piece.AddRange("\r\n".Bytes)
+        }
+
+        if sent == length {
+            // the last piece goes out in one write with the end of the body, as hyper flushes the end with its last data: written
+            // on its own after the piece, the end waits under Nagle's algorithm for the client's acknowledgement (W8)
+            mut more = Bytes()
+            extra = f.Read(mut more, 1)
+            if extra > 0 {
+                f.Close()
+                return IoError(IoKind.InvalidData, 0, path)
+            }
+
+            break
+        }
+
+        HttpPace(s, pace, piece.Count)
+        s.Write(piece)
+        piece = Bytes()
+    }
+
+    f.Close()
+    if sent != length {
+        return IoError(IoKind.InvalidData, 0, path)
+    }
+
+    if chunked {
+        piece.AddRange("0\r\n\r\n".Bytes)
+    }
+
+    if piece.Count > 0 {
+        HttpPace(s, pace, piece.Count)
+        s.Write(piece)
+    }
+}
+
+// The number a `Content-Length` of a handler's holds, or -1 where it holds anything but digits.
+long HttpLength(string text) {
+    b = text.Trim().Bytes
+    if b.Count == 0 {
+        return -1
+    }
+
+    mut n = 0L
+    for c in b {
+        if c < 48 || c > 57 || n > 100_000_000_000_000_000 {
+            return -1
+        }
+
+        n = n * 10 + (c - 48)
+    }
+
+    return n
+}
+
+// Whether a `Transfer-Encoding`'s last coding is `chunked`.
+bool HttpEndsInChunked(string value) {
+    codings = value.Split(",")
+    return codings[codings.Count - 1].Trim().ToLowerAscii() == "chunked"
+}
+
+// A size of a chunk in hexadecimal, as RFC 9112, section 7.1, writes it.
+string HttpHex(long n) {
+    if n == 0 {
+        return "0"
+    }
+
+    digits = "0123456789abcdef".Bytes
+    mut out = Bytes()
+    mut rest = n
+    while rest > 0 {
+        out.Insert(0, digits[int(rest % 16)])
+        rest = rest / 16
+    }
+
+    return string.FromUtf8(out) else {
+        InvalidUtf8 => "0"
+    }
+}
+
+// The reason phrase of a status, RFC 9110's, and RFC 6585's for `428`, `429`, `431` and `511`, empty for a status neither names.
+string HttpReason(int status) {
+    match status {
+        100 => return "Continue"
+        101 => return "Switching Protocols"
+        200 => return "OK"
+        201 => return "Created"
+        202 => return "Accepted"
+        203 => return "Non-Authoritative Information"
+        204 => return "No Content"
+        205 => return "Reset Content"
+        206 => return "Partial Content"
+        300 => return "Multiple Choices"
+        301 => return "Moved Permanently"
+        302 => return "Found"
+        303 => return "See Other"
+        304 => return "Not Modified"
+        305 => return "Use Proxy"
+        307 => return "Temporary Redirect"
+        308 => return "Permanent Redirect"
+        400 => return "Bad Request"
+        401 => return "Unauthorized"
+        402 => return "Payment Required"
+        403 => return "Forbidden"
+        404 => return "Not Found"
+        405 => return "Method Not Allowed"
+        406 => return "Not Acceptable"
+        407 => return "Proxy Authentication Required"
+        408 => return "Request Timeout"
+        409 => return "Conflict"
+        410 => return "Gone"
+        411 => return "Length Required"
+        412 => return "Precondition Failed"
+        413 => return "Content Too Large"
+        414 => return "URI Too Long"
+        415 => return "Unsupported Media Type"
+        416 => return "Range Not Satisfiable"
+        417 => return "Expectation Failed"
+        421 => return "Misdirected Request"
+        422 => return "Unprocessable Content"
+        426 => return "Upgrade Required"
+        428 => return "Precondition Required"
+        429 => return "Too Many Requests"
+        431 => return "Request Header Fields Too Large"
+        500 => return "Internal Server Error"
+        501 => return "Not Implemented"
+        502 => return "Bad Gateway"
+        503 => return "Service Unavailable"
+        504 => return "Gateway Timeout"
+        505 => return "HTTP Version Not Supported"
+        511 => return "Network Authentication Required"
+        else => return ""
+    }
+}
+
+// The server of HTTP/1.1 (design record, section 12; W9): `Serve` accepts each connection of a listener and serves it, one at a time,
+// and `ServeConnection` serves every request of one accepted connection with the handler, in their order, and closes it, so that a
+// program can write its own loop of `Accept`, as hyper's `serve_connection` lets it.
+pub class HttpServer {
+    // Every connection of the listener served with the handler within `HttpLimits()`, until an `Accept` fails other than for one
+    // connection: a connection aborted, reset or refused before it was accepted goes on, as hyper's accept loop goes on past it.
+    pub static void | IoError Serve(TcpListener listener, (HttpRequest) => HttpResponse handler) {
+        return Serve(listener, handler, HttpLimits())
+    }
+
+    // The same, within `limits` (W7).
+    pub static void | IoError Serve(TcpListener listener, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+        HttpCheckLimits(limits)
+        while true {
+            match listener.Accept() {
+                TcpStream stream => {
+                    ServeConnection(stream, handler, limits) else {
+                        IoError e => {
+                        }
+                        HttpError e => {
+                        }
+                    }
+                }
+                IoError e => {
+                    if e.Kind != IoKind.ConnectionAborted && e.Kind != IoKind.ConnectionReset && e.Kind != IoKind.ConnectionRefused {
+                        return e
+                    }
+                }
+            }
+        }
+    }
+
+    // Every request of the connection served with the handler within `HttpLimits()`, and the connection closed: `void` where it
+    // ended between two requests, the `IoError` of the network, or the `HttpError` of a request the server refused.
+    pub static void | IoError | HttpError ServeConnection(TcpStream stream, (HttpRequest) => HttpResponse handler) {
+        return ServeConnection(stream, handler, HttpLimits())
+    }
+
+    // The same, within `limits` (W7).
+    pub static void | IoError | HttpError ServeConnection(TcpStream stream, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+        HttpCheckLimits(limits) else {
+            IoError e => {
+                stream.Close()
+                return e
+            }
+        }
+
+        HttpServeRequests(stream, handler, limits) else {
+            IoError e => {
+                stream.Close()
+                return e
+            }
+            HttpError e => {
+                stream.Close()
+                return e
+            }
+        }
+
+        stream.Close()
+    }
+}
+
+// A limit of zero or below, `InvalidInput` naming the member, as a time of zero or below is at `Connect`.
+void | IoError HttpCheckLimits(HttpLimits limits) {
+    if limits.MaxRequestLineSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestLineSize")
+    }
+
+    if limits.MaxRequestHeadersTotalSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestHeadersTotalSize")
+    }
+
+    if limits.MaxRequestHeaderCount <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestHeaderCount")
+    }
+
+    if limits.MaxRequestBodySize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestBodySize")
+    }
+
+    if limits.RequestHeadersTimeout <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "RequestHeadersTimeout")
+    }
+
+    if limits.MinRequestBodyDataRate.BytesPerSecond <= 0 || limits.MinRequestBodyDataRate.Grace <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "MinRequestBodyDataRate")
+    }
+
+    if limits.MinResponseDataRate.BytesPerSecond <= 0 || limits.MinResponseDataRate.Grace <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "MinResponseDataRate")
+    }
+
+    if limits.MaxRequestsPerConnection <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxRequestsPerConnection")
+    }
+
+    if limits.KeepAliveTimeout <= 0s {
+        return IoError(IoKind.InvalidInput, 0, "KeepAliveTimeout")
+    }
+
+    if limits.MaxDrainSize <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxDrainSize")
+    }
+
+    if limits.MaxChunkSizeLine <= 0 {
+        return IoError(IoKind.InvalidInput, 0, "MaxChunkSizeLine")
+    }
+}
+
+// The requests of one connection, each read, given to the handler and answered before the next is read, as hyper's dispatcher
+// serves them: the loop ends where the connection ends between two requests, where a response or a request closes it, and at a
+// request the server refuses, which it answers with its status alone.
+void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    mut served = 0
+    mut second = -1L
+    mut date = ""
+    mut pending = HttpNoBytes()
+    mut ahead = false
+    while true {
+        // the wait for the first byte of each request, the first of the connection among them, `KeepAliveTimeout`, as Kestrel
+        // arms it (section 12); none where the head of the next request stands whole in the buffer already, which the `Fill` takes
+        // with no call of the system
+        if !ahead {
+            s.SetReadTimeout(limits.KeepAliveTimeout)
+        }
+
+        mut first = Bytes()
+        n = s.Fill(mut first) else {
+            IoError e => {
+                if e.Kind == IoKind.TimedOut || e.Kind == IoKind.ConnectionReset {
+                    return
+                }
+
+                return e
+            }
+        }
+
+        if n == 0 {
+            return
+        }
+
+        // the head's time counts from its first byte, by the monotonic clock, and the `Date` reads the civil one
+        begun = instant.Now
+        now = HttpSecondOf(timestamp.Now)
+        if now != second {
+            second = now
+            date = "Date: {HttpDate(now)}\r\n"
+        }
+
+        match HttpReadRequest(s, limits, begun + limits.RequestHeadersTimeout) {
+            HttpRefused no => {
+                HttpRefuse(s, mut pending, no.Status, date) else {
+                    IoError e => return no.Error
+                }
+
+                return no.Error
+            }
+            IoError e => {
+                if e.Kind == IoKind.TimedOut {
+                    HttpRefuse(s, mut pending, 408, date) else {
+                        IoError lost => return HttpTimedOut()
+                    }
+
+                    return HttpTimedOut()
+                }
+
+                return e
+            }
+            HttpRequest r => {
+                served = served + 1
+                if pending.Count > 0 && !r.Body.Ended {
+                    // a handler that reads a body may wait for it, and its first read may send `100 Continue`: the responses
+                    // before it go out first
+                    HttpFlush(s, mut pending)
+                }
+
+                response = handler(r)
+                headers = response.Headers
+                mut keep = r.minor == 1 && served < limits.MaxRequestsPerConnection && response.Status != 500
+                if HttpCloses(r.Headers) || HttpCloses(headers) {
+                    keep = false
+                }
+
+                body = r.Body
+                if body.TimedOut {
+                    HttpRefuse(s, mut pending, 408, date) else {
+                        IoError lost => return HttpTimedOut()
+                    }
+
+                    return HttpTimedOut()
+                }
+
+                if body.Failed || body.AwaitsContinue {
+                    keep = false
+                } else if keep {
+                    drained = body.Drain(limits.MaxDrainSize) else {
+                        IoError e => return e
+                        HttpError e => {
+                            // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), answered `408`
+                            if body.TimedOut {
+                                HttpRefuse(s, mut pending, 408, date) else {
+                                    IoError lost => return HttpTimedOut()
+                                }
+
+                                return HttpTimedOut()
+                            }
+
+                            return e
+                        }
+                    }
+
+                    if !drained {
+                        keep = false
+                    }
+                }
+
+                mut dated = date
+                if headers.Get("Date") != null {
+                    dated = ""
+                }
+
+                close = !keep && headers.Get("Connection") == null
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate, mut pending, keep && r.next)
+                if !keep || !written {
+                    return
+                }
+
+                ahead = r.next
+            }
+        }
+    }
+}
+
+// The status line alone that answers a request the server refuses, with an empty body, its `Date` and a close, and nothing where the
+// status is 0 (section 12, "Status line only"), after the responses `pending` holds and in the same write.
+void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string date) {
+    if status != 0 {
+        pending.AddRange("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
+    }
+
+    HttpFlush(s, mut pending)
+}
+
+// The error a connection gives where the server answered its request `408 Request Timeout`, among the server's texts of the kind
+// `Protocol` (W10; section 12, the owner, 2026-11-03, "The server's error texts mirror the client's").
+HttpError HttpTimedOut() => HttpError(HttpKind.Protocol, "request timed out")
+
+// Sets the time of the stream's next read to what is left until `deadline`, the head's time alone, with no 5 seconds of a read on a
+// socket inside the server (section 12, Q10 (b)), and gives `TimedOut` where nothing is left, with no call of the system (W10).
+void | IoError HttpWaitUntil(TcpStream s, instant deadline) {
+    spare = deadline - instant.Now
+    if spare <= 0s {
+        return IoError(IoKind.TimedOut, 0, "")
+    }
+
+    s.SetReadTimeout(spare)
+}
+
+// Sets the time of the stream's next write to the longer of the grace of `pace` and the time `count` bytes take at its rate, as
+// Kestrel holds a response to `MinResponseDataRate` for each write; nothing where no rate is given (W10).
+void | IoError HttpPace(TcpStream s, HttpRate? pace, long count) {
+    if pace == null {
+        return
+    }
+
+    bound = HttpNanosAt(count, pace.BytesPerSecond)
+    if bound > HttpNanosOf(pace.Grace) {
+        s.SetWriteTimeout(HttpNanos(bound))
+    } else {
+        s.SetWriteTimeout(pace.Grace)
+    }
+}
+
+// The nanoseconds `count` bytes take at `perSecond` bytes a second, without passing the range of a `long` on the way.
+long HttpNanosAt(long count, int perSecond) => count / perSecond * 1_000_000_000 + count % perSecond * 1_000_000_000 / perSecond
+
+// A `duration` of `nanoseconds`, a bound the server takes in proportion to a count of bytes, which no operator gives.
+duration HttpNanos(long nanoseconds) {
+    long bits = nanoseconds
+    mut duration d = 0s
+    raw {
+        d = *Ptr<duration>(&bits)
+    }
+
+    return d
+}
+
+// The nanoseconds of `d`.
+long HttpNanosOf(duration d) {
+    duration copy = d
+    mut long n = 0
+    raw {
+        n = *Ptr<long>(&copy)
+    }
+
+    return n
+}
+
+// Whether headers say `Connection: close`, among the options of every `Connection` line, without regard to ASCII case (RFC 9110,
+// section 7.6.1).
+bool HttpCloses(HttpHeaders headers) {
+    for value in headers.GetAll("Connection") {
+        for option in value.Split(",") {
+            if option.Trim().ToLowerAscii() == "close" {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+// The whole seconds of `at` since 1970-01-01, rounded down, so that the loop writes its `Date` once a second, as hyper caches it.
+long HttpSecondOf(timestamp at) {
+    timestamp copy = at
+    mut long nanoseconds = 0
+    raw {
+        nanoseconds = *Ptr<long>(&copy)
+    }
+
+    mut second = nanoseconds / 1_000_000_000
+    if nanoseconds < 0 && second * 1_000_000_000 != nanoseconds {
+        second = second - 1
+    }
+
+    return second
+}
+
+// The second `second` since 1970-01-01 as HTTP's `Date` writes it, RFC 9110's IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`
+// (section 5.6.7), the civil date of its day by the algorithm `civil_from_days`, which chrono's dates follow too.
+string HttpDate(long second) {
+    mut days = second / 86400
+    if second < 0 && days * 86400 != second {
+        days = days - 1
+    }
+
+    inDay = second - days * 86400
+    z = days + 719468
+    mut era = z / 146097
+    if z < 0 && era * 146097 != z {
+        era = era - 1
+    }
+
+    doe = z - era * 146097
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp = (5 * doy + 2) / 153
+    day = doy - (153 * mp + 2) / 5 + 1
+    mut month = mp + 3
+    if mp >= 10 {
+        month = mp - 9
+    }
+
+    mut year = yoe + era * 400
+    if month <= 2 {
+        year = year + 1
+    }
+
+    weekdays = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"]
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    weekday = weekdays[int((days % 7 + 7) % 7)]
+    hour = inDay / 3600
+    minute = inDay / 60 % 60
+    sec = inDay % 60
+    return "{weekday}, {HttpTwo(day)} {months[int(month) - 1]} {year} {HttpTwo(hour)}:{HttpTwo(minute)}:{HttpTwo(sec)} GMT"
+}
+
+// `n`, from 0 to 99, in two digits.
+string HttpTwo(long n) {
+    if n < 10 {
+        return "0{n}"
+    }
+
+    return "{n}"
+}
+
+// What std/'s reader refuses: the status the server answers, 0 where it answers none, beside the error a program sees (W5).
+data HttpRefused(int Status, HttpError Error)
+
+// The next line of the stream without its CR LF, of at most `most` bytes with them, taken through the stream's buffer (S24).
+Bytes | IoError | HttpError HttpLine(TcpStream s, int most) {
+    mut line = Bytes()
+    while true {
+        start = line.Count
+        n = s.Fill(mut line)
+        if n == 0 {
+            return HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+        }
+
+        for i in start..<line.Count {
+            if line[i] == 10 {
+                s.Consume(i + 1 - start)
+                if i == 0 || line[i - 1] != 13 || i + 1 > most {
+                    return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+                }
+
+                return line[0..<i - 1]
+            }
+        }
+
+        s.Consume(n)
+        if line.Count >= most {
+            return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+        }
+    }
+
+    return line
+}
+
+HttpRefused HttpBad(string what) => HttpRefused(400, HttpError(HttpKind.Protocol, "malformed request: {what}"))
+
+// The request of a stream with these limits, the entry of the server's loop (W5): the head is taken through the stream's buffer
+// (S24) line by line, each line ended by CR LF, and held to its limits as Kestrel holds it, a request line of at most
+// `MaxRequestLineSize` bytes with its CR LF and header lines of at most `MaxRequestHeadersTotalSize` bytes with theirs and the empty
+// line's, at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body.
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits) => HttpReadRequest(s, limits, null)
+
+// The same, and where a `deadline` is given, as the server's loop reads: the head by the deadline, which the loop sets
+// `RequestHeadersTimeout` after the request's first byte, each read of it after the first, which takes the bytes the loop's wait
+// for that byte left in the buffer, waiting what is left, and the body held to its rate (W10). Without one it reads the clock nowhere, so that a call on the socket is the first thing a build for Windows
+// says `not supported` to.
+HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limits, instant? deadline) {
+    mut head = Bytes()
+    mut lineStart = 0
+    mut firstEnd = -1
+    mut count = 0
+    while true {
+        start = head.Count
+        n = s.Fill(mut head)
+        if n == 0 {
+            if start == 0 {
+                return HttpRefused(0, HttpError(HttpKind.Protocol, "malformed request: no request line"))
+            }
+
+            return HttpBad("incomplete")
+        }
+
+        mut i = start
+        while i < head.Count {
+            if head[i] == 10 {
+                if i == 0 || head[i - 1] != 13 {
+                    s.Consume(i + 1 - start)
+                    return HttpBad("line not ended by CR LF")
+                }
+
+                if firstEnd < 0 {
+                    if i + 1 > limits.MaxRequestLineSize {
+                        s.Consume(i + 1 - start)
+                        return HttpRefused(414, HttpError(HttpKind.TooLarge, "request line too long"))
+                    }
+
+                    firstEnd = i - 1
+                } else if i - 1 == lineStart {
+                    s.Consume(i + 1 - start)
+                    if i + 1 - (firstEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+                        return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+                    }
+
+                    match HttpParseHead(head, firstEnd, i - 1, limits) {
+                        HttpHead h => {
+                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits, deadline != null))
+                            r.minor = h.Minor
+                            r.next = !h.Chunked && h.Length == 0 && HttpHeadFollows(head, i + 1)
+                            return r
+                        }
+                        HttpRefused no => return no
+                    }
+                } else {
+                    count = count + 1
+                    if count > limits.MaxRequestHeaderCount {
+                        s.Consume(i + 1 - start)
+                        return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+                    }
+                }
+
+                lineStart = i + 1
+            }
+
+            i = i + 1
+        }
+
+        s.Consume(n)
+        if firstEnd < 0 && head.Count >= limits.MaxRequestLineSize {
+            return HttpRefused(414, HttpError(HttpKind.TooLarge, "request line too long"))
+        }
+
+        if firstEnd >= 0 && head.Count - (firstEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+            return HttpRefused(431, HttpError(HttpKind.TooLarge, "request header too large"))
+        }
+
+        if deadline != null {
+            HttpWaitUntil(s, deadline)
+        }
+    }
+
+    return HttpBad("incomplete")
+}
+
+// Whether the bytes from `from` on hold the end of a head, a CR LF CR LF.
+bool HttpHeadFollows(Bytes b, int from) {
+    mut i = from
+    while i + 3 < b.Count {
+        if b[i] == 13 && b[i + 1] == 10 && b[i + 2] == 13 && b[i + 3] == 10 {
+            return true
+        }
+
+        i = i + 1
+    }
+
+    return false
+}
+
+// What a head says of its request, for its body and the server's loop.
+data HttpHead(string Method, string Path, string Query, HttpHeaders Headers, int Minor, long Length, bool Chunked, bool Continue)
+
+// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2).
+bool HttpTokenByte(byte c) {
+    if c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 {
+        return true
+    }
+
+    return c == 33 || c >= 35 && c <= 39 || c == 42 || c == 43 || c == 45 || c == 46 || c == 94 || c == 95 || c == 96 || c == 124 || c == 126
+}
+
+// Whether a `Host` is a host and an optional port, a name of the bytes RFC 3986 allows in one or an address between brackets.
+bool HttpHostValid(string host) {
+    b = host.Bytes
+    mut at = 0
+    if b.Count > 0 && b[0] == 91 {
+        at = 1
+        while at < b.Count && b[at] != 93 {
+            c = b[at]
+            if !(c >= 48 && c <= 58 || c >= 97 && c <= 102 || c >= 65 && c <= 70 || c == 46) {
+                return false
+            }
+
+            at = at + 1
+        }
+
+        if at == b.Count {
+            return false
+        }
+
+        at = at + 1
+    } else {
+        while at < b.Count && b[at] != 58 {
+            c = b[at]
+            if !(c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 45 || c == 46 || c == 95 || c == 126 || c == 37 || c == 33 || c == 36 || c >= 38 && c <= 44 || c == 59 || c == 61) {
+                return false
+            }
+
+            at = at + 1
+        }
+    }
+
+    if at == b.Count {
+        return true
+    }
+
+    if b[at] != 58 {
+        return false
+    }
+
+    for p in at + 1..<b.Count {
+        if b[p] < 48 || b[p] > 57 {
+            return false
+        }
+    }
+
+    return true
+}
+
+// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5). A header
+// line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse refuses it
+// (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
+HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimits limits) {
+    if head[0] == 32 {
+        return HttpBad("empty method")
+    }
+
+    mut at = 0
+    while at < lineEnd && head[at] != 32 {
+        if !HttpTokenByte(head[at]) {
+            return HttpBad("bad request line")
+        }
+
+        at = at + 1
+    }
+
+    if at == lineEnd {
+        return HttpBad("bad request line")
+    }
+
+    method = string.FromUtf8(head[0..<at]) else {
+        InvalidUtf8 => ""
+    }
+
+    targetStart = at + 1
+    at = targetStart
+    while at < lineEnd && head[at] != 32 {
+        if head[at] < 33 || head[at] == 127 {
+            return HttpBad("bad request line")
+        }
+
+        at = at + 1
+    }
+
+    if at == targetStart || at == lineEnd {
+        return HttpBad("bad request line")
+    }
+
+    target = string.FromUtf8(head[targetStart..<at]) else {
+        InvalidUtf8 => return HttpBad("target not UTF-8")
+    }
+
+    v = head[at + 1..<lineEnd]
+    if v.Count != 8 || v[0] != 72 || v[1] != 84 || v[2] != 84 || v[3] != 80 || v[4] != 47 || v[6] != 46 || v[5] < 48 || v[5] > 57 || v[7] < 48 || v[7] > 57 {
+        return HttpBad("bad request line")
+    }
+
+    if v[5] != 49 || v[7] > 49 {
+        return HttpRefused(505, HttpError(HttpKind.Unsupported, "unsupported HTTP version"))
+    }
+
+    minor = v[7] - 48
+    if method == "CONNECT" {
+        return HttpBad("CONNECT")
+    }
+
+    mut path = target
+    mut query = ""
+    question = target.IndexOf("?")
+    if question != null {
+        path = target.Substring(0, question)
+        query = target.Substring(question + 1, target.Bytes.Count - question - 1)
+    }
+
+    headers = HttpHeaders()
+    mut lineStart = lineEnd + 2
+    while lineStart < end {
+        mut lineStop = lineStart
+        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
+            lineStop = lineStop + 1
+        }
+
+        if head[lineStart] == 32 || head[lineStart] == 9 {
+            return HttpBad("folded header")
+        }
+
+        mut colon = lineStart
+        while colon < lineStop && head[colon] != 58 {
+            if head[colon] == 32 || head[colon] == 9 {
+                return HttpBad("space before a header's colon")
+            }
+
+            if !HttpTokenByte(head[colon]) {
+                return HttpBad("bad header name")
+            }
+
+            colon = colon + 1
+        }
+
+        if colon == lineStop {
+            return HttpBad("header without a colon")
+        }
+
+        if colon == lineStart {
+            return HttpBad("bad header name")
+        }
+
+        mut valueStart = colon + 1
+        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
+            valueStart = valueStart + 1
+        }
+
+        mut valueEnd = lineStop
+        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
+            valueEnd = valueEnd - 1
+        }
+
+        for p in valueStart..<valueEnd {
+            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
+                return HttpBad("control byte in a header")
+            }
+        }
+
+        name = string.FromUtf8(head[lineStart..<colon]) else {
+            InvalidUtf8 => ""
+        }
+
+        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
+            InvalidUtf8 => return HttpBad("header not UTF-8")
+        }
+
+        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
+        headers.Add(name, value) else {
+            HttpError e => return HttpBad("control byte in a header")
+        }
+
+        lineStart = lineStop + 2
+    }
+
+    hosts = headers.GetAll("Host")
+    if hosts.Count > 1 {
+        return HttpBad("two Host headers")
+    }
+
+    if hosts.Count == 0 && minor == 1 {
+        return HttpBad("no Host")
+    }
+
+    if hosts.Count == 1 && !HttpHostValid(hosts[0]) {
+        return HttpBad("bad Host")
+    }
+
+    lengths = headers.GetAll("Content-Length")
+    mut length = -1L
+    mut over = false
+    for text in lengths {
+        mut n = 0L
+        if text.Bytes.Count == 0 {
+            return HttpBad("bad Content-Length")
+        }
+
+        for c in text.Bytes {
+            if c < 48 || c > 57 {
+                return HttpBad("bad Content-Length")
+            }
+
+            if limits.MaxRequestBodySize - (c - 48) < 0 || n > (limits.MaxRequestBodySize - (c - 48)) / 10 {
+                over = true
+            } else {
+                n = n * 10 + (c - 48)
+            }
+        }
+
+        if length >= 0 && n != length {
+            return HttpBad("bad Content-Length")
+        }
+
+        length = n
+    }
+
+    codings = headers.GetAll("Transfer-Encoding")
+    if codings.Count > 0 && lengths.Count > 0 {
+        return HttpBad("Content-Length beside Transfer-Encoding")
+    }
+
+    if codings.Count > 1 || codings.Count == 1 && codings[0].ToLowerAscii() != "chunked" {
+        return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported transfer encoding"))
+    }
+
+    if over {
+        return HttpRefused(413, HttpError(HttpKind.TooLarge, "request body over limit"))
+    }
+
+    mut expects = false
+    expect = headers.Get("Expect")
+    if expect != null {
+        if expect.ToLowerAscii() != "100-continue" {
+            return HttpRefused(417, HttpError(HttpKind.Unsupported, "unsupported expectation"))
+        }
+
+        expects = minor == 1
+    }
+
+    mut sized = length
+    if sized < 0 {
+        sized = 0
+    }
+
+    return HttpHead(method, path, query, headers, minor, sized, codings.Count == 1, expects)
 }

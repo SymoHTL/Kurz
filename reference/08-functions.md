@@ -51,7 +51,11 @@ print(Sign(3))
 
 ### F4 (assumed, §8) `void`
 
-A function that has no result is declared with `void`, as in C# and in the record's samples.
+A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
+is no type of a value: a parameter a function declares, a field or a variable of type `void` is
+`syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
+`void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -60,6 +64,28 @@ void Greet(string name) {
 }
 
 Greet("Ann")
+```
+
+Case: [functions/void-parameter.kz](../corpus/functions/void-parameter.kz)
+```kurz
+// `void` is no type of a parameter
+void Show(void v) {
+    print("shown")
+}
+```
+
+Case: [functions/void-field.kz](../corpus/functions/void-field.kz)
+```kurz
+// `void` is no type of a field
+data Box(void Content)
+
+print("boxed")
+```
+
+Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
+```kurz
+// `void` is no type of a variable
+void done = 1
 ```
 
 ### F5 (decided, §8) Top-level statements
@@ -193,15 +219,20 @@ line, in every file of the project, those of the folder `json` included, and wit
 `use json as j` (§8, the owner, 2026-11-02). The reading reads a project's files: the runtime's `use sys` and `use std`
 stand as §2 makes them, and in a program's file they are paths like any other, which a folder at
 the top or a line of `project.kz` of that name answers, `unknown-name` where the project has neither
-(§8, the owner, 2026-11-03, "the runtime's names only"). *(assumed, §8, §13: the two ids; a type of the file's own
+(§8, the owner, 2026-11-03, "the runtime's names only"). A `.` or `..` where a name of the path stands,
+`use ../util`, is `syntax` (§8, the owner, 2026-11-04, "as built"). A path longer than a package's line name
+reaches that package's folder: with a line `json` of `project.kz` and no folder `json` at the top,
+`use json/schema` reaches the folder `schema` of that package (§8, §13, the owner, 2026-11-04, "with only a
+`json` dependency line, `use json/schema` reaches that package's subfolder"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
 the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
-nothing through that line and being `unknown-name` where no other `use` line of the file gives it;
+nothing through that line and being `unknown-name` where no other `use` line of the file, and no
+declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
-the project and no line of `project.kz`, a path to a folder that holds a `project.kz` of its own,
-and a path that holds `.` or `..` are `unknown-name` at the `use` line; a longer
+the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
+which that package's line alone reaches, are `unknown-name` at the `use` line; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
 folder of the project, so that `use json` beside it names the line)*
@@ -220,9 +251,15 @@ use sys
 print(1)
 ```
 
+Case: [functions/use-path-with-dots.kz](../corpus/functions/use-path-with-dots.kz)
+```kurz
+use ../util
+
+print(1)
+```
+
 No case: the forms that take several files or a `project.kz`, since a case of the corpus is a single
-file with none, and a path that holds `.` or `..`, which the compiler's front end refuses as `syntax`
-before the checker reads it.
+file with none.
 
 ### F11 (decided, §4) Function types and what a lambda captures
 
@@ -254,8 +291,11 @@ objected to)* A lambda whose body is a call with a `void` success, `x => print(x
 a `void` result and no use of the call as a value (O10) (the owner, 2026-10-10). The `=>` of a function
 type reaches to the end of the type, so `(int) => int | NotFound` returns the union, and a union of a
 function type and another type is written `((int) => int) | NotFound`, as the nullable one is; such a
-lambda under a function type whose result is not `void`, `(int) => int`, is `type-mismatch` (T1) at
+lambda under a function type whose result is not `void` and whose first case is not `void` (O10), `(int) => int`, is `type-mismatch` (T1) at
 the lambda, since its result is `void` where an `int` is required (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+Under a result whose first case is `void`, `() => void | IoError`, it fits, as its block form
+`() => { print("x") }` does (O10), and gives that case; a function value of type `() => void` stays
+`type-mismatch` (T1) there (§4, the owner, 2026-11-05, #110, comment 6659026217).
 
 Case: [functions/function-type.kz](../corpus/functions/function-type.kz)
 ```kurz
@@ -350,6 +390,32 @@ void Run((int) => void f) {
 
 Run(x => print(x))
 // the lambda's body is a call with a void success: a void lambda, and no use of the call as a value (F11)
+```
+
+Case: [functions/function-type-void-union.kz](../corpus/functions/function-type-void-union.kz)
+```kurz
+data Oops
+
+void | Oops Run(() => void | Oops f) {
+    f()
+}
+
+Run(() => print("x")) else {
+    Oops => print("oops")
+}
+// the lambda's body is a call with a void success, under a result whose first case is void: it gives that case, as its block form does (F11, O10)
+```
+
+Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())
 ```
 
 ### F12 (decided, §8) Overloads, default values, named arguments
