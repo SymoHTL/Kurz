@@ -5457,6 +5457,7 @@ public sealed class CheckerTests
     [InlineData("void Show<const int N, const int M = N>() {\n    print(M)\n}\n\nShow<1>()", "4: unknown-name: no `N` is visible here (V10)")]
     [InlineData("void Name<const Unknown M>(M x) {\n    print(M)\n}\n\nName<1>(2)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
     [InlineData("void Pair<const Unknown M, const M N>() {\n}\n\nprint(1)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
+    [InlineData("void Name<const Unknown M>() {\n    print(x)\n}\n\nName<1>()", "4: unknown-name: no type named `Unknown` is visible here (V10)|5: unknown-name: no `x` is visible here (V10)")]
     [InlineData("void Name<const string S>() {\n    print(S)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: syntax: `double` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
@@ -5466,6 +5467,9 @@ public sealed class CheckerTests
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Nope>()", "7: unknown-name: `Mode` has no value `Nope` (D12, V10)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay()", "7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, int>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, Mode.Loud>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nvoid Outer<const Mode M>() {\n    Say<M, M>()\n}\n\nOuter<Mode.Plain>()", "8: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, Nope>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Two<T, const Mode M>(T x) {\n}\n\nTwo<int>(1)", "7: syntax: `Two` takes 2 type arguments (T19; E4 for another count)")]
     [InlineData("void Three<T, U, const Mode M = Mode.Plain>(T x, U y) {\n}\n\nThree<int>(1, 2)", "7: syntax: `Three` takes 2 or 3 type arguments (T19; E4 for another count)")]
     [InlineData("void Three<T, const int A = 1, const int B = 2>(T x) {\n}\n\nThree<int, 1, 2, 3>(1)", "7: syntax: `Three` takes 1 to 3 type arguments (T19; E4 for another count)")]
@@ -5492,7 +5496,9 @@ public sealed class CheckerTests
         // with no default fixes nothing (T27), a count of type arguments names every count a call may write (T19), and a default before
         // a parameter with none is syntax, as Rust and C# refuse it; a constant of a type outside T35's list is syntax, where rustc gives
         // an error of its own; a default, or a constant's type, that was not read gives the calls no second error, and the type of
-        // a constant that names such a parameter none either (E1); the
+        // a constant that names such a parameter none either, while a body whose constant's type was not read is read, and its own
+        // error is reported, as before T35's refusals, and the uses of its constant none (E1); an argument past every type parameter, a
+        // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); the
         // constant is a value of its type in the body; `f(a < 64, c > (d))` is the call `a<64, c>(d)` (the owner, 2026-11-02)
         Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }

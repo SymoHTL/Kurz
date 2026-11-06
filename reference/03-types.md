@@ -180,6 +180,36 @@ long big = small
 print(big)
 ```
 
+A constant that a copy passes on to a type parameter holding a constant of a wider integer type widens the same way, and
+one passed on to a narrower type is `type-mismatch` (T1), as T35 reads a value of another type where a constant
+stands.
+
+Case: [types/const-parameter-widening.kz](../corpus/types/const-parameter-widening.kz)
+```kurz
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Wide<L>()
+}
+
+Pass<7>()
+```
+
+Case: [types/const-parameter-narrowing.kz](../corpus/types/const-parameter-narrowing.kz)
+```kurz
+void Narrow<const int N>() {
+    print(N)
+}
+
+void Pass<const long L>() {
+    Narrow<L>()
+}
+
+Pass<7>()
+```
+
 Where a union is required (D9), a value that is no case of it stands there when it widens into
 exactly one of its cases: a `byte` stands where `int | string` is required. One that would widen
 into two of them, a `byte` where `short | int` is required, is the compile error `type-mismatch`
@@ -1920,18 +1950,22 @@ call that leaves it out takes; the types it holds are the integer types, `bool`,
 `enum`)* A default is a constant expression, as a parameter's default value is (F12), of one
 operand: a literal with its `-`, an `enum`'s value, or an expression in brackets,
 `const int N = (1 + 2)`, as Rust takes `{ 1 + 2 }` there, and `const int N = 1 + 2` is `syntax`;
-the name of an earlier parameter there is `unknown-name` (V10); a type outside the list is
-`syntax`; a call that writes fewer type arguments than the parameters without a
-default, or more than all of them, is T19's count, `syntax`, which names each count the call may
-write. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+it is checked against the parameter's type as a parameter's default value is (F12), so `const byte N = 300` is
+`constant-overflow` (T6), `const Mode M = Color.Red` is `type-mismatch` (T1) and `const int N = (F())` is
+`default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
+a type parameter among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the name of an earlier
+constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
+outside the list)*; a call that writes at least one type argument
+but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
+count the call may write, and one that writes none takes the defaults (below). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
-`enum`'s value are there; a constant passed on to a parameter of a wider integer type widens as a
+`enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
 reads it"). *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
 `assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
-`syntax`; the parameter's name stands as a value of its type; a value of another type or a type
-where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
+`syntax`; the parameter's name stands as a value of its type; a value of a type that does not widen to the
+constant's (T8), or a type, where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
 loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
@@ -1948,7 +1982,7 @@ owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer take
 an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
 another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
 `List<64>.FromRaw(p, 0)` is `syntax`)* An integer literal of every form, with its suffix and its
-base, starts the list, `f(a < 64L, c > (d))`, while a `double`, a string, a literal with a unit and
+base, starts the list, `f(a < 64L, c > (d))`, and so do `true`, `false` and a `char` literal, while a `double`, a string, a literal with a unit and
 `null` keep the comparisons, since no such parameter holds one (§4, the owner, 2026-11-03, "every
 default").
 
@@ -2075,13 +2109,8 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Wide<const long W>() {
-    print(W + 1)
-}
-
 void Pass<const int L>() {
     Show<L>()
-    Wide<L>()
 }
 
 print(Scaled<64>(2))
@@ -2090,6 +2119,21 @@ print(Mark<'x'>())
 Show()
 Show<-3>()
 Pass<7>()
+```
+
+Case: [types/const-parameter-widening.kz](../corpus/types/const-parameter-widening.kz)
+
+Case: [types/const-parameter-narrowing.kz](../corpus/types/const-parameter-narrowing.kz)
+
+Case: [types/const-parameter-in-declaration-type.kz](../corpus/types/const-parameter-in-declaration-type.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(List<M> values) {
+    print(values)
+}
+
+Keep<Mode.Plain>([Mode.Plain])
 ```
 
 Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
