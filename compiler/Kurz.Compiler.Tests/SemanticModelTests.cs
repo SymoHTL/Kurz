@@ -451,6 +451,47 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Inside_its_class_a_name_a_member_and_a_state_have_records_the_member()
+    {
+        // the reading on R13 with K7 (README): the code generator reads the field and the `static` field, and outside the class the state
+        var (tree, model) = Clean("""
+            thread static mut long left = 7
+
+            class C(mut long left) {
+                pub void Set() {
+                    raw {
+                        left = left + 1
+                    }
+                }
+            }
+
+            class D(long V) {
+                pub static long left = 3
+
+                pub static long Get() => left
+            }
+
+            long F() {
+                raw {
+                    return left
+                }
+            }
+
+            c = C(1)
+            c.Set()
+            print(D.Get() + F())
+            """, "raw");
+        Assert.True(model.IsImplicitField(Find<AssignOrDeclare>(tree, a => a.Name == "left"), out _, out var assigned));
+        Assert.True(model.IsImplicitField(Find<NameExpression>(tree, n => n.Name == "left" && n.Line == 6), out _, out var read));
+        Assert.Equal("left", assigned!.Name);
+        Assert.Same(assigned, read);
+        Assert.True(model.IsStaticField(Find<NameExpression>(tree, n => n.Name == "left" && n.Line == 14), out var staticField));
+        Assert.Equal("left", staticField.Name);
+        var state = model.DeclarationOf(Find<VariableDeclaration>(tree, v => v.Name == "left"));
+        Assert.Same(state, model.VariableOf(Find<NameExpression>(tree, n => n.Name == "left" && n.Line == 19)));
+    }
+
+    [Fact]
     public void A_call_with_else_records_its_whole_result_and_stands_as_its_success()
     {
         var (tree, model) = Clean("""
@@ -634,6 +675,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case RawBlock r:
                     Block(r.Body);
                     break;
+                case ConstAssertStatement:
+                    break; // T37: checked while the program compiles, and nothing of it is emitted
                 case AsmStatement a:
                     foreach (var o in a.Operands)
                     {

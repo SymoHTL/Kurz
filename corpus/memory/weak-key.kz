@@ -1,0 +1,7 @@
+// expect: error weak-key at 6
+// rules: R3
+
+class Owner(string Name)
+
+seen = Map<weak Owner?, int>()
+print(seen.Count)

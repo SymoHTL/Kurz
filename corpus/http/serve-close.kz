@@ -96,7 +96,17 @@ string Wire(TcpStream client) {
     return "[{shown}]{after}"
 }
 
-hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+// a response the writer cannot write: its `Content-Length` contradicts its body
+HttpResponse Unwritable() {
+    response = HttpResponse.Text(200, "x")
+    response.Headers.Set("Content-Length", "2") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+hello =(HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
 closing = (HttpRequest r) => {
     response = HttpResponse.Text(200, "bye")
     response.Headers.Set("Connection", "close") else {
@@ -107,10 +117,10 @@ closing = (HttpRequest r) => {
 }
 
 failing = (HttpRequest r) => HttpResponse.Empty(500)
-unwritable = (HttpRequest r) => HttpResponse.Text(205, "x")
+unwritable = (HttpRequest r) => Unwritable()
 partly = (HttpRequest r) => {
     if r.Path == "/b" {
-        return HttpResponse.Text(205, "x")
+        return Unwritable()
     }
 
     return HttpResponse.Text(200, "hi {r.Path}")

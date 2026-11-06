@@ -316,6 +316,8 @@ public sealed partial class Checker
             ResolveClass(symbol); // K1
         }
 
+        RefuseChainMembers(); // K6, K7, K18: once every base is known
+
         CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
@@ -344,7 +346,7 @@ public sealed partial class Checker
             }
             else if (ReadsFields(f))
             {
-                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text has such a loop
+                ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
         }
 
@@ -944,7 +946,7 @@ public sealed partial class Checker
             }
             else if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (D1, F4)");
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -1476,8 +1478,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// F12: a <c>data</c> value made by its name whose every argument is a constant expression, a literal or a <c>data</c> value of
-    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default, which F12
-    /// holds to a constant where it is declared. The emitter makes it as it makes any construction, from those constants.
+    /// constants among them, <c>HttpRate(240, 5s)</c> (the owner, 2026-11-03); a field it leaves out takes its own default (D11), which
+    /// <c>CheckDefaults</c> holds to a constant where the field is declared, so that this walk reads no field's default:
+    /// <c>data H(List&lt;int&gt; Xs = [1])</c> is <c>default-not-constant</c> at the field, and <c>H()</c> is a constant. The emitter
+    /// makes it as it makes any construction, from those constants, at each call that leaves the argument out.
     /// </summary>
     private bool IsConstantData(Expression value) =>
         value is CallExpression c
@@ -1616,7 +1620,9 @@ public sealed partial class Checker
 
             if (!f.IsLambda || f.Outer is null)
             {
-                return statics.TryGetValue(name, out var state) ? (state, false) : (null, false); // R13: state outside a function, which every function reaches
+                // R13: state outside a function, which every function reaches; inside its class a member of the name hides it (K7, K18),
+                // as a method hides a top-level function of its name there (section 4)
+                return !IsMemberName(name) && statics.TryGetValue(name, out var state) ? (state, false) : (null, false);
             }
 
             captured = true;
@@ -1632,13 +1638,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
-    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4), and
+    /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), and <c>Hint</c> (F18).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
         name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
-        || name is "X86" or "Arm" or "Vector128" or "Vector256";
+        || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
 
     /// <summary>
     /// V9: the text of a type's or a function's declaration whose name is declared already; where a type every file sees has the name,
@@ -1933,6 +1939,9 @@ public sealed partial class Checker
             case AsmStatement a:
                 CheckAsm(a, naked: false);
                 return Flow.Completes;
+            case ConstAssertStatement c:
+                CheckConstAssert(c); // T37: checked while the program compiles
+                return Flow.Completes;
             case FunctionDeclaration f:
                 if (blockDepth > 0)
                 {
@@ -2135,7 +2144,7 @@ public sealed partial class Checker
         if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
         {
             AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
-            CheckExpression(a.Value, null);
+            CheckExpression(a.Value, Untyped(a.Value));
             return;
         }
 
@@ -2428,8 +2437,10 @@ public sealed partial class Checker
     /// <summary>
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// C#"); two names over an instance of a class that <see cref="WalkedByIndex"/> holds are <c>not supported</c>, the walk of a class
+    /// that section 12 decides and section 4 reads as an index loop, which the build does not make (C6), and two names over anything else
+    /// but a map are <c>type-mismatch</c>, as
+    /// the loop over a value it does not walk is (C6, proposed: section 4 gives the form over a map, section 12 over such a class). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
     /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
@@ -2471,6 +2482,7 @@ public sealed partial class Checker
                     ErrorType or VoidType => Types.Error,
                     MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                     MapType m => m.Key,
+                    ClassType c when f.Second is not null && WalkedByIndex(c.Symbol) => WalkOfClass(f.Collection.Line, t.Type),
                     _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                     _ => Report(f.Collection.Line, t.Type),
                 };
@@ -2514,6 +2526,34 @@ public sealed partial class Checker
             this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not {Types.A(type)} (C6, C8)");
             return Types.Error;
         }
+
+        KurzType WalkOfClass(int line, KurzType type)
+        {
+            NotSupported(line, $"two names over {Types.A(type)}, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)");
+            return Types.Error; // the two names take the error type, so that the body reports nothing more of them (E1)
+        }
+    }
+
+    /// <summary>
+    /// C6: a class that two names walk as the index loop <c>for i in 0..&lt;h.Count { name = h.NameAt(i); value = h.ValueAt(i) }</c>
+    /// (section 4, the owner, 2026-11-04, "Index loop, Count once"; section 12, the owner, 2026-11-02, "any class with <c>Count</c>,
+    /// <c>NameAt(i)</c> and <c>ValueAt(i)</c>"), each member found and visible at the loop's place as a member access there finds it
+    /// (K6, K7, F9): <c>h.Count</c>, read with no call, a field or a property of the instance, and <c>h.NameAt(i)</c> and
+    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance of one <c>int</c> (proposed, C6: a <c>Count</c> of an
+    /// <c>int</c>, the <c>int</c> of the index and a result of each method, which the two names take); a class of <c>std/</c> is read
+    /// through its symbol, as one of the file.
+    /// </summary>
+    private bool WalkedByIndex(ClassSymbol c)
+    {
+        var counted = c.Field("Count") is { } field
+            ? Visible(field, c) && field.Type is PrimitiveType { Kind: Primitive.Int }
+            : Property(c, "Count") is { IsStatic: false } count && Visible(count) && count.ReturnType is PrimitiveType { Kind: Primitive.Int };
+        return counted && TakesAnIndex("NameAt") && TakesAnIndex("ValueAt");
+
+        bool TakesAnIndex(string name) =>
+            MethodsOf(c, name) is { } methods
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1
+                && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int } && !Types.IsVoid(m.ReturnType) && Visible(m));
     }
 
     private void CheckReturn(ReturnStatement r)
