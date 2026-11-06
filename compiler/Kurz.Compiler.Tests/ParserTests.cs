@@ -965,7 +965,7 @@ public sealed class ParserTests
     public void A_function_named_assert_whose_type_is_named_const_is_declared(string program, string tree)
     {
         // L18 with T37: `const assert(` whose `)` is followed by `=>` or `{`, a function's body, declares a function named `assert`
-        // whose type is named `const`, as before `const assert` was a statement (assumed, §4: told apart by the shape that follows)
+        // whose type is named `const`, as before `const assert` was a statement (§4, the owner, 2026-11-06)
         Assert.Equal(tree, Tree(program));
     }
 

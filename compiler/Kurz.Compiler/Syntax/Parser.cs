@@ -777,7 +777,7 @@ public sealed class Parser
     /// L18 with T37: whether the first <c>(</c> from the cursor closes on a <c>)</c> that <c>=&gt;</c> or <c>{</c> follows, the
     /// shape of a function's parameters before its body, so that <c>const assert(int x) =&gt; const(x)</c> declares a function
     /// named <c>assert</c> whose type is named <c>const</c>, as it did before <c>const assert</c> was a statement, and every other
-    /// <c>const assert(</c> is the statement *(assumed, §4: told apart by the shape that follows)*; an <c>=&gt;</c> inside the
+    /// <c>const assert(</c> is the statement (§4, the owner, 2026-11-06); an <c>=&gt;</c> inside the
     /// parentheses, of a lambda in the condition or of a parameter's function type, decides nothing.
     /// </summary>
     private bool BodyFollowsTheParentheses()
