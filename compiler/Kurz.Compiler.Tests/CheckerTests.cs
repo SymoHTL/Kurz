@@ -1121,6 +1121,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 4)], Errors("class Step(() => int Run)\n\n" + fs + "fs.Add(Step(() => fs.Count).Run)\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("class Step(() => int Run)\n\nStep Keep(() => int g) => Step(g)\n\nmut ss = List<Step>()\nss.Add(Keep(() => ss.Count))\nprint(ss.Count)"));
         Clean("class Num(int V)\n\nNum Make(() => int g) => Num(g())\n\nmut ns = List<Num>()\nns.Add(Make(() => ns.Count))\nprint(ns.Count)");
+        // and a value of a base class what an instance of a class derived from it holds, which K6 lets stand where its base does: the
+        // base has no field, the derived class's keeps the lambda; a derived class whose fields hold none keeps nothing
+        const string shape = "class Shape {\n    pub virtual int Area() => 0\n}\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(shape + "class Timed(() => int Run) : Shape()\n\nShape Keep(() => int g) => Timed(g)\n\nmut ss = List<Shape>()\nss.Add(Keep(() => ss.Count))\nprint(ss.Count)"));
+        Clean(shape + "class Square(int Side) : Shape()\n\nShape Make(() => int g) => Square(g())\n\nmut ss = List<Shape>()\nss.Add(Make(() => ss.Count))\nprint(ss.Count)");
         Clean(wrap + "fs.Add(Wrap(() => 0))\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(fs.Count + xs.Count)");
 
         // a value inside the argument that can hold no function value ends what the argument keeps (the owner, 2026-10-28, "Pass,
