@@ -714,6 +714,8 @@ public sealed partial class Emitter
                 break;
             case FunctionDeclaration or ExternBlock or UseStatement or TypeDeclaration:
                 break; // declared at the top level and emitted when called, a data type laid out where a value of it is made; a `use` brings in a folder for the checker alone
+            case ConstAssertStatement:
+                break; // T37: checked while the program compiles, and nothing of it runs
             default:
                 throw Unsupported(statement.Line, StatementName(statement));
         }
