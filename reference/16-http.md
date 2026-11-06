@@ -496,8 +496,8 @@ record's four kinds"), each with a text that names the cause and quotes no value
 `malformed request: header without a colon`, `request line too long` or `unsupported HTTP version`
 (§12, the owner, 2026-11-03, "The server's error texts mirror the client's" and "The refusals that
 had no text take the kind `Unsupported`"). A `Transfer-Encoding` whose last coding is not `chunked` is
-`malformed request: transfer encoding not ending in chunked`, and one that names another coding before
-its last `chunked` is `unsupported transfer encoding` (§12, the owner, 2026-11-05, Q1); a request of
+answered `400`, of the kind `Protocol`, and one that names another coding before its last `chunked` is
+answered `501`, of the kind `Unsupported` (§12, the owner, 2026-11-05, Q1); a request of
 HTTP/1.0 with a `Transfer-Encoding` is `malformed request: transfer encoding in HTTP/1.0` (Q7); and the
 method `CONNECT` is `unsupported method`, answered `501` (Q3). A target or a header value that is not UTF-8
 is `malformed request: target not UTF-8` or `malformed request: header not UTF-8`, since a `string` is
@@ -508,9 +508,22 @@ supported"). *(assumed, §12, not put to the owner: a stream that ends before it
 `malformed request: no request line`, which the server answers with nothing; a line ended by a LF
 alone is refused, as RFC 9112, section 2.2, lets a server refuse it; a valid `Host` is the host
 of RFC 3986 with an optional port; the lines of a `Transfer-Encoding` given more than once read as one
-list in their order, each coding without regard to ASCII case; a target is in absolute form where it
-starts with a scheme and `://`, its empty path `/`, and an authority that is no valid `Host` is
-`malformed request: bad Host`; and a NUL, a lone CR or any other control byte but a tab in a header's
+list in their order, each coding without regard to ASCII case, with the spaces and tabs around it taken
+off, and an empty item between two commas skipped, as RFC 9110, section 5.6.1, has a list read; the
+texts of Q1's two refusals, `malformed request: transfer encoding not ending in chunked` and
+`unsupported transfer encoding`; a `chunked` before the last one counted as another coding, so that
+`chunked, chunked` is `unsupported transfer encoding`, as RFC 9112, section 6.1, forbids `chunked`
+twice; a target is in absolute form where it starts with a scheme and `://`, the scheme of RFC 3986, a
+letter and then letters, digits, `+`, `-` and `.`, whatever it names, its empty path `/`; the
+client's own `Host` held to the rules of any other request, two of them, none in HTTP/1.1 and one that
+is no valid `Host` refused, before the authority takes its place; an authority that is empty, or that
+is no valid `Host`, one with a userinfo among them, since a `Host` holds no `@`, is
+`malformed request: bad Host`, as RFC 9110, section 4.2.1, refuses both; where a request meets more than
+one refusal, the first the reader meets answers it, in this order: a request line or headers over their
+limits as they are read, then the request line (its method, its target, its version, then `CONNECT`),
+each header, `Host`, `Content-Length`, a `Content-Length` beside a `Transfer-Encoding`, a
+`Transfer-Encoding` in HTTP/1.0, its last coding, a coding before its last `chunked`, a declared body
+over its limit, and `Expect`; and a NUL, a lone CR or any other control byte but a tab in a header's
 value is `malformed request: control byte in a header`, as RFC 9110, section 5.5, has a value of
 visible characters, spaces and tabs, a byte over 127 passing where the value is UTF-8)*
 
@@ -672,7 +685,9 @@ of a body whose client sent `Expect: 100-continue` sends `HTTP/1.1 100 Continue`
 a server that refuses the request without reading the body sends none (§12, "Status line only").
 A chunked body's trailer is read and dropped within what the head left of `MaxRequestHeadersTotalSize`
 and `MaxRequestHeaderCount`, past which a read gives `HttpError(TooLarge, "request header too large")`
-(§12, the owner, 2026-11-05, Q8). `Read` gives `int | IoError | HttpError`, `ReadAll`
+(§12, the owner, 2026-11-05, Q8); where the server drops a body the handler did not read, such a trailer
+closes the connection as a chunked body malformed while it is dropped, and a handler whose read gave
+it has its response written with a close (W9, §12, assumed). `Read` gives `int | IoError | HttpError`, `ReadAll`
 `Bytes | IoError | HttpError` and `ReadAllText` `string | IoError | HttpError | InvalidUtf8`: a failure
 of the network is the stream's `IoError`, a body the stream ends inside
 `HttpError(Protocol, "malformed request: unexpected end of body")`, a chunk that is not well formed
@@ -787,7 +802,9 @@ All() else {
 Case: [http/request-trailer.kz](../corpus/http/request-trailer.kz)
 ```kurz
 // the trailer of a chunked body is held to what its head left of the head's limits, 100 lines and 32768 bytes of them by
-// `HttpLimits()`: the head's 2 lines and 98 of the trailer pass and 99 do not, and so for the bytes
+// `HttpLimits()`: the head's 2 lines and 98 of the trailer pass and 99 do not; the head's 37 bytes, `Host: h` and
+// `Transfer-Encoding: chunked` each with its CR LF, and 32731 of the trailer, each line with its CR LF, pass, and a byte more does
+// not, so that a trailer given a budget of its own, or lines counted without their CR LF, would pass both
 void | IoError Show(string label, string trailer) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -823,11 +840,22 @@ string Lines(int count, int size) {
     return lines
 }
 
+// the line `X-<i>: ` with `size` bytes of `v`, and its CR LF
+string Line(int i, int size) {
+    mut v = ""
+    while v.Bytes.Count < size {
+        v = "{v}v"
+    }
+
+    return "X-{i}: {v}\r\n"
+}
+
 void | IoError All() {
     Show("98 lines", Lines(98, 1))
     Show("99 lines", Lines(99, 1))
-    Show("7 lines of 4096", Lines(7, 4096))
-    Show("9 lines of 4096", Lines(9, 4096))
+    // 7 lines of 4103 bytes are 28721, and an eighth of 4010 makes 32731, what the head left
+    Show("32731 bytes", "{Lines(7, 4096)}{Line(7, 4003)}")
+    Show("32732 bytes", "{Lines(7, 4096)}{Line(7, 4004)}")
     Show("1 line of 65536", Lines(1, 65536))
 }
 
@@ -1378,21 +1406,29 @@ white space around it,
 one after a `500`, the writer's own among them, and one after the last request
 `MaxRequestsPerConnection` allows closes after the response (§12, the owner, 2026-10-31, "Persistent,
 100 req, 5 s", and 2026-11-02, Q11, and assumed). The server writes its `Date` where the handler set none and keeps the handler's (§12, the owner,
-2026-11-02, Q10), and before a close its own `Connection: close` beside a handler's `Connection` that
-does not say `close` (§12, the owner, 2026-11-05, Q6). A connection the server closes once it has
+2026-11-02, Q10), and before a close its own `Connection: close` where the handler set no `Connection`
+(Q10), and beside a handler's `Connection` that does not say `close`, read as the option above (§12, the
+owner, 2026-11-05, Q6). A connection the server closes once it has
 written a response or a refusal is closed in stages: its writes ended, then what the client still
 sends read and dropped, then the close, as RFC 9112, section 9.6, has it (§12, the owner, 2026-11-02,
 "a half-close on `TcpStream`"). A `HEAD` is answered with the head alone, as `WriteHead` writes it (§12, the owner, 2026-11-02,
 Q13). A body the handler did not read is read and dropped up to `MaxDrainSize`, past which the
 connection closes, a request that expects `100-continue` whose body the handler did not read closes it
-with no `100 Continue` sent, and a chunked body malformed while it is dropped closes it without an
-answer (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
+with no `100 Continue` sent, and a chunked body malformed while it is dropped, one whose trailer passes
+what the head left of its limits among them, closes it without an answer, the handler's response not
+written (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
 body and `Connection: close`, and the connection closes (§12, the owner, 2026-10-31, "Status line
 only"). A handler that throws ends what runs the server, as an exception ends the actor it happens in
 (§12). In a build for Windows `Serve` and `ServeConnection` are `not supported` at the line of the
 program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
-drop of the close in stages bounded by `MaxDrainSize` and `KeepAliveTimeout`, and no close in stages
-where the client ended the connection, where it stayed idle or where the network failed; the
+drop of the close in stages bounded by `MaxDrainSize` and `KeepAliveTimeout`, a drop of its own after
+a body whose drop passed `MaxDrainSize`, up to `MaxDrainSize` more, and after a body the handler left
+unread for `100-continue`; no close in stages where the client ended the connection, where it stayed
+idle, where the network failed, or where the write of a response failed, one that ran out of its time
+among them, the connection then closed at once and the failure the result of `ServeConnection`; a
+half-close the system refuses, or a read of the drop that fails, ending the close in stages at once;
+a handler whose read of a body gave an error, a trailer past what the head left among them, answered
+by its response with a close, as after any read of its body that failed; the
 `Date` written once a second, as hyper caches it; a refusal's status line with `Content-Length: 0` and
 the server's `Date`, as Kestrel writes it; a handler's `Transfer-Encoding` dropped for a request of
 HTTP/1.0 and the body framed by its length, as hyper drops it, at the cost that a body the handler
@@ -1831,7 +1867,8 @@ Case: [http/serve-drain.kz](../corpus/http/serve-drain.kz)
 ```kurz
 // a body the handler did not read is read and dropped up to `MaxDrainSize`, and the next request served; a body past it closes the
 // connection, and so does a request that expects `100-continue` whose body the handler did not read, with no `100 Continue` sent;
-// a chunked body malformed while it is dropped closes the connection without an answer; and a response the server holds while the
+// a chunked body malformed while it is dropped closes the connection without an answer, and so does one whose trailer passes what
+// the head left of its limits, here one line of `MaxRequestHeaderCount` 3; and a response the server holds while the
 // next request stands in the buffer goes out before that request's `100 Continue`; a `MaxDrainSize` of the largest `int` drops a
 // body as any other does
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
@@ -1926,6 +1963,7 @@ Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nabcd{next}", h
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nabcde{next}", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n{next}", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-a: 1\r\nX-b: 2\r\n\r\n", hello, HttpLimits(MaxRequestHeaderCount: 3))
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)

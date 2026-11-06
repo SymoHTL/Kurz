@@ -25,7 +25,8 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private static Compilation Compile(string text, CheckedRuntime runtime) => Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true);
+    private static Compilation Compile(string text, CheckedRuntime runtime, IReadOnlyCollection<string>? grants = null) =>
+        Builder.Compile(SourceText.FromString("program.kz", text), grants ?? [], runtime, testBuild: true);
 
     /// <summary>std/ with <c>HttpServer.DateOf</c>, the <c>Date</c> the loop writes in the given second since 1970-01-01.</summary>
     private static readonly Lazy<CheckedRuntime> WithDate = new(() => ListTests.Edited(("std/std.kz", "pub class HttpServer {\n", """
@@ -560,9 +561,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     public async Task A_read_of_a_body_sets_what_remains_of_its_time_before_each_refill()
     {
         // W10 (section 12, the owner, 2026-11-04, Q9 (a)): a read of a body may wait its grace, here 1 second, and each refill it makes
-        // inside, the size line of a chunk among them, waits what remains of that. A size line of which two bytes come, 600 ms apart,
-        // runs out at its second wait, and the request is answered `408` about 1 second after its head; a refill that waited for the
-        // rest of the line without that bound would answer only once the client sent it, which this client does after the answer
+        // inside, the size line of a chunk among them, waits what remains of that. A size line of which two bytes come, 800 ms apart,
+        // runs out at its second wait, and the request is answered `408` about 1 second after its head; a refill given the whole grace
+        // again would answer 1 second after the second byte, 1.8 seconds after the head at the earliest, past the window, and one that
+        // waited for the rest of the line without a bound would answer only once the client sent it, which this client does after the
+        // answer
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
@@ -608,7 +611,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             var stream = client.GetStream();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1"u8);
-            await Task.Delay(600);
+            await Task.Delay(800);
             stream.Write("0"u8);
             var buffer = new byte[65536];
             using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -623,7 +626,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var (code, output, error) = await run;
         Ran((0, "", "request timed out\nserved\n"), (code, error, output));
         Assert.StartsWith("HTTP/1.1 408 Request Timeout\r\n", System.Text.Encoding.ASCII.GetString(got.ToArray()));
-        Assert.InRange(answered, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(2500));
+        Assert.InRange(answered, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(1700));
     }
 
     [Fact]
@@ -702,7 +705,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     {
         // section 12 (the default of the follow-up's product pass, Q10): `WriteWithin`, the write the server's responses take, is a
         // member of a stream that the checker admits in std/ alone; a program's call of it names no member, and the server that
-        // calls it builds (the positive control)
+        // calls it builds (the positive control); the refusal is pinned by its id and its line (E1, E2)
         const string text = """
             void | IoError Main(TcpStream s) {
                 s.WriteWithin("a".Bytes, 1s)
@@ -710,8 +713,72 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             """;
         var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
         Assert.Null(refused.Program);
-        Assert.Contains(refused.Diagnostics.Sorted, d => d.Message.Contains("has no member `WriteWithin`", StringComparison.Ordinal));
+        Assert.Contains(refused.Diagnostics.Sorted,
+            d => d.Id == ErrorIds.UnknownName && d.Line == 2 && d.Message.Contains("`WriteWithin`", StringComparison.Ordinal));
         Assert.NotNull(Compile("void | IoError | HttpError Main(TcpStream s) {\n    HttpServer.ServeConnection(s, (HttpRequest r) => HttpResponse.Text(200, \"\"))\n}\n", Builder.CheckRuntime(Target.Linux)).Program);
+    }
+
+    [Fact]
+    public void A_response_held_to_its_rate_leaves_the_stream_its_default_bound()
+    {
+        // W10 (section 12, the default of the follow-up's product pass, Q10): `WriteWithin` sets `SO_SNDTIMEO` (21) to what remains of
+        // a response's bound before each call of the system, and the stream's default bound of 5 seconds (S9) again before it returns,
+        // so that a later write that sets no time of its own, the `100 Continue` of the next request among them, is not held to a
+        // remainder; the handler reads the bound of the stream `Accept` gave, descriptor 5, at each request (as FileTests' `Bounds`),
+        // under the grants `raw` and `native`; the first request has a body, so that its response is written before the second is
+        // read and not held for it (W9)
+        const string text = """
+            extern "C" {
+                int getsockopt(int fd, int level, int name, void* value, int* length)
+                void* malloc(long size)
+                void free(void* p)
+            }
+
+            string Bound(int fd, int option) {
+                mut long seconds = -1
+                mut long micros = -1
+                raw {
+                    void* time = malloc(16)
+                    mut int length = 16
+                    if getsockopt(fd, 1, option, time, &length) == 0 {
+                        seconds = *Ptr<long>(time)
+                        micros = *Ptr<long>(Ptr<byte>(time) + 8)
+                    }
+
+                    free(time)
+                }
+
+                return "{seconds} {micros}"
+            }
+
+            void | IoError | HttpError All() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                client.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\nxGET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+                client.ShutdownWrite()
+                HttpServer.ServeConnection(server, (HttpRequest r) => {
+                    print("{r.Path} {Bound(5, 21)}")
+                    return HttpResponse.Empty(204)
+                }, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms)))
+            }
+
+            All() else {
+                IoError e => print(e)
+                HttpError e => print(e.Detail)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime, ["raw", "native"]);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-server-default-bound"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["/a 5 0", "/b 5 0"], output);
     }
 
     /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
