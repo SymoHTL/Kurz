@@ -5226,13 +5226,13 @@ public sealed class CheckerTests
     [InlineData("const assert(1, \"one\")", "4: type-mismatch: a condition is a `bool`, not an `int` (C3)")]
     [InlineData("const assert(nope > 1, \"{nope > 1}\")\nconst assert(false, \"{nope}\")", "4: unknown-name: no `nope` is visible here (V10)|4: unknown-name: no `nope` is visible here (V10)|5: unknown-name: no `nope` is visible here (V10)")]
     [InlineData("x = nope\nconst assert(x, \"a\")\nconst assert(true, \"{x}\")", "4: unknown-name: no `nope` is visible here (V10)")]
-    [InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "7: const-assert-failed: the value of `T` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
+    [InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "6: redeclared: `T` is a type parameter of the function around it (V9)")]
     public void A_const_assert_stops_the_build_where_its_condition_is_false(string program, string expected)
     {
         // T37: a false one in a copy stops the build at the call that made the outermost copy, naming it and the function that holds
         // the `const assert`, with the text, its holes filled: a type parameter with the copy's type, a constant with its text (A2, A4);
         // outside a copy, at the statement, in a function no call reaches too; a variable or a parameter is not known while the program
-        // compiles (Rust's E0435), a variable of a type parameter's name among them, and `f.Get(value)` in a pass reads `value`, in the
+        // compiles (Rust's E0435), a variable of a type parameter's name `redeclared` before its hole is read (V9), and `f.Get(value)` in a pass reads `value`, in the
         // condition and in a hole; the condition is a `bool` (C3), and a part's own
         // error is its one (E1), a variable whose type was reported included
         Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
