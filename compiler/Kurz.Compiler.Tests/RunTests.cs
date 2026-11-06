@@ -110,7 +110,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. Each number is the count measured on its system, with no margin, so that one case that stops being built turns it red, and a change that adds a case to the run raises it (#156).</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 408 : 495;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 408 : 500;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -123,7 +123,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/lines-propagate.kz", "system/lines-read.kz", "system/setter-after-close.kz", "system/lines-keeps-its-file.kz", "system/shutdown-write.kz",
         "system/read-buffer-fill.kz", "system/read-buffer-straight.kz", "system/read-buffer-zero.kz", "system/read-buffer-failed.kz",
         "system/read-buffer-close.kz", "system/fill-consume.kz", "system/fill-held.kz", "system/fill-head.kz", "system/fill-timeout.kz",
-        "system/consume-past.kz", "system/consume-negative.kz", "system/fill-closed.kz",
+        "system/consume-past.kz", "system/consume-negative.kz", "system/fill-closed.kz", "system/read-buffer-zero-held.kz",
+        "system/read-buffer-limit.kz", "system/read-buffer-second.kz", "system/read-buffer-close-stream.kz", "system/consume-closed.kz",
         "http/request-read.kz", "http/request-refused.kz", "http/request-refused-unsupported.kz", "http/request-body.kz",
         "http/request-body-errors.kz", "http/request-continue.kz", "http/request-limits.kz",
         "http/response-write.kz", "http/response-head.kz", "http/response-bodiless.kz", "http/response-unwritable.kz",
