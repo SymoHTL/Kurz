@@ -5043,12 +5043,13 @@ public sealed class CheckerTests
     {
         // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
         // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains; the check runs in a process of its
-        // own, `kurz exec`, whose limit of 20 seconds ends that process where the check does not end
+        // own, `kurz exec` started as the command's tests start it, whose limit of two minutes holds the start of the process and the
+        // load of the compiler beside the check, and ends that process where the check does not end
         const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
             + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
-        var (code, output, error) = Processes.Capture(CommandTests.Host, [CommandTests.Dll, "exec", Branching], null, TimeSpan.FromSeconds(20));
+        var (code, output, error) = CommandTests.Kurz("exec", Branching);
         var streams = $"the output stream: \"{output}\"; the error stream: \"{error}\"";
-        Assert.True(code == 1, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of 20 seconds; {streams}");
+        Assert.True(code == 1, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of the command's tests; {streams}");
         Assert.True(output.Length == 0, $"`kurz exec` wrote to its output stream, where nothing was expected; {streams}");
         var bound = Assert.Single(error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
         Assert.StartsWith("exec:12: not supported: ", bound);

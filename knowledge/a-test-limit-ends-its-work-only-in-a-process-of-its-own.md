@@ -17,7 +17,10 @@ Pull request 342 runs the check in a process of its own: `kurz exec` with the pr
 through `Processes.Capture` with a limit of 20 seconds, which ends the process's tree when the time
 is up and answers -1 with "gave no answer within 20 s and was ended". With the fix of pull request
 307 taken out of `CopyOf`, the test failed at its limit, the run of the four tests of the bound took
-27 seconds, and no `kurz exec` was left running in the container.
+27 seconds, and no `kurz exec` was left running in the container. The round of pull request 342
+read that limit as one that also holds the start of `dotnet` and the load of the compiler, which a
+loaded runner can stretch past it (issue 19, comment 6680805232), so the test starts `kurz` as the
+command's tests do, with their limit of two minutes.
 
 What to do: a test whose limit must end the work runs the work in a process of its own, through
 `Processes.Capture`, as the command's tests and the corpus's runner do

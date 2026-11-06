@@ -1485,8 +1485,8 @@ for are made after its body is checked, in the order of those calls in its text,
 copies before the copy of the call after it, and the copies that calls outside every copy ask for
 are made after the code outside the copies is checked; the outer call of a chain of copies is the
 call outside every copy that made its first copy; a build stopped at the bound of 64 copies on a
-chain of copies (the record, section 14) reports the errors outside the copies, that `not supported`
-and the errors of the copies made before it, while a copy of the same outer call that a chain asks
+chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
+of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
 for after the bound is not made, so that its errors show only in a build where the chain is ended)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
