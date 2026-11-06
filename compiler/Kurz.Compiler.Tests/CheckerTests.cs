@@ -741,6 +741,36 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((x, y) => x, 4))"));
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("y = 5\nint Apply((int) => int f, int n) => f(n)\n\nprint(Apply((a, b) => y, 4))")); // the body is read after the error: `y` counts as read
         Clean("void Run((int) => void f) {\n    f(1)\n}\n\nRun(x => print(x))");
+        // F11 with O10: under a result whose first case is `void`, a lambda whose body is a call with a `void` success fits, as its block
+        // form does, under a nullable function type and beside more than one other case too; under a result whose first case is not
+        // `void`, a body of another type and a function value of type `() => void` stay `type-mismatch` (the owner, 2026-11-05, #110,
+        // comment 6659026217)
+        var run = "data Oops\n\nvoid | Oops Run(() => void | Oops f) {\n    f()\n}\n\n";
+        Clean(run + "Run(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}");
+        Clean("void | IoError Run((int) => void | IoError f) {\n    f(1)\n}\n\nRun(n => print(n)) else {\n    IoError e => print(\"io\")\n}");
+        Clean("data Oops\n\nvoid | Oops Run((() => void | Oops)? f) {\n    if f != null {\n        f()\n    }\n}\n\nRun(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}");
+        Clean("data Oops\ndata Nope\n\nvoid | Oops | Nope Run(() => void | Oops | Nope f) {\n    f()\n}\n\nRun(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n    Nope => print(\"nope\")\n}");
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(run + "Run(() => 5) else {\n    Oops => print(\"oops\")\n}"));
+        // the refusals that stay: the lambda's names the rule that lets a `void` call fit, and a function value's names the lambda written
+        // at the call that fits, its parameters by the first names nothing here takes, the other arguments as a default is written and a
+        // member's callee in full (the owner, 2026-11-05, #110, comment 6664353093; the forms beyond `Run(() => say())` assumed); a
+        // function value that such a lambda would not make fit gets no hint
+        string Said(string program) => string.Join("|", Check(program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        var fits = "; a `void` call fits only where the first case is `void` (F11, O10, T1)";
+        Assert.Equal("5: type-mismatch: the lambda's result is `void` where `(int) => int` requires an `int`" + fits, Said("int Apply((int) => int f, int n) => f(n)\n\nvoid Show(int x) {\n}\nprint(Apply(x => Show(x), 4))"));
+        var get = "data Oops\n\nint | Oops Get(() => int | Oops f) => f()\n\n";
+        Assert.Equal("5: type-mismatch: the lambda's result is `void` where `() => (int | Oops)` requires an `int | Oops`" + fits, Said(get + "x = Get(() => print(\"x\")) else {\n    Oops => 0\n}\nprint(x)"));
+        var hint = " where a `() => (void | Oops)` is required; write a lambda at the call: ";
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(() => say())` (T1)", Said(run + "say = () => print(\"x\")\nRun(say) else {\n    Oops => print(\"oops\")\n}")); // a function value
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(() => g())` (T1)", Said(run + "void | Oops Twice(() => void g) {\n    Run(g)\n}\n\nTwice(() => print(\"x\")) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `() => void`" + hint + "`Run(f: () => say())` (T1)", Said(run + "say = () => print(\"x\")\nRun(f: say) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("11: type-mismatch: a `() => void`" + hint + "`r.Go(() => say())` (T1)", Said("data Oops\n\nclass Runner {\n    pub void | Oops Go(() => void | Oops f) {\n        f()\n    }\n}\n\nr = Runner()\nsay = () => print(\"x\")\nr.Go(say) else {\n    Oops => print(\"oops\")\n}"));
+        var each = "data Oops\n\nvoid | Oops Each(int n, (int) => void | Oops f) {\n    f(n)\n}\n\n";
+        Assert.Equal("10: type-mismatch: a `(int) => void` where a `(int) => (void | Oops)` is required; write a lambda at the call: `Each(3, y => show(y))` (T1)", Said(each + "x = 1\nprint(x)\nshow = (int n) => print(n)\nEach(3, show) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `(int, string) => void` where a `(int, string) => (void | Oops)` is required; write a lambda at the call: `Pair((x, y) => both(x, y))` (T1)", Said("data Oops\n\nvoid | Oops Pair((int, string) => void | Oops f) {\n    f(1, \"a\")\n}\n\nboth = (int n, string s) => print(s)\nPair(both) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `() => int` where a `() => (void | Oops)` is required (T1)", Said(run + "five = () => 5\nRun(five) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("8: type-mismatch: a `(string) => void` where a `(int) => (void | Oops)` is required (T1)", Said(each + "show = (string s) => print(s)\nEach(3, show) else {\n    Oops => print(\"oops\")\n}"));
+        Assert.Equal("6: type-mismatch: a `() => void` where a `() => (int | Oops)` is required (T1)", Said(get + "say = () => print(\"x\")\nx = Get(say) else {\n    Oops => 0\n}\nprint(x)"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Apply((int) => int f, int n) => f(n)\n\nprint(Apply((string s) => 1, 4))"));
     }
 
@@ -3827,7 +3857,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_method_is_checked_as_a_function_and_a_field_as_a_variable_of_its_class()
     {
-        // K1: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
+        // F4: `void` is no type of a field; K7: a method has a body; T19: a class takes no type arguments (E4)
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("class C(void N)\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C(int N) {\n    pub int Get()\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("class C(int N)\n\nprint(C<int>(1).N)"));
@@ -4936,8 +4966,13 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+    }
 
-        // a loop over `T.Fields` opened inside such an arm is read as a loop's calls are, and a cycle that grows there is refused at its call
+    [Fact]
+    public void A_call_in_a_loop_over_T_Fields_opened_inside_an_arm_of_a_match_on_T_Kind_is_read_as_a_call_of_that_loop()
+    {
+        // T34, its assumed reading: a loop over `T.Fields` opened inside an arm of a `match` on `T.Kind` is read as a loop's calls are,
+        // and a cycle that grows there is refused at its call
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors("data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n"
             + "            for f in T.Fields {\n                Deep(Wrap(x), n - 1)\n            }\n        }\n        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)"));
     }
