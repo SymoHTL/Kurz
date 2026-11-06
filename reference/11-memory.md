@@ -78,7 +78,7 @@ print(b.Next?.Value ?? 0)
 ### R9 (decided, §3) Fields of function type in the cycle rule
 
 A field of function type, `mut` or not, counts as a field that can reach every class whose
-instance a lambda in the program captures, as R8 treats a field of interface type; R2's `mut`
+instance a lambda it counts captures (below), as R8 treats a field of interface type; R2's `mut`
 field can be the function field or any other field on the path. With
 `class Button(string Name, mut () => void OnClick)` and a `b.OnClick = () => print(b.Name)`
 anywhere in the program, `Button` reaches itself, and the class is `reference-cycle`; with
@@ -87,15 +87,20 @@ anywhere in the program, `Button` reaches itself, and the class is `reference-cy
 on the path is the error. The owner chose this on 2026-10-03, against a weak capture inside
 stored lambdas, which would need a rule for what a gone capture reads as and a check at every
 use, and against forbidding such a capture. *(assumed: that a field without `mut` counts, which
-the second ring needs)* The field reaches only what the lambdas capture whose type it can hold,
-and the lambdas a function value such a lambda captures can be, every lambda counting where a type
-on the way names a type parameter; so a button's `mut () => void` field is not reached by an
-`(int) => void` lambda that reads the button, unless a `() => void` lambda captures that one (§3,
-the owner, 2026-11-04, #110, comment 6643368937, answering comment 6624472418). The
-cost is not local: once a class has a field of function type, any lambda of a type the field can
-hold, anywhere in the program, that captures an instance of that class, or of a class that holds
-one, makes it an error, and the lambda can sit in another file. An event handler escapes the
-error only in a program in which no lambda captures the button's class: through an interface
+the second ring needs)* The field counts the lambdas whose type it can hold, and the lambdas a
+function value such a lambda captures can be, every lambda counting where a type on the way names a
+type parameter; so a button's `mut () => void` field is not reached by an `(int) => void` lambda
+that reads the button, unless a `() => void` lambda captures that one (§3, the owner,
+2026-11-04, #110, comment 6643368937, answering comment 6624472418). *(assumed, §3: the count is transitive,
+the lambdas a function value of a counted lambda can be counted in turn until no lambda is added;
+the types on the way are the lambda's own type, which makes it count for every field, so that a
+`(T) => void` lambda that reads the button reaches its `() => void` field, and the type of a value
+a counted lambda captures, or of a function value such a value holds, which makes every lambda of
+the program count)* The cost
+is not local: once a class has a field of function type, any lambda the field counts, anywhere in
+the program, that captures an instance of that class, or of a class that holds one, makes it an
+error, and the lambda can sit in another file. An event handler escapes the error only in a program
+in which no lambda the button's field counts captures the button's class: through an interface
 (R8), whose class must not hold the button, or by receiving the button as a parameter.
 
 Case: [memory/cycle-through-function-field.kz](../corpus/memory/cycle-through-function-field.kz)
@@ -129,7 +134,7 @@ b.OnClick()
 Case: [memory/function-field-other-type.kz](../corpus/memory/function-field-other-type.kz)
 ```kurz
 // a lambda whose type the field cannot hold, `(int) => void` beside a `() => void` field, closes no ring through it however it
-// reads the button (R9, assumed)
+// reads the button (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class Button(string Name, mut () => void OnClick)
 
 void Each(List<int> xs, (int) => void f) {
@@ -146,7 +151,7 @@ b.OnClick()
 Case: [memory/cycle-through-captured-function.kz](../corpus/memory/cycle-through-captured-function.kz)
 ```kurz
 // a lambda of another type that reads the button, which a `() => void` lambda that the field can hold captures, closes the ring
-// through the field as the handler that reads the button itself does (R9, assumed)
+// through the field as the handler that reads the button itself does (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class Button(string Name, mut () => void OnClick)
 
 b = Button("ok", () => print("x"))
@@ -158,7 +163,7 @@ b.OnClick()
 Case: [memory/cycle-through-open-capture.kz](../corpus/memory/cycle-through-open-capture.kz)
 ```kurz
 // a lambda the field can hold that captures a value of a type parameter holds whatever function a use gives that parameter, so a
-// lambda of another type that reads the button closes the ring through the field (R9, assumed)
+// lambda of another type that reads the button closes the ring through the field (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class Button(string Name, mut () => void OnClick)
 class Panel(Button B)
 
@@ -179,7 +184,7 @@ b.OnClick()
 Case: [memory/cycle-through-generic-lambda.kz](../corpus/memory/cycle-through-generic-lambda.kz)
 ```kurz
 // a lambda whose type names a type parameter is a lambda of whatever type a use gives that parameter, so one that reads the button
-// through a panel closes the ring through a field of another function type (R9, assumed)
+// through a panel closes the ring through a field of another function type (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class Button(string Name, mut (int) => void OnClick)
 class Panel(Button B)
 
@@ -189,6 +194,23 @@ b = Button("ok", (int n) => print("x"))
 p = Panel(b)
 b.OnClick = Show<int>(p)
 b.OnClick(1)
+```
+
+Case: [memory/cycle-through-type-parameter-lambda.kz](../corpus/memory/cycle-through-type-parameter-lambda.kz)
+```kurz
+// a lambda whose type names a type parameter counts for a field of any function type, since a use can give that parameter any type:
+// a `(T) => void` lambda that reads the button through a panel closes the ring through a `() => void` field, though no use can make
+// it a `() => void` (R9, the owner, 2026-11-04, #110, comment 6643368937)
+class Button(string Name, mut () => void OnClick)
+class Panel(Button B)
+
+(T) => void Show<T>(Panel panel) => (T t) => print(panel.B.Name)
+
+b = Button("ok", () => print("x"))
+p = Panel(b)
+f = Show<int>(p)
+f(1)
+b.OnClick()
 ```
 
 Case: [http/stream-cycle.kz](../corpus/http/stream-cycle.kz)
@@ -205,6 +227,22 @@ app = App(HttpResponse.Text(200, "x"))
 Keep((HttpRequest r) => app.Cached)
 streamed = HttpResponse.Stream(200, (HttpWriter w) => w.Write("{app.Cached.Status}"))
 print(streamed.Status)
+```
+
+Case: [http/stream-handler-no-cycle.kz](../corpus/http/stream-handler-no-cycle.kz)
+```kurz
+// a handler that reads a class that holds a `mut` response closes no ring through the response's function, since that field counts
+// only the lambdas whose type it can hold and a handler is none of them, and the function that writes the body reads nothing of the
+// class (R9, the owner, 2026-11-04, #110, comment 6643368937)
+class App(mut HttpResponse Cached)
+
+void Keep((HttpRequest) => HttpResponse handler) {
+}
+
+app = App(HttpResponse.Text(200, "x"))
+Keep((HttpRequest r) => app.Cached)
+app.Cached = HttpResponse.Stream(201, (HttpWriter w) => w.Write("y"))
+print(app.Cached.Status)
 ```
 
 What a lambda captures is read as a field of its type. A `weak` reference it captures reaches no

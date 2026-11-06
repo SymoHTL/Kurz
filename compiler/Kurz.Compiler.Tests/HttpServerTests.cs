@@ -249,6 +249,106 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     [Fact]
+    public async Task A_write_that_failed_leaves_the_writer_failed_so_that_the_body_ends_cut()
+    {
+        // W11 (assumed, section 12): a client that reads nothing makes a write of 512 KiB time out, part of its chunk written; the
+        // function catches the `IoError`, waits for the byte of the request's body that the client sends once it reads again, and
+        // writes again: that write gives the `IoError` again and writes nothing, and the end of the body gives it to the loop, which
+        // closes the connection, so that the client gets the body cut and never a chunk of `x` after the part of the failed one
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 524288 {
+                    piece.Add(122)
+                }
+
+                handler = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+                    mut failed = false
+                    while !failed {
+                        w.Write(piece) else {
+                            IoError e => {
+                                print("first {e.Kind}")
+                                failed = true
+                            }
+                        }
+                    }
+
+                    mut one = Bytes()
+                    n = r.Body.Read(mut one, 1) else {
+                        IoError e => return e
+                        HttpError e => return IoError(IoKind.InvalidData, 0, e.Detail)
+                    }
+
+                    print("read {n}")
+                    w.Write("x") else {
+                        IoError e => print("again {e.Kind}")
+                    }
+                })
+                HttpServer.ServeConnection(server, handler, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-failed-write");
+        var port = FreePort();
+        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var got = new MemoryStream();
+        using (var client = Connect(port, run, receiveBuffer: 65536))
+        {
+            var stream = client.GetStream();
+            stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\n"u8);
+
+            // the write times out about 100 ms after the buffers of the connection are full
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            stream.Write("b"u8);
+            client.Client.Shutdown(SocketShutdown.Send);
+            var buffer = new byte[65536];
+            while (true)
+            {
+                int n;
+                try
+                {
+                    n = stream.Read(buffer);
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+
+                if (n == 0)
+                {
+                    break;
+                }
+
+                got.Write(buffer, 0, n);
+            }
+        }
+
+        var (code, output, error) = await run;
+        var bytes = got.ToArray();
+        Assert.Equal((0, "", "first TimedOut\nread 1\nagain TimedOut\nTimedOut\nserved\n", false, false),
+            (code, error, output, bytes.AsSpan().EndsWith("0\r\n\r\n"u8), bytes.AsSpan().IndexOf("\r\n1\r\nx"u8) >= 0));
+    }
+
+    [Fact]
     public async Task A_write_of_a_streamed_response_over_64_KiB_is_given_its_length_at_the_rate()
     {
         // W11 (assumed, section 12): a write over 64 KiB goes out on its own after its chunk's size line, and it is given the longer of
@@ -333,8 +433,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     [Fact]
     public async Task A_streamed_response_ends_without_waiting_for_the_acknowledgement_of_its_last_chunk()
     {
-        // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream, as Kestrel sets it on every connection, so that the
-        // chunk that ends a body goes out at once after the chunk before it; under Nagle's algorithm it waits for the client's
+        // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream at each streamed response, as Kestrel sets it on every
+        // connection, so that the chunk that ends a body goes out at once after the chunk before it; under Nagle's algorithm it waits for the client's
         // acknowledgement, which a client that sends its next request only after the whole response gives at its delayed-ACK timer,
         // about 40 ms on Linux, so that 100 requests one after the other take 4 seconds and not a few milliseconds
         const string text = """

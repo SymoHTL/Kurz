@@ -2066,46 +2066,63 @@ void Unread() {
 ### W11 (decided, §12) A streamed response
 
 A handler streams a body by `HttpResponse.Stream(status, (HttpWriter w) => ...)`, a function of the
-type `(HttpWriter) => void | IoError`: the server writes the head and then calls the function
-*(assumed: in the system call of the function's first write, or at its return where it wrote nothing,
-as `Results.Stream` on Kestrel sends it; put to the owner, #110, comment 6645606334)*, each
-`w.Write` sends one chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body
-goes without chunks and the close of the connection ends it; and the writer lives only inside the
-call (§12, the owner, 2026-11-03, "A response can be streamed"). The function takes its writer
-without `mut`, since `HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of
-a streamed response takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and
-gives `void | IoError`, the function gives `void | IoError` too, and an `IoError` closes the
-connection, since no status can be sent after the head went out (§12, the owner, 2026-11-03).
-`Stream` sends `application/octet-stream`, which a handler replaces with `Set` (§12, the owner,
-2026-11-03). A status that has no body, 100 to 199, `204`, `205` or `304`, stops the program at
-`Stream` with `status <n> has no body to stream`, and a write after the function returned gives an
-`IoError` of the kind `InvalidInput`, `writer used after its response ended`, and writes nothing
-(§12, the owner, 2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585).
-*(assumed, §12, not put to the owner: a `HEAD` answered with the head,
-`Transfer-Encoding: chunked` in it, and the function not called; a `Content-Length` the handler set
-giving `InvalidInput` with nothing written; a write of no bytes writing nothing; each write held to
-`MinResponseDataRate` (W10); `response.Write(stream)` chunking always, and `WriteHead` writing the
-head alone; the function's `IoError` ending the body without its last chunk, the head written where
-no write sent it, and `Write` and `ServeConnection` giving that error; the function reading the
-request's body while it writes, what it left unread drained after it and the connection closing
-where that is past `MaxDrainSize` or the request still awaits `100 Continue`, a read before the head
-went out sending `100 Continue` and none after it; no bound on the stream's whole time; the CR LF
-that ends a chunk going out with the write after it; and the
-end of the body after the function's return held where the next request's head stands whole in the
-stream's buffer, as a response is held (W9), and written with the response after it)* The
+type `(HttpWriter) => void | IoError`: the server calls the function, the head goes out in the system
+call of its first write, or at its return where it wrote nothing, as `Results.Stream` on Kestrel
+sends it (§12, the owner, 2026-11-05, #110, comment 6657251329, H1 (a)), each `w.Write` sends one
+chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body goes without chunks
+and the close of the connection ends it; and the writer lives only inside the call (§12, the owner,
+2026-11-03, "A response can be streamed"). The function takes its writer without `mut`, since
+`HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of a streamed response
+takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and gives
+`void | IoError`, the function gives `void | IoError` too, and an `IoError` the function gives while
+its response is written closes the connection, since no status can be sent after the head went out
+(§12, the owner, 2026-11-03). `Stream` sends `application/octet-stream`, which a handler replaces
+with `Set` (§12, the owner, 2026-11-03, #110, comment 6605621326, item 7). A `Transfer-Encoding`
+the handler set is kept, `chunked` added where it does not end in it, as on every response (§12, the
+owner, 2026-11-03, #110, comment 6613870327). A status that has no
+body, 100 to 199, `204`, `205` or `304`, stops the program at `Stream` with
+`status <n> has no body to stream`, and a write after the function returned gives an `IoError` of
+the kind `InvalidInput`, `writer used after its response ended`, and writes nothing (§12, the owner,
+2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585). *(assumed, §12: for 100 to
+199, which S2's range stops too, `Stream`'s own text, since its check comes first)*
+*(assumed, §12, not put to the owner: a `HEAD` answered with the head, `Transfer-Encoding: chunked`
+in it, and the function not called, and a `HEAD` of a peer of HTTP/1.0 with the head alone, without
+`Transfer-Encoding`, and `Connection: close`; a `Content-Length` the handler set giving
+`IoError(InvalidInput, 0, "")` from `Write` and `ServeConnection`, with nothing written, and a write
+after the function returned giving its `IoError` with the code 0; a write of no bytes writing nothing; each write held to `MinResponseDataRate`
+(W10); `response.Write(stream)` chunking always, a second `Write` of one response calling its
+function again with a writer of its own, and `WriteHead` writing the head alone; the function's
+`IoError` ending the body without its last chunk, the head written where no write sent it, and
+`Write` and `ServeConnection` giving that error; a write that failed leaving the writer failed,
+every later write and the end of the body giving its `IoError` again and writing nothing, so that
+the client sees the body cut; the `IoError` of a write after the function returned touching neither
+the connection nor the response after it; the function reading the request's body while it writes,
+what it left unread drained after it and the connection closing where that is past `MaxDrainSize`,
+a body under its rate there giving the server's `request timed out` and closing the connection with
+no `408`, since the head went out, as a read of the function under its rate gives that error too
+(W10); a head that goes out while the request's body still awaits `100 Continue` saying
+`Connection: close`, as RFC 9110, section 10.1.1, asks of a server that answers before it read the
+body, and the connection closing after the function; a read before the head went out sending
+`100 Continue` and none after it; no bound on the stream's whole time; the socket set to
+`TCP_NODELAY` at each streamed response, where it stays, as Kestrel sets every connection, and the CR LF that ends a chunk going out with the
+write after it, so that no write of a few bytes waits for the acknowledgement of the one before;
+and the end of the body after the function's return held where the next request's head stands whole
+in the stream's buffer, as a response is held (W9), and written with the response after it)* The
 response holds its function in a field of a function type, so that a function that reads a class
 that holds a `mut` response closes a ring through it (R9), which a handler that reads that class
 does not, by R9's reading of a field of a function type (§3, the owner, 2026-11-04, #110, comment
-6643368937), whose case `http/stream-cycle.kz` stands under R9.
+6643368937), whose cases `http/stream-cycle.kz` and `http/stream-handler-no-cycle.kz` stand under
+R9.
 
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
 // a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
 // `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
-// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept, `chunked`
-// added; a `Content-Length` the handler set is `InvalidInput` with nothing written; a function's `IoError` ends the body without its
-// last chunk, the head written where no write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no
-// function; and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
+// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
+// `chunked` added; a response written again calls its function again, with a writer of its own; a `Content-Length` the handler set
+// is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
+// write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
+// call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()
 
@@ -2184,6 +2201,9 @@ void | IoError | HttpError All() {
     coded = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     coded.Headers.Set("Transfer-Encoding", "gzip")
     Wire(coded, false)
+    twice = HttpResponse.Stream(200, (HttpWriter w) => w.Write("t"))
+    Wire(twice, false)
+    Wire(twice, false)
     sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     sized.Headers.Set("Content-Length", "1")
     Wire(sized, false)
@@ -2221,11 +2241,13 @@ All() else {
 Case: [http/serve-stream.kz](../corpus/http/serve-stream.kz)
 ```kurz
 // the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
-// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function; the function may read the
-// request's body while it writes, a read before its first write sending `100 Continue` and none after it, and what it left unread is
-// drained after it, the connection closing where that is past `MaxDrainSize` or the request still awaits `100 Continue`, and a body
-// malformed there closing it with that error; a function's `IoError` closes the connection, which gives it; and a `Content-Length`
-// the handler set is `InvalidInput` with nothing written, to HTTP/1.0 too
+// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function, to HTTP/1.0 without
+// `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
+// first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
+// that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
+// awaits `100 Continue` says `Connection: close`, and the connection closes after the function, whether it read the body after its
+// first write or not; a function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
+// `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -2263,8 +2285,8 @@ void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
@@ -2344,6 +2366,7 @@ get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
 Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", called, HttpLimits())
+Exchange("HEAD /h HTTP/1.0\r\n\r\n", called, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", echo, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits(MaxDrainSize: 2))
@@ -2357,12 +2380,13 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\
 
 Case: [http/serve-stream-timeouts.kz](../corpus/http/serve-stream-timeouts.kz)
 ```kurz
-// a streamed response's request body that falls under `MinRequestBodyDataRate` after the function returned closes the connection
-// after the whole response, with no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request
-// timed out")`: a body the function left unread, while it is drained, and one whose read in the function ran out of its time, that
-// read giving the same error (section 12, Q12 (b))
+// a streamed response's request body that falls under `MinRequestBodyDataRate` closes the connection after the whole response, with
+// no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request timed out")`: a body the function
+// left unread, while it is drained after the function returned, and one whose read in the function ran out of its time, that read
+// giving the same error (section 12, Q12 (b))
 // serves `sent`, which the client does not end, on one connection with `handler` within `limits`, and prints the loop's result,
-// whether it took 100 ms to 2 s, and what the client got
+// whether it took from the 100 ms of the grace the case sets to 2 s, under the 5 s of the default grace (W10), so that a server that
+// waited the default's time is told from one that held the case's, with 1.9 s of margin for a busy machine, and what the client got
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
     listener = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => return
@@ -2391,8 +2415,8 @@ void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
