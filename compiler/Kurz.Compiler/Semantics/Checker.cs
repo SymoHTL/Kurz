@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpServer"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -318,7 +318,6 @@ public sealed partial class Checker
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
-        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -333,6 +332,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         CheckFieldDefaults(); // K7
@@ -372,6 +372,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         MakeCopies();
+        CheckReferenceCycles(); // R2, R4, R9: after every body, the copies' among them, when the lambdas of the file are known
     }
 
     /// <summary>
@@ -606,6 +607,20 @@ public sealed partial class Checker
         if (std is null)
         {
             return;
+        }
+
+        // W1, S1: the types every file sees without a declaration are one set of symbols across std/ and the file, so that the
+        // `IoError` a function of std/ gives, `HttpRequest.Read`'s among them, is the file's `IoError`
+        foreach (var t in BuiltInTypes.Statements.OfType<TypeDeclaration>())
+        {
+            if (std.dataTypes.TryGetValue(t.Name, out var builtIn))
+            {
+                dataTypes[t.Name] = builtIn;
+            }
+            else if (std.enums.TryGetValue(t.Name, out var builtInEnum))
+            {
+                enums[t.Name] = builtInEnum;
+            }
         }
 
         foreach (var name in Prelude)
@@ -932,7 +947,7 @@ public sealed partial class Checker
             }
             else if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (D1, F4)");
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -1570,6 +1585,10 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
         }
+        else if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+        }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
@@ -1616,6 +1635,15 @@ public sealed partial class Checker
             f = f.Outer;
         }
     }
+
+    /// <summary>
+    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
+    /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
+    /// refuses it (CS0412) (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
+    /// </summary>
+    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
+
+    private static string TypeParameterClash(string name) => $"`{name}` is a type parameter of the function around it (V9)";
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
@@ -1753,6 +1781,12 @@ public sealed partial class Checker
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
+            return true;
+        }
+
+        if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
             return true;
         }
 
@@ -2189,10 +2223,10 @@ public sealed partial class Checker
             return;
         }
 
-        if (IsDeclaredName(a.Name))
+        if (IsTypeParameterName(a.Name) || IsDeclaredName(a.Name))
         {
             // E1: the declaration is the one error, and a read of the name after it reports nothing more, as F16's branch above
-            Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is visible already (V9)");
+            Report(ErrorIds.Redeclared, a.Line, IsTypeParameterName(a.Name) ? TypeParameterClash(a.Name) : $"`{a.Name}` is visible already (V9)");
             DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
@@ -2423,8 +2457,10 @@ public sealed partial class Checker
     /// <summary>
     /// C6, C8: <c>for name in collection</c> over a list, a range or a map, whose one name is an entry with <c>Key</c> and <c>Value</c>,
     /// and <c>for key, value in map</c>, which names the two under any two names (section 4, the owner, 2026-10-30, "Key and Value, as
-    /// C#"); two names over anything but a map are <c>type-mismatch</c>, as the loop over a value it does not walk is (C6, proposed:
-    /// section 4 gives the form over a map alone). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
+    /// C#"); two names over an instance of a class that <see cref="WalkedByIndex"/> holds are <c>not supported</c>, the walk of a class
+    /// that section 12 decides and section 4 reads as an index loop, which the build does not make (C6), and two names over anything else
+    /// but a map are <c>type-mismatch</c>, as
+    /// the loop over a value it does not walk is (C6, proposed: section 4 gives the form over a map, section 12 over such a class). S16: <c>for line in f.Lines()</c> over the lines of a file, each a <c>string</c>, whose
     /// failures the arms of an <c>else</c> after the block handle as a call's (O5) and every other one leaves the function at the loop's line.
     /// </summary>
     private void CheckForIn(ForInStatement f)
@@ -2466,6 +2502,7 @@ public sealed partial class Checker
                     ErrorType or VoidType => Types.Error,
                     MapType m when f.Second is null => new DataType(dataTypes["Entry"], [m.Key, m.Value]), // C6: a value of `Entry<K, V>`
                     MapType m => m.Key,
+                    ClassType c when f.Second is not null && WalkedByIndex(c.Symbol) => WalkOfClass(f.Collection.Line, t.Type),
                     _ when Unchecked(t, f.Collection.Line, "walked") => Types.Error,
                     _ => Report(f.Collection.Line, t.Type),
                 };
@@ -2509,6 +2546,34 @@ public sealed partial class Checker
             this.Report(ErrorIds.TypeMismatch, line, $"a `for` loop walks a list, a range or a map, not {Types.A(type)} (C6, C8)");
             return Types.Error;
         }
+
+        KurzType WalkOfClass(int line, KurzType type)
+        {
+            NotSupported(line, $"two names over {Types.A(type)}, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)");
+            return Types.Error; // the two names take the error type, so that the body reports nothing more of them (E1)
+        }
+    }
+
+    /// <summary>
+    /// C6: a class that two names walk as the index loop <c>for i in 0..&lt;h.Count { name = h.NameAt(i); value = h.ValueAt(i) }</c>
+    /// (section 4, the owner, 2026-11-04, "Index loop, Count once"; section 12, the owner, 2026-11-02, "any class with <c>Count</c>,
+    /// <c>NameAt(i)</c> and <c>ValueAt(i)</c>"), each member found and visible at the loop's place as a member access there finds it
+    /// (K6, K7, F9): <c>h.Count</c>, read with no call, a field or a property of the instance, and <c>h.NameAt(i)</c> and
+    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance of one <c>int</c> (proposed, C6: a <c>Count</c> of an
+    /// <c>int</c>, the <c>int</c> of the index and a result of each method, which the two names take); a class of <c>std/</c> is read
+    /// through its symbol, as one of the file.
+    /// </summary>
+    private bool WalkedByIndex(ClassSymbol c)
+    {
+        var counted = c.Field("Count") is { } field
+            ? Visible(field, c) && field.Type is PrimitiveType { Kind: Primitive.Int }
+            : Property(c, "Count") is { IsStatic: false } count && Visible(count) && count.ReturnType is PrimitiveType { Kind: Primitive.Int };
+        return counted && TakesAnIndex("NameAt") && TakesAnIndex("ValueAt");
+
+        bool TakesAnIndex(string name) =>
+            MethodsOf(c, name) is { } methods
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1
+                && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int } && !Types.IsVoid(m.ReturnType) && Visible(m));
     }
 
     private void CheckReturn(ReturnStatement r)

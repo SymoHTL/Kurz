@@ -47,7 +47,7 @@ public sealed partial class Emitter
     private readonly Dictionary<FunctionSymbol, string?> cLibraries = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<VariableSymbol, string> statics = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> instances = new(StringComparer.Ordinal);
-    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, System.Collections.Immutable.ImmutableSortedSet<string> Features)> pending = new();
+    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, System.Collections.Immutable.ImmutableSortedSet<string> Features, int Origin)> pending = new();
     private readonly List<IrFunction> emitted = [];
     private readonly SortedSet<string> libraries = new(StringComparer.Ordinal);
     private readonly Dictionary<DataSymbol, Unit> dataOwners = new(ReferenceEqualityComparer.Instance);
@@ -57,6 +57,10 @@ public sealed partial class Emitter
 
     // the function being emitted, and the file it is in
     private Unit unit;
+
+    // S11, W1: the line of the program's statement whose call led to the function being emitted, 0 where none did, so that a function of
+    // the standard library that reaches a call on a file or a socket is `not supported` in a build for Windows at the program's call
+    private int origin;
     private IrFunction fn = null!;
     private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
     private string? guardedDisplay; // the guarded block being emitted as a trace names it, which names a guarded block in it
@@ -188,8 +192,9 @@ public sealed partial class Emitter
         {
             if (pending.Count > 0)
             {
-                var (function, instanceMap, name, compiled) = pending.Dequeue();
+                var (function, instanceMap, name, compiled, from) = pending.Dequeue();
                 features = compiled;
+                origin = from;
                 EmitFunction(function, instanceMap, name);
             }
             else if (defaultsPending.Count > 0)
@@ -389,7 +394,7 @@ public sealed partial class Emitter
         {
             name = $"@\"{key}\"";
             instances[key] = name;
-            pending.Enqueue((f, instanceMap, name, sets));
+            pending.Enqueue((f, instanceMap, name, sets, origin));
         }
 
         return name;
@@ -412,6 +417,12 @@ public sealed partial class Emitter
         try
         {
             EmitFunctionCore(f, d, instanceMap, name);
+        }
+        catch (UnsupportedException e) when (unit.Runtime && origin > 0 && e.Construct is NotOnWindows or ProcessNotOnWindows)
+        {
+            // S11, W1: a function of the standard library that reaches a call on a file or a socket, the command line, the environment or
+            // the clock, `HttpRequest.Read` among them, is `not supported` in a build for Windows at the program's statement that called it
+            throw Unsupported(origin, e.Construct);
         }
         catch (UnsupportedException e) when (unit.Runtime)
         {
@@ -571,6 +582,12 @@ public sealed partial class Emitter
 
         var f = fn;
         var around = f.Location;
+        var outer = origin;
+        if (!unit.Runtime)
+        {
+            origin = statement.Line;
+        }
+
         At(statement.Line);
         try
         {
@@ -583,6 +600,7 @@ public sealed partial class Emitter
         finally
         {
             f.Location = around;
+            origin = outer;
         }
     }
 

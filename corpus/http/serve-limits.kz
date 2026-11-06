@@ -1,0 +1,66 @@
+// expect: output
+// | invalid input: MaxRequestLineSize
+// | invalid input: MaxRequestLineSize
+// | invalid input: MaxRequestHeadersTotalSize
+// | invalid input: MaxRequestHeadersTotalSize
+// | invalid input: MaxRequestHeaderCount
+// | invalid input: MaxRequestHeaderCount
+// | invalid input: MaxRequestBodySize
+// | invalid input: MaxRequestBodySize
+// | invalid input: RequestHeadersTimeout
+// | invalid input: RequestHeadersTimeout
+// | invalid input: MinRequestBodyDataRate
+// | invalid input: MinRequestBodyDataRate
+// | invalid input: MinResponseDataRate
+// | invalid input: MinResponseDataRate
+// | invalid input: MaxRequestsPerConnection
+// | invalid input: MaxRequestsPerConnection
+// | invalid input: KeepAliveTimeout
+// | invalid input: KeepAliveTimeout
+// | invalid input: MaxDrainSize
+// | invalid input: MaxDrainSize
+// | invalid input: MaxChunkSizeLine
+// | invalid input: MaxChunkSizeLine
+// rules: W9
+
+// a limit of zero or below is an `IoError` of the kind `InvalidInput` that names the member, at `ServeConnection` before it reads
+// and at `Serve` before it accepts
+void Show(HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    hello = (HttpRequest r) => HttpResponse.Empty(204)
+    HttpServer.ServeConnection(server, hello, limits) else {
+        IoError e => print(e)
+        HttpError e => print(e.Detail)
+    }
+
+    HttpServer.Serve(listener, hello, limits) else {
+        IoError e => print(e)
+    }
+}
+
+Show(HttpLimits(MaxRequestLineSize: 0))
+Show(HttpLimits(MaxRequestHeadersTotalSize: -1))
+Show(HttpLimits(MaxRequestHeaderCount: 0))
+Show(HttpLimits(MaxRequestBodySize: 0))
+Show(HttpLimits(RequestHeadersTimeout: 0s))
+Show(HttpLimits(MinRequestBodyDataRate: HttpRate(0, 5s)))
+Show(HttpLimits(MinResponseDataRate: HttpRate(240, -1s)))
+Show(HttpLimits(MaxRequestsPerConnection: 0))
+Show(HttpLimits(KeepAliveTimeout: 0s))
+Show(HttpLimits(MaxDrainSize: 0))
+Show(HttpLimits(MaxChunkSizeLine: 0))

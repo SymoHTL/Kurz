@@ -1,0 +1,17 @@
+// expect: output
+// | 2
+// allow: raw
+// rules: T36
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+mut seen = Map<instant, string>()
+seen[Reading(7)] = "first"
+seen[Reading(7)] = "again"
+seen[Reading(8)] = "other"
+print(seen.Count)
