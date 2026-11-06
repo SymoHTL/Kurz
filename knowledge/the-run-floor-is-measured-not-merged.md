@@ -34,7 +34,8 @@ The two wrong merges fail differently:
 - **Windows.** Only the `compiler-windows` job builds there. Until a run measures it, keep the
   higher of the two sides' numbers where neither side took a case out of the Windows run: the
   merged tree runs the cases of both, so its count is at least each. Pull request 301's take kept
-  408. A pushed head with 999 measures it: pull request 351 set 999 in one commit, and in the
-  next the count its Windows run printed, 416. `judgment step`
+  408. A pushed head with 999 measures it. On 2026-11-06 pull request 351 set 999 in 17bf6d96,
+  whose Windows run printed `only 416 cases are built and run, the floor is 999`, and 416 in
+  35646bde. `judgment step`
 - Gate: `compiler-tests` turns red on a floor above the count, on Linux in `gates` and on Windows
   in `compiler-windows`. A floor below the count is read by nobody: `judgment step`.
