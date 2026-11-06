@@ -916,6 +916,8 @@ public sealed partial class Checker
         {
             case ErrorType or EnumType:
                 return null;
+            case TypeParameterType when textFieldTypes.ContainsValue(type):
+                return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
             case PrimitiveType p:

@@ -2525,6 +2525,11 @@ public sealed partial class Checker
         }
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        if (fields)
+        {
+            KeepFieldTypeOfText(f);
+        }
+
         fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
         fieldsLoopDepth -= fields ? 1 : 0;

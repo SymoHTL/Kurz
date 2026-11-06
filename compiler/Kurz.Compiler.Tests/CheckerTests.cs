@@ -5150,6 +5150,29 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_type_argument_that_holds_the_field_s_type_beside_a_type_parameter_grows_by_that_parameter()
+    {
+        // T34: on the text, `f.Type` of a loop over `T.Fields` is a type of its own, no type parameter of the function, so a type argument
+        // that holds it beside `T` inside a form grows by `T` and is refused at its call (the owner, 2026-11-04, comment 6643376941 on
+        // issue 156); one that holds it with no type parameter takes no part, as the field's type alone does
+        const string Deep = "data Point(int X, int Y)\ndata Pair<A, B>(A First, B Second)\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n"
+            + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\nDeep(Point(1, 2), 3)";
+        // each form beside its control with `int` in place of the field's type, which the walk refused before
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Map<f.Type, T>(), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Map<int, T>(), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<int, T>(1, x), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<f.Type, T>(f.Get(x), x)], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair<int, T>(1, x)], n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<f.Type, List<T>>(f.Get(x), [x]), n - 1)")));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair<int, List<T>>(1, [x]), n - 1)")));
+        // the field's type with no type parameter takes no part: `Pair<f.Type, int>` runs, and `List<f.Type>` is left to the copies, where
+        // `Deep<List<int>>` reads `T.Fields` of a list and is `kind-not-read` at the outer call
+        Clean(string.Format(Deep, "Deep(Pair<f.Type, int>(f.Get(x), 1), n - 1)"));
+        Assert.Equal([(ErrorIds.KindNotRead, 12)], Errors(string.Format(Deep, "Deep([f.Get(x)], n - 1)")));
+    }
+
+    [Fact]
     public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
     {
         // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,
@@ -5162,6 +5185,15 @@ public sealed class CheckerTests
         Assert.StartsWith("13: ", bound);
         Assert.EndsWith("(T33)", bound);
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 6)], Errors(string.Format(Deep, "        Deep(Wrap(x), n - 1)")));
+
+        // the arm nearest the call is the one the walk reads: an arm inside a loop opened inside another arm takes no part either, and its
+        // chain ends at the bound of T33, at the outer call (the control is the Fact of a loop opened inside an arm, below)
+        const string Nested = "data Wrap<T>(T A)\n\nvoid Deep<T>(T x, int n) {\n    match T.Kind {\n        TypeKind.Data => {\n            for f in T.Fields {\n"
+            + "                match T.Kind {\n                    TypeKind.Data => Deep(Wrap(x), n - 1)\n                    else => print(n)\n                }\n            }\n        }\n"
+            + "        else => print(n)\n    }\n}\n\nDeep(Wrap(1), 3)";
+        var nested = Assert.Single(NotSupported(Nested));
+        Assert.StartsWith("17: ", nested);
+        Assert.EndsWith("(T33)", nested);
     }
 
     [Fact]
