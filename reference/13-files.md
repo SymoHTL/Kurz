@@ -1261,7 +1261,7 @@ In a build for Windows, a call of this chapter is `not supported`, and the runti
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
 and `File.Modified` (S13 to S15; §12, assumed), `instant.Now` and `t.Elapsed` (S25; §12, the owner,
 2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls, `Stdin` and `Environment.Exit`
-(S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
+(S17 to S23; §12, assumed), and a log call (P6; §12, the owner, 2026-11-05, L2). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 
