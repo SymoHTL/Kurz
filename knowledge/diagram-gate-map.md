@@ -304,8 +304,8 @@ flowchart TD
         reviewed too; a run there whose every file replays makes no pass, puts no label on and completes,
         in CI with review at success: no round (the owner, 2026-11-01). The end is inside the job: a job its if skips reports success.
         A --plan without --passes reads the state the CI account stored, as the run in CI does, with --passes the state of its own login,
-        as a run off the pipeline does, and says NOT CHECKED, exit 1, never cap, where that state's key is not the checkout's
-        and the checkout's reviewer is not the default branch's (issue 300).
+        as a run off the pipeline does, and says NOT CHECKED, exit 1, never cap, where it reads a state of the CI account
+        and the checkout's reviewer is not the default branch's, whatever key that state carries (issue 300).
         Red: self-tests (the count, the label before the first pass, the label taken off at a limit before any paid pass and its
         refusal, the end and its status, the run that only replays, whose state a plan reads and its NOT CHECKED).
         A label taken off or put on by hand, a second issue with the collection label, two runs that start
@@ -339,8 +339,10 @@ flowchart TD
         approval of 2026-10-21, which holds for the cap of one since 2026-10-22, is given for the head the round at the cap reviewed, when that round completed,
         for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
         step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
-        the branch is brought up to date as a new head, which only the owner's approval of that head merges
-        over red; a new head the replay cache answers whole is green and needs none (R7)"]
+        the branch is brought up to date as a new head, which the owner's approval of that head merges
+        over red, or the standing approval for such a head under the conditions the over-red rule of
+        CLAUDE.md names (a clean take or one with disjoint text or a measured floor, the round completed);
+        a new head the replay cache answers whole is green and needs none (R7)"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end
