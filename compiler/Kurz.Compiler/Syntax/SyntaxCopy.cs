@@ -19,6 +19,8 @@ public static class SyntaxCopy
     /// A new block with the same text, every node of it new, but where <paramref name="rewrite"/> gives an expression its own: it is
     /// shown each expression before its copy, with the copier for the expressions inside it, and returns the expression to stand in
     /// its place or null for the copy. T33: a pass of a loop over <c>T.Fields</c>, in which <c>f.Get(value)</c> reads the field.
+    /// <paramref name="copied"/> is shown each expression the copier copies, and not one the rewrite gives, whose expressions inside are
+    /// copies the rewrite asks of the copier and are shown in turn: T34, a call inside <c>f.Get(value)</c> keeps its origin so.
     /// </summary>
     public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
         (Block)new Copier(null, rewrite, copied).Statement(b);
@@ -27,13 +29,16 @@ public static class SyntaxCopy
     public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
         new Copier(null, rewrite, copied).Expression(e);
 
-    /// <summary>Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them.</summary>
-    public static void Walk(FunctionDeclaration d, Action<Expression> visit) => new Copier(visit).Function(d);
+    /// <summary>
+    /// Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them, and
+    /// <paramref name="statements"/> every statement of its body and of its lambdas' bodies.
+    /// </summary>
+    public static void Walk(FunctionDeclaration d, Action<Expression> visit, Action<Statement>? statements = null) => new Copier(visit, statements: statements).Function(d);
 
     /// <summary>Shows <paramref name="visit"/> every expression of a statement.</summary>
     public static void Walk(Statement s, Action<Expression> visit) => new Copier(visit).Statement(s);
 
-    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Expression, Expression>? copied = null)
+    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Expression, Expression>? copied = null, Action<Statement>? statements = null)
     {
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
@@ -128,7 +133,7 @@ public static class SyntaxCopy
 
         private Block Block(Block b) => b with { Statements = b.Statements.Select(Statement).ToList() };
 
-        public Statement Statement(Statement s) => s switch
+        public Statement Statement(Statement s) => Seen(s) switch
         {
             Block b => Block(b),
             VariableDeclaration v => v with { Type = OptionalType(v.Type), Value = Optional(v.Value) },
@@ -143,6 +148,7 @@ public static class SyntaxCopy
             ReturnStatement r => r with { Value = Optional(r.Value) },
             ThrowStatement t => t with { Value = Optional(t.Value) },
             RawBlock r => r with { Body = Block(r.Body) },
+            ConstAssertStatement c => c with { Condition = Expression(c.Condition), Text = (StringLiteral)Expression(c.Text) },
             AsmStatement a => a with
             {
                 Operands = a.Operands.Select(o => o with { Value = Optional(o.Value), Output = Optional(o.Output), Body = o.Body is null ? null : Block(o.Body) }).ToList(),
@@ -150,5 +156,11 @@ public static class SyntaxCopy
             FunctionDeclaration or TypeDeclaration or ExternBlock or UseStatement or FieldDeclaration or ConstructorDeclaration => s, // not supported in a body (F1)
             _ => throw new InvalidOperationException($"the statement `{s.GetType().Name}` has no copy"),
         };
+
+        private Statement Seen(Statement s)
+        {
+            statements?.Invoke(s);
+            return s;
+        }
     }
 }

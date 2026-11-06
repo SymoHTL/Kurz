@@ -167,6 +167,7 @@ public static class ErrorIds
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
     public const string KindNotRead = "kind-not-read";
+    public const string ConstAssertFailed = "const-assert-failed";
     public const string VoidTypeArgument = "void-type-argument";
     public const string GrowingTypeArgument = "growing-type-argument";
     public const string LogTemplate = "log-template";

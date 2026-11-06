@@ -58,7 +58,8 @@ What the rows show:
   third round reviewed when that round completed (for `review`, and for `gates` when `pr-findings`
   is its one FAIL); any other red is the owner's to approve for that head.
 - The reviewer counts the rounds: a run that has files to review labels the pull request
-  `review-round-<n>` before its first pass, and is a round whatever follows; the count is the
+  `review-round-<n>` before its first pass, and is a round whatever follows (since 2026-11-02 but
+  for a run that the usage limit ends before any paid pass: [[a-limit-before-any-paid-pass-is-no-round]]); the count is the
   highest `n`, and at three every run ends before its first pass as
   `REVIEW DID NOT COMPLETE (cap)`, in CI with the status `review` at `error`. The end is inside the
   job, since a job its `if` skips reports success ([[a-skipped-job-reports-success]]).
@@ -76,7 +77,9 @@ above holds with the one round as the round at the cap.
   The round at the cap is the last, and since 2026-10-22 it is the first: the push before it carries
   every fix that can be made, the lows of the pull request too.
 - A round is a bill whatever it finds or costs: a run cancelled after its label, one that stopped
-  on a limit, and a run of it again are rounds.
+  on a limit after a paid pass, and a run of it again are rounds. A run that the usage limit stops
+  before any paid pass, as the third round above did, takes its label off again and is no round
+  since the owner's answer of 2026-11-02 ([[a-limit-before-any-paid-pass-is-no-round]]).
 - Keep the change small, so that the one round is enough: the bill of a round, and what a round
   finds, grow with the diff ([[what-a-review-pass-costs]]).
 - What the labels do not hold: a label taken off or put on by hand, a second issue with the

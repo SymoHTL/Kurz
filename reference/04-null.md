@@ -695,11 +695,13 @@ of its own too, so a test after a call in the same condition does not narrow the
 owner, 2026-11-01, "Those ends stop narrowing", against a narrowed read that checks the target and
 ends the program with an error at run time where it was freed since the test). A call is every
 expression that runs code the function does not see: a call of a function or a method, a
-constructor, an interpolation or `print` of a class instance (its `Text()`, A5), `==` on class
+constructor, an interpolation or `print` of a class instance (its `Text()`, A5), `==` and `!=` on class
 instances that name their fields (K5) and on values that hold such an instance, whose `==` runs
-theirs, and a read or a write of a map's entry whose key type compares by such a clause, which runs
-that `==` and the key's hash (§4, the owner, 2026-11-02, #110, comment 6586836827: such an `==` is a call
-everywhere). A declaration is not an assignment; an assignment into any path is one, apart from the
+theirs, a `data` value among them (§4, the owner, 2026-11-02, #39, comment 6586837160) and a list or a
+nullable *(assumed: as a `data` value)*, and a read or a write of a map's entry whose key's `==` runs such a
+clause, which runs that `==` and the key's hash (§4, the owner, 2026-11-02, #110, comment 6586836827: such an
+`==` is a call everywhere). A comparison with the literal `null`, `k != null` with `k` a `K?`, runs no `==`
+of a class and is no call (N10) *(proposed: the record names no such comparison)*. A declaration is not an assignment; an assignment into any path is one, apart from the
 write this rule takes out below, and one that assigns a value whose type has no `null` narrows a path with no `weak`
 reference in it again, as this rule says above with the owner's choice of 2026-10-09, while the case
 `null/narrowed-field-after-assignment.kz` assigns a value that may be null. One assignment is no end for
@@ -708,12 +710,15 @@ variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k]
 narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
 path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
 write, since that count can be the target's last; a write into what a field of an instance holds,
-`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). That
-write keeps the narrowing only where the map's key compares as a value or by identity: a key whose
-type compares by an `equal by` clause runs that `==` and the key's hash, a call, so `m[k] = 2` with
-`class K(int Id) equal by Id` ends the narrowing, as `m[k]` does (§4, the owner, 2026-11-02, #110, comment 6586836827).
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). A
+write into a list's item keeps it whatever the item. The write into a map's entry that this exception keeps,
+`m[k] = 2` into a map a variable holds, keeps it only where the key's `==` runs no clause: a key that
+compares as a value, by its content (K4) or by identity, and holds no instance of a class that names its
+fields. A key whose type compares by an `equal by` clause, or that holds an instance of such a class,
+`Pair<K>`, runs that `==` and the key's hash, a call, so `m[k] = 2` with `class K(int Id) equal by Id`
+ends the narrowing, as `m[k]` does (§4, the owner, 2026-11-02, #110, comment 6586836827).
 Reading a field, `.Bytes` and `.Count` on a value, `==` on values that hold no instance of a class
-that names its fields, and a read of a map's entry by a key that compares as a value or by identity
+that names its fields, and a read of a map's entry by a key whose `==` runs no clause
 are none of them. *(this list is proposed)*
 `print` is a call like any other. C# keeps such a path narrowed across the call (the .NET SDK
 10.0.204, 2026-10-08: no warning for a use after a call that sets the field to null, CS8602 for an
@@ -817,6 +822,25 @@ void Show(Pet pet) {
             if name == "x" {
                 return
             }
+        }
+
+        print(pet.Keeper.Name)
+    }
+}
+
+o = Owner("Ann")
+Show(Pet(o))
+```
+
+Case: [memory/weak-narrowed-after-block-without-variable.kz](../corpus/memory/weak-narrowed-after-block-without-variable.kz)
+```kurz
+class Owner(string Name)
+class Pet(weak Owner? Keeper)
+
+void Show(Pet pet) {
+    if pet.Keeper != null {
+        if pet.Keeper.Name == "x" {
+            return
         }
 
         print(pet.Keeper.Name)
