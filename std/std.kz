@@ -6187,8 +6187,8 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 
 // The body of a request, read from its stream as the client sends it: `Read` appends at most `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
-// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it. A failure of HTTP stays: every read after it
-// gives it again.
+// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
+// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
 pub class HttpBody {
     mut TcpStream? stream = null
     mut long remaining = 0
@@ -6205,6 +6205,7 @@ pub class HttpBody {
     mut long waited = 0
     mut long arrived = 0
     mut bool timedOut = false
+    mut bool begun = false
 
     // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
     internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed) {
@@ -6229,6 +6230,11 @@ pub class HttpBody {
 
     // Whether a read of the body ran out of its time, which the server answers `408` (F9).
     internal bool TimedOut => timedOut
+
+    // The response's head on its way to the client, after which no read sends `100 Continue` (F9).
+    internal void Begin() {
+        begun = true
+    }
 
     // Whether a read of the body failed, so that what the stream holds after it is not known (F9).
     internal bool Failed => failed != null
@@ -6312,7 +6318,9 @@ pub class HttpBody {
 
         if expects {
             expects = false
-            s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+            if !begun {
+                s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+            }
         }
 
         if chunked && remaining == 0 {
@@ -6445,8 +6453,8 @@ pub class HttpBody {
     }
 }
 
-// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, or none (design
-// record, section 12; W8). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
+// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, chunks a function
+// writes, or none (design record, section 12; W8, W11). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
 // out of range does, since a status is a literal in code, and set the `Content-Type` ASP.NET Core's `Results` sets, which the
 // headers can replace. `Write` writes the response, and `WriteHead` its head alone, for a `HEAD`; neither adds `Date` or
 // `Connection`, which the server's loop adds where the handler set none.
@@ -6456,6 +6464,7 @@ pub class HttpResponse {
     mut bool isFile = false
     mut Bytes held = HttpNoBytes()
     mut string filePath = ""
+    mut ((HttpWriter) => void | IoError)? streamer = null
 
     // The status, from 200 to 599.
     pub int Status => code
@@ -6491,23 +6500,41 @@ pub class HttpResponse {
     // A response with no body and no `Content-Type`.
     pub static HttpResponse Empty(int status) => Of(status, "")
 
+    // A response whose body `body` writes, as `application/octet-stream`: the writer sends the head, then calls `body` with an
+    // `HttpWriter`, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
+    pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
+        if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
+            throw "status {status} has no body to stream"
+        }
+
+        r = Of(status, "application/octet-stream")
+        r.streamer = body
+        return r
+    }
+
     // Writes the status line, the headers and the body to `stream` (W8).
     pub void | IoError Write(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, true, "", false, false, null, mut none, false)
+        Send(stream, true, "", false, false, null, mut none, false, null)
     }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
     pub void | IoError WriteHead(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, false, "", false, false, null, mut none, false)
+        Send(stream, false, "", false, false, null, mut none, false, null)
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
     // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
-    // write, and where `hold` a response of 64 KiB or less, with them, is held there in place of a write (F9).
-    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold) => Send(stream, withBody, date, close, plain, pace, mut pending, hold)
+    // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
+    // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
+    // writes has gone out (F9).
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold, HttpBody request) => Send(stream, withBody, date, close, plain, pace, mut pending, hold, request)
+
+    // Whether a function writes the body, which the loop calls before it drains the request's body, since the function may read it (F9).
+    internal bool Streams => streamer != null
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
@@ -6537,9 +6564,11 @@ pub class HttpResponse {
 
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` whose file holds
     // bytes or a `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
-    // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
-    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
+    // `Content-Length`, and a `Content-Length` beside a body a function writes, are answered with nothing, `InvalidInput`, as hyper
+    // ends such a response.
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold, HttpBody? request) {
         bodiless = code == 204 || code == 304
+        body = streamer
         mut length = 0L
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {
@@ -6554,8 +6583,8 @@ pub class HttpResponse {
 
         codings = headers.GetAll("Transfer-Encoding")
         lengths = headers.GetAll("Content-Length")
-        chunked = !bodiless && !plain && codings.Count > 0
-        if chunked && lengths.Count > 0 {
+        chunked = !bodiless && !plain && (codings.Count > 0 || body != null)
+        if (chunked || body != null) && lengths.Count > 0 {
             HttpFlush(s, mut pending)
             return IoError(IoKind.InvalidInput, 0, "")
         }
@@ -6594,7 +6623,11 @@ pub class HttpResponse {
             out.AddRange("{name}: {value}\r\n".Bytes)
         }
 
-        if !bodiless && !chunked && lengths.Count == 0 {
+        if chunked && codings.Count == 0 {
+            out.AddRange("Transfer-Encoding: chunked\r\n".Bytes)
+        }
+
+        if !bodiless && !chunked && lengths.Count == 0 && body == null {
             out.AddRange("Content-Length: {length}\r\n".Bytes)
         }
 
@@ -6618,6 +6651,21 @@ pub class HttpResponse {
 
             HttpPace(s, pace, out.Count)
             s.Write(out)
+            return true
+        }
+
+        if body != null {
+            // the head goes out with the first chunk, in one write, so that the chunk does not wait for the acknowledgement of
+            // the head, and the last chunk after the function's return, held as a response is where `hold`
+            w = HttpWriter.Make(s, out, chunked, pace, request)
+            body(w) else {
+                IoError e => {
+                    w.Abort()
+                    return e
+                }
+            }
+
+            w.End(mut pending, hold)
             return true
         }
 
@@ -6659,6 +6707,138 @@ pub class HttpResponse {
         }
 
         return true
+    }
+}
+
+// The writer of a streamed response, which `HttpResponse.Stream` gives its function (design record, section 12; W11): `Write` sends
+// a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
+// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
+// write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
+// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing.
+pub class HttpWriter {
+    mut TcpStream? stream = null
+    mut Bytes ahead = Bytes()
+    mut bool chunked = true
+    mut bool ended = false
+    mut bool sent = false
+    mut HttpRate? pace = null
+    mut HttpBody? request = null
+
+    // The writer of a body on `s`, the head `head` going out with its first write, before which a read of the body `answered` may
+    // still send `100 Continue` (F9: `internal`, the maker std/'s writer calls). The stream is set to `TCP_NODELAY`, as Kestrel sets
+    // every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
+    // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
+    // A stream the option cannot be set on is written as it is, the option only a matter of time.
+    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered) {
+        s.SetNoDelay(true) else {
+            IoError e => {
+            }
+        }
+
+        w = HttpWriter()
+        w.stream = s
+        w.ahead = head
+        w.chunked = isChunked
+        w.pace = rate
+        w.request = answered
+        return w
+    }
+
+    // The head on its way: no read of the request's body sends `100 Continue` after it.
+    void Started() {
+        sent = true
+        b = request
+        if b != null {
+            b.Begin()
+        }
+    }
+
+    // Writes `bytes` as one chunk of the body.
+    pub void | IoError Write(Bytes bytes) {
+        s = stream
+        if ended || s == null {
+            return IoError(IoKind.InvalidInput, 0, "writer used after its response ended")
+        }
+
+        if bytes.Count == 0 {
+            return
+        }
+
+        mut out = ahead
+        ahead = Bytes()
+        Started()
+        if chunked {
+            out.AddRange("{HttpHex(bytes.Count)}\r\n".Bytes)
+        }
+
+        if bytes.Count <= 65536 {
+            out.AddRange(bytes)
+        } else {
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+            out = Bytes()
+            HttpPace(s, pace, bytes.Count)
+            s.Write(bytes)
+        }
+
+        if out.Count > 0 {
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+        }
+
+        if chunked {
+            ahead.AddRange("\r\n".Bytes)
+        }
+    }
+
+    // Writes `text` in UTF-8 as one chunk of the body.
+    pub void | IoError Write(string text) => Write(text.Bytes)
+
+    // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
+    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response (F9).
+    internal void | IoError End(mut Bytes pending, bool hold) {
+        ended = true
+        s = stream
+        if s == null {
+            return
+        }
+
+        mut out = ahead
+        ahead = Bytes()
+        Started()
+        if chunked {
+            out.AddRange("0\r\n\r\n".Bytes)
+        }
+
+        if hold && out.Count <= 65536 {
+            pending = out
+            return
+        }
+
+        if out.Count > 0 {
+            HttpPace(s, pace, out.Count)
+            s.Write(out)
+        }
+    }
+
+    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that the client sees it cut (F9).
+    internal void Abort() {
+        ended = true
+        s = stream
+        if s == null || sent {
+            return
+        }
+
+        Started()
+        out = ahead
+        ahead = Bytes()
+        HttpPace(s, pace, out.Count) else {
+            IoError e => return
+        }
+
+        s.Write(out) else {
+            IoError e => return
+        }
     }
 }
 
@@ -7038,9 +7218,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                     return HttpTimedOut()
                 }
 
-                if body.Failed || body.AwaitsContinue {
+                streams = response.Streams
+                if body.Failed || (body.AwaitsContinue && !streams) {
                     keep = false
-                } else if keep {
+                } else if keep && !streams {
                     drained = body.Drain(limits.MaxDrainSize) else {
                         IoError e => return e
                         HttpError e => {
@@ -7068,9 +7249,32 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 }
 
                 close = !keep && headers.Get("Connection") == null
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate, mut pending, keep && r.next)
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate, mut pending, keep && r.next, body)
                 if !keep || !written {
                     return
+                }
+
+                if streams {
+                    // the function may read the request's body while it writes, as hyper reads one while its response goes out,
+                    // so that what it left is drained after it
+                    if body.TimedOut {
+                        return HttpTimedOut()
+                    }
+
+                    if body.Failed || body.AwaitsContinue {
+                        return
+                    }
+
+                    // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), with no `408`, since the
+                    // head has gone out
+                    drained = body.Drain(limits.MaxDrainSize) else {
+                        IoError e => return e
+                        HttpError e => return e
+                    }
+
+                    if !drained {
+                        return
+                    }
                 }
 
                 ahead = r.next

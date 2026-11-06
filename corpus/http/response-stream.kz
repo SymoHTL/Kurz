@@ -1,0 +1,130 @@
+// expect: output
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||5|hello|6| world|0||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||0||]
+// | void [HTTP/1.1 201 Created|Content-Type: text/event-stream|Transfer-Encoding: chunked||7|data: 1|0||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: gzip, chunked||1|x|0||]
+// | InvalidInput []
+// | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|a]
+// | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|k|0||]
+// | invalid input: writer used after its response ended
+// | 70101 11170 70000 0
+// rules: W11
+
+// a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
+// `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
+// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept, `chunked`
+// added; a `Content-Length` the handler set is `InvalidInput` with nothing written; a function's `IoError` ends the body without its
+// last chunk, the head written where no write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no
+// function; and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
+class Keeper {
+    pub mut List<HttpWriter> Kept = List<HttpWriter>()
+
+    pub void Keep(HttpWriter w) {
+        Kept.Add(w)
+    }
+}
+
+// what the client got from `r.Write`, or from `r.WriteHead` where `head`, each CR LF as `|`, after what the call gave
+void | IoError Wire(HttpResponse r, bool head) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    mut result = "void"
+    if head {
+        r.WriteHead(server) else {
+            IoError e => {
+                result = "{e.Kind}"
+            }
+        }
+    } else {
+        r.Write(server) else {
+            IoError e => {
+                result = "{e.Kind}"
+            }
+        }
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    shown = text.Replace("\r\n", "|")
+    print("{result} [{shown}]")
+}
+
+// a write of more than 64 KiB, its chunk's size line and the count of the bytes the client got
+void | IoError Big() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    mut body = Bytes()
+    for i in 0..<70000 {
+        body.Add(97)
+    }
+
+    HttpResponse.Stream(200, (HttpWriter w) => w.Write(body)).Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    lines = text.Split("\r\n")
+    print("{got.Count} {lines[4]} {lines[5].Bytes.Count} {lines[6]}")
+}
+
+void | IoError | HttpError All() {
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("hello")
+        w.Write(Bytes())
+        w.Write(" world".Bytes)
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => w.Write("")), false)
+    events = HttpResponse.Stream(201, (HttpWriter w) => w.Write("data: 1"))
+    events.Headers.Set("Content-Type", "text/event-stream")
+    Wire(events, false)
+    coded = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
+    coded.Headers.Set("Transfer-Encoding", "gzip")
+    Wire(coded, false)
+    sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
+    sized.Headers.Set("Content-Length", "1")
+    Wire(sized, false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("a")
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    }), false)
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        print("called")
+        w.Write("c")
+    }), true)
+    keeper = Keeper()
+    Wire(HttpResponse.Stream(200, (HttpWriter w) => {
+        keeper.Keep(w)
+        w.Write("k")
+    }), false)
+    keeper.Kept[0].Write("late") else {
+        IoError e => print(e)
+    }
+
+    Big()
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
