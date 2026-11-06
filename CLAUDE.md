@@ -463,18 +463,21 @@ Gate: review rule "rules for sessions".
   2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
   6680237539), to merge over red for the check `review` at that head, when all of these hold:
   - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words and the merge keeps every word of both; a conflict that rerere resolved is a
-    conflict ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
+    different words and the merge keeps every word of both; the merge is made with rerere off
+    (comment 6680237539), since a conflict that rerere resolves is still a conflict
+    ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
     the lines a conflict block joined;
   - after a conflict, `py -3 tools/gates.py` passed on the merge commit in the image the `gates` job
     runs in, before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
   - `gates` and `compiler-windows` are green on that head;
-  - no high finding of its round holds, and the reading of each is on issue 39.
+  - every defect its round found is named on issue 39, and no high finding of it holds.
 
-  Any other conflict, any other change to its own diff, a high finding that holds and a red gate
-  need the owner's approval for that head. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
+  It holds for a round that did not converge, or that the usage limit cut off after a paid pass, too
+  (comment 6577439799): it is the owner's choice that the refusal of a branch behind `main` at the
+  cap (the rule below) asks for. Any other conflict, any other change to its own diff, a high finding
+  that holds and a red gate need the owner's approval for that head. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
   takes `--over-red` as the caller's statement (HAZARD #3). Retired on
   2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
