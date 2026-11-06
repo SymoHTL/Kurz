@@ -1,0 +1,116 @@
+// expect: output
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /aHTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /b]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>|Connection: close||hi /a]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /aHTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>||hi /b]
+// | http: malformed request: bad chunk size
+// | []
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 5|Date: <29>|Connection: close||hi /a]
+// | void
+// | [HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 2|Date: <29>||ok]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 0|Date: <29>||HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 2|Date: <29>||ok]
+// rules: W9
+
+// a body the handler did not read is read and dropped up to `MaxDrainSize`, and the next request served; a body past it closes the
+// connection, and so does a request that expects `100-continue` whose body the handler did not read, with no `100 Continue` sent;
+// a chunked body malformed while it is dropped closes the connection without an answer; and a response the server holds while the
+// next request stands in the buffer goes out before that request's `100 Continue`
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+reading = (HttpRequest r) => {
+    text = r.Body.ReadAllText(100) else {
+        else => "?"
+    }
+
+    return HttpResponse.Text(200, text)
+}
+
+small = HttpLimits(MaxDrainSize: 4)
+next = "GET /b HTTP/1.1\r\nHost: h\r\n\r\n"
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nabcd{next}", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nabcde{next}", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n{next}", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)

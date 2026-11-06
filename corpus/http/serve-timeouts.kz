@@ -1,0 +1,158 @@
+// expect: output
+// | request timed out
+// | true
+// | [HTTP/1.1 408 Request Timeout|Content-Length: 0|Connection: close|Date: <29>||]
+// | the handler read: request timed out
+// | request timed out
+// | true
+// | [HTTP/1.1 408 Request Timeout|Content-Length: 0|Connection: close|Date: <29>||]
+// | the handler read: request timed out
+// | request timed out
+// | true
+// | [HTTP/1.1 408 Request Timeout|Content-Length: 0|Connection: close|Date: <29>||]
+// | request timed out
+// | true
+// | [HTTP/1.1 408 Request Timeout|Content-Length: 0|Connection: close|Date: <29>||]
+// | true
+// | []
+// | TimedOut
+// | true
+// rules: W10
+
+// a head that does not arrive whole within `RequestHeadersTimeout` from its first byte, and a body whose reads fall under
+// `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection, the handler's response
+// unwritten, the handler's read of such a body giving `HttpError(Protocol, "request timed out")`, and the connection gives that error
+// too; a connection whose first request sends no byte within `KeepAliveTimeout` is closed with nothing written; a response whose
+// write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate closes it, since its status
+// has gone out
+void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(sent.Bytes) else {
+        IoError e => return
+    }
+
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => print(e.Kind)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+reading = (HttpRequest r) => {
+    text = r.Body.ReadAllText(100) else {
+        IoError e => "{e.Kind}"
+        HttpError e => e.Detail
+        else => "?"
+    }
+
+    print("the handler read: {text}")
+    return HttpResponse.Text(200, text)
+}
+
+hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
+Stall("GET /a HTTP/1.1\r\nHost: h\r\n", hello, HttpLimits(RequestHeadersTimeout: 100ms))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+
+// the same where the request says `Connection: close`, so that no drain of the body follows the handler
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+
+// a handler that reads none of such a body, which the server drains after it
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", hello, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+
+// a client that sends nothing at all
+Stall("", hello, HttpLimits(KeepAliveTimeout: 100ms))
+Unread()
+
+// a response of 32 MiB to a client that reads none of it, which the buffers of the connection cannot hold
+void Unread() {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes) else {
+        IoError e => return
+    }
+
+    mut piece = Bytes()
+    while piece.Count < 65536 {
+        piece.Add(122)
+    }
+
+    mut body = Bytes()
+    while body.Count < 33554432 {
+        body.AddRange(piece)
+    }
+
+    large = HttpResponse.Bytes(200, body)
+    start = timestamp.Now
+    HttpServer.ServeConnection(server, (HttpRequest r) => large, HttpLimits(MinResponseDataRate: HttpRate(1_000_000_000, 100ms))) else {
+        IoError e => print(e.Kind)
+        HttpError e => print(e.Detail)
+    }
+
+    waited = timestamp.Now - start
+    print(waited >= 100ms && waited < 2s)
+}
