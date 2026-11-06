@@ -1,0 +1,26 @@
+// expect: output
+// | true
+// | true
+// | true
+// | false
+// | true
+// | true
+// allow: raw
+// rules: T36
+
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(1)
+instant b = Reading(2)
+instant c = Reading(2)
+print(a < b)
+print(b <= c)
+print(b > a)
+print(a >= b)
+print(b == c)
+print(a != c)

@@ -495,6 +495,11 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
+            if (methods.Find(f => f.IsProperty) is { } property)
+            {
+                return ReadImplicitProperty(n, property); // K7: the property of `this`
+            }
+
             NotSupported(n.Line, "a method as a value, named without a call (K7, F11)");
             return Typed.Error;
         }
@@ -660,6 +665,11 @@ public sealed partial class Checker
         }
 
         var target = CheckExpression(m.Target, null);
+        if (target.Type is ClassType owner && Property(owner.Symbol, m.Member) is { } property)
+        {
+            return ReadProperty(m, owner, property); // K7: a call at every read, which no test narrows (N9)
+        }
+
         return Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3
     }
 
@@ -1705,7 +1715,13 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        // O10: under a result whose first case is `void`, `void | IoError`, a call with a `void` success is the body its block
+                        // form `() => { print(x) }` already is, and the lambda gives that case (the owner, 2026-11-05, #110, comment 6659026217);
+                        // the refusal elsewhere names that rule (the owner, 2026-11-05, #110, comment 6664353093)
+                        if (!SuccessIsVoid(result))
+                        {
+                            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)}; a `void` call fits only where the first case is `void` (F11, O10, T1)");
+                        }
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
