@@ -2798,7 +2798,8 @@ and `response.EnsureSuccess()` gives `void | HttpError`, of the kind `Status` fo
 success (§12, the owner, 2026-10-31, "Never, a value", and 2026-11-01, issue 110, comment 6557433114,
 Q6 (a), the range assumed).
 The response is an `HttpResponseMessage`, as .NET names it, with `Status`, `Headers` and `Body`, as the
-client's request is an `HttpRequestMessage` (2026-11-04, issue 156, comment 6643376941, Q2 (a)), and
+client's request is an `HttpRequestMessage` (2026-11-04, issue 156, comment 6643376941, Q2 (a) of comment
+6620774918), and
 its failures take the texts of the server for a
 request with `response` in their place (C4) (§12, the owner, 2026-11-05, issue 110, comment
 6657251329): `malformed response: no status line` for a
