@@ -495,7 +495,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if (methods.Find(f => f.IsProperty) is { } property)
+            if (ImplicitPropertyOf(n.Name) is { } property)
             {
                 return ReadImplicitProperty(n, property); // K7: the property of `this`
             }
@@ -1715,7 +1715,13 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        // O10: under a result whose first case is `void`, `void | IoError`, a call with a `void` success is the body its block
+                        // form `() => { print(x) }` already is, and the lambda gives that case (the owner, 2026-11-05, #110, comment 6659026217);
+                        // the refusal elsewhere names that rule (the owner, 2026-11-05, #110, comment 6664353093)
+                        if (!SuccessIsVoid(result))
+                        {
+                            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)}; a `void` call fits only where the first case is `void` (F11, O10, T1)");
+                        }
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {
