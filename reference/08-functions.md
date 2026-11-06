@@ -672,6 +672,33 @@ long big = 5
 Show(big)
 ```
 
+A method that the place of the call does not see (F9) is no candidate of the call where the place
+sees one of its name: a call from a class that fits only a method or a property of a base the class
+does not see gets the error of the class's own methods of that name, as C# leaves an inaccessible
+member out of overload resolution (CS7036, CS1501). The owner chose this on 2026-11-06 (#39,
+comment 6680927192), against keeping such a member a candidate and refusing the call with
+`not-visible`, as Rust reports a private method its lookup found (E0624); the cost is a filter of
+the candidates by what the class sees, and an error that does not name the base's method. A call
+outside every class, through an instance, picks among the methods its place sees too, and where the
+place sees no method of the name, the call is `not-visible` (F9), as C# reports a member it cannot
+reach (CS0122) *(assumed: a reading of the answer, which named a call from the class)*.
+
+Case: [classes/call-hidden-base-method.kz](../corpus/classes/call-hidden-base-method.kz)
+```kurz
+class Counter(int Start) {
+    int Next() => Start + 1
+}
+
+class Ticket(int Seat) : Counter {
+    pub int Next(int step) => Seat + step
+
+    // `Next()` fits only the `Next` of `Counter`, which `Ticket` does not see: it is no candidate, and the call is `Next(int)`'s
+    pub int Take() => Next()
+}
+
+print(Ticket(1, 2).Take())
+```
+
 A call of a name that has one function, with an argument of a type its parameter does not take, is
 `type-mismatch` (T1), a value of one type where another is required, and not `argument-mismatch`,
 and so is a call of such a name whose argument is a call with a case the parameter's union does not

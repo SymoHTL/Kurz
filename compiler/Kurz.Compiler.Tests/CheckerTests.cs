@@ -4475,6 +4475,31 @@ public sealed class CheckerTests
         Assert.Equal(Said(Program + "class D(int Y) {\n" + body), said);
     }
 
+    [Theory]
+    [InlineData("    int Count => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count() => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count() => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count(int y) => y + X\n", "    pub long Run() => Count(3)\n", "D(1, 2).Run()", null, 0, 6)]
+    public void A_member_of_a_base_the_class_does_not_see_is_no_candidate_of_a_call_from_it(string member, string use, string call, string? id, int line, int hiddenLine)
+    {
+        // F13, F9 (the owner, 2026-11-06): a property or a method of a base the class does not see is no candidate of a call beside the
+        // class's own method of its name, by the name alone and through an instance: a call that fits only the base's member is the
+        // error of the class's own method, which takes a `long`, and in the last row, where the base's method fits exactly and the
+        // class's own with a widening, the call is the class's own and the program is clean
+        const string Own = "    pub long Count(long y) => y + Y\n";
+        var program = "class B(int X) {\n" + member + "}\n\nclass D(int Y) : B {\n" + Own + use + "}\n\nprint(" + call + ")\n";
+        (string, int)[] expected = id is null ? [] : [(id, line)];
+        Assert.Equal(expected, Errors(program));
+
+        // as the same class with no base says, four lines up
+        var noBase = program[program.IndexOf("class D", StringComparison.Ordinal)..].Replace(" : B {", " {").Replace("D(1, 2)", "D(2)");
+        Assert.Equal(expected.Select(e => (e.Item1, e.Item2 - 4)), Errors(noBase));
+
+        // the positive control: the same class without its own method, where the call is the base's member's, which the class does not see
+        Assert.Equal([(ErrorIds.NotVisible, hiddenLine)], Errors(program.Replace(Own, "")));
+    }
+
     [Fact]
     public void A_property_of_a_base_named_Text_gives_an_instance_no_text()
     {
