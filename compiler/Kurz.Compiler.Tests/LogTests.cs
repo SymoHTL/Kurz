@@ -252,21 +252,36 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     }
 
     [Theory]
-    [InlineData("Log.Information(\"a\")\n", "Warning Kurz.Log: dropped 1 line")]
-    [InlineData("Log.Information(\"a\")\nLog.Error(\"b\")\n", "Warning Kurz.Log: dropped 2 lines")]
-    public void A_write_the_system_refuses_raises_nothing_and_the_next_line_written_says_how_many_were_dropped(string dropped, string line)
+    [InlineData("Log.Information(\"a\")\n", "", "Warning Kurz.Log: dropped 1 line")]
+    [InlineData("Log.Information(\"a\")\nLog.Error(\"b\")\n", "", "Warning Kurz.Log: dropped 2 lines")]
+    [InlineData("Log.Information(\"a\")\n", "Kurz.Log=None", "Warning Kurz.Log: dropped 1 line")] // whatever level the filter gives `Kurz.Log`
+    public void A_write_the_system_refuses_raises_nothing_and_the_next_line_written_says_how_many_were_dropped(string dropped, string filter, string line)
     {
         // standard error appends to a file already past the limit of a file's size, so that a write fails with EFBIG and no signal;
         // the program empties the file, and the next line is written
         var text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\n" + dropped + "Empty() else {\n    IoError e => print(e)\n}\n\nLog.Information(\"c\")\nLog.Information(\"d\")\nprint(\"done\")\n";
-        var name = $"log-dropped-{dropped.Length}";
+        var name = $"log-dropped-{dropped.Length}-{filter.Length}";
         var before = DateTime.UtcNow;
-        if (Ran(text, name, $"printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        if (Ran(text, name, $"export KURZ_LOG='{filter}'; printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["done"], run.Output);
             var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
             Assert.Equal([line, "Information program: c", "Information program: d"], Unstamped(log, before, DateTime.UtcNow));
+        }
+    }
+
+    [Fact]
+    public void Lines_dropped_after_the_last_line_written_are_named_by_no_line()
+    {
+        // as in the theory above, `a` is refused and the program empties the file, where a line after it would be written; the program
+        // ends with no line after it, and nothing is written at its exit
+        const string text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\nLog.Information(\"a\")\nEmpty() else {\n    IoError e => print(e)\n}\n\nprint(\"done\")\n";
+        if (Ran(text, "log-dropped-last", "printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["done"], run.Output);
+            Assert.Equal("", File.ReadAllText(Path.Combine(toolchain.Directory, "log-dropped-last", "log.txt")));
         }
     }
 

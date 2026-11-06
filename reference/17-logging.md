@@ -136,7 +136,8 @@ the owner's answers (§12, the owner, 2026-11-05, answers L3 and L8). A build fo
 runtime gives no clock for a line's time, says `not supported` at a log call (S11), which narrows
 Q16 (a) (§12, the owner, 2026-11-05, answer L2). Top-level code takes in a function at the top
 level, its file's name is the name without its folder, and a call in a lambda takes the category
-of the code that holds the lambda. *(proposed)*
+of the code that holds the lambda. *(proposed)* This rule names no category for a call in a method
+of a generic type, in a constructor, in a property or in a field's default.
 
 No case: a case's header holds no line of standard error, and a case that expects output writes
 nothing to it.
