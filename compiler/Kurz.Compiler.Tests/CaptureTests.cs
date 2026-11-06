@@ -15,6 +15,9 @@ public sealed class CaptureTests
 {
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(3);
 
+    // the limit of a control, a program whose streams end with it: a cold start of `cmd.exe` on a CI runner took all of `Limit`
+    private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(60);
+
     [Fact]
     public async Task A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit()
     {
@@ -22,18 +25,19 @@ public sealed class CaptureTests
         {
             // `start /b` leaves `ping` running with the output it took from `cmd`, which ends at once; no list of a process's handles
             // is read on Windows, so the run ends at its limit and says that it found no holder, and `ping` ends by itself
-            Assert.Equal(0, Processes.Capture("cmd.exe", ["/c", "echo done"], null, Limit).Code); // a program whose streams end with it
+            Assert.Equal(0, Processes.Capture("cmd.exe", ["/c", "echo done"], null, ControlLimit).Code); // a program whose streams end with it
             var started = Stopwatch.StartNew();
             var held = Task.Run(() => Processes.Capture("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1"], null, Limit));
             Assert.True(await Task.WhenAny(held, Task.Delay(TimeSpan.FromSeconds(20))) == held, "the run waited past its limit on the output a child of its program holds");
             Assert.True(started.Elapsed >= Limit, $"the run ended after {started.Elapsed}, before its limit of {Limit}");
-            var (heldCode, _, heldError) = await held;
-            Assert.Equal(-1, heldCode);
-            Assert.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", heldError, StringComparison.Ordinal);
+            var (heldCode, heldOutput, heldError) = await held;
+            var heldSeen = $"output [{heldOutput}] error [{heldError}] after {started.Elapsed}"; // each assert below names what the run gave
+            Assert.True(heldCode == -1, $"the run ended with {heldCode}, not -1: {heldSeen}");
+            Assert.True(heldError.EndsWith("`cmd.exe` ended, and an orphan holds its output: no process that holds it was found", StringComparison.Ordinal), $"the error does not say that no holder was found: {heldSeen}");
             return;
         }
 
-        Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, Limit)); // a program whose streams end with it
+        Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, ControlLimit)); // a program whose streams end with it
 
         var clock = Stopwatch.StartNew();
         var run = Task.Run(() => Processes.Capture("/bin/sh", ["-c", "sleep 60 & echo $!"], null, Limit));
@@ -41,10 +45,11 @@ public sealed class CaptureTests
         Assert.True(clock.Elapsed >= Limit, $"the run ended after {clock.Elapsed}, before its limit of {Limit}");
         var (code, output, error) = await run;
         var child = output.Trim();
-        Assert.Equal(-1, code);
-        Assert.Matches("^[0-9]+$", child);
-        Assert.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", error, StringComparison.Ordinal);
-        Assert.False(Lives(child), $"the child {child} still runs");
+        var seen = $"output [{output}] error [{error}] after {clock.Elapsed}"; // each assert below names what the run gave
+        Assert.True(code == -1, $"the run ended with {code}, not -1: {seen}");
+        Assert.True(child.Length > 0 && child.All(char.IsAsciiDigit), $"the output holds no pid: {seen}");
+        Assert.True(error.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", StringComparison.Ordinal), $"the error does not say that the child {child} was ended: {seen}");
+        Assert.False(Lives(child), $"the child {child} still runs: {seen}");
     }
 
     [Fact]
@@ -169,6 +174,64 @@ public sealed class CaptureTests
         Assert.Equal("pid 100, ended; pid 101, not ended", Processes.Held([ended, passed], [ended]));
         Assert.Equal("pid 100, ended", Processes.Held([ended], [ended]));
         Assert.Equal("no process that holds it was found", Processes.Held([], []));
+    }
+
+    [Fact]
+    public void A_program_ended_at_its_limit_names_where_it_stood()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // no /proc is read elsewhere, and the error ends as before
+        }
+
+        // a positive control first: a program that ends inside its limit says nothing of where it stood
+        Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, TimeSpan.FromSeconds(60)));
+
+        // `sleep` waits in a call of the system the whole time, so its state is S and its syscall a number and six arguments
+        var (code, output, error) = Processes.Capture("/bin/sleep", ["30"], null, Limit);
+        Assert.Equal((-1, ""), (code, output));
+        Assert.Matches("^\n`/bin/sleep` gave no answer within 3 s and was ended; where it stood, as /proc gave it: state S, wchan \\S+, syscall [0-9]+( 0x[0-9a-f]+){6}$", error);
+    }
+
+    [Fact]
+    public void Where_a_program_stood_is_read_from_its_entry_without_the_pointers()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // /proc is read on Linux alone
+        }
+
+        var proc = Directory.CreateTempSubdirectory("kurz-proc-").FullName;
+        try
+        {
+            void Lay(int pid, string stat, string wchan, string syscall)
+            {
+                var entry = Path.Combine(proc, pid.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Directory.CreateDirectory(entry);
+                File.WriteAllText(Path.Combine(entry, "stat"), stat);
+                File.WriteAllText(Path.Combine(entry, "wchan"), wchan);
+                File.WriteAllText(Path.Combine(entry, "syscall"), syscall);
+            }
+
+            // a name with a space and a bracket, a call with its six arguments and the two pointers after them, which are left out
+            Lay(200, "200 (a b) c) S 1 200 200 0", "wait_woken", "0 0x4 0x7f00 0x2000 0x0 0x8 0x0 0x7ffe0000 0x7f000001\n");
+            Assert.Equal("; where it stood, as /proc gave it: state S, wchan wait_woken, syscall 0 0x4 0x7f00 0x2000 0x0 0x8 0x0", Processes.Stood(proc, 200));
+
+            // a process that waits outside a call: -1 alone, its pointers left out; and one that runs, which waits in nothing
+            Lay(201, "201 (p) D 1 201 201 0", "folio_wait_bit", "-1 0x7ffe0000 0x7f000001\n");
+            Assert.Equal("; where it stood, as /proc gave it: state D, wchan folio_wait_bit, syscall -1", Processes.Stood(proc, 201));
+            Lay(202, "202 (p) R 1 202 202 0", "0", "running\n");
+            Assert.Equal("; where it stood, as /proc gave it: state R, wchan 0, syscall running", Processes.Stood(proc, 202));
+
+            // an entry that is gone, as the program's is once it ended, and a stat that ends at its name
+            Assert.Equal("; where it stood could not be read", Processes.Stood(proc, 203));
+            Lay(204, "204 (p)", "0", "running\n");
+            Assert.Equal("; where it stood could not be read", Processes.Stood(proc, 204));
+        }
+        finally
+        {
+            Directory.Delete(proc, recursive: true);
+        }
     }
 
     /// <summary>The start of the running process <paramref name="pid"/>: the 22nd field of its stat, counted from the end of its name in brackets.</summary>
