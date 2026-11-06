@@ -1,0 +1,16 @@
+// expect: output
+// | x
+// | 1
+// rules: W4
+
+void | HttpError Fill(HttpHeaders headers) {
+    headers.Add("", "x")
+}
+
+h = HttpHeaders()
+Fill(h) else {
+    HttpError e => print(e.Detail)
+}
+// an empty name is taken, as std/'s class took it; a CR or a LF alone is refused
+print(h.Get("") ?? "none")
+print(h.Count)

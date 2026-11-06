@@ -1,0 +1,10 @@
+// expect: output
+// | ok
+// rules: R9
+
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("x"))
+weak Button? w = b
+b.OnClick = () => print(w?.Name ?? "gone")
+b.OnClick()
