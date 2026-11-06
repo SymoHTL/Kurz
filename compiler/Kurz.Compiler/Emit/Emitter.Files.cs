@@ -357,8 +357,8 @@ public sealed partial class Emitter
     /// first, as a <c>Read</c> below 8 KiB fills it (<see cref="FillBuffer"/>), and all that read gave is appended and kept from the
     /// buffer's start. The room in the list is made for the bytes appended, as <c>Add</c> grows a list. The count appended is the result,
     /// 0 at the end of the file or the stream (assumed, as a <c>Read</c>'s). A call in flight on the handle (S5), whose fill, where a
-    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it (assumed, as a <c>Read</c>'s fill
-    /// gives what it took).
+    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it, having no <c>max</c>, where a
+    /// <c>Read</c>'s fill gives at most <c>max</c> of it (assumed).
     /// </summary>
     private void EmitFileFill(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {
