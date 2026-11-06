@@ -437,6 +437,12 @@ public sealed partial class Checker
             }
         }
 
+        if (from is ClassType owner && Property(owner.Symbol, m.Member) is not null)
+        {
+            NotSupported(m.Line, "a property read after `?.` (K7, N5)");
+            return Typed.Error;
+        }
+
         var member = MemberOf(from, m.Member, m.Line);
         if (member.IsError)
         {

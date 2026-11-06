@@ -1,5 +1,4 @@
-// expect: error type-mismatch at 5
+// expect: error type-mismatch at 4
 // rules: T36
 
-instant start = instant.Now
-print(start + start)
+instant Twice(instant t) => t + t

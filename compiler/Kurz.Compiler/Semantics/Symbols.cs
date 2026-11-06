@@ -90,6 +90,9 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
     /// </summary>
     public bool IsStatic => Owner is not null && Declaration is not null && (Declaration.Modifiers & Modifiers.Static) != 0;
 
+    /// <summary>K7: a read-only property, <c>pub int Count => names.Count</c>, a method without parameters that a read calls, <c>h.Count</c>.</summary>
+    public bool IsProperty => Declaration is { Property: true };
+
     /// <summary>K7: the method of a base class this <c>override</c> overrides; null for any other function.</summary>
     public FunctionSymbol? Overridden { get; set; }
 
@@ -208,7 +211,7 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     /// <summary>A5, A9: the <c>Text()</c> that gives an instance its text, a method of the instance of no parameters with a <c>string</c> result, its own or the nearest base's; null where the chain has none.</summary>
     public FunctionSymbol? TextMethod =>
-        Chain.Select(c => c.Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null)
+        Chain.Select(c => c.Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => !f.IsStatic && !f.IsProperty && f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String }) : null)
             .FirstOrDefault(f => f is not null);
 }
 
