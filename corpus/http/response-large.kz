@@ -1,0 +1,77 @@
+// expect: output
+// | HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 70000||[70000]
+// | HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Transfer-Encoding: chunked||11170|[70000]|0||
+// | HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 70000||[70000]
+// | HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||10000|[65536]|1170|[4464]|0||
+// rules: W8
+
+// a body over 64 KiB goes out whole, and a file in pieces of 64 KiB, each a chunk where the body is chunked; the wire is printed
+// with each CR LF as `|` and each run of the byte `z` as its length in brackets
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server)
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    mut shown = Bytes()
+    mut run = 0
+    for b in got {
+        if b == 122 {
+            run = run + 1
+            continue
+        }
+
+        if run > 0 {
+            shown.AddRange("[{run}]".Bytes)
+            run = 0
+        }
+
+        shown.Add(b)
+    }
+
+    if run > 0 {
+        shown.AddRange("[{run}]".Bytes)
+    }
+
+    text = string.FromUtf8(shown) else {
+        InvalidUtf8 => "?"
+    }
+
+    print(text.Replace("\r\n", "|"))
+}
+
+Bytes Repeated(byte value, int count) {
+    mut b = Bytes()
+    while b.Count < count {
+        b.Add(value)
+    }
+
+    return b
+}
+
+void | IoError | HttpError All() {
+    body = Repeated(122, 70000)
+    text = string.FromUtf8(body) else {
+        InvalidUtf8 => ""
+    }
+
+    Wire(HttpResponse.Text(200, text))
+    chunked = HttpResponse.Text(200, text)
+    chunked.Headers.Set("Transfer-Encoding", "chunked")
+    Wire(chunked)
+    File.WriteAll("response-large.txt", body)
+    Wire(HttpResponse.File(200, "response-large.txt"))
+    file = HttpResponse.File(200, "response-large.txt")
+    file.Headers.Set("Transfer-Encoding", "chunked")
+    Wire(file)
+    File.Delete("response-large.txt")
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}

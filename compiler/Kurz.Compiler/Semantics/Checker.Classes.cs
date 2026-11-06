@@ -196,7 +196,7 @@ public sealed partial class Checker
             }
             else if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -268,7 +268,7 @@ public sealed partial class Checker
             var type = Resolve(f.Type!);
             if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -381,7 +381,7 @@ public sealed partial class Checker
         }
         else if (Types.IsVoid(s.Type))
         {
-            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (K1, F4)");
+            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (F4)");
             s.Refused = true;
         }
         else if (held.Count > 0)
@@ -1248,7 +1248,7 @@ public sealed partial class Checker
     /// </summary>
     private bool FieldVisible(FieldSymbol field, ClassSymbol owner, int line)
     {
-        if (field.IsPub || ReferenceEquals(CurrentClass(), owner) || (field.IsInternal && InFolder(owner)))
+        if (Visible(field, owner))
         {
             return true;
         }
@@ -1256,6 +1256,10 @@ public sealed partial class Checker
         Report(ErrorIds.NotVisible, line, Hidden(field.Name, owner, field.IsInternal, "a field"));
         return false;
     }
+
+    /// <summary>F9: whether a field of <paramref name="owner"/> is visible at the place the checker reads: one with <c>pub</c>, any inside its class, and one marked <c>internal</c> in the folder that declares its class.</summary>
+    private bool Visible(FieldSymbol field, ClassSymbol owner) =>
+        field.IsPub || ReferenceEquals(CurrentClass(), owner) || (field.IsInternal && InFolder(owner));
 
     /// <summary>F9: a method without <c>pub</c> is private to its class, one marked <c>internal</c> to the folder that declares its class, and one with <c>prot</c> visible in the classes derived from it too; a call of it from elsewhere is <c>not-visible</c>.</summary>
     private bool Visible(FunctionSymbol method) =>

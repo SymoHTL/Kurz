@@ -1,0 +1,47 @@
+// expect: output
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Transfer-Encoding: gzip, chunked||5|hello|0||]
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Transfer-Encoding: Chunked||0||]
+// | InvalidInput
+// | []
+// rules: W8
+
+// a `Transfer-Encoding` the handler sets is kept as it set it, `chunked` added as its last coding unless it is, and the body is
+// chunked, a coding it names being announced and not applied; beside a `Content-Length` it is a response that gets no answer
+void | IoError Wire(HttpResponse r) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    r.Write(server) else {
+        IoError e => print(e.Kind)
+    }
+
+    server.ShutdownWrite()
+    mut got = Bytes()
+    while client.Read(mut got, 65536) > 0 {
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    shown = text.Replace("\r\n", "|")
+    print("[{shown}]")
+}
+
+void | IoError | HttpError All() {
+    gzip = HttpResponse.Text(200, "hello")
+    gzip.Headers.Set("Transfer-Encoding", "gzip")
+    Wire(gzip)
+    empty = HttpResponse.Text(200, "")
+    empty.Headers.Set("Transfer-Encoding", "Chunked")
+    Wire(empty)
+    both = HttpResponse.Text(200, "hello")
+    both.Headers.Set("Transfer-Encoding", "chunked")
+    both.Headers.Set("Content-Length", "5")
+    Wire(both)
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print(e.Detail)
+}
