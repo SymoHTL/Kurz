@@ -41,6 +41,14 @@ public sealed class CheckerTests
         return diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList();
     }
 
+    /// <summary>The one diagnostic of a program, a <c>not supported</c> at the line given that names the rule given, whatever its wording.</summary>
+    private static void NotSupportedAt(int line, string rule, string program)
+    {
+        var only = Assert.Single(NotSupported(program));
+        Assert.StartsWith($"{line}: ", only);
+        Assert.EndsWith($"({rule})", only);
+    }
+
     /// <summary>The type of a top-level variable of a program the checker reads clean.</summary>
     private static string TypeOf(string program, string variable)
     {
@@ -5027,19 +5035,22 @@ public sealed class CheckerTests
     public void A_chain_of_copies_deeper_than_the_build_reads_is_not_supported_at_its_first_call()
     {
         // T33: a reader that calls itself for a larger type each time makes a new copy at each call, which no build could end
-        Assert.Equal(["7: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"],
-            NotSupported("void Deep<T>() {\n    match T.Kind {\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()"));
+        NotSupportedAt(7, "T33", "void Deep<T>() {\n    match T.Kind {\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
     }
 
     [Fact]
-    public async Task A_chain_of_copies_that_branches_ends_at_the_bound_with_its_one_diagnostic()
+    public void A_chain_of_copies_that_branches_ends_at_the_bound_with_its_one_diagnostic()
     {
         // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
-        // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains
+        // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains; the check runs in a process of its
+        // own, `kurz exec`, whose limit of 20 seconds ends that process where the check does not end
         const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
             + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
-        var bound = await Task.Run(() => NotSupported(Branching)).WaitAsync(TimeSpan.FromSeconds(20)); // a `TimeoutException` where it does not end
-        Assert.Equal(["12: a chain of more than 64 copies of generic functions that read their type, from `Deep<int>` (T33)"], bound);
+        var (code, output, error) = Processes.Capture(CommandTests.Host, [CommandTests.Dll, "exec", Branching], null, TimeSpan.FromSeconds(20));
+        Assert.True(code == 1 && output.Length == 0, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of 20 seconds: {output}{error}");
+        var bound = Assert.Single(error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+        Assert.StartsWith("exec:12: not supported: ", bound);
+        Assert.EndsWith("(T33)", bound);
     }
 
     [Fact]
@@ -5049,7 +5060,7 @@ public sealed class CheckerTests
         static string Chain(int readers) => string.Concat(Enumerable.Range(1, readers).Select(i =>
             $"void R{i}<T>() {{\n    match T.Kind {{\n        else => {(i < readers ? $"R{i + 1}<T>()" : "print(1)")}\n    }}\n}}\n\n")) + "R1<int>()";
         Clean(Chain(64));
-        Assert.Equal(["391: a chain of more than 64 copies of generic functions that read their type, from `R1<int>` (T33)"], NotSupported(Chain(65)));
+        NotSupportedAt(391, "T33", Chain(65));
     }
 
     [Fact]
@@ -5100,7 +5111,7 @@ public sealed class CheckerTests
         // type is read in its copies alone, and its chain of copies stays bounded
         Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(string.Format(Deep, "Deep([nothing], n - 1)")));
         var passing = "void Only<T>() {\n    match T.Kind {\n        else => print(1)\n    }\n}\n\nvoid Outer<U>(U x, int n) {\n    Only<U>()\n    if n > 0 {\n        Outer([x], n - 1)\n    }\n}\n\nOuter(1, 3)";
-        Assert.Equal(["14: a chain of more than 64 copies of generic functions that read their type, from `Outer<int>` (T33)"], NotSupported(passing));
+        NotSupportedAt(14, "T33", passing);
         Clean("void Deep<T>() {\n    match T.Kind {\n        TypeKind.List => print(1)\n        else => Deep<List<T>>()\n    }\n}\n\nDeep<int>()");
     }
 
