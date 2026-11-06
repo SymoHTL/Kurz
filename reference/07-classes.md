@@ -192,7 +192,12 @@ by `Id` and `Level`. The owner chose this on 2026-10-03 as the option whose cont
 clause "replacing instead of extending" the base's; against C#'s record equality, which compares
 the run-time types and every field with a replacing clause, and against equality by the fields of
 the static type, under which `a == b` and `b == a` can differ; the cost is that a base-typed
-collection cannot find an instance by a base-typed key.
+collection cannot find an instance by a base-typed key. `==` on a class that another class derives
+from, and a key of it, read the fields that count of each class derived from it too, since the value
+can be an instance of any of them, so that such a field of a type `==` does not take makes `==` on the
+base `type-mismatch`, as D3 reads the fields of a type derived from a `data` type *(assumed, §4: the
+build's reading of the answer that `==` on a `data` value that holds a map or a function value is a
+compile error; C# refuses no `==`, since every type has `Equals`)*.
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
@@ -414,7 +419,7 @@ assigned as after, and the build says `not supported` to such a constructor (K14
 readings of the owner's choice of 2026-11-05, #39, comment 6657252447, marked assumed there: a property
 of a base class is read through an instance of a derived class and by its name alone in the derived
 class's methods, as C# reads an inherited property (K6), the nearest class up the chain that declares a
-member of the name giving it; a property of a base without `pub` is `not-visible` in the derived class,
+member of the name giving it; a property of a base with none of `pub`, `prot` and `internal` is `not-visible` in the derived class,
 as a method of it is (F9); and `virtual`, `override` and `prot` on a property are `not supported`, as
 §14 leaves them open)* A member of a derived class with the name of a property of a base, a property, a
 field or a method whatever its parameters, and a property with the name of a method of a base, are
@@ -422,7 +427,7 @@ field or a method whatever its parameters, and a property with the name of a met
 (§4, the owner, 2026-11-05, #110, comment 6659026217, against an overload of a base property by a method
 with parameters and against C#'s hiding, CS0108, which `new` silences and Kurz has not; the cost is that
 a derived class reuses no such name while §14 leaves a `virtual` or `override` property open). A
-property or a method of a base that the class cannot see, one without `pub`, is hidden by nothing, as a
+property or a method of a base that the class cannot see, one with none of `pub`, `prot` and `internal`, is hidden by nothing, as a
 method the class cannot see is (F9) *(assumed, §4: a reading of the answer, which names no visibility)*.
 A property with the name of a field of a base is `redeclared` (V9), since the base's fields are the
 class's *(assumed, §4: the id of that case)*. A `static`, `virtual`, `override` or `prot` property, one
