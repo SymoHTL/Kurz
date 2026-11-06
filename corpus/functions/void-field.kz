@@ -1,0 +1,7 @@
+// expect: error syntax at 5
+// rules: F4
+
+// `void` is no type of a field
+data Box(void Content)
+
+print("boxed")

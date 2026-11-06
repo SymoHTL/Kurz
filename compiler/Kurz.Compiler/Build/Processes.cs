@@ -18,9 +18,10 @@ public static class Processes
     /// the code -1 and says so on its error stream. The variables given are set for it, a null one
     /// taken away. The streams are waited for within what remains of the limit: a child the program
     /// left running holds them past the program's end, and no end of the program's tree reaches it once
-    /// the first process of the system has taken it over, so on Linux each process that holds the write
-    /// end of one of them then is found by the pipes it holds and ended, and the run answers -1 with its
-    /// pid on the error stream (knowledge/an-orphan-holds-the-output-of-its-program.md).
+    /// its new parent has taken it over, the nearest ancestor marked as a subreaper or else the first
+    /// process of the system, so on Linux each process that holds the write end of one of them then is
+    /// found by the pipes it holds and ended, and the run answers -1 with each one's pid on the error
+    /// stream, and whether it was ended (knowledge/an-orphan-holds-the-output-of-its-program.md).
     /// </summary>
     public static (int Code, string Output, string Error) Capture(string file, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan limit, IReadOnlyDictionary<string, string?>? environment = null)
     {
@@ -69,9 +70,9 @@ public static class Processes
             if (!Task.WaitAll([output, error], rest > Drain ? rest : Drain))
             {
                 var orphans = Holders("/proc", pipes, Environment.ProcessId);
-                End("/proc", orphans);
+                var ended = End("/proc", orphans);
                 var drained = Task.WaitAll([output, error], Drain);
-                var held = orphans.Count == 0 ? "no process that holds it was found" : $"pid {string.Join(", ", orphans.Select(o => o.Pid))}, ended";
+                var held = Held(orphans, ended);
                 return (-1, drained ? output.Result : string.Empty, (drained ? error.Result : string.Empty) + $"\n`{file}` {ending}, and an orphan holds its output: {held}");
             }
 
@@ -140,7 +141,7 @@ public static class Processes
 
             try
             {
-                if (Directory.EnumerateFileSystemEntries(Path.Combine(entry, "fd")).Any(fd => new FileInfo(fd).LinkTarget is { } name && pipes.Contains(name) && Writes(Path.Combine(entry, "fdinfo", Path.GetFileName(fd))))
+                if (Directory.EnumerateFileSystemEntries(Path.Combine(entry, "fd")).Any(fd => HoldsWriteEnd(fd, Path.Combine(entry, "fdinfo", Path.GetFileName(fd)), pipes))
                     && Start(entry) is { } start)
                 {
                     found.Add(new Holder(pid, start));
@@ -155,14 +156,34 @@ public static class Processes
         return found;
     }
 
-    /// <summary>Whether the handle that the <c>fdinfo</c> file at <paramref name="info"/> describes is open for writing: the access mode of its flags, written in octal, is 1 or 2.</summary>
+    /// <summary>
+    /// Whether the handle <paramref name="fd"/> is one of the <paramref name="pipes"/>, open for writing as its <c>fdinfo</c> file at
+    /// <paramref name="info"/> says. A handle that closed while it was read is no writer, and the process's other handles are read.
+    /// </summary>
+    internal static bool HoldsWriteEnd(string fd, string info, HashSet<string> pipes)
+    {
+        try
+        {
+            return new FileInfo(fd).LinkTarget is { } name && pipes.Contains(name) && Writes(info);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the handle that the <c>fdinfo</c> file at <paramref name="info"/> describes is open for writing: the access mode of its
+    /// flags, written in octal, is 1 or 2, which their last digit holds. Flags that are no octal number are no writer's.
+    /// </summary>
     private static bool Writes(string info)
     {
         foreach (var line in File.ReadLines(info))
         {
             if (line.StartsWith("flags:", StringComparison.Ordinal))
             {
-                return (Convert.ToInt64(line["flags:".Length..].Trim(), 8) & 3) is 1 or 2;
+                var flags = line["flags:".Length..].Trim();
+                return flags.Length > 0 && flags.All(c => c is >= '0' and <= '7') && ((flags[^1] - '0') & 3) is 1 or 2;
             }
         }
 
@@ -171,21 +192,30 @@ public static class Processes
 
     /// <summary>
     /// The start of the process whose <c>/proc</c> entry is <paramref name="entry"/>: the 22nd field of its <c>stat</c>, counted from
-    /// the end of its name in brackets, which may hold a space; none where the field is not a number.
+    /// the end of its name in brackets, which may hold a space; none where the field is not a number, or the text ends first.
     /// </summary>
     private static ulong? Start(string entry)
     {
         var stat = File.ReadAllText(Path.Combine(entry, "stat"));
-        var fields = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
+        var close = stat.LastIndexOf(')');
+        if (close < 0 || close + 2 > stat.Length)
+        {
+            return null;
+        }
+
+        var fields = stat[(close + 2)..].Split(' ');
         return fields.Length > 19 && ulong.TryParse(fields[19], NumberStyles.None, CultureInfo.InvariantCulture, out var start) ? start : null;
     }
 
     /// <summary>
-    /// Ends each of the <paramref name="holders"/>, with what it started, where its entry under <paramref name="proc"/> still gives
-    /// the start it was found with; one that ended first, or whose id another process took since, is passed over.
+    /// Ends each of the <paramref name="holders"/>, where its entry under <paramref name="proc"/> still gives the start it was found
+    /// with, and gives back the ones it ended; one that ended first, or whose id another process took since, is passed over. It ends
+    /// the holder alone and not its tree: a process of the tree that holds a write end is a holder of its own, and one that holds
+    /// none holds nothing the run waits on.
     /// </summary>
-    internal static void End(string proc, List<Holder> holders)
+    internal static List<Holder> End(string proc, List<Holder> holders)
     {
+        var ended = new List<Holder>();
         foreach (var holder in holders)
         {
             try
@@ -196,16 +226,25 @@ public static class Processes
                 }
 
                 using var orphan = Process.GetProcessById(holder.Pid);
-                orphan.Kill(entireProcessTree: true);
+                orphan.Kill();
+                ended.Add(holder);
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or AggregateException or System.ComponentModel.Win32Exception)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                // IOException and UnauthorizedAccessException: its entry was gone or could not be read; ArgumentException: it ended;
-                // InvalidOperationException: it ended, or its tree would hold this process; AggregateException and Win32Exception:
-                // a part of its tree could not be ended. The run answers with what it has.
+                // IOException and UnauthorizedAccessException: its entry was gone or could not be read; ArgumentException and
+                // InvalidOperationException: it ended; Win32Exception: it could not be ended. The run answers with what it has.
             }
         }
+
+        return ended;
     }
+
+    /// <summary>
+    /// What the error stream of a run says of the <paramref name="found"/> holders: each one's pid, and whether it is among the
+    /// <paramref name="ended"/>, as <c>pid 100, ended; pid 101, not ended</c>.
+    /// </summary>
+    internal static string Held(List<Holder> found, List<Holder> ended) =>
+        found.Count == 0 ? "no process that holds it was found" : string.Join("; ", found.Select(h => $"pid {h.Pid}, {(ended.Contains(h) ? "ended" : "not ended")}"));
 
     /// <summary>
     /// How <c>kurz run</c> and <c>kurz exec</c> start the program: in the caller's directory, with the words after <c>--</c> as its

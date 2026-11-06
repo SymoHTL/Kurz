@@ -41,12 +41,16 @@ The check before the push: `git diff --name-only <the merge base the round revie
 names none of the pull request's files and none of those three. On a Draft,
 `py -3 tools/review/review.py --pr N --plan` after the push prints 0 batches before a dispatch; at
 the cap it refuses as `cap` when a file is left to review. The plan reads the state the CI account
-stored, as the run in CI does, whatever login it runs with. Where that state was stored under
-another key than the checkout's, and the checkout's `review.py` or `kit.py` is not the default
-branch's, it cannot know the key of the run in CI: it prints NOT CHECKED and exits 1. So it is run
-from a checkout of the default branch. Before #300 the plan read only the state of the login it ran
-as: with a person's login it printed `cap` for the head of pull request 297, which the run in CI
-then replayed whole.
+stored, as the run in CI does, whatever login it runs with. The run in CI makes its key of the
+default branch's `review.py` and `kit.py` as they are now, so the checkout's two files must be those:
+wherever the plan reads such a state and the checkout's `review.py` or `kit.py` is not the default
+branch's, it cannot know the key of that run, whatever key the state carries, and prints NOT
+CHECKED and exits 1. A checkout of an older default branch makes the key of a state stored before
+the reviewer changed, which the run in CI no longer makes; pull request 302 compared the two files
+only where the keys differed, and so counted that state's replay, which its round found. So it is run
+from a checkout of the default branch as it is now. Before #300 the plan read only the state of the
+login it ran as: with a person's login it printed `cap` for the head of pull request 297, which the
+run in CI then replayed whole.
 
 ## How to apply
 
