@@ -14,7 +14,9 @@ its low findings are collected on one issue and hold nothing.
                                       It plans the run in CI, from the state the CI account stored
   review.py ... --passes N            with --local, --dry-run or --plan: the caller's limit for this run. A
                                       batch gets at most N passes, where a run without it gives two to five.
-                                      A plan with it plans a run off the pipeline, from its own login's state
+                                      A plan with it plans a run off the pipeline, from its own login's state:
+                                      a run off the pipeline without it is planned with `--passes 5`, the
+                                      limit such a run has, since a plan without it plans the run in CI
   review.py --self-test               the unit suite in test_review.py
 
 Trust boundary: the pull request is data. The rules come from the default branch through the API,
@@ -26,9 +28,9 @@ workflow run of this repository shares, and the status `review` is posted with t
 neither proves that this script wrote it (HAZARD #11). A plan of the run in CI (`--plan` without
 `--passes`) posts and pays nothing, and reads the state the CI account wrote, CI_ACCOUNT, as that
 run does, so that it counts what that run counts. A forged comment of that account misleads it as it
-misleads the run (HAZARD #11). Where that state's key is not this checkout's, and this checkout's
-review.py or kit.py is not the default branch's, which the run in CI is made of, the plan cannot know
-that run's key: it says NOT CHECKED and exits 1, and never says `cap` (#300).
+misleads the run (HAZARD #11). Where that state exists and this checkout's review.py or kit.py is not
+the default branch's as it is now, which the run in CI is made of, the plan cannot know that run's key,
+whatever key the state carries: it says NOT CHECKED and exits 1, and never says `cap` (#300).
 
 What this script posts and prints is public. Every text that comes from the model, from an
 exception or from the caller goes through `public`, which replaces a credential-shaped or
@@ -1140,17 +1142,17 @@ def review(argv):
         reader = CI_ACCOUNT if call["plan"] and call["passes"] is None else me
         states = marked(issue_comments, reader, STATE_MARK)
         state_comment, state = states[-1] if states else (None, None)
-        if reader != me and isinstance(state, dict) and state.get("key") != key:
-            # that run's key is made of the default branch's review.py and kit.py: a key that differs from this
-            # checkout's is that run's answer only where this checkout's two files are the default branch's
+        if reader != me and isinstance(state, dict):
+            # that run's key is made of the default branch's review.py and kit.py as they are now: this checkout's key,
+            # whether it is the stored one or not, is that run's only where this checkout's two files are those
             mine = {"tools/review/review.py": parts["review.py"], "tools/kit.py": parts["kit.py"]}
             other = [path for path, data in mine.items() if forge.blob_id(branch, path) != blob_id(data)]
             if other:
-                print(f"NOT CHECKED: whether the cache of the run in CI answers this head. Its state (comment "
-                      f"{state_comment['id']}, written by {CI_ACCOUNT}) is stored under another key than this checkout's, and "
-                      f"{' and '.join(other)} here {'is' if len(other) == 1 else 'are'} not the default branch's ({branch}), "
-                      f"which that run's key is made of: what it replays is not known here, so no batch is counted. "
-                      f"Run the plan from a checkout of the default branch")
+                print(f"NOT CHECKED: whether the cache of the run in CI answers this head. That run reads its state (comment "
+                      f"{state_comment['id']}, written by {CI_ACCOUNT}) with a key made of the default branch's review.py and "
+                      f"kit.py, and {' and '.join(other)} here {'is' if len(other) == 1 else 'are'} not the default branch's "
+                      f"({branch}) as it is now: that run's key, and what it replays, are not known here, whatever key the "
+                      f"state carries, so no batch is counted. Run the plan from a checkout of the default branch as it is now")
                 return 1
         replay = replayable(state, key, files)
         todo = [f for f in files if f["path"] not in replay]

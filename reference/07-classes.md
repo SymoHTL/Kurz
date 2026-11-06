@@ -165,6 +165,23 @@ print(a == Club([o]))
 print(a == a)
 ```
 
+Case: [classes/property-equality.kz](../corpus/classes/property-equality.kz)
+```kurz
+class Point(int X) {
+    pub int Loud => Say()
+
+    int Say() {
+        print("read")
+        return X
+    }
+}
+
+// a property is no field: equality compares the fields alone (K4), and runs no property, which would print
+print(Point(1) == Point(1))
+print(Point(1) == Point(2))
+print(Point(1).Loud)
+```
+
 ### K13 (decided, §4) Equality across inheritance
 
 What D15 says for `data` holds for classes: instances of different classes are never equal,
@@ -366,7 +383,49 @@ the override taking the base method's visibility; the cost is a method that a ca
 reaches and a call on the derived type is refused). A class derived from the one with such an
 override takes it as the method of that name, so a call of it on that class is `not-visible` too
 *(assumed: the nearest override stands for the method it overrides, as F13's candidates are read)*.
-There is no property syntax until something needs it.
+A read-only property is written as C#'s expression-bodied property, `pub int Count => names.Count`: a type,
+a name, `=>` and one expression. It is read as `h.Count`, as a list's `xs.Count` is (M9), without a call,
+and has no setter (§4, the owner, 2026-11-03, #110, comment 6615254370, against a method `h.Count()`,
+which departs from `h.Count` and from `xs.Count`, and against a `pub mut int Count` field kept in step,
+which any program could write). *(assumed, §4: readings of the product pass, #110, comment 6615484562,
+not put to the owner: the expression runs at every read, as C#'s does, so a read that looks like a
+field's runs code; an assignment of a property, through an instance or by its name inside its class, is
+`assign-immutable`; a call `h.Count()` calls the value the property gives, as a field's value is called
+(F11), which is `type-mismatch` on an `int`; another form, an accessor `{ get; }`, a setter or parameters,
+is `syntax` (E4); inside its class a method or another property reads it by its name alone, as a field,
+and a field's default does not, where it is `unknown-name` as a method of the instance is (V10); its body
+may change the instance, as a method's does (K9); a property without `pub` is private to its class, and
+one marked `internal` is visible to the files of its folder, as every member marked so is (F9);
+a property and a field, a method or a parameter of the primary constructor of one name are `redeclared`
+(V9); a property is no field, so it stands in no list of the fields (T33), in no text `print` gives (A5)
+and in no equality (K4, K5), and one named `Text` gives an instance no text (A5); a read is a call, so a
+test of one read narrows no other and the read ends what a test showed of a path through a `mut` field
+(N9), and its value is no place that `mut` passes (M7) or that a `mut` method changes (M5); a read
+through the class's name, or by the property's name alone in a `static` member, is `static-mismatch`, as
+a method of the instance is (K19); a read after `?.` (N5) or after `&` (R10), where the checker reads a
+field alone, and a property marked `extern`, as a method so marked (R16), are `not supported`; a read in
+a constructor written in the body is a call of a method of the instance there, before its fields are
+assigned as after, and the build says `not supported` to such a constructor (K14))* *(assumed, §4: the
+readings of the owner's choice of 2026-11-05, #39, comment 6657252447, marked assumed there: a property
+of a base class is read through an instance of a derived class and by its name alone in the derived
+class's methods, as C# reads an inherited property (K6), the nearest class up the chain that declares a
+member of the name giving it; a property of a base without `pub` is `not-visible` in the derived class,
+as a method of it is (F9); and `virtual`, `override` and `prot` on a property are `not supported`, as
+§14 leaves them open)* A member of a derived class with the name of a property of a base, a property, a
+field or a method whatever its parameters, and a property with the name of a method of a base, are
+`hides-member`, since a property has no override and a method of a property's name is no overload of it
+(§4, the owner, 2026-11-05, #110, comment 6659026217, against an overload of a base property by a method
+with parameters and against C#'s hiding, CS0108, which `new` silences and Kurz has not; the cost is that
+a derived class reuses no such name while §14 leaves a `virtual` or `override` property open). A
+property or a method of a base that the class cannot see, one without `pub`, is hidden by nothing, as a
+method the class cannot see is (F9) *(assumed, §4: a reading of the answer, which names no visibility)*.
+A property with the name of a field of a base is `redeclared` (V9), since the base's fields are the
+class's *(assumed, §4: the id of that case)*. A `static`, `virtual`, `override` or `prot` property, one
+in an interface or in the body of a `data` type, and one of `void` or of a type that lists cases beside
+its success are open (§14): C# takes a `static`, `virtual`, `override` or `protected` property, one in
+an interface and one in a struct or a record, refuses one of `void` (CS0547) and has no type that lists
+cases; Kurz can take each form as C# does, or refuse it, as it refuses a setter. The build says
+`not supported` to each.
 
 Case: [classes/override-private.kz](../corpus/classes/override-private.kz)
 ```kurz
@@ -631,6 +690,141 @@ class Money(int Cents) {
 }
 
 print(Money.Of(3).Units())
+```
+
+Case: [classes/property.kz](../corpus/classes/property.kz)
+```kurz
+class Bag(string Name) {
+    mut List<int> items = [1]
+
+    pub int Count => items.Count
+    pub string Label => "{Name}: {Count}"
+
+    pub void Add(int x) {
+        items.Add(x)
+    }
+
+    pub int Twice() => Count * 2
+}
+
+b = Bag("ann")
+print(b.Count)
+b.Add(5)
+print(b.Count)
+print(b.Twice())
+print(b.Label)
+```
+
+Case: [classes/property-assign.kz](../corpus/classes/property-assign.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+b.Count = 3
+print(b.Count)
+```
+
+Case: [classes/property-call.kz](../corpus/classes/property-call.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+}
+
+b = Bag()
+print(b.Count())
+```
+
+Case: [classes/property-redeclared.kz](../corpus/classes/property-redeclared.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub int Count => items.Count
+    pub int Count(int x) => items.Count + x
+}
+
+print(Bag().Count)
+```
+
+Case: [classes/property-mut.kz](../corpus/classes/property-mut.kz)
+```kurz
+void Bump(mut int n) {
+    n = n + 1
+}
+
+class Counter {
+    mut int count = 0
+
+    pub int Count => count
+
+    pub void Run() {
+        Bump(mut Count)
+    }
+}
+
+Counter().Run()
+```
+
+Case: [classes/property-change.kz](../corpus/classes/property-change.kz)
+```kurz
+class Bag {
+    mut List<int> items = []
+
+    pub List<int> Items => items
+}
+
+b = Bag()
+b.Items.Add(1)
+print(b.Items.Count)
+```
+
+Case: [classes/property-equality.kz](../corpus/classes/property-equality.kz)
+
+Case: [classes/property-inherited.kz](../corpus/classes/property-inherited.kz)
+```kurz
+class Bag(List<int> Items) {
+    pub int Count => Items.Count
+}
+
+class Named(string Name) : Bag {
+    pub int Twice() => Count * 2
+    pub string Label => "{Name} ({Count})"
+}
+
+n = Named([1, 2], "Ann")
+print(n.Count)
+Bag b = n
+print(b.Count)
+print(n.Twice())
+print(n.Label)
+```
+
+Case: [classes/property-hides.kz](../corpus/classes/property-hides.kz)
+```kurz
+class Bag(List<int> Items) {
+    pub int Count => Items.Count
+}
+
+class Big(int Size) : Bag {
+    pub int Count(int x) => x
+}
+
+print(Big([1], 3).Count(2))
+```
+
+Case: [classes/property-static-mismatch.kz](../corpus/classes/property-static-mismatch.kz)
+```kurz
+class C {
+    pub int Count => 1
+}
+
+print(C.Count)
 ```
 
 ### K18 (decided, §3, §4, §6) What a `static` field may hold
