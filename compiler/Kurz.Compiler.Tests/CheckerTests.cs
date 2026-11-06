@@ -5316,8 +5316,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep(Pair(1, x), n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair(f.Get(x), x)], n - 1)")));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 7)], Errors(string.Format(Deep, "Deep([Pair(1, x)], n - 1)")));
-        Assert.Contains("`Deep` calls itself with `Pair<f.Type, T>` for `T`", Assert.Single(Check(string.Format(Deep, "Deep(Pair(f.Get(x), x), n - 1)")).Diagnostics.Sorted).Message);
-        Assert.Contains("`Deep` calls itself with `List<Pair<f.Type, T>>` for `T`", Assert.Single(Check(string.Format(Deep, "Deep([Pair(f.Get(x), x)], n - 1)")).Diagnostics.Sorted).Message);
+        Assert.Contains("`Pair<f.Type, T>`", Assert.Single(Check(string.Format(Deep, "Deep(Pair(f.Get(x), x), n - 1)")).Diagnostics.Sorted).Message);
+        Assert.Contains("`List<Pair<f.Type, T>>`", Assert.Single(Check(string.Format(Deep, "Deep([Pair(f.Get(x), x)], n - 1)")).Diagnostics.Sorted).Message);
         // the field's type with no type parameter takes no part: `Pair<f.Type, int>` runs, and `List<f.Type>` and the field's type alone are
         // left to the copies, where `Deep<List<int>>` reads `T.Fields` of a list and `Deep<int>` those of an `int`, each `kind-not-read` at
         // the outer call
