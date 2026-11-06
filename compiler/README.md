@@ -1811,8 +1811,9 @@ base has fields and no clause, where K13 does not say whether the base's fields 
 `override` on one method, and `virtual` on a private method (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
 of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
-over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one
-`int` with a result, each of the instance and visible at the loop (F9), the walk of a class that section 12 decides and section 4
+over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods that the
+call with one `int` fits, weighed as a call is, with a result, each of the instance and visible at the loop (F9), the walk of a class
+that section 12 decides and section 4
 reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
