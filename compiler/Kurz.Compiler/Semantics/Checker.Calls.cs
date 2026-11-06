@@ -2822,8 +2822,45 @@ public sealed partial class Checker
             return;
         }
 
-        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required");
+        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required{LambdaAtTheCall(c, pre.Argument, own, parameter)}");
     }
+
+    /// <summary>
+    /// T1 with F11 and O10: the hint for a function value whose result is <c>void</c>, passed by its name where a function type whose
+    /// result's first case is <c>void</c> is required, <c>Run(say)</c> for a <c>() => void</c> where a <c>() => void | Oops</c> is: the
+    /// lambda written at the call fits, <c>Run(() => say())</c> (the owner, 2026-11-05, #110, comment 6664353093). Its parameters take
+    /// the first names nothing here takes (V9), the call's other arguments are written as a default is (F13), and <c>...</c> stands for
+    /// a callee or type arguments of another form (assumed).
+    /// </summary>
+    private string LambdaAtTheCall(CallExpression c, Argument argument, KurzType own, KurzType parameter)
+    {
+        if (argument.Value is not NameExpression name || own is not FunctionType from || !Types.IsVoid(from.Result)
+            || (Types.NonNull(parameter) ?? parameter) is not FunctionType to || !SuccessIsVoid(to.Result) || to.Parameters.Count != from.Parameters.Count
+            || to.Parameters.Where((p, i) => !Types.Assignable(p, from.Parameters[i])).Any() || !c.Arguments.Any(a => ReferenceEquals(a, argument)))
+        {
+            return "";
+        }
+
+        var names = FreeNames(to.Parameters.Count);
+        var lambda = $"{(names.Count == 1 ? names[0] : $"({string.Join(", ", names)})")} => {name.Name}({string.Join(", ", names)})";
+        var arguments = c.Arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Mut ? "mut " : "")}{(ReferenceEquals(a, argument) ? lambda : DefaultText(a.Value))}");
+        return $"; write a lambda at the call: `{CalleeText(c.Callee)}{(c.TypeArguments.Count > 0 ? "<...>" : "")}({string.Join(", ", arguments)})`";
+    }
+
+    private static readonly string[] FirstNames = ["x", "y", "z"];
+
+    /// <summary>The names of <paramref name="count"/> lambda parameters that no variable or declaration here takes (V9, F16): <c>x</c>, <c>y</c>, <c>z</c>, then <c>x1</c>, <c>x2</c> and on.</summary>
+    private List<string> FreeNames(int count) =>
+        FirstNames.Concat(Enumerable.Range(1, int.MaxValue - 1).Select(i => $"x{i}"))
+            .Where(n => Lookup(n, capture: false).Variable is null && !IsDeclaredName(n) && frame.Reserved?.Contains(n) != true).Take(count).ToList();
+
+    /// <summary>A callee for a message: a name or a member of one, <c>HttpResponse.Stream</c>; <c>...</c> for another form.</summary>
+    private static string CalleeText(Expression e) => e switch
+    {
+        NameExpression n => n.Name,
+        MemberAccess m => $"{CalleeText(m.Target)}{(m.Conditional ? "?." : ".")}{m.Member}",
+        _ => "...",
+    };
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
     private static string Signature(FunctionSymbol f)

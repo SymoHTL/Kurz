@@ -279,7 +279,7 @@ parameter is the success case (§5, the owner, 2026-10-31, "Unwrap: T = int"). A
 written union holds a type parameter, `void F<T>(T | NotFound x)`, keeps the cases where it names one
 beyond the success, as a variable of that type, and `T` is inferred from the success (§5, the owner,
 2026-10-31, "Keep, infer T = int"). A parameter whose union names some of the call's cases beyond the
-success and not all is `type-mismatch` where the call's name has one function, as for a variable; a parameter of the success case or of a type it converts to
+success and not all is `type-mismatch` where the name of the function that takes the argument has one function, as for a variable; a parameter of the success case or of a type it converts to
 unwraps the call, a union that names no case of the call beyond the success, `int | string` for an
 `int | NotFound` call, among them, at a parameter as at a variable; a lambda's and a function value's parameter and a named argument follow the same
 rule; and a call inside an expression, `Show(Find(1) + 1)`, unwraps; a list literal takes its written item
