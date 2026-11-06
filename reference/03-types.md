@@ -1489,8 +1489,18 @@ same type arguments reads that copy, so that an error of the copy is reported on
 does not read that arm; the copies are made depth first: the copies that the calls of a copy ask
 for are made after its body is checked, in the order of those calls in its text, each with its own
 copies before the copy of the call after it, and the copies that calls outside every copy ask for
-are made after the code outside the copies is checked; the outer call of a chain of copies is the
-call outside every copy that made its first copy; a build stopped at the bound of 64 copies on a
+are made after the code outside the copies is checked, the calls in the bodies of functions first,
+then those in the bodies of methods, then those of the top-level code, each body's calls in the
+order of its text, each call with its whole chain before the call after it makes a copy, so that which copies a
+build stopped at the bound made, and so which errors it shows, depends on the order of those calls,
+and a swap of two calls of a copy changes them; a later call that reads a copy already made (the
+assumed reading before this one) makes no chain of its own, so that the copy is in the chain of the
+outer call that made it first; the outer call of a
+chain of copies is the call outside every copy that made its first copy, and for a copy made inside
+another copy the call that made the copy, where the build stops, is that outer call; the bound
+stops the chains of one outer call alone: another outer call still makes its copies, and each outer
+call whose chain reaches the bound reports its own `not supported`, so that one build can report
+more than one; a build stopped at the bound of 64 copies on a
 chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
 of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
 for after the bound is not made, so that its errors show only in a build where the chain is ended)*

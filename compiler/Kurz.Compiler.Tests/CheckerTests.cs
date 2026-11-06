@@ -5131,7 +5131,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_chain_of_copies_that_branches_ends_at_the_bound_with_its_one_diagnostic()
     {
-        // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
+        // T33: once a chain reaches the bound, no copy of the same outer call is made, so a reader whose copy makes two larger
         // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains; the check runs in a process of its
         // own, `kurz exec` started as the command's tests start it, whose limit of two minutes holds the start of the process and the
         // load of the compiler beside the check, and ends that process where the check does not end
@@ -5151,7 +5151,7 @@ public sealed class CheckerTests
     {
         // T33 (assumed, §4): the copies are made depth first, in the order of the calls in a copy's text, so the copy that a call
         // before the chain's call asks for is made and reports its error, while the one a call after it asks for is not made; the
-        // code outside the copies is checked before any copy is made, so its error shows in both orders
+        // error of the code outside the copies shows in both orders, since the bound stops no check of that code
         const string Program = "void Other<T>() {\n    match T.Kind {\n        TypeKind.Int => print(1)\n    }\n}\n\nvoid Deep<T>() {\n"
             + "    match T.Kind {\n        else => {\n            FIRST\n            SECOND\n        }\n    }\n}\n\nDeep<int>()\nprint(1 + \"two\")";
         static List<string> Reported(string first, string second) =>
@@ -5163,6 +5163,38 @@ public sealed class CheckerTests
         Assert.Contains("16: not supported", before);
         Assert.Contains($"17: {ErrorIds.TypeMismatch}", before);
         Assert.Equal(["16: not supported", $"17: {ErrorIds.TypeMismatch}"], Reported("Deep<List<T>>()", "Other<T>()"));
+    }
+
+    [Fact]
+    public void The_calls_outside_every_copy_make_their_copies_in_the_bodies_of_functions_then_of_methods_then_in_the_top_level_code()
+    {
+        // T33 (assumed, §4): the calls outside every copy make their copies in the order the checker meets them, the bodies of
+        // functions, then of methods, then the top-level code, and a copy made one time is in the chain of the call that made it
+        // first, so that `kind-not-read` of the copy `A<int>` is reported at that call alone
+        const string Readers = "void Bad<T>() {\n    match T.Kind {\n        TypeKind.Data => print(1)\n    }\n}\n\nvoid A<T>() {\n    Bad<T>()\n}\n\n";
+        static List<string> Lines(string program) =>
+            Check(Readers + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}").ToList();
+
+        Assert.Equal([$"11: {ErrorIds.KindNotRead}"], Lines("A<int>()\n")); // the control: the top-level call alone reports at its line
+        Assert.Equal([$"14: {ErrorIds.KindNotRead}"], Lines("A<int>()\n\nvoid Run() {\n    A<int>()\n}\n\nRun()\n"));
+        Assert.Equal([$"18: {ErrorIds.KindNotRead}"],
+            Lines("class Box(int X) {\n    pub void Show() {\n        A<int>()\n    }\n}\n\nvoid Run() {\n    A<int>()\n}\n\nBox(1).Show()\nRun()\n"));
+        Assert.Equal([$"13: {ErrorIds.KindNotRead}"], Lines("class Box(int X) {\n    pub void Show() {\n        A<int>()\n    }\n}\n\nA<int>()\nBox(1).Show()\n"));
+    }
+
+    [Fact]
+    public void Each_outer_call_whose_chain_reaches_the_bound_reports_its_own_not_supported()
+    {
+        // T33 (assumed, §4): the bound stops the chains of one outer call alone: another outer call still makes its copies, and each
+        // one whose chain reaches the bound reports its own `not supported`; a call that asks for a copy already made makes no chain
+        const string Readers = "void Other<T>() {\n    match T.Kind {\n        TypeKind.Data => print(1)\n    }\n}\n\n"
+            + "void Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n        }\n    }\n}\n\n";
+        static List<string> Lines(string program) =>
+            Check(Readers + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {(d.IsNotSupported ? "not supported" : d.Id)}").ToList();
+
+        Assert.Equal(["15: not supported"], Lines("Deep<int>()\n")); // the control: one outer call, one `not supported`
+        Assert.Equal(["15: not supported", "16: not supported"], Lines("Deep<int>()\nDeep<bool>()\nDeep<int>()\n"));
+        Assert.Equal(["15: not supported", $"16: {ErrorIds.KindNotRead}"], Lines("Deep<int>()\nOther<int>()\n"));
     }
 
     [Fact]
