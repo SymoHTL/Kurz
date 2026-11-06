@@ -197,7 +197,7 @@ from, and a key of it, read the fields that count of each class derived from it 
 can be an instance of any of them, so that such a field of a type `==` does not take makes `==` on the
 base `type-mismatch`, as D3 reads the fields of a type derived from a `data` type *(assumed, §4: the
 build's reading of the answer that `==` on a `data` value that holds a map or a function value is a
-compile error; C# refuses no `==`, since every type has `Equals`)*.
+compile error; C# takes `==` on any class or record, a class's comparing references)*.
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
@@ -352,8 +352,9 @@ implements the interface with a `pub` method of its own, which hides nothing, si
 class cannot see is hidden by nothing (below).
 Between the braces of a class, a field is written `Type name`, with `mut` in front when it can be
 assigned and its first value after `=`, which may be any expression (the owner, 2026-10-10, against a constant, which F12 keeps for a
-parameter's default): it may read the parameters of the primary constructor, the fields declared above
-it and functions outside the class, and is evaluated in declaration order before the body of a
+parameter's default): it may read the parameters of the primary constructor, whose fields are set
+before the defaults of the body (§4, the owner, 2026-11-06, #39, comment 6682994925), the fields
+declared above it and functions outside the class, and is evaluated in declaration order before the body of a
 constructor runs, as C# evaluates an initializer, which refuses an instance member there; a field
 declared below it, a method of its instance or `this` is `unknown-name` (V10), while a `static`
 method of the class is a name there, as C# refuses no `static` member in an initializer (§4, the
@@ -1332,7 +1333,12 @@ There are two forms. The short one is the form of a `data` type (D7):
 in the same order, and then the parameters the class lists. The explicit one writes the
 arguments of the base after its name, so that they can be computed:
 `class Guest(int Number) : User("guest {Number}")`. Its constructor takes only the parameters
-the class lists, and the arguments of the base are expressions over them. Whether a parameter
+the class lists, and the arguments of the base are expressions over them. An instance of the class
+is built in C#'s order: the defaults of its fields of the body, then the arguments of the base,
+then the defaults of the base's fields of the body and the base's constructor, then its own
+constructor (§4, the owner, 2026-11-03, #39, comment 6600033456, and 2026-11-06, comment
+6682994925); the build says `not supported` to a field in the body of a class with a base or with
+classes derived from it (K7). Whether a parameter
 can be passed on without becoming a field of the class is K11; the case computes the argument
 from a field. What the short form follows when the base has further constructors or none, and
 what a listed parameter with a base field's name is in that form, K16 says.
