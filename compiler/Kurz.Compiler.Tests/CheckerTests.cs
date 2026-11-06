@@ -3016,16 +3016,21 @@ public sealed class CheckerTests
     [Fact]
     public void Two_names_over_a_class_with_Count_NameAt_and_ValueAt_are_not_supported()
     {
-        // C6: two names over an instance of a class whose chain holds a `Count` field or property and the methods `NameAt` and `ValueAt`
-        // of one `int` walk it as an index loop (section 12, the owner, 2026-11-02; proposed: the `int`s), which the build does not make:
-        // `not supported` at the collection, and nothing more of the two names (E1); one name over such a class, and two names over a
-        // class of another shape, stay `type-mismatch` (C6, proposed)
+        // C6: two names over an instance of a class walk it as the index loop `for i in 0..<p.Count { name = p.NameAt(i); value = p.ValueAt(i) }`
+        // (section 4, the owner, 2026-11-04; section 12, the owner, 2026-11-02), which the build does not make: `not supported` at the
+        // collection, and nothing more of the two names (E1), where that loop, read at the loop's place, finds a `Count` field or property
+        // and methods `NameAt` and `ValueAt` of one `int`, each of the instance and visible there (F9; proposed, C6: a `Count` of an `int`
+        // and a result of each method); one name over such a class, and two names over a class of another shape, stay `type-mismatch`
+        // (C6, proposed)
         const string Members = "    pub string NameAt(int i) => \"n\"\n\n    pub string ValueAt(int i) => \"v\"\n}\n\n";
         const string Walk = "p = Pairs()\nfor name, value in p {\n    int n = name\n    print(\"{n}={value}\")\n}";
         const string Text = "two names over a `Pairs`, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)";
         Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n" + Members + Walk)); // a property
         Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count = 2\n\n" + Members + Walk)); // a field
         Assert.Equal([$"12: {Text}"], NotSupported("class Base {\n    pub int Count => 2\n}\n\nclass Pairs : Base {\n" + Members + Walk)); // from the base
+        Assert.Equal([$"9: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n\n    pub void Show(Pairs p) {\n        for name, value in p {\n            print(\"{name}={value}\")\n"
+            + "        }\n    }\n}\n\nPairs().Show(Pairs())")); // a private `NameAt`, inside its class
 
         // the controls: two names over a map are read, and the other shapes stay `type-mismatch`
         Clean("mut m = Map<string, int>()\nm[\"a\"] = 1\nfor key, value in m {\n    print(\"{key}={value}\")\n}");
@@ -3034,6 +3039,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count() => 2\n\n" + Members + Walk)); // `Count` a method
         Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string i) => \"n\"\n\n"
             + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // `NameAt` of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    int Count = 2\n\n" + Members + Walk)); // a private `Count` field
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    int Count => 2\n\n" + Members + Walk)); // a private `Count` property
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub string Count = \"2\"\n\n" + Members + Walk)); // a `Count` field of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub string Count => \"2\"\n\n" + Members + Walk)); // a `Count` property of a `string`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a private `NameAt`, outside its class
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub static string NameAt(int i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `static` `NameAt`
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub void NameAt(int i) {\n        print(i)\n    }\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `void` `NameAt`
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub static int Count = 2\n\n" + Members + Walk)); // a `static` field named `Count`
+        Assert.Equal([$"12: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string s) => s\n\n" + Members + Walk)); // one `NameAt` of two fits
     }
 
     [Fact]
