@@ -318,7 +318,6 @@ public sealed partial class Checker
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
-        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -333,6 +332,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         CheckFieldDefaults(); // K7
@@ -372,6 +372,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         MakeCopies();
+        CheckReferenceCycles(); // R2, R4, R9: after every body, the copies' among them, when the lambdas of the file are known
     }
 
     /// <summary>
