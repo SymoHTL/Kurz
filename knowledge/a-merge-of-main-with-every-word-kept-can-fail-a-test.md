@@ -1,6 +1,6 @@
 ---
-name: a-clean-merge-of-main-can-fail-a-test
-description: A take of main whose text conflicts were only disjoint words, and whose own diff was the reviewed one, failed a test on the merged head (pull request 288, 2026-11-06): a test row main had added for one rule expected an error that the pull request's own rule now reports first; neither the text merge nor the comparison of the own diff can see that, so the gates run on the merge commit, in the image, before the push and before the take is described to the owner
+name: a-merge-of-main-with-every-word-kept-can-fail-a-test
+description: A take of main that had two text conflicts, each merged with every word of both sides kept, and whose own diff was the reviewed one plus main's words where the blocks met, failed a test on the merged head (pull request 288, 2026-11-06): a test row main had added for one rule expected an error that the pull request's own rule now reports first; neither the text merge nor the comparison of the own diff can see that, so the gates run on the merge commit, in the image, before the push and before the take is described to the owner
 metadata:
   type: reference
 ---
@@ -9,15 +9,17 @@ metadata:
 
 Pull request 288 makes a variable that is named like a type parameter of its function
 `redeclared` (V9). Pull request 280, on `main`, added a row to
-`CheckerTests.A_const_assert_stops_the_build_where_its_condition_is_false`:
+`CheckerTests.A_const_assert_stops_the_build_where_its_condition_is_false`, as it stands in
+`CheckerTests.cs`:
 
 ```
-void F<T>(T value) { if true { T = 1; const assert(true, "{T}") } }
+[InlineData("void F<T>(T value) {\n    if true {\n        T = 1\n        const assert(true, \"{T}\")\n    }\n}\n\nF(1)", "7: const-assert-failed: the value of `T` is not known while the program compiles, in a hole of the text of a `const assert` (T37)")]
 ```
 
-The row expects `const-assert-failed` at line 7.
+The row's program assigns to `T` and then reads it in a hole of the assert's text. The row expects
+the build to stop at the assert, where the hole's value is not known.
 
-288's take of `main` had two text conflicts: the row of `redeclared` in
+This was no clean merge. 288's take of `main` had two text conflicts: the row of `redeclared` in
 `reference/12-errors.md`, and a comment in `CheckerTests.cs`. Each side changed other words of
 those lines, so the words merged with every word kept. The own diff of the merge was the reviewed
 one, plus `main`'s words where the blocks met. The park on the pull request said "No code line

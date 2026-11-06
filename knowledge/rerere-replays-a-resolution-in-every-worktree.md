@@ -20,8 +20,8 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
 
 - **rerere is on without a setting.** `git config rerere.enabled` prints nothing in the clone,
   but `.git/rr-cache` exists. Git turns rerere on when that directory exists and the setting is
-  unset. With git 2.43, in a throwaway repository, a conflicting merge printed `Recorded preimage`
-  only once `.git/rr-cache` had been created.
+  unset. Seen on 2026-11-06 with git 2.43.0, in a throwaway repository: a conflicting merge
+  printed `Recorded preimage` only once `.git/rr-cache` had been created.
 - **The directory is shared.** It lives in the common git directory (`git rev-parse
   --git-common-dir`), which every worktree of the clone shares. A conflict resolved and
   committed in one worktree is recorded there. The same conflict in a merge in any other
@@ -45,5 +45,7 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
 - A take of `main` that has a conflict is described to the owner as one, whoever resolved it.
   `judgment step`
 - To survey which pull requests conflict with `main`, use `git merge-tree --write-tree origin/main
-  <head>`. It does not use rerere: in a worktree whose rerere held a resolution for a conflict,
-  it still named that conflict, with exit 1. `judgment step`
+  <head>`. It does not use rerere. Seen on 2026-11-06 with git 2.43.0, in a second worktree of the
+  same throwaway repository, whose rerere held a resolution for the conflict:
+  `git merge-tree --write-tree --name-only <ours> <theirs>` still named the conflict, with exit 1.
+  `judgment step`
