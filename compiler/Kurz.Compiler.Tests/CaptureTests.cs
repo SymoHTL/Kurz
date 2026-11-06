@@ -6,10 +6,10 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The run of a program with its streams captured (<see cref="Processes.Capture"/>), as the corpus's runner and the suites run one:
-/// a child that the program left running, and that holds the streams it took from it, ends the run at its limit with -1, the
-/// child's pid on the error stream and, on Linux, the child ended, where the run waited on the streams without end and a run of
+/// a child that the program left running, and that holds the streams it took from it, ends the run at its limit with -1 and, on
+/// Linux, the child's pid on the error stream and the child ended, where the run waited on the streams without end and a run of
 /// the suite hung for 80 minutes (knowledge/an-orphan-holds-the-output-of-its-program.md). Only a process that holds the write end
-/// of a run's pipe is ended, and only while its id is still its own.
+/// of a run's pipe is ended, not the processes it started, and only while its id is still its own.
 /// </summary>
 public sealed class CaptureTests
 {
@@ -74,12 +74,21 @@ public sealed class CaptureTests
             Lay(200, 9, "pipe:[7]", "02000000"); // a read end, as a child that another thread forked holds it before its exec
             Lay(300, 1, "pipe:[8]", "01"); // the write end of a pipe that is not the run's
             Lay(400, 1, "pipe:[7]", "01"); // this process
+            Lay(500, 4, "pipe:[7]", "01"); // the write end beside a handle that closed while it was read: a holder
+            var closed = Path.Combine(proc, "500", "fd", "3");
+            File.CreateSymbolicLink(closed, "pipe:[7]"); // its fdinfo is gone
+            Lay(600, 1, "pipe:[7]", "zz"); // flags that are no octal number
+            Lay(700, 1, "pipe:[7]", "01");
+            File.WriteAllText(Path.Combine(proc, "700", "stat"), "700 (x)"); // a stat that ends after its name: no start
             Directory.CreateDirectory(Path.Combine(proc, "self"));
 
             Assert.Equal(
-                new[] { new Processes.Holder(100, 1000), new Processes.Holder(101, 1010) },
+                new[] { new Processes.Holder(100, 1000), new Processes.Holder(101, 1010), new Processes.Holder(500, 5000) },
                 Processes.Holders(proc, ["pipe:[7]"], 400).OrderBy(h => h.Pid).ToArray());
             Assert.Empty(Processes.Holders(proc, [], 400)); // no pipe read, no holder
+            Assert.False(Processes.HoldsWriteEnd(closed, Path.Combine(proc, "500", "fdinfo", "3"), ["pipe:[7]"])); // read in any order
+            Assert.False(Processes.HoldsWriteEnd(Path.Combine(proc, "500", "fd", "9"), Path.Combine(proc, "500", "fdinfo", "9"), ["pipe:[7]"]));
+            Assert.True(Processes.HoldsWriteEnd(Path.Combine(proc, "500", "fd", "4"), Path.Combine(proc, "500", "fdinfo", "4"), ["pipe:[7]"]));
         }
         finally
         {
@@ -96,14 +105,13 @@ public sealed class CaptureTests
         }
 
         using var sleeper = Process.Start("/bin/sleep", "30") ?? throw new InvalidOperationException("`/bin/sleep` did not start");
-        var pid = sleeper.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var stat = File.ReadAllText($"/proc/{pid}/stat");
-        var start = ulong.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[19], System.Globalization.CultureInfo.InvariantCulture);
+        var start = StartOf(sleeper.Id);
         try
         {
-            Processes.End("/proc", [new Processes.Holder(sleeper.Id, start + 1)]); // the start it was found with is not the one it has
+            Assert.Empty(Processes.End("/proc", [new Processes.Holder(sleeper.Id, start + 1)])); // the start it was found with is not the one it has
             Assert.False(sleeper.WaitForExit(500), "a process whose start is not the holder's was ended");
-            Processes.End("/proc", [new Processes.Holder(sleeper.Id, start)]); // a positive control: its own start
+            var holder = new Processes.Holder(sleeper.Id, start);
+            Assert.Equal(new[] { holder }, Processes.End("/proc", [holder])); // a positive control: its own start
             Assert.True(sleeper.WaitForExit(5000), "the holder was not ended");
         }
         finally
@@ -113,6 +121,61 @@ public sealed class CaptureTests
                 sleeper.Kill();
             }
         }
+    }
+
+    [Fact]
+    public void A_holder_is_ended_alone_and_not_the_processes_it_started()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the start of a process is read from /proc on Linux alone: nothing ends a holder elsewhere
+        }
+
+        // the shell starts a `sleep` that holds none of its streams, says its pid and waits for it
+        var info = new ProcessStartInfo("/bin/sh") { RedirectStandardOutput = true, UseShellExecute = false };
+        info.ArgumentList.Add("-c");
+        info.ArgumentList.Add("sleep 30 </dev/null >/dev/null 2>&1 & echo $!; wait");
+        using var shell = Process.Start(info) ?? throw new InvalidOperationException("`/bin/sh` did not start");
+        var child = shell.StandardOutput.ReadLine() ?? string.Empty;
+        try
+        {
+            Assert.Matches("^[0-9]+$", child);
+            var holder = new Processes.Holder(shell.Id, StartOf(shell.Id));
+            Assert.Equal(new[] { holder }, Processes.End("/proc", [holder]));
+            Assert.True(shell.WaitForExit(5000), "the holder was not ended");
+            Thread.Sleep(500);
+            Assert.True(Lives(child), $"the child {child} of the holder, which holds nothing of the run, was ended");
+        }
+        finally
+        {
+            if (!shell.HasExited)
+            {
+                shell.Kill();
+            }
+
+            if (int.TryParse(child, out var pid) && Lives(child))
+            {
+                using var sleeping = Process.GetProcessById(pid);
+                sleeping.Kill();
+            }
+        }
+    }
+
+    [Fact]
+    public void The_error_names_each_holder_and_whether_it_was_ended()
+    {
+        var ended = new Processes.Holder(100, 1000);
+        var passed = new Processes.Holder(101, 1010);
+        Assert.Equal("pid 100, ended; pid 101, not ended", Processes.Held([ended, passed], [ended]));
+        Assert.Equal("pid 100, ended", Processes.Held([ended], [ended]));
+        Assert.Equal("no process that holds it was found", Processes.Held([], []));
+    }
+
+    /// <summary>The start of the running process <paramref name="pid"/>: the 22nd field of its stat, counted from the end of its name in brackets.</summary>
+    private static ulong StartOf(int pid)
+    {
+        var stat = File.ReadAllText($"/proc/{pid.ToString(System.Globalization.CultureInfo.InvariantCulture)}/stat");
+        return ulong.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[19], System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>Whether the process runs: it has an entry in /proc, and the entry is no zombie, which a first process of the system that reaps nothing keeps.</summary>

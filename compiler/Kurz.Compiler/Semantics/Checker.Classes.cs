@@ -196,7 +196,7 @@ public sealed partial class Checker
             }
             else if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, p.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -268,7 +268,7 @@ public sealed partial class Checker
             var type = Resolve(f.Type!);
             if (Types.IsVoid(type))
             {
-                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (K1, F4)");
+                Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (F4)");
                 type = Types.Error;
             }
 
@@ -381,7 +381,7 @@ public sealed partial class Checker
         }
         else if (Types.IsVoid(s.Type))
         {
-            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (K1, F4)");
+            Report(ErrorIds.Syntax, s.Line, "`void` is no type of a field (F4)");
             s.Refused = true;
         }
         else if (held.Count > 0)

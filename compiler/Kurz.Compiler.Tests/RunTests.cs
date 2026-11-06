@@ -110,7 +110,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. Each number is the count measured on its system, with no margin, so that one case that stops being built turns it red, and a change that adds a case to the run raises it (#156).</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 401 : 486;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 408 : 495;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -136,7 +136,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly string[] ProcessCases =
     [
         "system/arguments.kz", "system/args-parameter.kz", "system/args-in-lambda.kz", "system/args-new-list.kz", "system/clock.kz", "system/environment-missing.kz",
-        "system/monotonic-clock.kz", "types/instant-arithmetic.kz",
+        "system/monotonic-clock.kz", "system/elapsed-order.kz",
     ];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
