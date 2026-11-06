@@ -1457,10 +1457,11 @@ call can be a caller's in another package than the function (§4, the owner, 202
 makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
 type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
 CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
-refused a lambda's parameter so named up to its language version 7.3 (§4, the owner, 2026-11-03, "redeclared, as C#'s
+refused, up to its language version 7.3, the three forms its later versions let hide the type parameter, a lambda's
+parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
 text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
-a function. *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+a function, and once, at the declaration, however many copies give it (below). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1479,12 +1480,25 @@ same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no 
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
 fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
 `match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
-the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
-a function, is checked only in the copies that calls make: an error in it shows at its first copy,
-and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
-*(assumed, with the build: a copy is made at the first call that names its type arguments, and a later call with the
-same type arguments reads that copy, so that an error of the copy is reported once, and one reported at the call,
-`kind-not-read` or `unlisted-case`, shows at that first call, the call that made it)*
+the bodies running in the order of the fields, as F12 evaluates arguments)* Where that function does not list such a case, it is `unlisted-case` at that call's line in
+the body, with O3's text, once for the copies that give it; the call that made the copy, where a copy that gives an
+outcome its function does not list is `unlisted-case` above, is the place of an outcome the type gives, `Invalid` (§4,
+the owner, 2026-11-06, against moving the report to the call that made the copy). A generic function that reads its type, and one that passes its type parameter to such
+a function, is checked only in the copies that calls make, in its body: an error in its body shows at its first copy,
+and the body of one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig"). Its
+signature, its type parameters among them, is checked from the text in every case, so that F16 refuses a type parameter
+of a function no call reaches too (§4, the owner, 2026-11-06, "Signature always, body per copy"; the cost is that a
+misnamed type parameter in a function nobody calls is an error, where Zig analyses no part of it).
+A copy is made at the first call that names its type arguments in the order the checker reads a file: the bodies of its
+functions, in the order their names first appear, then the methods of its classes, then the top-level code, the calls of
+a copy's body before the calls that follow the call that made it. A later call with the same type arguments reads that
+copy, so that an error of the copy is reported once, and one reported at the call, `kind-not-read` or the
+`unlisted-case` of an outcome the type gives, shows at that first call, the call that made it (§4, the owner,
+2026-11-06, against the first call in the order of the text and against a report at every call that names the copy;
+the cost is that the line named is not always the first in the file). *(assumed, §4, with the build: a call that infers
+its type arguments makes a copy as one that writes them; a fault of the function's text that several copies give,
+`redeclared` (V9) among them, is reported once, at its line, and one that differs between copies, `kind-not-read` for
+each kind, once for each copy)*
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
 does not read that arm; a build stopped at the bound of 64 copies on a chain of copies (the record,
 section 14) reports that `not supported` and the errors of the copies made before it, while a copy

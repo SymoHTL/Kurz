@@ -5618,11 +5618,12 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_name_of_a_type_parameter_is_free_outside_its_function()
+    public void A_name_of_a_type_parameter_is_free_in_another_function()
     {
-        // V9 with T19: the positive control of the test above; a type parameter's name is taken in its own function alone, so a
-        // variable of another function and a parameter of a function without type parameters may hold it, the name of one that holds a
-        // constant too (T35); a top-level variable may not (F16, the test below)
+        // V9 with T19: the positive control of the test above; no declaration of its own function may take a type parameter's name,
+        // while a variable of another function and a parameter of a function without type parameters may hold it, the name of one
+        // that holds a constant too (T35); a variable at the outermost level of the top-level code may not share it, as F16 then
+        // refuses the type parameter (the test below)
         Clean(Shapes + "T Same<T>(T value) => value\n\nvoid Show() {\n    T = 1\n    print(T)\n}\n\nvoid Echo(int T) {\n    print(T)\n}\n\nShow()\nEcho(2)\nK = 3\nprint(Same(K))");
         Clean(Shapes + "int Twice<const int M>() => M * 2\n\nint Thrice<const int N>() => N * 3\n\nvoid Show() {\n    M = 1\n    print(M)\n}\n\nShow()\nK = 3\nprint(Twice<2>() + Thrice<1>() + K)");
     }
@@ -5657,14 +5658,33 @@ public sealed class CheckerTests
     [Fact]
     public void A_copy_two_calls_share_reports_at_the_first_and_a_case_of_a_body_of_make_leaves_its_function()
     {
-        // T33 (assumed, with the build): a later call with the same type arguments reads the copy the first call made, so an error
-        // at the call shows at that first call alone; a case that a call in a body of `T.Make` gives beside the field's type leaves
-        // the function that holds `T.Make`, as one of any argument of a call does (section 5), and a return type that lists it reads
-        // clean
+        // T33 (section 4, the owner, 2026-11-06): a later call with the same type arguments reads the copy the first call made, so an
+        // error at the call shows at that first call alone; a case that a call in a body of `T.Make` gives beside the field's type
+        // leaves the function that holds `T.Make`, as one of any argument of a call does (section 5), and is `unlisted-case` at that
+        // call's line in the body, not at the function's line or at the calls that made the copies, once for the two copies that give
+        // it, while a return type that lists it reads clean
         Assert.Equal([(ErrorIds.KindNotRead, 3)], Errors("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<int>())\nprint(Bad<int>())"));
-        const string get = "data P(int A)\ndata NotFound\n\nint | NotFound Get(int x) => x\n\n";
-        Assert.Equal([(ErrorIds.UnlistedCase, 6)], Errors(get + "T Build<T>() => T.Make(f => Get(1))\n\nprint(Build<P>())"));
+        const string get = "data P(int A)\ndata Q(int B)\ndata NotFound\n\nint | NotFound Get(int x) => x\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 8)], Errors(get + "T Build<T>() {\n    return T.Make(f => Get(1))\n}\n\nprint(Build<P>())\nprint(Build<Q>())"));
         Clean(get + "T | NotFound Build<T>() => T.Make(f => Get(1))\n\nmatch Build<P>() {\n    P p => print(p)\n    NotFound => print(\"nf\")\n}");
+    }
+
+    [Fact]
+    public void The_first_call_in_the_order_the_checker_reads_makes_a_copy_and_a_fault_of_the_text_is_reported_once()
+    {
+        // T33 (section 4, the owner, 2026-11-06): a copy is made at the first call in the order the checker reads a file, the bodies
+        // of its functions in the order their names first appear before the methods and the top-level code, so the error of a copy
+        // shows at a call in a body below a call of the top-level code, in the body of the function declared first of two, at a call
+        // in a method before one of the top-level code, and at a call in a function before one in a method above it; with the build, a
+        // fault of the function's text that two copies give is reported once, and one that differs between copies once for each
+        const string bad = "void Bad<T>() {\n    match T.Kind {\n        TypeKind.Int => print(1)\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.KindNotRead, 5)], Errors("Bad<long>()\nRun()\n\nvoid Run() {\n    Bad<long>()\n}\n\n" + bad));
+        Assert.Equal([(ErrorIds.KindNotRead, 6)], Errors("Bad<long>()\nA()\nB()\n\nvoid B() {\n    Bad<long>()\n}\n\nvoid A() {\n    Bad<long>()\n}\n\n" + bad));
+        const string method = "class C {\n    pub void Go() {\n        Bad<long>()\n    }\n}\n\n";
+        Assert.Equal([(ErrorIds.KindNotRead, 7)], Errors("Bad<long>()\nc = C()\nc.Go()\n\n" + method + bad));
+        Assert.Equal([(ErrorIds.KindNotRead, 13)], Errors("Bad<long>()\nc = C()\nc.Go()\nRun()\n\n" + method + "void Run() {\n    Bad<long>()\n}\n\n" + bad));
+        Assert.Equal([(ErrorIds.KindNotRead, 7), (ErrorIds.KindNotRead, 8)], Errors(bad + "Bad<long>()\nBad<string>()"));
+        Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("void Show<T>() {\n    T = 1\n    print(T)\n}\n\nShow<long>()\nShow<int>()"));
     }
 
     [Theory]

@@ -883,16 +883,19 @@ arm of a `match` of the top-level code binds reserves nothing either, as a varia
 *(assumed: the answer named a loop variable, a variable inside a block and a lambda's parameter)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
-read first, whose message points at the read while the fix is the whole line). A type parameter of the function, one that holds a
-constant among them (T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes
-a copy of the function (T33), so that a body never has to choose which of the two it reads (§4, the owner, 2026-11-05,
-"redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its function, as C#
-and Rust let it; the cost is that a generic function cannot reuse a top-level name). The owner chose the
+read first, whose message points at the read while the fix is the whole line). The owner chose the
 rule on 2026-10-03, against reading the variable at the call as a C# local function does, which
 would have given two kinds of function two views of a captured variable (F15), and against taking
 the value at the function's declaration as a lambda does, which a function declared above the
 variable (F6) could never see; the cost is that a counter or a table of the program is passed into
-every function, or made a field of a class.
+every function, or made a field of a class. A type parameter of the function, one that holds a constant among them
+(T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes a copy of the
+function, since a function's signature is checked from its text in every case (T33; §4, the owner, 2026-11-06,
+"Signature always, body per copy"), so that a body never has to choose which of the two it reads (§4, the owner,
+2026-11-05, "redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its
+function, as C# and Rust let it; the cost is that a generic function cannot reuse a top-level name). The parameter
+stands for the rest of the function, so a read of its name in the body reports nothing more, and `redeclared` at the
+parameter is the one error (E1).
 
 Case: [functions/top-level-function-reads-no-variable.kz](../corpus/functions/top-level-function-reads-no-variable.kz)
 ```kurz
