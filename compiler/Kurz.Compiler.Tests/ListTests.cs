@@ -5174,13 +5174,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(["520", "520", "1000", "1520", "0"], first.Skip(3));
 
         // removed entries first: their slots, of 128 in groups with no slot of 255, do not end the read's probe, which passes the 65
-        // groups as before; the rehash makes them slots of 255, and the 1000 keys after it find the room the removed entries left
+        // groups as before; after the rehash the map gives every entry left, and 1000 keys more grow it
         var removed = Enumerable.Range(100, 10).ToList();
         var (gone, goneAgain) = RunTwice(ReadPast(held, absent, removed), toolchain.Runtime, "map-read-past-removed");
         Assert.Equal("-1", gone[1]);
         Assert.NotEqual(gone[2], goneAgain[2]);
         Assert.Equal(held.Select((k, i) => (k, i)).Where(e => !removed.Contains(e.i)).Select(e => $"{e.k}: {e.i}").Order(), gone[2].Trim('[', ']').Split(", ").Order());
         Assert.Equal(["510", "510", "1000", "1510", "1045"], gone.Skip(3));
+
+        // the slots entries can take after the rehash, counted again from the capacity: 896 of the block's 1024 slots less its 510
+        // entries, 386, the removed entries' 10 among them. Under an allocator that refuses a block of more than 16384 bytes, which
+        // the block of 2048 slots a growth takes is, 386 keys more fill the block of 1024 and the 387th grows it
+        var room = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "pub byte* Allocate(long size) {\n    if size > 16384 {\n        return null\n    }\n\n    mut byte* p = null\n"));
+        Ran(BuildAndRun(Refilled(held, absent, removed, 386), room, "map-read-past-room"), 0, ["-1", "896", "1045"], "");
+        var over = BuildAndRun(Refilled(held, absent, removed, 387), room, "map-read-past-room-over");
+        Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
 
         // the positive control: the same program with no lookup that rehashes stays on the fast hash, one order in two runs
         var still = RunTwice(ReadPast(held, absent, []), Edited(NoLookupRehash), "map-read-past-none");
@@ -5258,6 +5266,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         $"print(m)\nprint(m[{absent}] ?? -1)\nprint(m)\n" +
         "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\nprint(m.Count)\n" +
         "for i in 1000000..<1001000 {\n    m[i] = i\n}\nmut more = 0\nfor i in 1000000..<1001000 {\n    w = m[i] ?? -1\n    if w == i {\n        more = more + 1\n    }\n}\nprint(more)\nprint(m.Count)\nprint(taken)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, removes the keys at the indexes
+    /// <paramref name="removed"/>, prints what a read of the key <paramref name="absent"/>, which it does not hold, gave, puts
+    /// <paramref name="more"/> keys more in and prints its count and the sum of the values the removals gave.
+    /// </summary>
+    private static string Refilled(IEnumerable<long> keys, string absent, IEnumerable<int> removed, int more) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nList<int> removed = [{string.Join(", ", removed)}]\n" +
+        "mut m = Map<int, int>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut taken = 0\nfor i in 0..<removed.Count {\n    t = m.Remove(keys[removed[i]]) ?? -1\n    taken = taken + t\n}\n" +
+        $"print(m[{absent}] ?? -1)\nfor i in 0..<{more} {{\n    m[2000000 + i] = i\n}}\nprint(m.Count)\nprint(taken)\n";
 
     [Fact]
     public void The_map_programs_print_the_same_with_every_map_moved_onto_SipHash_1_3_at_its_first_insert()

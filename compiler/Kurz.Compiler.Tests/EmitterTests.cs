@@ -341,28 +341,43 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void Remove_finds_the_slot_of_its_key_again_only_in_a_block_it_copied()
+    public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
-        // hashbrown's `remove_entry` finds the key's slot once: the helper of `Remove` looks the key up a second time only on the branch
-        // where the block it found the slot in was shared and was copied (M3), so that the slot of the copy is taken
+        // hashbrown's `remove_entry` finds the key's slot once, and so does the helper of `Remove`: where the block it found the slot in
+        // was shared and was copied (M3), it takes the copy's slot at the offset the slot has in that block, since the copy holds the
+        // block's bytes (`MapCopy`)
         var program = Compile("mut m = Map<long, long>()\nm[1] = 2\nprint(m.Remove(1) ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
         Assert.True(program is not null, "no program");
         var lines = program.Ir.Split('\n').Select(l => l.TrimEnd('\r')).ToArray(); // the IR ends its lines in CR LF on Windows
         var first = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains("@\"remove.", StringComparison.Ordinal));
         Assert.True(first >= 0, "no remove helper in the IR");
         var body = lines[first..Array.IndexOf(lines, "}", first)];
-        var finds = Enumerable.Range(0, body.Length).Where(i => body[i].Contains("call ptr @\"find.", StringComparison.Ordinal)).ToList();
-        Assert.Equal(2, finds.Count); // the lookup, and the lookup in the copy
-        var label = body.Take(finds[1]).Last(l => l.EndsWith(':') && !l.StartsWith(' '));
-        Assert.StartsWith("in.copy.", label, StringComparison.Ordinal);
+        var find = Assert.Single(body, l => l.Contains("call ptr @\"find.", StringComparison.Ordinal)); // the lookup alone
+        var found = Regex.Match(find, @"^\s*(%\S+) = call ptr @""find\.[^""]+""\(ptr (%[^,\s]+),");
+        Assert.True(found.Success, find);
+        var (slot, block) = (found.Groups[1].Value, found.Groups[2].Value);
 
-        // the branch into the second lookup is taken where the block the map holds after `OwnBlock` is not the block the slot was
-        // found in, and the slot found is taken where it is
+        // the branch into the copy's slot is taken where the block the map holds after `OwnBlock` is not the block the slot was found
+        // in, and the slot found is taken where it is
         var branch = Assert.Single(body, l => l.TrimStart().StartsWith("br i1 ", StringComparison.Ordinal) && l.Contains("label %in.copy.", StringComparison.Ordinal));
         Assert.Matches(@"label %take\.\d+, label %in\.copy\.", branch);
         var condition = branch.TrimStart()["br i1 ".Length..].Split(',')[0];
         var test = Assert.Single(body, l => l.TrimStart().StartsWith(condition + " = ", StringComparison.Ordinal));
-        Assert.Matches(@"= icmp eq ptr %[^,\s]+, %[^,\s]+", test);
+        var compared = Regex.Match(test, @"= icmp eq ptr (%[^,\s]+), (%[^,\s]+)$");
+        Assert.True(compared.Success, test);
+        Assert.Equal(block, compared.Groups[2].Value);
+        var current = compared.Groups[1].Value;
+
+        // in the copy: the slot's address less the address of the block it was found in, added to the address of the copy
+        var start = Array.FindIndex(body, l => l.StartsWith("in.copy.", StringComparison.Ordinal));
+        var end = Array.FindIndex(body, start + 1, l => l.EndsWith(':') && !l.StartsWith(' '));
+        var copy = string.Join("\n", body[(start + 1)..end]);
+        var from = Regex.Match(copy, $@"(%\S+) = ptrtoint ptr {Regex.Escape(slot)} to i64$", RegexOptions.Multiline);
+        var of = Regex.Match(copy, $@"(%\S+) = ptrtoint ptr {Regex.Escape(block)} to i64$", RegexOptions.Multiline);
+        Assert.True(from.Success && of.Success, copy);
+        var offset = Regex.Match(copy, $@"(%\S+) = sub i64 {Regex.Escape(from.Groups[1].Value)}, {Regex.Escape(of.Groups[1].Value)}$", RegexOptions.Multiline);
+        Assert.True(offset.Success, copy);
+        Assert.Matches(new Regex($@"= getelementptr i8, ptr {Regex.Escape(current)}, i64 {Regex.Escape(offset.Groups[1].Value)}$", RegexOptions.Multiline), copy);
     }
 
     [Fact]

@@ -4537,7 +4537,9 @@ pub bool MapTripped(byte* block) {
 
 // One loop over a map more (`change` 1) or less (-1) holds the block, nothing for a map that holds none:
 // a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
-// (`MapLongLookup`).
+// (`MapLongLookup`). A loop counts itself where it starts and lets go where it ends: at its end, a `break`,
+// a `return` or a case propagated out of its body. A write inside it finds the block shared, since the
+// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`).
 pub void MapWalk(byte* block, int change) {
     raw {
         if block != null {
@@ -4546,7 +4548,7 @@ pub void MapWalk(byte* block, int change) {
     }
 }
 
-// For a lookup whose probe passed more than 512 slots, 64 groups of 8 without a slot of 255: whether the
+// For a lookup whose probe passed more than 512 slots, 65 groups of 8 without a slot of 255: whether the
 // block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
 // over a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the block is then marked
 // as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code moves the entries

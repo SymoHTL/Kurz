@@ -1,6 +1,6 @@
 ---
 name: a-front-end-option-of-clang-does-not-reach-ir
-description: clang's `-falign-functions=64`, which its C front end reads and sets on each function it writes, does nothing to a module of LLVM IR that clang compiles, since IR does not pass through that front end, while `-falign-loops` does change its assembly; seen on 2026-11-02 on Linux x86-64, when `-falign-functions=64` left every function of the IR at LLVM's `.prefalign 4` and `-mllvm -align-all-functions=6` put `.p2align 6` on all of them, with no other option of the front end probed, so the compiler hands LLVM's own option through `-mllvm` and a test reads the assembly, not the argument.
+description: clang's `-falign-functions=64`, which its C front end reads and sets on each function it writes, does nothing to a module of LLVM IR that clang compiles, since IR does not pass through that front end, while `-falign-loops` does change its assembly; seen on 2026-11-02 on Linux x86-64, when `-falign-functions=64` left every function of the IR at LLVM's `.prefalign 4` and `-mllvm -align-all-functions=6` put `.p2align 6` on all of them, with no other option that the front end sets on each function probed, so the compiler hands LLVM's own option through `-mllvm` and a test reads the assembly, not the argument.
 metadata:
   type: reference
 ---

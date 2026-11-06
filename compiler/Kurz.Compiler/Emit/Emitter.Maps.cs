@@ -238,7 +238,7 @@ public sealed partial class Emitter
     /// the slot's address, or null where the map has no entry of the key. It reads a group's 8 control bytes as one word and marks
     /// the bytes equal to the hash's control byte as hashbrown's generic group does (a byte after a match can be marked too, which
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
-    /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 64 groups without a slot of 255, in a block on
+    /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 65 groups without a slot of 255, in a block on
     /// the fast hash that no loop over a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
     /// new hash (section 4, the owner, 2026-11-02, "lookups count too"): past the bound the lookup gives what
     /// <see cref="FarEntry"/> gives.
@@ -349,9 +349,10 @@ public sealed partial class Emitter
     /// as hashbrown's <c>rehash_in_place</c> does, so that every value that holds the block finds its entries: every entry marked as not
     /// yet placed (<c>MapRehashMark</c>), then, for each slot that holds such an entry, its key's hash under the block's keys, as
     /// hashbrown's <c>rehash_in_place</c> calls its hasher for the slot, written into the entry where the map keeps the hash
-    /// (<see cref="KeepsHash"/>), and the entry put in the slot that hash probes first (<c>MapRehashPlace</c>), until the slot holds no
-    /// entry marked so: the one it changed places with is the next. A key of one word, whose slot keeps no hash, is so placed by the
-    /// hash of its key, and every key is hashed once.
+    /// (<see cref="KeepsHash"/>), and the entry put in the first slot of its probe whose control byte is 255 or 128, or left in its
+    /// own slot where that one is in the same group of 8 (<c>MapRehashPlace</c>), until the slot holds no entry marked so: the one it
+    /// changed places with is the next. A key of one word, whose slot keeps no hash, is so placed by the hash of its key, and every
+    /// key is hashed once.
     /// </summary>
     private void RehashBody(MapType type)
     {
@@ -747,9 +748,10 @@ public sealed partial class Emitter
     /// with the count the map held of it, or <c>null</c>
     /// where the map has no entry of the key, as Rust's <c>HashMap::remove</c> gives <c>Option&lt;V&gt;</c> (section 4, the owner,
     /// 2026-10-30, "C# names, Rust's Remove"). Only a map with the key's entry is written: a block other values hold is copied first
-    /// (M3), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as hashbrown's
-    /// <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an item: what it
-    /// was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
+    /// (M3), the entry taken from the copy's slot at the offset the lookup found it at in the block, since the copy holds the block's
+    /// bytes (<c>MapCopy</c>), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as
+    /// hashbrown's <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an
+    /// item: what it was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
     /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c>, the copy of a
     /// shared map block with a key read from a field, whose literal holds no block of its own, and <c>built.Counts.Remove(built.Name)</c>,
     /// the same with a key made while the program runs, which holds one.
@@ -782,7 +784,8 @@ public sealed partial class Emitter
             fn.Emit($"store ptr {slot}, ptr {at}");
             fn.CondBranch(fn.Value($"icmp eq ptr {current}, {block}"), take, copied); // the block found in, where no other value held it
             fn.Block(copied);
-            fn.Emit($"store ptr {fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})")}, ptr {at}"); // the same slot of the copy
+            var offset = fn.Value($"sub i64 {fn.Value($"ptrtoint ptr {slot} to i64")}, {fn.Value($"ptrtoint ptr {block} to i64")}");
+            fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {current}, i64 {offset}")}, ptr {at}"); // the same slot of the copy, at its offset in the block
             fn.Block(take);
             var own = fn.Value($"load ptr, ptr {at}");
             var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, own)}");
