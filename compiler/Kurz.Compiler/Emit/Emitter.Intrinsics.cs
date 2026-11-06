@@ -184,11 +184,12 @@ public sealed partial class Emitter
     private void EmitGuarded(IReadOnlyList<IntrinsicClass> guards, int line, IReadOnlyList<string> pointers, Action<IReadOnlyList<string>> body)
     {
         var compiled = features.Union(guards.Select(c => c.Name));
-        var key = $"{unit.Prefix}.{display.Replace('"', '\'')}.guarded.{Number(line)}.{Number(++guardedCount)}";
+        var traced = $"{guardedDisplay ?? display}.guarded"; // a block in a guarded block adds its mark to that block's name
+        var key = $"{unit.Prefix}.{traced.Replace('"', '\'')}.{Number(line)}.{Number(++guardedCount)}";
         var name = $"@\"{key}\"";
         var hasResult = !Types.IsVoid(returnType);
         var (parentFn, parentSlots, parentLoops, parentRegions, parentScopes) = (fn, slots, loops.ToArray(), regions, scopes);
-        var (parentElse, parentDisplay, parentOutline, parentFeatures) = (elseCase, display, outline, features);
+        var (parentElse, parentDisplay, parentOutline, parentFeatures, parentGuarded) = (elseCase, display, outline, features, guardedDisplay);
         var context = new Outline(parentSlots, parentOutline);
         var parameters = new List<string>();
         var fallsThrough = true;
@@ -198,9 +199,12 @@ public sealed partial class Emitter
             features = compiled;
             outline = context;
             // the line tables name the block's function as the trace does, from its symbol: `<function>.guarded` (section 13, the owner,
-            // 2026-11-02); a lambda or a guarded block written in the block is named after the function the block stands in, as its symbol is
-            Trace($"{parentDisplay}.guarded", key, line);
+            // 2026-11-02), and a guarded block written in the block adds its own mark, `<function>.guarded.guarded` (section 13, the
+            // owner, 2026-11-03); a lambda written in the block is named after the function the block stands in, as its symbol is
+            // (section 13, assumed)
+            Trace(traced, key, line);
             display = parentDisplay;
+            guardedDisplay = traced;
             if (hasResult)
             {
                 parameters.Add("ptr %result");
@@ -250,7 +254,7 @@ public sealed partial class Emitter
                 loops.Push(loop);
             }
 
-            (elseCase, display, outline, features) = (parentElse, parentDisplay, parentOutline, parentFeatures);
+            (elseCase, display, outline, features, guardedDisplay) = (parentElse, parentDisplay, parentOutline, parentFeatures, parentGuarded);
         }
 
         var result = hasResult ? fn.Alloca(Ir(returnType), "guarded") : null;

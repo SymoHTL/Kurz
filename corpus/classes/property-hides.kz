@@ -1,0 +1,12 @@
+// expect: error hides-member at 9
+// rules: K7
+
+class Bag(List<int> Items) {
+    pub int Count => Items.Count
+}
+
+class Big(int Size) : Bag {
+    pub int Count(int x) => x
+}
+
+print(Big([1], 3).Count(2))
