@@ -981,7 +981,9 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     // but the program's listener holds it: a port the test chose and freed for the program could be held by another socket before
     // the program bound it, and a client that reached that socket was reset while the program waited in its accept until the
     // test's time ended (`A_chunked_file_ends_its_body_in_the_write_of_its_last_piece`, twice on 2026-11-06, with the port
-    // chosen below the system's range for port 0); the newline that ends the number says that the write is whole
+    // chosen below the system's range for port 0); the newline that ends the number says that the write is whole. No file of an
+    // earlier run is read: each run of the class builds in a new temporary directory (`Toolchain`), which its end removes, and each
+    // test, and each row of a theory, builds under a name of its own, so the only `port` beside a program is the one it wrote
     private static TcpClient Connect(string executable, Task program, int receiveBuffer = 0)
     {
         var file = Path.Combine(Path.GetDirectoryName(executable)!, "port");
