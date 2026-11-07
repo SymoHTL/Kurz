@@ -13,9 +13,12 @@ its level: `Log.Trace`, `Log.Debug`, `Log.Information`, `Log.Warning`, `Log.Erro
 `Log.Critical`, and a program's own type named `Log` is `redeclared` (V9) (§12, the owner,
 2026-11-04, Q1 (a)). *(assumed, §12: C#'s six levels with a function named after each)* A file's own
 function, variable or parameter `Log` at any level is `redeclared` too, as of `Environment` (S14),
-while a member named `Log` of a type, a method or a field, is not, and in that type's methods
-`Log.Information("a")` stays a log call. A member of `Log` that names no level is `unknown-name`
-(V10), and so are `Log` and a log function used as a value, `f = Log.Information`. A log call gives
+while a member named `Log` of a type, a method or a field, a parameter of a primary constructor
+among them, is not, and in that type's methods
+`Log.Information("a")` stays a log call, though the member's type has a method `Information`;
+there `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a member's name. A member
+of `Log` that names no level is `unknown-name` (V10), and so are `Log`, where no member takes its
+name, and a log function used as a value, `f = Log.Information`. A log call gives
 nothing: it is a statement, as a call of `print` is, and `x = Log.Information("a")` is `syntax`, a
 call with a `void` success used as a value (O10). *(proposed)*
 
@@ -34,6 +37,7 @@ Log.Verbose("started")
 Case: [logging/log-call-as-value.kz](../corpus/logging/log-call-as-value.kz)
 ```kurz
 paid = Log.Information("paid")
+print(paid)
 ```
 
 ### P2 (decided, §12) The template
@@ -44,8 +48,11 @@ checked as every hole is, and becomes a field of the line named by its text, `{o
 not a string literal is the compile error `log-template`. *(assumed, §12: a hole that is no name
 and no path, `{a + b}`, gives a field named by its text; `log-template`)* The spaces between a
 hole's braces and its text are no part of the field's name, `{ who }` the field `who`. A log
-call with no argument, or with more than one, is `argument-mismatch` (D11), and its one parameter is
-named `template`, so that `Log.Information(template: "a")` is a log call. *(proposed)*
+call with no argument, or with more than one, is `argument-mismatch` (D11), whatever its arguments
+are, `Log.Information(1, "b")` among them; its one parameter is named `template`, so that
+`Log.Information(template: "a")` is a log call, an argument of another name,
+`Log.Information(text: "a")`, is `argument-mismatch`, and the one argument of a call that is no
+string literal is `log-template`, named or not. *(proposed)*
 
 Case: [logging/template-not-literal.kz](../corpus/logging/template-not-literal.kz)
 ```kurz
@@ -126,7 +133,12 @@ chain ID and the actor's parts stand in a line, and what a line written outside 
 their place, stands open (P8). The
 category of a call is the name of the type whose method holds it, as C#'s `ILogger<T>` names a
 category by its type, taken with no container (§12, the owner, 2026-11-04, Q1 (a)): the name as
-written, `Orders` for a method of `Orders`. The category of top-level code is its file's. The
+written, `Orders` for a method of `Orders`. A call in a constructor, in a property or in a field's
+default takes the name of the type it stands in, as a call in its method does, and a call in a
+method of a generic type takes the type's name without its type arguments, so that every instance of
+one generic type shares its category, as .NET's category of `ILogger<T>` leaves them out (§12, the
+owner, 2026-11-07, answer M11); a constructor declared in a class's body and a generic type are
+`not supported` (K14, T19). The category of top-level code is its file's. The
 message is the template with its holes filled as an interpolation fills them (L6). A line's time
 is UTC in the named form of RFC 3339 with milliseconds, and a line break inside a value, a line
 feed in the message or in a field (P7), is written as `\n`, so that no value forges a line. Logs
@@ -136,8 +148,7 @@ the owner's answers (§12, the owner, 2026-11-05, answers L3 and L8). A build fo
 runtime gives no clock for a line's time, says `not supported` at a log call (S11), which narrows
 Q16 (a) (§12, the owner, 2026-11-05, answer L2). Top-level code takes in a function at the top
 level, its file's name is the name without its folder, and a call in a lambda takes the category
-of the code that holds the lambda. *(proposed)* This rule names no category for a call in a method
-of a generic type, in a constructor, in a property or in a field's default.
+of the code that holds the lambda. *(proposed)*
 
 No case: a case's header holds no line of standard error, and a case that expects output writes
 nothing to it.
@@ -152,7 +163,9 @@ type `string` stands in double quotes, with `"` and `\` in it after a `\`. A lin
 message or in a field is written as `\n`. The category of top-level code is the name of its file
 without `.kz`, `main` for `main.kz`. Where lines were dropped (P9), the line
 `<time> Warning Kurz.Log: dropped <n> lines` stands before the next line written (§12, the owner,
-2026-11-05, answers L3, L4 and L8). The layout holds no chain ID: where it stands is open (P8).
+2026-11-05, answers L3, L4 and L8). The layout has no place for the chain ID while P8 stands open,
+and a line is written without it: a line holds the chain ID (P6, P8), and only where it stands is
+open.
 The fields stand in the template's order, a value of any type but `string` is its text (A2 to
 A16), a carriage return is written as `\r` and a `\` in the message as `\\`, as Rust's
 `escape_debug` writes them, so that a `\n` in a line is a line feed; one dropped line is
@@ -191,7 +204,12 @@ No case: as P6's.
 Where a program declares a `Logging` part of its settings type, which wins (P4), the part and
 `KURZ_LOG` combine entry by entry: the part's entry wins for its prefix, and the variable's entries
 stand for every prefix the part does not name, as ASP.NET's configuration layers its providers key
-by key. The two lists are merged once, before the program's first statement (§12, the owner,
-2026-11-06, answer P10).
+by key. The two lists are merged once, before the program's first statement, and a category takes
+its level from the merged list as P5 takes it, by the longest prefix it starts with, so that an
+operator turns a category up or down through `KURZ_LOG` where the part does not name its prefix:
+beside the part's `Orders=Warning`, `KURZ_LOG="Orders.Payments=Debug"` gives `Orders.Payments`
+the level `Debug` (§12, the owner, 2026-11-06, answer P10). The level without a prefix is one
+entry of each list: the part's wins where it declares one, and else the variable's, as ASP.NET's
+`Default` key is layered as every other key. *(proposed)*
 
 No case: as P4's.
