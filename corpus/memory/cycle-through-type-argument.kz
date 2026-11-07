@@ -1,0 +1,13 @@
+// expect: error reference-cycle at 4
+// rules: R9
+
+class Button(string Name, mut () => void OnClick)
+
+T Hook<T>(T x) {
+    f = () => x
+    return f()
+}
+
+b = Button("ok", () => print("x"))
+b.OnClick()
+print(Hook(b).Name)

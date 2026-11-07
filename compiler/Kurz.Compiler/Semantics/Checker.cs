@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpServer"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpServer", "Uri", "UriError", "UriKind", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -318,7 +318,6 @@ public sealed partial class Checker
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
-        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -333,6 +332,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         CheckFieldDefaults(); // K7
@@ -372,6 +372,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         MakeCopies();
+        CheckReferenceCycles(); // R2, R4, R9: after every body, the copies' among them, when the lambdas of the file are known
     }
 
     /// <summary>
@@ -1681,10 +1682,10 @@ public sealed partial class Checker
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
     /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01), and <c>Hint</c> (F18).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), <c>Hint</c> (F18), and <c>Log</c> (P1).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Log" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
 
     /// <summary>
@@ -2188,7 +2189,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        if (variable is null && ImplicitPropertyOf(a.Name) is { Owner: { } owner })
         {
             AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
             CheckExpression(a.Value, Untyped(a.Value));
@@ -2552,6 +2553,11 @@ public sealed partial class Checker
         }
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        if (fields)
+        {
+            KeepFieldTypeOfText(f);
+        }
+
         fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
         fieldsLoopDepth -= fields ? 1 : 0;

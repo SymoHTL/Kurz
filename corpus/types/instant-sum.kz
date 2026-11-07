@@ -13,6 +13,6 @@ instant Reading(long nanoseconds) {
 }
 
 instant a = Reading(5000000000)
-print(a + 90min - a == 90min)
-print(a - 5s - a == -5s)
-print(90min + a - a == 90min)
+print(a + 90min == Reading(5405000000000))
+print(a - 5s == Reading(0))
+print(90min + a == Reading(5405000000000))

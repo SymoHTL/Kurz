@@ -1,0 +1,4 @@
+// expect: error unknown-name at 4
+// rules: P1
+
+Log.Verbose("started")

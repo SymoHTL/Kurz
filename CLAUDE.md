@@ -461,25 +461,34 @@ Gate: review rule "rules for sessions".
   `main` after that round need the owner's approval for that head as for any other, but for the second
   case. The second: a head that took `main` after the round at the cap carries the owner's approval of
   2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
-  6680237539), to merge over red for the check `review` at that head, when all of these hold:
+  6680237539, and for the floor on 2026-11-06, comment 6680659012), to merge over red for the check
+  `review` at that head, when all of these hold:
+  - its round at the cap completed, as in the first case;
   - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words and the merge keeps every word of both; the merge is made with rerere off
-    (comment 6680237539), since a conflict that rerere resolves is still a conflict
+    different words and the merge keeps every word of both, or the floor of `RunTests` (`RunFloor`),
+    set to the count measured on the merged tree: on Linux in the image the `gates` job runs in, with
+    the floor at 999, and on Windows the side that changed it, held by the `compiler-windows` run; the
+    merge is made with rerere off (comment 6680237539), since a conflict that rerere resolves is still a
+    conflict
     ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
-    the lines a conflict block joined;
-  - after a conflict, `py -3 tools/gates.py` passed on the merge commit in the image the `gates` job
-    runs in, before its push: every word kept does not keep every test
+    the lines a conflict block joined and for the floor;
+  - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
+    before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
-  - `gates` and `compiler-windows` are green on that head;
+  - `gates` and `compiler-windows` are green on that head, read after the walk at the cap (the rule
+    "A pull request gets at most one review round" below), which resolves every thread of the round;
   - every defect its round found is named on issue 39, and no high finding of it holds.
 
-  It holds for a round that did not converge, or that the usage limit cut off after a paid pass, too
-  (comment 6577439799): it is the owner's choice that the refusal of a branch behind `main` at the
-  cap (the rule below) asks for. Any other conflict, any other change to its own diff, a high finding
-  that holds and a red gate need the owner's approval for that head. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
-  takes `--over-red` as the caller's statement (HAZARD #3). Retired on
-  2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
+  The round need not have converged (the owner, 2026-11-06, issue 39, comment 6680905808): for a
+  round that did not, this case is the owner's choice that the refusal of a branch behind `main` at
+  the cap (the rule below) asks for. Any other conflict, any
+  other change to its own diff, a round at the cap that did not complete, a high finding that holds
+  and a red gate need the owner's approval for that head. Whether the conditions of either case hold
+  is read by the caller, a `judgment step`: the merge tool takes `--over-red` as the caller's
+  statement (HAZARD #3). Retired on 2026-10-21 by the cap of the first case: "An approval is never
+  standing" with no case. Retired on 2026-11-06 by issue 39, comment 6680237539: "a head that took
+  `main` after that round" needing the owner's approval as any other. The tool switches the whole
   ruleset off for the one merge and restores it; while it is off nothing on the server holds any
   pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
