@@ -461,12 +461,15 @@ Gate: review rule "rules for sessions".
   `main` after that round need the owner's approval for that head as for any other, but for the second
   case. The second: a head that took `main` after the round at the cap carries the owner's approval of
   2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
-  6680237539, for the floor comment 6680659012, and for an append at one end comment 6694541027), to
-  merge over red for the check `review` at that head, when all of these hold:
+  6680237539, for the floor comment 6680659012, and for an append at one end comment 6694541027) and on
+  2026-11-07 (for lines, comment 6710283110), to merge over red for the check `review` at that head,
+  when all of these hold:
   - its round at the cap completed, as in the first case;
   - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words, or only appended, both at the same end of a line or of a table cell, and the merge
-    keeps every word of both, or the floor of `RunTests` (`RunFloor`),
+    different words, or only appended, both at the same end of a line or of a table cell, or changed
+    different lines, one side's whole lines standing between lines the other side changed, or only
+    added items or table rows, both at the end of one list, and the merge keeps every word and every
+    line of both, or the floor of `RunTests` (`RunFloor`),
     held on each system to a bound: `main`'s floor plus the pull request's own change to it, its
     floor less the merge base's, so that a merge that lost the cases either side added is caught. On
     Linux the floor is the count of cases measured on the merged tree in the image the `gates` job
