@@ -566,14 +566,18 @@ split at its first `?`, with no decoding, and `r.Headers` each header as sent, i
 spaces and tabs around it (W4) (§12, assumed with the product passes of 2026-10-31 and 2026-11-03). A
 target in absolute form, `http://host/a?b`, gives its path alone, `/a` and `b`, and its authority
 stands as the `Host` in place of the client's (§12, the owner, 2026-11-05, Q2). A refusal
-is of the kind `Protocol` where the server answers `400`, or `408` for a request that ran out of its
-time (W10), `TooLarge` where it answers `413`, `414`
+is of the kind `Protocol` where the server answers `400`, `TooLarge` where it answers `413`, `414`
 or `431`, and `Unsupported` where it answers `501`, `505` or `417`, for the causes §12 lists with
 each status (the owner, 2026-10-31, "Status line only", and 2026-11-03, "`HttpKind` keeps the
 record's four kinds"), each with a text that names the cause and quotes no value of the request,
 `malformed request: header without a colon`, `request line too long` or `unsupported HTTP version`
 (§12, the owner, 2026-11-03, "The server's error texts mirror the client's" and "The refusals that
-had no text take the kind `Unsupported`"). A `Transfer-Encoding` whose last coding is not `chunked` is
+had no text take the kind `Unsupported`"). A request whose head or body runs out of its time in the
+server's loop (W10) has one result, `HttpError(Protocol, "request timed out")`, which `ServeConnection`
+gives and the server answers `408` (§12, the owner, 2026-11-01, "Kestrel's bounds", and 2026-11-03,
+"The server's error texts mirror the client's"); the `TimedOut` of the loop's own read is turned into
+it and reaches no program, and `HttpRequest.Read`, which sets no time of the server's (W10), gives a
+read past the stream's own time as the stream's `IoError` of the kind `TimedOut` (§12, assumed). A `Transfer-Encoding` whose last coding is not `chunked` is
 answered `400`, of the kind `Protocol`, and one that names another coding before its last `chunked` is
 answered `501`, of the kind `Unsupported` (§12, the owner, 2026-11-05, Q1); a request of
 HTTP/1.0 with a `Transfer-Encoding` is `malformed request: transfer encoding in HTTP/1.0` (Q7); and the
@@ -587,7 +591,10 @@ supported"). *(assumed, §12, not put to the owner: a stream that ends before it
 alone is refused, as RFC 9112, section 2.2, lets a server refuse it; a valid `Host` is the host
 of RFC 3986 with an optional port; the lines of a `Transfer-Encoding` given more than once read as one
 list in their order, each coding without regard to ASCII case, with the spaces and tabs around it taken
-off, and an empty item between two commas skipped, as RFC 9110, section 5.6.1, has a list read; the
+off, and an empty item skipped wherever it stands, before the first comma, between two or after the
+last, as RFC 9110, section 5.6.1, has a list read, so that a `Transfer-Encoding` with no coding left,
+an empty one or `,`, is one whose last coding is not `chunked`, answered `400`, of the kind `Protocol`,
+`malformed request: transfer encoding not ending in chunked`; the
 texts of Q1's two refusals, `malformed request: transfer encoding not ending in chunked` and
 `unsupported transfer encoding`; a `chunked` before the last one counted as another coding, so that
 `chunked, chunked` is `unsupported transfer encoding`, as RFC 9112, section 6.1, forbids `chunked`
@@ -596,7 +603,9 @@ letter and then letters, digits, `+`, `-` and `.`, whatever it names, its empty 
 client's own `Host` held to the rules of any other request, two of them, none in HTTP/1.1 and one that
 is no valid `Host` refused, before the authority takes its place; an authority that is empty, or that
 is no valid `Host`, one with a userinfo among them, since a `Host` holds no `@`, is
-`malformed request: bad Host`, as RFC 9110, section 4.2.1, refuses both; where a request meets more than
+`malformed request: bad Host`, as RFC 9110 has a recipient refuse an empty host, sections 4.2.1 and
+4.2.2, and treat a userinfo as an error, section 4.2.4, each for `http` and `https`, the refusal of
+either for another scheme being the build's own reading; where a request meets more than
 one refusal, the first the reader meets answers it, in this order: a request line or headers over their
 limits as they are read, then the request line (its method, its target, its version, then `CONNECT`),
 each header, `Host`, `Content-Length`, a `Content-Length` beside a `Transfer-Encoding`, a
@@ -771,7 +780,10 @@ of the network is the stream's `IoError`, a body the stream ends inside
 `HttpError(Protocol, "malformed request: unexpected end of body")`, a chunk that is not well formed
 `malformed request: bad chunk` or `malformed request: bad chunk size`, of the same kind, and a body over
 `MaxRequestBodySize` or over the `max` of `ReadAll` `HttpError(TooLarge, "request body over limit")`
-(§12, the owner, 2026-11-03, "The server's error texts mirror the client's").
+(§12, the owner, 2026-10-31, "HttpError + record's rule", for the results of `Read` and `ReadAll` and
+a failure of the network as an `IoError` beside those of HTTP as an `HttpError`, and 2026-11-03, "The
+server's error texts mirror the client's", for the kinds and the texts; `ReadAllText`'s result, its
+`InvalidUtf8` among them, §12, assumed, not put to the owner).
 *(assumed, §12, not put to the owner: a `Read` with a `max` of zero or below giving 0 and reading
 nothing, but after a failure of HTTP, which it gives again; a chunk's extensions dropped, the trailer and the head one budget,
 the empty line of each beside it, `ReadAll(max)` taking any `max` up to the largest `int` (a default the
@@ -780,7 +792,9 @@ UTF-8, chunks held to `MaxRequestBodySize` as they are read, as a declared lengt
 `ReadAll(max)` refusing a body over `max` with `request body over limit`, every body where `max` is
 below zero, an empty one among them, a declared length before its first byte is read, so that the body
 stays in the stream for the reads after it, and a chunked body once more than `max` of its bytes were
-read, which are dropped; a failure of HTTP staying, every read after it giving it again; and
+read, which are dropped; a failure of HTTP staying, every read after it giving it again, but for
+`ReadAll`'s refusal for its own `max`, which does not stay: the body is still readable after it, a
+declared length whole and a chunked body from the byte after those `ReadAll` dropped; and
 `100 Continue` sent to a request of HTTP/1.1 alone, and to none whose body is absent or a declared
 length of 0)*
 
@@ -1073,7 +1087,7 @@ rate", and 2026-11-03); and the four numbers the server held fixed made members,
 `MaxRequestsPerConnection`, 100 requests to a connection, `KeepAliveTimeout`, an idle connection
 closed after 5 seconds, Kestrel's name with the owner's number where Kestrel waits 130 seconds,
 `MaxDrainSize`, 64 KiB of a body drained, and `MaxChunkSizeLine`, a chunk's size line of 4096 bytes,
-the three without a limit of Kestrel's (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and
+`MaxRequestsPerConnection`, `MaxDrainSize` and `MaxChunkSizeLine` without a limit of Kestrel's (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and
 2026-11-03).
 `HttpRequest.Read(stream)` reads with the limits of `HttpLimits()`, and the limits a server is given
 reach the parser through an entry inside `std/` that no program calls (§12, the owner, 2026-11-02,
@@ -1173,7 +1187,8 @@ contradicts, is answered `500 Internal Server Error` with an empty body and `Con
 the size of its file cannot be read (below) (§12, the owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
 added as its last coding where it does not end in it, and the body is chunked, a coding it names
 being announced and not applied; beside a `Content-Length` it gets no answer (§12, the owner,
-2026-11-03). A status RFC 9110 and RFC 6585 name no reason phrase for is written with an empty one
+2026-11-03); its exceptions are a `204` and a `304`, where it is dropped (above), and a request of
+HTTP/1.0, where the server's loop drops it and frames the body by its length (W9) (§12, assumed). A status RFC 9110 and RFC 6585 name no reason phrase for is written with an empty one
 (§12, assumed). In a build for Windows `Write` and `WriteHead` are `not supported` at the line of the
 program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
 headers written in the order they were set, the `Content-Type` first, and the `Content-Length` of
@@ -1182,7 +1197,9 @@ no number or another number than the body's length; a file whose
 size cannot be read answered with that `500`, `Write` giving the `IoError` of the read; a
 `Transfer-Encoding` beside a `Content-Length` giving an `IoError` of the kind `InvalidInput`, nothing
 written, before the `Content-Length` is held against the body; a chunked `Text` or `Bytes` written as
-one chunk and the last, and a `File` as a chunk for each piece of 64 KiB it is read in; and a file
+one chunk and the last, and a `File` as a chunk for each piece of 64 KiB it is read in, an empty body,
+an `Empty` with a handler's `Transfer-Encoding` among them, as the last chunk alone, with no size
+line and no data chunk; and a file
 whose size changes while it is sent giving one of the kind `InvalidData`)*
 
 Case: [http/response-write.kz](../corpus/http/response-write.kz)
@@ -1485,8 +1502,10 @@ one after a `500`, the writer's own among them, and one after the last request
 `MaxRequestsPerConnection` allows closes after the response (§12, the owner, 2026-10-31, "Persistent,
 100 req, 5 s", and 2026-11-02, Q11, and assumed). The server writes its `Date` where the handler set none and keeps the handler's (§12, the owner,
 2026-11-02, Q10), and before a close its own `Connection: close` where the handler set no `Connection`
-(Q10), and beside a handler's `Connection` that does not say `close`, read as the option above (§12, the
-owner, 2026-11-05, Q6). A connection the server closes once it has
+(Q10), and beside a handler's `Connection` that does not say `close` (§12, the owner, 2026-11-05, Q6),
+the close and the server's own header both decided by the one reading above, `close` an option of the
+list, so that a handler's `Connection: keep-alive, close` closes the connection and gets no
+`Connection` of the server's beside it (§12, assumed). A connection the server closes once it has
 written a response or a refusal is closed in stages: its writes ended, then what the client still
 sends read and dropped, then the close, as RFC 9112, section 9.6, has it (§12, the owner, 2026-11-02,
 "a half-close on `TcpStream`"). A `HEAD` is answered with the head alone, as `WriteHead` writes it (§12, the owner, 2026-11-02,
@@ -1494,7 +1513,9 @@ Q13). A body the handler did not read is read and dropped up to `MaxDrainSize`, 
 connection closes, a request that expects `100-continue` whose body the handler did not read closes it
 with no `100 Continue` sent, and a chunked body malformed while it is dropped, one whose trailer passes
 what the head left of its limits among them, closes it without an answer, the handler's response not
-written (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
+written, the connection closed at once, with no close in stages, and `ServeConnection` giving that
+body's `HttpError`, as `malformed request: bad chunk size`, or `request header too large` for such a
+trailer (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
 body and `Connection: close`, and the connection closes (§12, the owner, 2026-10-31, "Status line
 only"). A handler that throws ends what runs the server, as an exception ends the actor it happens in
 (§12). In a build for Windows `Serve` and `ServeConnection` are `not supported` at the line of the
@@ -1755,6 +1776,112 @@ Exchange(two, unwritable, HttpLimits())
 Exchange("{two}GET /c HTTP/1.1\r\nHost: h\r\n\r\n", hello, HttpLimits(MaxRequestsPerConnection: 2))
 Exchange(two, partly, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", keeping, HttpLimits())
+```
+
+Case: [http/serve-close-option.kz](../corpus/http/serve-close-option.kz)
+```kurz
+// a handler's `Connection` is read as a list of options for the close and for the server's own `Connection: close` alike: one
+// that holds `close` among other options, without regard to ASCII case, closes the connection and gets no `Connection` of the
+// server's beside it, a request the client sent after it left unread; and one that holds no `close` gets the server's
+// `Connection: close` beside it before a close
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+
+listed = (HttpRequest r) => {
+    response = HttpResponse.Text(200, "bye")
+    response.Headers.Set("Connection", "keep-alive, Close") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+unlisted = (HttpRequest r) => {
+    response = HttpResponse.Text(200, "kept")
+    response.Headers.Set("Connection", "keep-alive, upgrade") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", listed, HttpLimits())
+Exchange("GET /a HTTP/1.0\r\n\r\n", unlisted, HttpLimits())
 ```
 
 Case: [http/serve-refused.kz](../corpus/http/serve-refused.kz)
@@ -2143,7 +2270,7 @@ grace, and under it the connection closes, since its status has gone out (§12, 
 "Add Kestrel's response rate"), and `ServeConnection` gives that write's `IoError` of the kind
 `TimedOut` (§12, assumed); and an idle connection closes without an answer at `KeepAliveTimeout`
 (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03), `ServeConnection` giving
-`void` (W9). The server measures these
+`void` (§12, assumed; W9). The server measures these
 bounds by `instant` and holds them by the socket's own times, `SO_RCVTIMEO` set before each refill to
 what remains of the bound that read is under (§12, the owner, 2026-11-04, the monotonic clock, Q9 (a));
 a read of a head waits what remains of the head's time alone, with no 5 seconds of a read on a socket
