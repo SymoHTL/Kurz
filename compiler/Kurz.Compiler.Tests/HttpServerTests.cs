@@ -234,6 +234,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-coded-file");
         var port = FreePort();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var whole = 0;
@@ -268,15 +269,15 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             catch (IOException e)
             {
                 // the server's exit code and what it printed say why the connection broke, so the client's error does not end the test
-                failed = $"after {whole} responses: {e.Message}";
+                failed = $"after {whole} responses, at {clock.Elapsed}: {e.Message}";
             }
 
             watch.Stop();
         }
 
         var (code, output, error) = await run;
-        Ran((0, "", "served\n"), (code, error, output));
-        Assert.True((whole, failed) == (100, ""), $"{whole} responses whole; client [{failed}]");
+        var seen = $"code {code} output [{output}] error [{error}] client [{failed}] after {clock.Elapsed}"; // the whole of what the run gave, which a tuple's display cuts
+        Assert.True((code, error, output, whole, failed) == (0, "", "served\n", 100, ""), $"the program did not serve 100 chunked files: {whole} responses, {seen}");
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 chunked files took {watch.Elapsed.TotalMilliseconds:F0} ms");
     }
 
@@ -323,22 +324,33 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-long-reads");
         var port = FreePort();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
+        var failed = "";
         using (var client = Connect(port, run))
         {
             var stream = client.GetStream();
-            stream.Write("POST /a HTTP/1.1\r\nHost: h\r\n"u8);
-            await Task.Delay(5500);
-            stream.Write("Content-Length: 4\r\nConnection: close\r\n\r\nab"u8);
-            await Task.Delay(5500);
-            stream.Write("cd"u8);
-            stream.CopyTo(got);
+            try
+            {
+                stream.Write("POST /a HTTP/1.1\r\nHost: h\r\n"u8);
+                await Task.Delay(5500);
+                stream.Write("Content-Length: 4\r\nConnection: close\r\n\r\nab"u8);
+                await Task.Delay(5500);
+                stream.Write("cd"u8);
+                stream.CopyTo(got);
+            }
+            catch (IOException e)
+            {
+                // the server's exit code and what it printed say why the connection broke, so the client's error does not end the test
+                failed = $"after {got.Length} bytes of the response, at {clock.Elapsed}: {e.Message}";
+            }
         }
 
         var (code, output, error) = await run;
-        Ran((0, "", "served\n"), (code, error, output));
+        var seen = $"code {code} output [{output}] error [{error}] client [{failed}] after {clock.Elapsed}"; // the whole of what the run gave, which a tuple's display cuts
+        Assert.True((code, error, output, failed) == (0, "", "served\n", ""), $"the program did not serve the request: {seen}");
         var response = System.Text.Encoding.ASCII.GetString(got.ToArray());
         Assert.StartsWith("HTTP/1.1 200 OK\r\n", response);
         Assert.EndsWith("\r\n\r\nabcd", response);

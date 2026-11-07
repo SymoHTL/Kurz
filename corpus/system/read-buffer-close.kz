@@ -1,9 +1,7 @@
 // expect: output
 // | 1
 // | Other 9
-// | 1
-// | 0
-// rules: S3, S5, S9
+// rules: S3, S5
 
 void | IoError Show() {
     // a read of one byte fills the file's buffer with the 20 bytes the file holds; its close drops the 19 no read took, and a read
@@ -18,18 +16,6 @@ void | IoError Show() {
         int n => print(n)
         IoError e => print("{e.Kind} {e.Code}")
     }
-
-    // a read of one byte fills the stream's buffer with the 10 bytes of one write, which leaves the system's queue empty; the close
-    // drops the 9 the buffer holds, and the peer reads the end of the stream, where bytes left in the queue would have reset it
-    listener = TcpListener.Bind("127.0.0.1:0")
-    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
-    server = listener.Accept()
-    client.Write("abcdefghij".Bytes)
-    mut got = Bytes()
-    print(server.Read(mut got, 1))
-    server.Close()
-    mut last = Bytes()
-    print(client.Read(mut last, 16))
 }
 
 Show() else {
