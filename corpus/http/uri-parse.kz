@@ -1,0 +1,65 @@
+// expect: output
+// | http|127.0.0.1|8080|/a/b|x=1&y=2
+// | HTTP|example.com|80|/|
+// | https|[::1]|443|/|
+// | http|host|81|/p|
+// | ftp|files.example|-1|/readme|
+// | http|example.com|80|/|q
+// | http|hh|80|/x|
+// | http|h|80|/|
+// | http|h|65535|/a%20b|c=%41
+// | Scheme 0
+// | Scheme 0
+// | Scheme 11
+// | Scheme 0
+// | Scheme 2
+// | Host 5
+// | Host 7
+// | Host 11
+// | Host 8
+// | Host 12
+// | Host 8
+// | Port 10
+// | Port 13
+// | Character 8
+// | Character 9
+// | Character 9
+// | Character 9
+// rules: W12
+
+// `Uri.Parse` gives the parts of an address as written, the scheme's port where none is written, `/` for an empty path and the
+// query without its `?`, a fragment and a user's part read and dropped; and for text that is no address the kind of the failure
+// and the position of the first byte refused
+void Show(string text) {
+    match Uri.Parse(text) {
+        Uri u => print("{u.Scheme}|{u.Host}|{u.Port}|{u.Path}|{u.Query}")
+        UriError e => print("{e.Kind} {e.At}")
+    }
+}
+
+Show("http://127.0.0.1:8080/a/b?x=1&y=2#top")
+Show("HTTP://example.com")
+Show("https://[::1]/")
+Show("http://user:pw@host:81/p?")
+Show("ftp://files.example/readme")
+Show("http://example.com?q")
+Show("http://hh:/x")
+Show("http://h#frag")
+Show("http://h:65535/a%20b?c=%41")
+Show("")
+Show("/relative")
+Show("example.com")
+Show("1http://x")
+Show("ht_tp://x")
+Show("http:x")
+Show("http:///x")
+Show("http://[::1/")
+Show("http://[]/")
+Show("http://[::1]x/")
+Show("http://a]b/")
+Show("http://h:8x/")
+Show("http://h:65536/")
+Show("http://a b/")
+Show("http://h/%zz")
+Show("http://h/%4")
+Show("http://h/é")

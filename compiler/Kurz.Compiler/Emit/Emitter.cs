@@ -175,6 +175,7 @@ public sealed partial class Emitter
                 Declare(slot, arguments.Type);
             }
 
+            EmitLogStart(); // P4: `KURZ_LOG`, read before the first statement of a program that logs
             EmitStatements(program.Tree.Statements);
         });
 
