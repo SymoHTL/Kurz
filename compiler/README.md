@@ -1811,7 +1811,8 @@ class it reads, a field in its body or a `static` member where the class has a b
 (K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
 (K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
-field's, or with a default, where the base's default is the field's (K11, K16), an `equal by` on a class whose
+field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
+parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
 `override` on one method, `virtual` on a private method, and either on a `static` method, which has no
 instance to dispatch on (K7, F9), a `prot` method called through a value

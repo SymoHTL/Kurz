@@ -52,10 +52,14 @@ print(Sign(3))
 ### F4 (assumed, §8) `void`
 
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
-is no type of a value: a parameter a function declares, a field or a variable of type `void` is
-`syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
+is no type of a value: a parameter a function or a method declares, `static` or not, a field or a
+variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
 `void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
-of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04): the type has one
+parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
+can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
+no value to pass (E4). A lambda that writes `void` on its parameter, `(void v) => 2`, is read against
+the function type it is passed for (F11).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -84,7 +88,7 @@ print("boxed")
 
 Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
 ```kurz
-// `void` is no type of a variable
+// `void` is no type of a variable: the case pins that refusal, and the value `1` is not checked against `void`
 void done = 1
 ```
 
@@ -444,9 +448,10 @@ does not name); one that is not is the compile error `default-not-constant`, at 
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 The default of a parameter of a method, `static` or not, is read with the members of its class in
 sight, as C# reads it: a field, a `static` field or a method of the class named there is no
-constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
-§8: `this` there is no constant either, and a field of an instance in the default of a `static`
-method is K19's `static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+constant, so it is `default-not-constant`, as C# gives CS1736 for a `static readonly` field (§8, the owner,
+2026-11-04). *(assumed, §8: `this` in the default of an instance method is no constant either, and
+`this` or a member of an instance, a field or a method, in the default of a `static` method is K19's
+`static-mismatch`, as in its body)* A call of a `virtual` method or of its override
 takes the default of the method its receiver's static type names, and runs the body the object's
 type gives, as C# does, so one object's call passes different values by the type of the variable it
 is read through; an override without a default has none of its own, and a call on the derived type
@@ -597,6 +602,30 @@ class A {
 
 class B : A {
     pub override int F(int x = 2) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
+```
+
+Case: [classes/method-default-field.kz](../corpus/classes/method-default-field.kz)
+```kurz
+class Counter(int Start) {
+    pub int Next(int from = Start) => from + 1
+}
+
+print(Counter(1).Next(2))
+```
+
+Case: [classes/method-default-override-missing.kz](../corpus/classes/method-default-override-missing.kz)
+```kurz
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x) => x * 10
 }
 
 A a = B()
