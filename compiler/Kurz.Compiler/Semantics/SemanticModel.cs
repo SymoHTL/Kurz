@@ -206,6 +206,9 @@ public enum CallKind
     /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
     TcpShutdownWrite,
 
+    /// <summary>A stream's <c>SetNoDelay(on)</c>, which only <c>std/</c> reaches (W11).</summary>
+    TcpSetNoDelay,
+
     /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls (section 12).</summary>
     TcpWriteWithin,
 

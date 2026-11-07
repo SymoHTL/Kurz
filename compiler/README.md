@@ -358,7 +358,7 @@ code is in `std/`: the allocator of section 3 and the blocks of a list and of a 
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
 `HttpError` with its `HttpKind` (W2), the class `HttpHeaders` (W4), and `HttpRequest` with its `HttpBody`, `HttpLimits` with its `HttpRate`, and
-the reader of a request from a `TcpStream` (W5 to W7), `HttpResponse`, the writer of a response to one (W8), and `HttpServer`, the loop that serves a connection's requests with a handler (W9) and holds each to its bounds of time (W10), and `Uri` with its `UriError` and `UriKind` (W12) and `HttpClient`, the client with its `HttpClientOptions` and its pool of connections, which gives an `HttpResponseMessage` and bounds each call by its time (W13 to W16), types every program sees (W1: the checker of a program is given
+the reader of a request from a `TcpStream` (W5 to W7), `HttpResponse`, the writer of a response to one (W8), with `HttpWriter`, the writer of a streamed body (W11), and `HttpServer`, the loop that serves a connection's requests with a handler (W9) and holds each to its bounds of time (W10), and `Uri` with its `UriError` and `UriKind` (W12) and `HttpClient`, the client with its `HttpClientOptions` and its pool of connections, which gives an `HttpResponseMessage` and bounds each call by its time (W13 to W16), types every program sees (W1: the checker of a program is given
 `std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
 members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, and the built-in types every file sees, `IoError` among them, are
 the symbols `std/`'s checker made of them, so that the `IoError` a function of `std/` gives is the program's), at
@@ -481,6 +481,9 @@ system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many byt
 each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
 `SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
 call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
+`SetNoDelay` sets `TCP_NODELAY` (1) at the level `IPPROTO_TCP` (6), the stream's member that only `std/`'s checker
+resolves, for the writer of a streamed response (W11), as Kestrel sets it on every connection: a small write then goes
+out at once, and not after the peer's acknowledgement of the one before.
 `LockWait` puts the thread to sleep on a file's lock word while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
 as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
@@ -1004,7 +1007,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
-  not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
+  not `null`, each of a stream's `ShutdownWrite` and `SetNoDelay`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
@@ -2438,7 +2441,12 @@ round can ask about it by the rule's id.
   folders the file uses, each captured variable read through its type as a field is, and a type
   parameter through every type argument a call of the program gives it. A list, a map, a union, a
   nullable type and a `data` value that hold a function value count as a function type does
-  *(assumed)*. The rule is judged after every body, when the lambdas are known, and the text of a ring
+  *(assumed)*. Of those lambdas the field counts the ones whose type it can hold, `Types.Assignable`
+  to one of the function types its type holds, and the ones a function value such a lambda captures
+  can be, until none is added; a type on the way that names a type parameter counts every lambda
+  (the owner, 2026-11-04, #110, comment 6643368937), so that a lambda that captures an
+  `HttpResponse`, whose streamed body is such a field, closes no ring unless it can be that body.
+  The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
   reported at the line of the file's first lambda that captures a class of the ring *(assumed)*. A ring
