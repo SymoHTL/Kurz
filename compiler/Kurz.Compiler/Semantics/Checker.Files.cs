@@ -71,7 +71,11 @@ public sealed partial class Checker
     /// a <c>duration?</c> (section 12, assumed), <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (the
     /// owner, 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do
     /// (section 12, assumed), and a stream's <c>ShutdownWrite()</c>, as Rust's <c>shutdown(Shutdown::Write)</c> (section 12, the owner,
-    /// 2026-11-02); each with the case <c>IoError</c>.
+    /// 2026-11-02); and, in <c>std/</c> alone, whose checker reads no other library, a stream's <c>SetNoDelay(on)</c>, the system's
+    /// <c>TCP_NODELAY</c>, which the writer of a streamed response sets, as Kestrel sets it on every connection, and which a program does
+    /// not see (W11, assumed); each with the case <c>IoError</c>. In <c>std/</c> alone, where no checker of <c>std/</c> stands above this one, a
+    /// stream's <c>WriteWithin(bytes, bound)</c>, a write held to <c>bound</c> across the calls of the system it makes, which the server's
+    /// writes of a response take (section 12, the default of the follow-up's product pass, Q10): a program sees no such member.
     /// </summary>
     private Typed CheckFileMethod(HandleType handle, MemberAccess m, CallExpression c)
     {
@@ -95,6 +99,8 @@ public sealed partial class Checker
             "SetWriteTimeout" when stream => (CallKind.TcpSetWriteTimeout, [timeout], Types.Void),
             "SetAcceptTimeout" when listener => (CallKind.TcpSetAcceptTimeout, [timeout], Types.Void),
             "ShutdownWrite" when stream => (CallKind.TcpShutdownWrite, [], Types.Void),
+            "SetNoDelay" when stream && std is null => (CallKind.TcpSetNoDelay, [new Slot("on", Types.Bool, false, false, false)], Types.Void),
+            "WriteWithin" when stream && std is null => (CallKind.TcpWriteWithin, [new Slot("bytes", bytes, false, false, false), new Slot("bound", Types.Duration, false, false, false)], Types.Void),
             "Close" => (CallKind.FileClose, [], Types.Void),
             _ => null,
         };

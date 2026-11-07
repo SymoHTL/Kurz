@@ -6,11 +6,12 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// Chapter 7: an instance of a class is the address of its block, as Rust's <c>Rc&lt;T&gt;</c> is the address of its <c>RcBox</c>
 /// (section 3): the count of the references that hold it, the count of the weak ones, one for all the strong ones together, then its
-/// fields in their order, a base's first (<see cref="Layout.ClassBlock"/>); a nullable instance is the address alone, null its
-/// <c>null</c>. A value of a class that another class derives from is the pair of the address and the table of the instance's class,
-/// as Rust's <c>Rc&lt;dyn Trait&gt;</c> is the address and its vtable (K6, <see cref="Layout.Fat"/>): the table holds the helpers that
-/// end the instance and free its block, its equality and its hash where the program uses them, and its <c>virtual</c> methods, the
-/// base's first (<see cref="EmitTables"/>). The instance is counted as a list is (K2): every place that holds one holds a count, a
+/// fields in their order, a base's first (<see cref="Layout.ClassBlock"/>); a nullable instance of a class that nothing derives from
+/// is the address alone, null its <c>null</c>. A value of a class that another class derives from is the pair of the address and the
+/// table of the instance's class, as Rust's <c>Rc&lt;dyn Trait&gt;</c> is the address and its vtable (K6, <see cref="Layout.Fat"/>),
+/// and a nullable one is the pair too, its <c>null</c> the pair of zeros (N1): the table holds the helpers that end the instance and
+/// free its block, its equality and its hash where the program uses them, and its <c>virtual</c> methods, the base's first
+/// (<see cref="EmitTables"/>). The instance is counted as a list is (K2): every place that holds one holds a count, a
 /// variable lets go of it at the end of its block, and the last count lets go of the fields in their order, as Rust drops them, and
 /// then of the weak count the strong ones held; the last weak count frees the block. An instance whose last count a release lets go of
 /// waits on a work list until that release ends (<see cref="ReleaseInstance"/>). No count is elided. A method is a function of the

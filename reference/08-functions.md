@@ -270,9 +270,10 @@ and a class instance is no part of the copy: the lambda holds a reference to the
 every change of the copy is `capture-assign` too, since it would be lost: an assignment into a path
 from a captured variable that reaches no instance (M4), a `mut` method called on the variable or on
 such a path (M5), and passing the variable or such a path as a `mut` argument (M7). *(proposed: the
-record speaks of assigning)* A path reaches an instance where a field of an instance lies on it, the
-field it assigns or one whose list or map it writes into: `() => { b.Xs[0] = 2 }` reaches the instance
-`b`, while `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field `Item` holds an
+record speaks of assigning)* A path reaches an instance where a field of an instance lies on it, whatever the
+path does after that field, the field it assigns, one whose list or map it writes into or one whose `data`
+value it writes into: `() => { b.Xs[0] = 2 }` and `() => { b.Data.X = 1 }`, with `Data` a `mut` field of
+a `data` type, reach the instance `b`, while `() => { d.Item = Counter(2) }`, with a `data` value `d` whose field `Item` holds an
 instance, assigns a field of the copy and is `capture-assign` *(proposed: as the sentence before)*. An instance changes through every reference (K2), so the lambda may
 change what an instance it captured holds, a `mut` field by an assignment, `() => { c.Count = 5 }`,
 or through a method, `() => c.Add(1)`, while `() => { c = Counter(1) }` and `() => { d.X = 1 }` with a `data`
@@ -453,14 +454,14 @@ that leaves the argument out is `argument-mismatch` (D11) (§8, the owner, 2026-
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
-int Log(string s, int v) {
+int Show(string s, int v) {
     print(s)
     return v
 }
 
 int Add(int a, int b) => a + b
 
-print(Add(b: Log("b", 2), a: Log("a", 1)))
+print(Add(b: Show("b", 2), a: Show("a", 1)))
 ```
 
 Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
@@ -909,7 +910,11 @@ arm of a `match` of the top-level code binds reserves nothing either, as a varia
 *(assumed: the answer named a loop variable, a variable inside a block and a lambda's parameter)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
-read first, whose message points at the read while the fix is the whole line). The owner chose the
+read first, whose message points at the read while the fix is the whole line). A type parameter of the function, one that holds a
+constant among them (T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes
+a copy of the function (T33), so that a body never has to choose which of the two it reads (§4, the owner, 2026-11-05,
+"redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its function, as C#
+and Rust let it; the cost is that a generic function cannot reuse a top-level name). The owner chose the
 rule on 2026-10-03, against reading the variable at the call as a C# local function does, which
 would have given two kinds of function two views of a captured variable (F15), and against taking
 the value at the function's declaration as a lambda does, which a function declared above the
@@ -946,6 +951,15 @@ int Next(int count) => count + 1
 
 count = Next(count)
 print(count)
+```
+
+Case: [functions/top-level-name-as-type-parameter.kz](../corpus/functions/top-level-name-as-type-parameter.kz)
+```kurz
+int N = 3
+
+int Thrice<const int N>() => N * 3
+
+print(N)
 ```
 
 Case: [functions/top-level-name-assigned-and-read.kz](../corpus/functions/top-level-name-assigned-and-read.kz)
@@ -1033,14 +1047,18 @@ if args.Count == 0 {
 
 ### F18 (decided, §12) `Hint.BlackBox`
 
-`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)`, as
-Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "Any value,
-as Rust's"). `Hint` is a name every file sees, so a file's own declaration of it is `redeclared`.
-Every program may call it, without `raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
+`Hint.BlackBox(value)` gives back its argument, a value of any type, `T BlackBox<T>(T value)` with
+`T` inferred from the argument, as Rust's `std::hint::black_box` does (§12, the owner, 2026-11-03,
+"`Hint.BlackBox(x)`" and "Any value, as Rust's"). An argument with no type of its own is refused as
+for any generic function: `Hint.BlackBox([])` is `cannot-infer` (M11, T27). `Hint` is a name every
+file sees, so a file's own declaration of it is `redeclared`. Every program may call it, without
+`raw`. The optimiser knows nothing of the value the call gives back and makes the argument before
 the call, as best effort, the way Rust's does, with no promise of constant time (§12, the owner,
-2026-11-03, "The defaults of the round stand"). *(assumed, §12: type arguments are refused, as
-`string.Join` refuses them, and a member of `Hint` other than `BlackBox` is `unknown-name` (V10), as
-a function `Sha256` lacks is)*
+2026-11-03, "The defaults of the round stand"). *(assumed, §12: `Hint.BlackBox(null)` is
+`type-mismatch`, as N6 assumes of a `null` with no nullable type, and a call with another count of
+arguments than one is `argument-mismatch`, the id D11 proposes; type arguments are refused with
+`syntax` (E4), as `string.Join` refuses them, and a member of `Hint` other than `BlackBox` is
+`unknown-name` (V10), as a function `Sha256` lacks is)*
 
 No case for what the optimiser sees: a case sees only the value the call gives back.
 
@@ -1072,5 +1090,29 @@ print(1)
 Case: [functions/black-box-unknown-member.kz](../corpus/functions/black-box-unknown-member.kz)
 ```kurz
 x = Hint.Opaque(1)
+print(x)
+```
+
+Case: [functions/black-box-type-arguments.kz](../corpus/functions/black-box-type-arguments.kz)
+```kurz
+x = Hint.BlackBox<int>(1)
+print(x)
+```
+
+Case: [functions/black-box-two-arguments.kz](../corpus/functions/black-box-two-arguments.kz)
+```kurz
+x = Hint.BlackBox(1, 2)
+print(x)
+```
+
+Case: [functions/black-box-empty-list.kz](../corpus/functions/black-box-empty-list.kz)
+```kurz
+x = Hint.BlackBox([])
+print(x)
+```
+
+Case: [functions/black-box-null.kz](../corpus/functions/black-box-null.kz)
+```kurz
+x = Hint.BlackBox(null)
 print(x)
 ```
