@@ -710,8 +710,8 @@ variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k]
 narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
 path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
 write, since that count can be the target's last; a write into what a field of an instance holds,
-`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). A
-write into a list's item keeps it whatever the item. The write into a map's entry that this exception keeps,
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). Within
+this exception, a write into an item of a list a variable holds keeps it whatever the item's type. The write into a map's entry that this exception keeps,
 `m[k] = 2` into a map a variable holds, keeps it only where the key's `==` runs no clause: a key that
 compares as a value, by its content (K4) or by identity, and holds no instance of a class that names its
 fields. A key whose type compares by an `equal by` clause, or that holds an instance of such a class,
@@ -755,14 +755,14 @@ Case: [null/narrowed-field-after-unrelated-call.kz](../corpus/null/narrowed-fiel
 ```kurz
 class Account(mut string? Email)
 
-void Log() {
+void Note() {
     print("log")
 }
 
 acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
-    Log()
+    Note()
     m = acc.Email.Bytes.Count
     print(n + m)
 }
