@@ -4,6 +4,8 @@
 // | Unsupported: unsupported transfer encoding
 // | Unsupported: unsupported transfer encoding
 // | Unsupported: unsupported transfer encoding
+// | read POST /
+// | Unsupported: unsupported method
 // | Unsupported: unsupported expectation
 // | TooLarge: request body over limit
 // | TooLarge: request body over limit
@@ -31,9 +33,11 @@ void | IoError Show(string request) {
 void | IoError All() {
     Show("GET / HTTP/2.0\r\nHost: h\r\n\r\n")
     Show("GET / HTTP/1.2\r\nHost: h\r\n\r\n")
-    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\n\r\n")
-    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked, gzip\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip, chunked\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n")
     Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: \t CHUNKED \t\r\n\r\n0\r\n\r\n")
+    Show("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n")
     Show("POST / HTTP/1.1\r\nHost: h\r\nExpect: 200-ok\r\n\r\n")
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 30000001\r\n\r\n")
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 99999999999999999999999\r\n\r\n")
@@ -49,12 +53,13 @@ void | IoError All() {
     }
 
     Show("{many}\r\n")
-    mut big = "GET / HTTP/1.1\r\nHost: h\r\n"
-    while big.Bytes.Count < 33000 {
-        big = "{big}X-Big: vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\r\n"
+    // over the size with 4 headers, far under the count
+    mut v = "v"
+    while v.Bytes.Count < 12000 {
+        v = "{v}{v}"
     }
 
-    Show("{big}\r\n")
+    Show("GET / HTTP/1.1\r\nHost: h\r\nX-A: {v}\r\nX-B: {v}\r\nX-C: {v}\r\n\r\n")
 }
 
 All() else {
