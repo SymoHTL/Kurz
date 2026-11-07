@@ -1,0 +1,197 @@
+// expect: output
+// | 2 /b
+// | 1 /a
+// | TooLarge: too many connections to the host
+// | 1 /a
+// | 1 /c
+// | 1 /b
+// | 2 /b
+// | 2 /b
+// | 2 /b
+// | 2 /b
+// | 2 /b
+// allow: raw native
+// rules: W13
+
+// a client's pool: a response whose body is open holds its connection, so that a second `Get` opens a second one, past
+// `MaxConnectionsPerServer` an `HttpError`; a body read to its end gives its connection back, even where its response is let go of
+// after the read, and the next `Get` takes it; a new connection is opened where the response let go of its body unread, where an
+// idle connection outlived `PooledConnectionIdleTimeout` or `PooledConnectionLifetime`, where the response said `Connection: close`,
+// and where the server closed the idle connection, whose request is then sent again on a new one
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process, within `limits`: each connection in turn, each request answered with the number
+// of its connection and its path, and the path `/close` with `Connection: close`
+void Serve(TcpListener on, HttpLimits limits) {
+    mut count = 0
+    while true {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        count = count + 1
+        number = count
+        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(number, r), limits) else {
+            IoError e => {
+            }
+            HttpError e => {
+            }
+        }
+    }
+}
+
+HttpResponse Answer(int number, HttpRequest r) {
+    response = HttpResponse.Text(200, "{number} {r.Path}")
+    if r.Path == "/close" {
+        response.Headers.Set("Connection", "close") else {
+            HttpError e => {
+            }
+        }
+    }
+
+    return response
+}
+
+// a server started in a child on a port of its own, and the client's part run against it, and the child ended; the listener's
+// `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by itself and does not
+// hold the output the suite reads
+void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf8 part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    if child == 0 {
+        Serve(on, limits)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port) else {
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+        InvalidUtf8 => print("not UTF-8")
+    }
+
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// the body of a `GET` of `path`, the response let go of after the read
+string | IoError | HttpError | InvalidUtf8 Fetch(HttpClient client, int port, string path) {
+    response = client.Get(Address(port, path))
+    return response.Body.ReadAllText(100)
+}
+
+// the status of a `GET` of `path`, the response let go of with its body unread
+int | IoError | HttpError Peek(HttpClient client, int port, string path) {
+    response = client.Get(Address(port, path))
+    return response.Status
+}
+
+void Wait(int milliseconds) {
+    raw {
+        usleep(milliseconds * 1000)
+    }
+}
+
+void | IoError | HttpError | InvalidUtf8 SideBySide(int port) {
+    client = HttpClient()
+    first = client.Get(Address(port, "/a"))
+    second = client.Get(Address(port, "/b"))
+    print(second.Body.ReadAllText(100))
+    print(first.Body.ReadAllText(100))
+}
+
+void | IoError | HttpError | InvalidUtf8 Limited(int port) {
+    client = HttpClient(HttpClientOptions(MaxConnectionsPerServer: 1))
+    first = client.Get(Address(port, "/a"))
+    match client.Get(Address(port, "/b")) {
+        HttpResponseMessage r => print("got {r.Status}")
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+
+    print(first.Body.ReadAllText(100))
+    print(Fetch(client, port, "/c"))
+}
+
+void | IoError | HttpError | InvalidUtf8 ReadThenLetGo(int port) {
+    client = HttpClient()
+    Fetch(client, port, "/a")
+    print(Fetch(client, port, "/b"))
+}
+
+void | IoError | HttpError | InvalidUtf8 LetGoUnread(int port) {
+    client = HttpClient()
+    Peek(client, port, "/a")
+    print(Fetch(client, port, "/b"))
+}
+
+void | IoError | HttpError | InvalidUtf8 IdleTooLong(int port) {
+    client = HttpClient(HttpClientOptions(PooledConnectionIdleTimeout: 1ms))
+    Fetch(client, port, "/a")
+    Wait(20)
+    print(Fetch(client, port, "/b"))
+}
+
+void | IoError | HttpError | InvalidUtf8 LivedTooLong(int port) {
+    client = HttpClient(HttpClientOptions(PooledConnectionLifetime: 1ms))
+    Fetch(client, port, "/a")
+    Wait(20)
+    print(Fetch(client, port, "/b"))
+}
+
+void | IoError | HttpError | InvalidUtf8 Closing(int port) {
+    client = HttpClient()
+    Fetch(client, port, "/close")
+    print(Fetch(client, port, "/b"))
+}
+
+void | IoError | HttpError | InvalidUtf8 ClosedByServer(int port) {
+    client = HttpClient()
+    Fetch(client, port, "/a")
+    Wait(500)
+    print(Fetch(client, port, "/b"))
+}
+
+Against(HttpLimits(KeepAliveTimeout: 100ms), (int port) => SideBySide(port))
+Against(HttpLimits(), (int port) => Limited(port))
+Against(HttpLimits(), (int port) => ReadThenLetGo(port))
+Against(HttpLimits(), (int port) => LetGoUnread(port))
+Against(HttpLimits(), (int port) => IdleTooLong(port))
+Against(HttpLimits(), (int port) => LivedTooLong(port))
+Against(HttpLimits(), (int port) => Closing(port))
+Against(HttpLimits(KeepAliveTimeout: 50ms), (int port) => ClosedByServer(port))
