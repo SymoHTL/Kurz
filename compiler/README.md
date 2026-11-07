@@ -775,7 +775,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and the two words of the pair where its class has derived classes, which holds the instance's weak
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
-  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
+  strong count, a temporary held to the end of its statement, or of its condition in an `if` or a
+`while`, as `Weak::upgrade` gives one (R3); `==` on
   two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
   K8, K15), else by their addresses where a field is `mut` or its type reaches a `weak` reference (K4), and else field by field as a
   `data` value compares (K4, D3), in a
@@ -1812,7 +1813,8 @@ class it reads, a field in its body or a `static` member where the class has a b
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
-`override` on one method, and `virtual` on a private method (K7, F9), a `prot` method called through a value
+`override` on one method, `virtual` on a private method, and either on a `static` method, which has no
+instance to dispatch on (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
 of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
 over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one

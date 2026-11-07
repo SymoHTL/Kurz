@@ -227,7 +227,7 @@ public sealed partial class Checker
 
                 if (p.Mut != inherited.Mut)
                 {
-                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, K16)");
+                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, {(shortForm ? "K16" : "K17")})");
                 }
                 else if (shortForm && p.Default is not null)
                 {
@@ -649,12 +649,24 @@ public sealed partial class Checker
     /// nothing (F9). An override is as visible as it writes, whatever the method it overrides writes: one without <c>pub</c> is private
     /// to its class, which a call through the base reaches and a call on the derived type outside it is refused (F9; the owner,
     /// 2026-11-02, #110, "allowed as written"). The checker does not read <c>virtual</c> on a private method, which no derived class sees,
-    /// or <c>virtual</c> and <c>override</c> on one method: <c>not supported</c>.
+    /// <c>virtual</c> and <c>override</c> on one method, or either on a <c>static</c> method, which has no instance to dispatch on, as C#
+    /// refuses it (CS0112): <c>not supported</c>. A <c>static</c> method overrides and hides nothing; in a class with a base or with classes
+    /// derived from it, the checker refused it already (<see cref="RefuseChainMembers"/>).
     /// </summary>
     private void CheckOverride(ClassSymbol symbol, FunctionSymbol method)
     {
         var d = method.Declaration!;
         var marks = d.Modifiers & (Modifiers.Virtual | Modifiers.Override);
+        if (method.IsStatic)
+        {
+            if (marks != 0 && symbol.Base is null && !symbol.Derived)
+            {
+                NotSupported(d.Line, $"`{((marks & Modifiers.Virtual) != 0 ? "virtual" : "override")}` on a `static` method, which has no instance to dispatch on (K7)");
+            }
+
+            return;
+        }
+
         var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
