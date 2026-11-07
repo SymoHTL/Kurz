@@ -1,0 +1,13 @@
+// expect: error type-mismatch at 10
+// rules: T35
+
+enum Mode { Plain, Loud }
+
+void Other<T>() {
+}
+
+void Outer<const Mode M>() {
+    Other<M>()
+}
+
+Outer<Mode.Plain>()

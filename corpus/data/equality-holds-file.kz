@@ -1,9 +1,9 @@
 // expect: error type-mismatch at 7
 // rules: D3
 
-data Log(File Out)
+data Journal(File Out)
 
-void Same(Log a, Log b) {
+void Same(Journal a, Journal b) {
     print(a == b)
 }
 
