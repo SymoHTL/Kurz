@@ -495,7 +495,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if (methods.Find(f => f.IsProperty) is { } property)
+            if (ImplicitPropertyOf(n.Name) is { } property)
             {
                 return ReadImplicitProperty(n, property); // K7: the property of `this`
             }
@@ -1505,7 +1505,7 @@ public sealed partial class Checker
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
                 || (left.Type is DataType && right.Type is DataType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is ListType && Types.Same(left.Type, right.Type))
-                || (left.Type is ClassType && Types.Same(left.Type, right.Type))
+                || (left.Type is ClassType && right.Type is ClassType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)))
                 || (left.Type is UnionType && right.Type is UnionType && (Types.Assignable(left.Type, right.Type) || Types.Assignable(right.Type, left.Type)));
             var refused = !ok ? null : left.Type switch
             {
@@ -1513,7 +1513,7 @@ public sealed partial class Checker
                 // value that holds a map or a function value, at any depth, compares by no field (section 4, the owner, 2026-10-30,
                 // "type-mismatch")
                 ListType list => ItemEquality(list.Element) is { } item ? item with { Why = $"its items: {item.Why}" } : null,
-                ClassType => HeldEquality(left.Type, [], [], []),
+                ClassType => HeldEquality(Types.Assignable(left.Type, right.Type) ? right.Type : left.Type, [], [], []), // K13: the two as the base, whose derived classes it reads
                 DataType => HeldEquality(left.Type, [], [], []) ?? HeldEquality(right.Type, [], [], []),
                 // two values of a union, as the union the other side goes to: by the case, then by the value (section 4, the owner,
                 // 2026-10-30, "Case and value, as Rust"); a union beside a value of one of its cases is no such pair, as Rust refuses
@@ -1570,7 +1570,9 @@ public sealed partial class Checker
     /// </summary>
     private bool ComparesByClause(KurzType type, HashSet<object> seen) => type switch
     {
-        ClassType c => seen.Add(c.Symbol) && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))),
+        ClassType c => seen.Add(c.Symbol)
+            && (c.Symbol.EqualBy.Count > 0 || c.Symbol.FieldsThatCount.Any(f => ComparesByClause(f.Type, seen))
+                || classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)).Any(x => ComparesByClause(new ClassType(x), seen))),
         ListType l => ComparesByClause(l.Element, seen),
         UnionType u => u.Cases.Any(x => ComparesByClause(x, seen)),
         DataType d when seen.Contains(d.Symbol) => HeldArguments(d).Any(a => ComparesByClause(a, seen)),
@@ -1713,7 +1715,13 @@ public sealed partial class Checker
                     var body = CheckExpression(l.ExpressionBody, result, keepCases: Types.KeepsCases(result));
                     if (Types.IsVoid(body.Type))
                     {
-                        Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)} (F11, T1)");
+                        // O10: under a result whose first case is `void`, `void | IoError`, a call with a `void` success is the body its block
+                        // form `() => { print(x) }` already is, and the lambda gives that case (the owner, 2026-11-05, #110, comment 6659026217);
+                        // the refusal elsewhere names that rule (the owner, 2026-11-05, #110, comment 6664353093)
+                        if (!SuccessIsVoid(result))
+                        {
+                            Report(ErrorIds.TypeMismatch, l.Line, $"the lambda's result is `void` where `{expected}` requires {Types.A(result)}; a `void` call fits only where the first case is `void` (F11, O10, T1)");
+                        }
                     }
                     else if (!body.IsError && !Types.IsError(result) && !Types.Assignable(body.Type, result))
                     {

@@ -58,8 +58,8 @@ public abstract record StringSegment;
 
 public sealed record TextSegment(string Text) : StringSegment;
 
-/// <summary>An interpolation (L6).</summary>
-public sealed record HoleSegment(Expression Expression) : StringSegment;
+/// <summary>An interpolation (L6), with the text between its braces, which names the field of a log call's template (P2).</summary>
+public sealed record HoleSegment(Expression Expression, string Source = "") : StringSegment;
 
 /// <summary>A string literal, one line or a <c>"""</c> block, as text and holes (L6, L7, L13).</summary>
 public sealed record StringLiteral(int Line, IReadOnlyList<StringSegment> Segments) : Expression(Line)
@@ -210,6 +210,12 @@ public sealed record UseStatement(int Line, string Target) : Statement(Line);
 /// interpolation (L6), then its operands.
 /// </summary>
 public sealed record AsmStatement(int Line, IReadOnlyList<AsmTemplate> Templates, IReadOnlyList<AsmOperand> Operands) : Statement(Line);
+
+/// <summary>
+/// <c>const assert(condition, text)</c> (T37): a condition known while the program compiles, checked then, in each copy of a generic
+/// function; where it is false, the build stops with the text.
+/// </summary>
+public sealed record ConstAssertStatement(int Line, Expression Condition, StringLiteral Text) : Statement(Line);
 
 /// <summary>A template of an <c>asm</c>, its text with the escapes of a string literal read and its braces as written.</summary>
 public sealed record AsmTemplate(int Line, string Text);

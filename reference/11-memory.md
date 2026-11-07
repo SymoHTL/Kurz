@@ -9,7 +9,24 @@ An instance whose last count ends lets go of the instances its fields hold throu
 not by a call for each, so a chain of any length is freed without exhausting the stack: a million
 links are freed as two are (§3, the owner, 2026-11-01, "Iterative, never crashes", against a
 release that calls itself for each nested instance, as Rust's drop glue does, under which a long
-chain ends the program with `stack-overflow`).
+chain ends the program with `stack-overflow`). The list needs no memory of its own: an instance on
+it is linked through its strong count, which counts nothing from then on, so the release allocates
+nothing and cannot run out *(assumed, as §3 marks it)*. Its cost is a pause: an assignment that lets
+go of the head of a million links frees all of them before it returns, where a region is freed in
+one sweep only for the memory of a message (§13, "Region per message", the research verdict on
+Goose's data stacks).
+
+The end of an instance or of a block lets go of what its fields hold in the order of the fields, as
+Rust drops a value's fields (§3, §4, the owner, 2026-11-04, issue 156, comment 6643376941), a derived
+block's base's fields first (§4, the owner, 2026-11-05, issue 110, comment 6657251329, recorded as a
+reading of that answer from D7), an instance of a derived class its base's fields first too, and a
+value whose last count a field held ends after the value that held it, from the work list.
+*(assumed, §3, §4: the end after its holder, a reading of the owner's answer on classes of
+2026-11-01, "Iterative, never crashes", issue 110, comment 6560107950; a derived class's base's
+fields first, a reading of the answer of 2026-11-05, given for a derived block, as K6 lays the
+base's fields out first)* No case shows the
+order: a release runs no code of the program between two fields, and a handle that closes at its
+last count (S5) shows it only outside the program.
 
 Case: [memory/long-chain-freed.kz](../corpus/memory/long-chain-freed.kz)
 ```kurz
@@ -70,8 +87,13 @@ anywhere in the program, `Button` reaches itself, and the class is `reference-cy
 on the path is the error. The owner chose this on 2026-10-03, against a weak capture inside
 stored lambdas, which would need a rule for what a gone capture reads as and a check at every
 use, and against forbidding such a capture. *(assumed: that a field without `mut` counts, which
-the second ring needs)* The cost is not local: once a class has a field of function type, any
-lambda anywhere in the program that captures an instance of that class, or of a class that holds
+the second ring needs)* The field reaches only what the lambdas capture whose type it can hold,
+and the lambdas a function value such a lambda captures can be, every lambda counting where a type
+on the way names a type parameter; so a button's `mut () => void` field is not reached by an
+`(int) => void` lambda that reads the button, unless a `() => void` lambda captures that one (§3,
+the owner, 2026-11-04, #110, comment 6643368937, answering comment 6624472418). The
+cost is not local: once a class has a field of function type, any lambda of a type the field can
+hold, anywhere in the program, that captures an instance of that class, or of a class that holds
 one, makes it an error, and the lambda can sit in another file. An event handler escapes the
 error only in a program in which no lambda captures the button's class: through an interface
 (R8), whose class must not hold the button, or by receiving the button as a parameter.
@@ -104,19 +126,136 @@ b = Button("ok", () => print("clicked"))
 b.OnClick()
 ```
 
+Case: [memory/function-field-other-type.kz](../corpus/memory/function-field-other-type.kz)
+```kurz
+// a lambda whose type the field cannot hold, `(int) => void` beside a `() => void` field, closes no ring through it however it
+// reads the button (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+
+void Each(List<int> xs, (int) => void f) {
+    for x in xs {
+        f(x)
+    }
+}
+
+b = Button("ok", () => print("clicked"))
+Each([1], (int n) => print(b.Name))
+b.OnClick()
+```
+
+Case: [memory/cycle-through-captured-function.kz](../corpus/memory/cycle-through-captured-function.kz)
+```kurz
+// a lambda of another type that reads the button, which a `() => void` lambda that the field can hold captures, closes the ring
+// through the field as the handler that reads the button itself does (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("x"))
+inner = (int n) => print(b.Name)
+b.OnClick = () => inner(1)
+b.OnClick()
+```
+
+Case: [memory/cycle-through-open-capture.kz](../corpus/memory/cycle-through-open-capture.kz)
+```kurz
+// a lambda the field can hold that captures a value of a type parameter holds whatever function a use gives that parameter, so a
+// lambda of another type that reads the button closes the ring through the field (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+class Panel(Button B)
+
+void Keep<T>(T x) {
+}
+
+void Wire<T>(Button button, T x) {
+    button.OnClick = () => Keep(x)
+}
+
+b = Button("ok", () => print("x"))
+p = Panel(b)
+f = (int n) => print(p.B.Name)
+Wire(b, f)
+b.OnClick()
+```
+
+Case: [memory/cycle-through-generic-lambda.kz](../corpus/memory/cycle-through-generic-lambda.kz)
+```kurz
+// a lambda whose type names a type parameter is a lambda of whatever type a use gives that parameter, so one that reads the button
+// through a panel closes the ring through a field of another function type (R9, assumed)
+class Button(string Name, mut (int) => void OnClick)
+class Panel(Button B)
+
+(T) => void Show<T>(Panel panel) => (T t) => print(panel.B.Name)
+
+b = Button("ok", (int n) => print("x"))
+p = Panel(b)
+b.OnClick = Show<int>(p)
+b.OnClick(1)
+```
+
+Case: [http/stream-cycle.kz](../corpus/http/stream-cycle.kz)
+```kurz
+// a function that writes a response's body and reads a class that holds a `mut` response closes a ring through the response's
+// function, which the cycle rule refuses, while a handler that reads that class closes none, since the response's function cannot
+// be a handler (R9, the owner, 2026-11-04, #110, comment 6643368937)
+class App(mut HttpResponse Cached)
+
+void Keep((HttpRequest) => HttpResponse handler) {
+}
+
+app = App(HttpResponse.Text(200, "x"))
+Keep((HttpRequest r) => app.Cached)
+streamed = HttpResponse.Stream(200, (HttpWriter w) => w.Write("{app.Cached.Status}"))
+print(streamed.Status)
+```
+
+What a lambda captures is read as a field of its type. A `weak` reference it captures reaches no
+class, as R3 says of a `weak` field, so a handler that reads its button through a `weak` reference
+closes no ring (§3, the owner, 2026-11-02, #110, comment 6573113786, R9a, against counting it as
+strong, which would close to a lambda the escape `weak` gives a field). A value of a type parameter
+reaches the classes of the type argument every call of its function names or infers, and through a
+generic caller's type parameter those of that caller's calls, as the copy of section 4 for each list
+of type arguments holds them (R9b, against every class of the program, under which one such lambda
+anywhere makes every ring through a field of function type an error). A method taken as a value
+captures its instance, as the lambda `() => c.Get()` does and as a C# delegate keeps its target
+(R9c, against capturing nothing, under which `b.OnClick = b.Show` would hold `b` in `b` with no ring
+reported); a method as a value is `not supported` (K7, F11), so R9c has no case of its own.
+
+Case: [memory/function-field-weak-capture.kz](../corpus/memory/function-field-weak-capture.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("x"))
+weak Button? w = b
+b.OnClick = () => print(w?.Name ?? "gone")
+b.OnClick()
+```
+
+Case: [memory/cycle-through-type-argument.kz](../corpus/memory/cycle-through-type-argument.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+T Hook<T>(T x) {
+    f = () => x
+    return f()
+}
+
+b = Button("ok", () => print("x"))
+b.OnClick()
+print(Hook(b).Name)
+```
+
 ### R3 (decided, §3) `weak`
 
 A `weak` reference points at an instance without keeping it alive. It is nullable, and it is
 null once its target has been freed. A field that is `weak` is not a strong field for R2. When a
 target is freed follows from what holds it: a variable holds its instance until the end of the
 block that declares the variable, a field as long as its owner lives, and a temporary until the
-end of its statement; an instance is freed when the last of these ends. So in the case under N9
+end of its statement, or of its condition in an `if` or a `while`, as N9 ends a narrowing there (§4); an instance is freed when the last of these ends. So in the case under N9
 the `o` that is declared at the top level keeps `Ann` alive while `p.Keeper` is read. *(the
 record marks the lifetimes as assumed: proposed on 2026-10-03, against releasing a variable after
 its last use, which would free `Ann` before the print)*
 
 A read of a `weak T?` place, a field, a variable or an item, gives a strong `T?`, which holds the
-target as a temporary does, to the end of its statement, and longer where the read is stored:
+target as a temporary does, to the end of its statement or its condition, and longer where the read is stored:
 `k = p.Keeper` keeps the target alive while `k` lives, and a `T?` parameter takes the read as it
 is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
 `?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
@@ -125,6 +264,15 @@ A `weak T?` type stands wherever a type stands: a field, a list's item, a variab
 return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
 stands", against a field and a list's item alone). What a nullable type written as a case of a
 union is stays open (§14), a `weak T?` among them.
+
+A `weak T?` field of a `data` value compares by its target's identity (D3): two values are equal
+where it reaches the same instance, and a freed target reads as null, so two freed ones are equal
+and a freed one equals `null` (§3, the owner, 2026-11-02, #110, comment 6580085338). A `weak T?` is
+no key of a `Map`, nor is a type that reaches one through what `==` compares by content, a field of
+a `data` value, an item or a nullable, while a `weak` behind a class does not count: such a key type
+is the compile error `weak-key` at the line that writes it (§3, the owner, 2026-11-02, #110, comments
+6580085338 and 6580137405; the id and the line *(assumed, as §3 marks them)*). A clause of K8 that
+names a `weak` field is `equal-by-weak` (K8).
 
 Case: [memory/weak-back-pointer.kz](../corpus/memory/weak-back-pointer.kz)
 ```kurz
@@ -194,9 +342,44 @@ weak Owner? a = Remember(o)
 print(NameOf(a))
 weak Owner? b = Remember(Owner("Bob"))
 print(NameOf(b))
+```
+
+Case: [memory/weak-map-value.kz](../corpus/memory/weak-map-value.kz)
+```kurz
+class Owner(string Name)
+
+o = Owner("Ann")
 mut keepers = Map<string, weak Owner?>()
 keepers["ann"] = o
 print(keepers["ann"]?.Name ?? "gone")
+```
+
+Case: [memory/weak-data-equality.kz](../corpus/memory/weak-data-equality.kz)
+```kurz
+class Owner(string Name)
+data Tag(string Label, weak Owner? Keeper)
+
+o = Owner("Ann")
+print(Tag("x", o) == Tag("x", o))
+print(Tag("x", o) == Tag("x", Owner("Bo")))
+gone = Tag("x", Owner("Cy"))
+print(gone == Tag("x", null))
+```
+
+Case: [memory/weak-key.kz](../corpus/memory/weak-key.kz)
+```kurz
+class Owner(string Name)
+
+seen = Map<weak Owner?, int>()
+print(seen.Count)
+```
+
+Case: [classes/equal-by-weak.kz](../corpus/classes/equal-by-weak.kz)
+```kurz
+class Owner(string Name)
+class Pet(string Name, weak Owner? Keeper) equal by Name, Keeper
+
+print(Pet("Rex", null) == Pet("Rex", null))
 ```
 
 ### R4 (decided, §3) Where `weak` is enough
@@ -1025,8 +1208,7 @@ of .NET's closed proposal, `Sha256TwoRounds` among them, on `Vector128<uint>` (�
 2026-11-01, "Proposal names, uint lanes"). A constant given for an intrinsic's parameter that C#
 types `byte`, the `2` of `X86.Sse41.Extract(v, 2)`, is an `int` for the pick of the function (F14)
 and has to fit the parameter's type: `X86.Sse41.Extract(v, 256)` is `constant-overflow`; one for a
-parameter that names a lane, the `index` of `X86.Sse41.Extract`, the one such parameter of the intrinsics the
-compiler builds, that fits and lies past the lanes
+parameter that names a lane, the `index` of `X86.Sse41.Extract`, that fits and lies past the lanes
 is the compile error `lane-out-of-range` at its line, whose text names the lane and the count of the
 lanes, so `X86.Sse41.Extract(v, 255)` of four lanes builds nothing (§13, the owner, 2026-11-02); any
 other constant is read as the instruction reads it, a count of 32 bytes or more giving 0 in
@@ -1126,8 +1308,9 @@ A trace and the line tables name the function a guarded block is compiled
 into after the function it stands in, `<function>.guarded`, `Pick.guarded` for a block in `Pick`, in the
 pattern of a lambda's `main.lambda` (§13, the owner, 2026-11-02). The function is the one written in the
 source: a block in the method `Twice` of `Doubler` is `Doubler.Twice.guarded`, one in a lambda written in
-`main` is `main.lambda.guarded`, one in a guarded block of `Pick` is `Pick.guarded` again, and a lambda
-written in a guarded block of `main` is `main.lambda`, as outside it *(assumed: as §13 marks them)*.
+`main` is `main.lambda.guarded`, and a lambda written in a guarded block of `main` is `main.lambda`, as
+outside it *(assumed: as §13 marks them)*. A guarded block written in a guarded block adds its own mark:
+one in a guarded block of `Pick` is `Pick.guarded.guarded` (§13, the owner, 2026-11-03).
 
 Case: [memory/intrinsic-guarded.kz](../corpus/memory/intrinsic-guarded.kz)
 ```kurz
@@ -1172,8 +1355,21 @@ print(Vector128.Create(1, 2, 3).GetElement(0))
 
 Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
 ```kurz
-// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared, while a field
+// takes the name, a parameter of a primary constructor among them (R18)
 data Vector128(int X)
+```
+
+Case: [memory/intrinsic-field.kz](../corpus/memory/intrinsic-field.kz)
+```kurz
+// a field takes the name `X86`, `Arm`, `Vector128` or `Vector256`, a parameter of a primary constructor among them (R18)
+data Lanes(int X86, int Vector128)
+class Unit(int Arm, int Vector256)
+
+lanes = Lanes(1, 2)
+print(lanes.X86 + lanes.Vector128)
+unit = Unit(3, 1)
+print(unit.Arm + unit.Vector256)
 ```
 
 Case: [memory/intrinsic-element-range.kz](../corpus/memory/intrinsic-element-range.kz)

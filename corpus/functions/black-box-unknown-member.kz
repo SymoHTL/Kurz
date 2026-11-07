@@ -1,0 +1,5 @@
+// expect: error unknown-name at 4
+// rules: F18
+
+x = Hint.Opaque(1)
+print(x)

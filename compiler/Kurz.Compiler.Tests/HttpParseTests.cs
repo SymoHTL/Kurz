@@ -244,7 +244,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
             // Transfer-Encoding
             (P + "Transfer-Encoding: chunked\r\n\r\n", "ok POST|/||1|0|true|false|Host=h|Transfer-Encoding=chunked"),
             (P + "transfer-encoding: CHUNKED\r\n\r\n", "ok POST|/||1|0|true|false|Host=h|transfer-encoding=CHUNKED"),
-            (P + "Transfer-Encoding: gzip\r\n\r\n", "501 unsupported transfer encoding"),
+            (P + "Transfer-Encoding: gzip\r\n\r\n", "400 malformed request: transfer encoding not ending in chunked"),
             (P + "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n", "501 unsupported transfer encoding"),
             (P + "Transfer-Encoding: chunked\r\nExpect: 200-ok\r\n\r\n", "417 unsupported expectation"),
             // Expect
@@ -260,7 +260,7 @@ public sealed class HttpParseTests(Toolchain toolchain) : IClassFixture<Toolchai
             ("GET ?q HTTP/1.1\r\nHost: h\r\n\r\n", "ok GET||q|1|0|false|false|Host=h"),
             ("get / HTTP/1.1\r\nHost: h\r\n\r\n", "ok get|/||1|0|false|false|Host=h"),
             ("M-SEARCH * HTTP/1.1\r\nHost: h\r\n\r\n", "ok M-SEARCH|*||1|0|false|false|Host=h"),
-            ("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n", "400 malformed request: CONNECT"),
+            ("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n", "501 unsupported method"),
             ("G\u0001T / HTTP/1.1\r\nHost: h\r\n\r\n", "400 malformed request: bad request line"),
             (" GET / HTTP/1.1\r\nHost: h\r\n\r\n", "400 malformed request: empty method"),
             ("GET  / HTTP/1.1\r\nHost: h\r\n\r\n", "400 malformed request: bad request line"),

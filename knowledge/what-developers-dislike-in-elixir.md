@@ -50,7 +50,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 5. Few debugging tools, and a live distributed system is hard to inspect
 
 - Evidence: State of Elixir 2025, question 44 summary: "a lack of advanced debugging tools compared to other ecosystems"; question 45: "Better LSP, IDE Support & Debuggers 58 resp. 23.8%"; question 26: "Improved debugging 496 resp. 50.5%".
-- Kurz: answered: "Read-only inspector", section 7 of the record. Before the answers: OPEN.
+- Kurz: answered: "Read-only inspector" (2026-10-30), section 7 of the record. Since 2026-11-04 the inspector is no longer read-only: its one write sets the level and the filter of the logs while the program runs (the round on logging, tracing and metrics, Q10 (b), the same section). Before the answers: OPEN.
 
 ## 6. Slow at CPU-bound work
 

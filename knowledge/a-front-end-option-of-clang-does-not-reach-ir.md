@@ -18,8 +18,9 @@ option (the alignment directives above the functions):
 - no option: `.prefalign 4` on all 40, LLVM's preference of 16 bytes on x86-64;
 - `-falign-functions=64`: `.prefalign 4` on all 40, the same as with no option;
 - `-mllvm -align-all-functions=6`: `.p2align 6` on all 40;
-- `-falign-loops=32` and `-falign-loops=64`: `.prefalign 4` on all 40, while 218 of the module's
-  219 other directives `.p2align 4` became `.p2align 5` and `.p2align 6`.
+- `-falign-loops=32`: `.prefalign 4` on all 40, while 218 of the module's 219 other directives
+  `.p2align 4` became `.p2align 5`;
+- `-falign-loops=64`: `.prefalign 4` on all 40, while 218 of the 219 became `.p2align 6`.
 
 LLVM's own alignment of a function depends on the target: clang 23.1.4 at `-O0`, with no option,
 wrote `.prefalign 4` above each function of the test's module on Linux x86-64, `.p2align 4` on
@@ -30,8 +31,8 @@ function. An option that the front end sets on each function is therefore named 
 under LLVM's name for it, or set in the IR itself. Whether any other option of clang reaches IR is
 read in the assembly, option by option: its effect on C says nothing about its effect here.
 
-A test that only pins the argument string cannot tell the two options apart: both are in the
-list, and only one aligns anything. The test of the release build reads what LLVM wrote instead.
+A test that only pins the argument string cannot tell the two options apart: it passes with either
+in the list, and only one aligns anything. The test of the release build reads what LLVM wrote instead.
 `ClangTests.A_release_build_aligns_every_function_at_64_bytes_and_a_test_build_leaves_llvms_alignment`
 builds a module to assembly with the arguments `Clang.Arguments` gives, finds every function's
 label and reads the directive above it. Gate: `compiler-tests`, for the alignment option. Any

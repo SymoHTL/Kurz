@@ -757,40 +757,150 @@ print(Negate(-9223372036854775808ns)) // one constant: the parameter's type take
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
 
-`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), a type
-of its own like the time types of T13 and a core word (L19) (§12, the owner, 2026-11-04, issue 110,
-comment 6643368937, the monotonic clock, Q1 (a)). `b - a` of two readings is a `duration`, negative
-where `a` is the later (§12, the same answer, Q2 (a)). A reading plus or less a `duration` is an
-`instant`, and `+` and `-` raise `overflow` (E3) where the result leaves the range, in every build,
-as T31 says of the other time types, so that a bound is checked by what has passed,
-`instant.Now - start >= limit`, and not by the sum `start + limit` (§12, the same answer, Q3 (a)).
-*(assumed, §12: the defaults of that round, not objected to: a reading holds 64 bits of
-nanoseconds, signed, and has no wide variant; `<`, `<=`, `>`, `>=`, `==` and `!=` compare two
-readings, inside a `data` value and as a map's key too; and a reading converts to no `timestamp`
-and no integer, and from neither.)* So a reading where an integer or a `timestamp` is required, two
-readings added, a reading beside a `timestamp` or a `longduration`, and the unary `-` of a reading
-are `type-mismatch`. A duration plus a reading is a reading too, and a conversion written into
-`instant` is `type-mismatch` whatever it converts, as one from a `duration` into a `timestamp` is
-(T13) *(assumed, §12: a reading plus a duration in either order, as `+` takes a `timestamp` and a
-`duration`, and a reading that only the clock makes)*.
+`instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), and a
+core word (L19) (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the monotonic clock, Q1
+(a)). It is a time type with rules of its own, and this rule and S25 state every form a reading
+takes: a rule that names the time types reaches a reading only where one of them names it, so that
+T29's widening and its conversions and T31's unary `-` take none *(assumed, §12: a reading has no
+wide variant, a default of that round, below, and the round gives a negated reading no meaning)*.
+`b - a` of two readings is a `duration`, negative where `a` is the later (§12, the same answer, Q2
+(a)), and it raises `overflow` (E3) where the difference leaves the range of a `duration`, in every
+build, as T31 says of the time types (§12, the same answer, "the check of section 4 on the
+subtraction"). A reading plus or less a `duration` is an `instant`, and `+` and `-` raise `overflow`
+where the result leaves the range, in every build, as T31 says of the other time types, so that a
+bound is checked by what has passed, `instant.Now - start >= limit`, and not by the sum
+`start + limit` (§12, the same answer, Q3 (a)). *(assumed, §12: the defaults of that round, not
+objected to: a reading holds 64 bits of nanoseconds, signed, counted from the clock's zero, and has
+no wide variant; `<`, `<=`, `>`, `>=`, `==` and `!=` compare two readings, inside a `data` value and
+as a map's key too; and a reading converts to no `timestamp` and no integer, and from neither.)*
 
-Case: [types/instant-arithmetic.kz](../corpus/types/instant-arithmetic.kz)
+Of the operators, a reading takes these and no other: `-` with a reading, `+` and `-` with a
+`duration` on its right, `+` with a `duration` on its left, and the six comparisons with a reading.
+Every other operator and operand is `type-mismatch` (T18): two readings added, a `duration` less a
+reading, `*`, `/` and `%` on a reading, a reading beside a `timestamp`, a `longduration`, a
+`longtimestamp` or an integer, the unary `-` of a reading, and a reading where an integer or a
+`timestamp` is required. A comparison of a reading with `null` is `type-mismatch` (N6), and a
+conversion of one to `string` is `not supported` (T10), as for every time type. *(assumed, §12, each
+from the forms of the other time types: a `duration` plus a reading is a reading, as `+` takes a
+`timestamp` and a `duration` in either order, where C#'s `DateTime` and Rust's `Instant` take the
+`duration` on the right alone; two readings added and a `duration` less a reading are refused, since
+a sum of two points in time and a span less a point mean nothing, and C# and Rust take neither; a
+reading beside the wide pair is refused, since a reading has no wide variant to widen into; and the
+unary `-` of a reading is refused, since the round gives a negated reading no meaning.)*
+
+A conversion written into `instant` from another type is `type-mismatch`, as one from a `duration`
+into a `timestamp` is (T13) *(assumed, §12: a reading that no conversion from another type makes)*,
+and `instant(t)` of a reading is that reading, as every time type converts into itself *(assumed,
+§12: from the forms of the other time types)*. A `raw` block reads a reading's bits through a
+pointer as it reads any value's (R10), and the bits are the nanoseconds since the clock's zero
+*(assumed, §12: the 64 bits of nanoseconds of that round's default)*.
+
+Case: [types/instant-difference.kz](../corpus/types/instant-difference.kz)
 ```kurz
-instant start = instant.Now
-instant later = instant.Now
-duration taken = later - start
-print(taken >= 0s)
-print(start - later <= 0s)
-print(start + taken == later)
-print(later - taken == start)
-print(1ns + start > start)
-print(start + 90min - start)
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(5000000000)
+instant b = Reading(5405000000000)
+print(b - a == 90min)
+print(a - b == -90min)
+print(a - a == 0s)
+```
+
+Case: [types/instant-sum.kz](../corpus/types/instant-sum.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(5000000000)
+print(a + 90min == Reading(5405000000000))
+print(a - 5s == Reading(0))
+print(90min + a == Reading(5405000000000))
+```
+
+Case: [types/instant-comparison.kz](../corpus/types/instant-comparison.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(1)
+instant b = Reading(2)
+instant c = Reading(2)
+print(a < b)
+print(b <= c)
+print(b > a)
+print(a >= b)
+print(b == c)
+print(a != c)
+```
+
+Case: [types/instant-in-data.kz](../corpus/types/instant-in-data.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
 data Mark(instant At)
-print(Mark(start) == Mark(later - taken))
+
+print(Mark(Reading(7)) == Mark(Reading(7)))
+print(Mark(Reading(7)) == Mark(Reading(8)))
+```
+
+Case: [types/instant-map-key.kz](../corpus/types/instant-map-key.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
 mut seen = Map<instant, string>()
-seen[start] = "first"
-seen[later - taken] = "again"
+seen[Reading(7)] = "first"
+seen[Reading(7)] = "again"
+seen[Reading(8)] = "other"
 print(seen.Count)
+```
+
+Case: [types/instant-identity.kz](../corpus/types/instant-identity.kz)
+```kurz
+instant Reading(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        return *Ptr<instant>(&bits)
+    }
+}
+
+instant a = Reading(42)
+print(instant(a) == a)
+```
+
+Case: [types/instant-difference-overflow.kz](../corpus/types/instant-difference-overflow.kz)
+```kurz
+duration Between(instant a, instant b) => b - a
+
+long low = -9223372036854775807 - 1
+long high = 9223372036854775807
+raw {
+    instant first = *Ptr<instant>(&low)
+    instant last = *Ptr<instant>(&high)
+    print(Between(first, last))
+}
 ```
 
 Case: [types/instant-overflow-release.kz](../corpus/types/instant-overflow-release.kz)
@@ -804,22 +914,40 @@ raw {
 }
 ```
 
+Case: [types/instant-overflow-lower.kz](../corpus/types/instant-overflow-lower.kz)
+```kurz
+instant Earlier(instant t, duration d) => t - d
+
+long bits = -9223372036854775807 - 1
+raw {
+    instant first = *Ptr<instant>(&bits)
+    print(Earlier(first, 1ns))
+}
+```
+
 Case: [types/instant-not-integer.kz](../corpus/types/instant-not-integer.kz)
 ```kurz
-int n = instant.Now
-print(n)
+int Count(instant t) => t
 ```
 
 Case: [types/instant-not-timestamp.kz](../corpus/types/instant-not-timestamp.kz)
 ```kurz
-timestamp t = instant.Now
-print(t)
+timestamp At(instant t) => t
 ```
 
 Case: [types/instant-plus-instant.kz](../corpus/types/instant-plus-instant.kz)
 ```kurz
-instant start = instant.Now
-print(start + start)
+instant Twice(instant t) => t + t
+```
+
+Case: [types/instant-duration-less-reading.kz](../corpus/types/instant-duration-less-reading.kz)
+```kurz
+duration Back(instant t) => 1s - t
+```
+
+Case: [types/instant-times-integer.kz](../corpus/types/instant-times-integer.kz)
+```kurz
+instant Twice(instant t) => t * 2
 ```
 
 Case: [types/instant-conversion.kz](../corpus/types/instant-conversion.kz)
@@ -1319,9 +1447,20 @@ declares (F9, D16), in the order of their declaration, and never a field the bod
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
 "for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
 type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
-a generic function lists every outcome any of its copies can give, and a copy that gives one its
+a generic function lists every outcome that the copies its calls make can give, and a copy that gives one its
 function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
-2026-11-02, "a generic function lists every outcome any of its copies can give"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+2026-11-02, "a generic function lists every outcome any of its copies can give", an option that named the id and its
+place, which the answer of 2026-11-03 narrows to the copies calls make); each copy is checked at the call that made it,
+as each copy is checked alone, so that
+a function whose calls make no copy that gives `Invalid` need not list it, `Remake` below among them, while that
+call can be a caller's in another package than the function (§4, the owner, 2026-11-03, "checked at each copy a call
+makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
+type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
+CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
+refused a lambda's parameter so named up to its language version 7.3 (§4, the owner, 2026-11-03, "redeclared, as C#'s
+CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
+text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
+a function. *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1338,11 +1477,19 @@ that `T.Fields` in its branch, in a copy whose type is not a `data` type, is tha
 the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: the id; that `T.Fields` and `T.Make` in a copy whose type is not a `data` type are the
 same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
-fields gives its value)* A generic function that reads its type, and one that passes its type parameter to such
+fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
+`match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
+the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
+*(assumed, with the build: a copy is made at the first call that names its type arguments, and a later call with the
+same type arguments reads that copy, so that an error of the copy is reported once, and one reported at the call,
+`kind-not-read` or `unlisted-case`, shows at that first call, the call that made it)*
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
-does not read that arm)*
+does not read that arm; a build stopped at the bound of 64 copies on a chain of copies (the record,
+section 14) reports that `not supported` and the errors of the copies made before it, while a copy
+of the same outer call that a chain asks for after the bound is not made, so that its errors show
+only in a build where the chain is ended)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1574,16 +1721,29 @@ type (T33) keeps its check in the copies, but for the calls this paragraph reads
 arm of a `match` on `T.Kind` can end its chain, and a chain of more than 64 copies stays
 `not supported`. Of its calls, those in a loop over `T.Fields` are read for such a cycle on its
 text, and a cycle that grows there is refused at that call. The chain of copies stops at that
-call, so that it does not reach that bound, and the copies before it report every other error of
-the function's body in the same build. A call in an arm of a `match` on `T.Kind` takes no part,
-inside such a loop as outside it, since each copy takes the one arm of its kind, and neither does
-a type argument there that is the field's type, since the text does not give that type. A cycle
-that grows in such an arm, or that leaves the loop through a call outside it, shows only at that
-bound. *(assumed, §4: the id; a type argument that holds the field's type inside a form of a type,
-`List<f.Type>`, takes no part, as the field's type itself; a type argument grows where it holds a type parameter of
-the calling function inside any other form of a type, a map, a `data` type and a function type
-among them, and not where it is a case of a union, which holds each case once, so that a
-`T | string` for `T` makes no larger copy; every call of the cycle where a type argument grows is
+call, so that it does not reach that bound, and the copies a call made before it report every
+other error of the function's body in the same build; a function that no call reaches has no copy,
+so the refusals of its cycle are the only errors it reports, as T33 reads such a function. A call
+in an arm of a `match` on `T.Kind` takes no part where no loop over `T.Fields` is opened between the
+call and the nearest such arm around it, in an arm inside such a loop as in one outside it, since
+each copy takes the one arm of its kind; a call in a loop opened inside the nearest such arm is the
+case of the assumed reading below. A type argument of a call in a loop over `T.Fields` that is the
+field's type takes no part either, since the text does not give that type. One that holds the
+field's type beside a type parameter of the calling function inside a form of a type, as
+`Map<f.Type, T>` for `T`, grows by that parameter, and the call is refused at its line: the walk
+types `f.Type` on the text as a type of its own, which is no type parameter of the function. A
+cycle that grows in such an arm, at a call with no such loop between it and the nearest such arm
+around it, or that leaves the loop through a call outside it, shows only at that bound. *(assumed,
+§4: the id; a type argument grows where it holds a type parameter of the calling function inside
+any other form of a type, a map, a `data` type and a function type among them, and not where it is
+a case of a union, which holds each case once, so that a `T | string` for `T` makes no larger copy;
+a type argument that holds the field's type inside a form of a type with no type parameter of the
+calling function, `List<f.Type>` and `Pair<f.Type, int>`, takes no part, as the field's type
+itself; one that holds the field's type and a type parameter of the calling function grows by that
+parameter wherever the form holds it, `List<Pair<f.Type, T>>` and `Pair<f.Type, List<T>>` among
+them, and the error names it as it is written; a call in a loop over `T.Fields` opened inside the
+nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
+every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
 as one of the body)*
 
@@ -1715,22 +1875,56 @@ string Show<T>(T value) {
 print(Show(Shape("box", Point(1, 2))))
 ```
 
+Case: [types/generic-growing-cycle-fields-beside.kz](../corpus/types/generic-growing-cycle-fields-beside.kz)
+```kurz
+data Point(int X, int Y)
+data Pair<A, B>(A First, B Second)
+
+// `Deep` gives `Pair<f.Type, T>` for `T` in its loop over `T.Fields`: the field's type is a type of its own on the text, and the `T` beside it grows
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)
+        }
+    }
+}
+
+Deep(Point(1, 2), 3)
+print("done")
+```
+
 ### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
-type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
+type and the parameter's name, `T | JsonError | Invalid Parse<T, const JsonKeys K = JsonKeys.AsWritten>(string text)`
+(§12 gives `K` its default). A call
 writes the constant among its type arguments, `Json.Parse<Order, JsonKeys.SnakeCase>(text)`; each
 constant makes a copy of the function of its own (T19), and the function's code reads the
 parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
-`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter alone (L18); a
+`enum`)* A default is a constant expression, as a parameter's default value is (F12), of one
+operand: a literal with its `-`, an `enum`'s value, or an expression in brackets,
+`const int N = (1 + 2)`, as Rust takes `{ 1 + 2 }` there, and `const int N = 1 + 2` is `syntax`;
+the name of an earlier parameter there is `unknown-name` (V10); a type outside the list is
+`syntax`; a call that writes fewer type arguments than the parameters without a
+default, or more than all of them, is T19's count, `syntax`, which names each count the call may
+write. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
+`enum`'s value are there; a constant passed on to a parameter of a wider integer type widens as a
+value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
+reads it"). *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
+`assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
-`syntax`; the parameter's name stands as a value of its type, and where a type stands it is
-`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
-where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
+`syntax`; the parameter's name stands as a value of its type; a value of another type or a type
+where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
-parameter is checked in each copy a call makes, as one that reads its type is (T33))*
+parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
+loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
+`redeclared`, as for any type parameter, in each copy a call makes, so not at all where no call reaches the function
+(V9, T33; §4, the owner, 2026-11-04, "the same reading for both"); `M = Mode.Loud` with that name is such a
+declaration (V8, V9). The type parameter itself takes no name of a variable at the outermost level of the top-level
+code, whether or not a call makes a copy (F16).
 
 A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
 where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
@@ -1739,7 +1933,10 @@ owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer take
 `Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
 an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
 another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
-`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
+`List<64>.FromRaw(p, 0)` is `syntax`)* An integer literal of every form, with its suffix and its
+base, starts the list, `f(a < 64L, c > (d))`, while a `double`, a string, a literal with a unit and
+`null` keep the comparisons, since no such parameter holds one (§4, the owner, 2026-11-03, "every
+default").
 
 Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
 ```kurz
@@ -1789,11 +1986,35 @@ Case: [types/const-parameter-default-order.kz](../corpus/types/const-parameter-d
 ```kurz
 enum Mode { Plain, Loud }
 
-void Late<const Mode M = Mode.Plain, T>(T value) {
+void Late<const Mode M = Mode.Plain,
+    T>(T value) {
     print("{M} {value}")
 }
 
 Late<Mode.Loud, int>(1)
+```
+
+Case: [types/const-parameter-name-as-type-argument.kz](../corpus/types/const-parameter-name-as-type-argument.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Other<T>() {
+}
+
+void Outer<const Mode M>() {
+    Other<M>()
+}
+
+Outer<Mode.Plain>()
+```
+
+Case: [types/const-parameter-other-type.kz](../corpus/types/const-parameter-other-type.kz)
+```kurz
+void Name<const string S>() {
+    print(S)
+}
+
+print(1)
 ```
 
 Case: [types/const-parameter-as-type.kz](../corpus/types/const-parameter-as-type.kz)
@@ -1805,6 +2026,18 @@ void Keep<const Mode M>(M value) {
 }
 
 Keep<Mode.Plain>(Mode.Plain)
+```
+
+Case: [types/const-parameter-redeclared.kz](../corpus/types/const-parameter-redeclared.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Say<const Mode M>(string text) {
+    M = Mode.Loud
+    print("{text} {M}")
+}
+
+Say<Mode.Plain>("a")
 ```
 
 Case: [types/const-parameter-not-inferred.kz](../corpus/types/const-parameter-not-inferred.kz)
@@ -1828,9 +2061,13 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Pass<const long L>() {
-    Show<5>()
-    print(L)
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Show<L>()
+    Wide<L>()
 }
 
 print(Scaled<64>(2))
@@ -1843,8 +2080,8 @@ Pass<7>()
 
 Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
 ```kurz
-int Scaled<const int N>(int x) => x * N
-print(Scaled<true>(2))
+int Size<const int N>() => N
+print(Size<true>())
 ```
 
 Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)
@@ -1855,6 +2092,89 @@ a = 1
 c = 5
 d = 3
 print(Both((a < 64), c > (d)))
+```
+
+### T37 (decided, §4) `const assert`
+
+Generic code stops the build on a fault it finds in a type it reads with `const assert(condition,
+text)`: a condition over values known while the program compiles, a copy's reading of its type
+(T33) and its constant type arguments (T35) among them, checked in each copy. Where it is false,
+the build stops at the call that made the copy, with the text of the code that holds it:
+`const assert(T.Kind == TypeKind.Data, "{T} is no data type")` stops `Need(1)` with `int is no
+data type` at that call, as Rust's `const { assert!(condition, "text") }` stops a build in a copy of
+generic code. Any generic code can use it (§4, the owner, 2026-11-01, "const assert, as Rust").
+A variable or a parameter in its condition or in a hole of its text, whose value is not known while
+the program compiles, is `const-assert-failed`, as a false condition is (§4, the owner, 2026-11-02,
+"`const-assert-failed`"). *(assumed, §4: the answer's "the one id of everything a const assert
+refuses" read as what its evaluation refuses, a condition that is not a `bool` and a text that is
+not a string literal keeping their own ids (below); the spelling `const assert(condition, text)`, a statement; the text interpolates
+values known while the program compiles as a string literal interpolates values, a type giving its
+name and an `enum` value its name; the compiler evaluates literals, constants, operators, a copy's
+reading of its type, its constant type arguments, the standard library's functions on strings, and
+a function of the program or of a package whose body uses nothing else besides its own variables,
+loops and branches, while a call of anything else in a `const assert` is `const-assert-failed`,
+naming that call; an evaluation that has not ended after a fixed count of steps is the same error)* *(assumed, §4: `const` followed by the name `assert` and `(` at the
+start of a statement starts it, and both are names everywhere else (L18); a line break may stand
+inside its parentheses, as inside a call's; the statement stands where any statement stands, and
+outside a generic function it is checked once where it stands, the build stopping at the statement
+where it is false; a generic function that holds one is checked in each copy a call makes, as one
+that reads its type is (T33); its condition is a `bool` (C3); the text is a string literal, and a
+text of another kind is `syntax`; a hole that names a type parameter gives the name of the type the
+copy binds, and any other hole the text of its value (A2, A4); a variable or a parameter in the
+condition or in a hole is that error at its name; what a `const assert` names counts as
+read, so that a variable read there alone is no `unused-variable` (V5); the error names the copy the call made and the
+function that holds the `const assert`, as `kind-not-read` does)*
+
+Case: [types/const-assert.kz](../corpus/types/const-assert.kz)
+```kurz
+enum Mode { Plain, Loud }
+data Point(int X, int Y)
+
+void Names<T>(T value) {
+    const assert(T.Kind == TypeKind.Data, "{T} is no data type")
+    for f in T.Fields {
+        const assert(f.Name != "Id", "{T} has a field {f.Name}")
+        print(f.Name)
+    }
+}
+
+void Say<const Mode M>(string text) {
+    const assert(M == Mode.Plain, "{M} is not plain")
+    print(text)
+}
+
+const assert(1 + 1 == 2, "one and one")
+Names(Point(1, 2))
+Say<Mode.Plain>("a")
+```
+
+Case: [types/const-assert-failed.kz](../corpus/types/const-assert-failed.kz)
+```kurz
+data Point(int X, int Y)
+
+void Need<T>(T value) {
+    const assert(T.Kind == TypeKind.Data, "{T} is no data type")
+}
+
+Need(Point(1, 2))
+Need(1)
+```
+
+Case: [types/const-assert-variable.kz](../corpus/types/const-assert-variable.kz)
+```kurz
+n = 2
+const assert(n > 1, "n is small")
+```
+
+Case: [types/const-assert-constant.kz](../corpus/types/const-assert-constant.kz)
+```kurz
+void Buffer<const int N>() {
+    const assert(N > 0, "a buffer of {N} items")
+    print(N)
+}
+
+Buffer<64>()
+Buffer<0>()
 ```
 
 ### T18 (assumed, §4) Operators

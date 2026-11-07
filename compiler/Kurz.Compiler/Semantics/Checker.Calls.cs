@@ -66,6 +66,12 @@ public sealed partial class Checker
 
         public bool CannotInfer { get; set; }
 
+        /// <summary>
+        /// T27: the type parameter at which <see cref="Infer"/> ended in <c>cannot-infer</c>, the one an argument named in its text gives
+        /// nothing (#156, comment 6620467625); null where it ended at no one type parameter, and the text names no argument.
+        /// </summary>
+        public TypeParameterSymbol? Uninferred { get; set; }
+
         /// <summary>The message of <c>cannot-infer</c> where this candidate is the call's one: a list literal's (M11); null for a call's, whose message <see cref="GivesNothing"/> completes (T27).</summary>
         public string? CannotInferText { get; init; }
 
@@ -122,7 +128,8 @@ public sealed partial class Checker
                         return CallValue(value.Type, c);
                     }
 
-                    if (ImplicitMethods(n.Name) is { } methods && methods.Find(f => f.IsProperty) is { } property && !InStaticMember())
+                    var named = BesideField(ImplicitMethods(n.Name), ImplicitField(n.Name) is not null);
+                    if (ImplicitPropertyOf(n.Name) is { } property && !InStaticMember())
                     {
                         var read = ReadImplicitProperty(n, property);
                         if (read.IsError)
@@ -135,7 +142,7 @@ public sealed partial class Checker
                         return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
                     }
 
-                    if (ImplicitMethods(n.Name) is { } named)
+                    if (named is not null)
                     {
                         return CallImplicitMethod(named, n, c, expected); // K7: a method of `this`
                     }
@@ -915,6 +922,8 @@ public sealed partial class Checker
         {
             case ErrorType or EnumType:
                 return null;
+            case TypeParameterType when textFieldTypes.ContainsValue(type):
+                return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
             case PrimitiveType p:
@@ -926,7 +935,7 @@ public sealed partial class Checker
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
             case ClassType c:
-                return ByFieldsThatCount(c, field => KeyOf(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => KeyOf(held, seen, path, cut));
             case UnionType u:
                 return u.Cases.Where(c => c is not NullType).Select(c => KeyOf(c, seen, path, cut)).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case ListType l:
@@ -1032,7 +1041,7 @@ public sealed partial class Checker
             case FunctionType or CFunctionType or HandleType or HasherType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
-                return ByFieldsThatCount(c, field => HeldEquality(field.Type, seen, path, cut));
+                return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
             case ListType l:
                 return HeldEquality(l.Element, seen, path, cut) is { } item ? item with { Why = $"its items: {item.Why}" } : null;
             case UnionType u:
@@ -1111,11 +1120,13 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the fields that count, each read by <paramref name="why"/>:
-    /// none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that compares by content. A
-    /// class met again inside its own fields was read where the walk met it first.
+    /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
+    /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
+    /// compares by content; and from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types (K13 with D3, a reading <c>compiler/README.md</c> marks assumed). A class met again inside its own
+    /// fields was read where the walk met it first.
     /// </summary>
-    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<FieldSymbol, (bool Mismatch, string Why)?> why)
+    private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
         if (!classesCompared.Add(c.Symbol))
         {
@@ -1126,9 +1137,17 @@ public sealed partial class Checker
         {
             foreach (var field in c.Symbol.FieldsThatCount)
             {
-                if (why(field) is { } refused)
+                if (why(field.Type) is { } refused)
                 {
                     return refused with { Why = $"its field `{field.Name}`: {refused.Why}" };
+                }
+            }
+
+            foreach (var derived in classDeclared.Where(x => ReferenceEquals(x.Base, c.Symbol)))
+            {
+                if (why(new ClassType(derived)) is { } refused)
+                {
+                    return refused with { Why = $"its derived class `{derived.Name}`: {refused.Why}" };
                 }
             }
 
@@ -1282,9 +1301,19 @@ public sealed partial class Checker
                 return CheckEnvironmentFunction(m, c); // S13, S14
             }
 
+            if (n.Name == "Log")
+            {
+                return CheckLogFunction(m, c); // P1, P2
+            }
+
             if (IsHashName(n.Name))
             {
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
+            }
+
+            if (n.Name == "Hint")
+            {
+                return CheckHintFunction(m, c); // F18
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -1709,6 +1738,37 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// F18: <c>Hint.BlackBox(value)</c>, the value itself, of any type, <c>T BlackBox&lt;T&gt;(T value)</c>, which the optimiser cannot see
+    /// through, as Rust's <c>std::hint::black_box</c> in Kurz's casing (section 12, the owner, 2026-11-03, "`Hint.BlackBox(x)`" and "any
+    /// value"); any other member of <c>Hint</c> is no name (V10). It takes no type arguments, as <c>string.Join</c> takes none (assumed).
+    /// </summary>
+    private Typed CheckHintFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member != "BlackBox")
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Hint` has no function `{m.Member}` (F18, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, "`Hint.BlackBox`"))
+        {
+            return Typed.Error;
+        }
+
+        var parameter = new TypeParameterSymbol("T", c.Line);
+        var value = new TypeParameterType(parameter);
+        var candidate = new Candidate
+        {
+            Slots = [new Slot("value", value, false, false, true)],
+            TypeParameters = [parameter],
+            Result = value,
+            Form = "T BlackBox<T>(T value)",
+        };
+        return Record(c, CallKind.BlackBox, Call([candidate], c, null, out var picked), picked);
+    }
+
+    /// <summary>
     /// M9: a map's members beside <c>Count</c>, with C#'s names and Rust's <c>Remove</c> (section 4, the owner, 2026-10-30, "C# names,
     /// Rust's Remove"): <c>ContainsKey(key)</c>, a <c>bool</c>; <c>mut Remove(key)</c>, the value of the key's entry, moved out of the
     /// map, or <c>null</c>, of the type <c>map[key]</c> has; and <c>mut Clear()</c>.
@@ -1924,15 +1984,16 @@ public sealed partial class Checker
             var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
-                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => p.Default is null))
+                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => !p.HasDefault))
                 {
-                    candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
+                    candidate.BindingError = $"`{f.Name}` takes {TypeArgumentCount(f)} type arguments (T19; E4 for another count)";
                     candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    // T35: a type parameter the call leaves out takes its default
-                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
+                    // T35: a type parameter the call leaves out takes its default, one that was not read the error type, since its
+                    // diagnostic stands at the default (E1)
+                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType?)p.Default ?? Types.Error))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -1944,6 +2005,14 @@ public sealed partial class Checker
         return typed;
     }
 
+    /// <summary>T19, T35: how many type arguments a call of the function writes, "2", "2 or 3" or "1 to 3", where it may leave out those with a default.</summary>
+    private static string TypeArgumentCount(FunctionSymbol f)
+    {
+        var all = f.TypeParameters.Count;
+        var least = f.TypeParameters.FindLastIndex(p => !p.HasDefault) + 1;
+        return least == all ? $"{all}" : least + 1 == all ? $"{least} or {all}" : $"{least} to {all}";
+    }
+
     /// <summary>
     /// T35: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
     /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
@@ -1952,6 +2021,11 @@ public sealed partial class Checker
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
+        if (there.Count == 0 && argument is ConstantTypeArgument)
+        {
+            return Types.Error; // T19: a literal past every candidate's type parameters carries the call's count, and no error of its own (E1)
+        }
+
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
         if (kinds.Count > 1)
         {
@@ -1967,8 +2041,9 @@ public sealed partial class Checker
     /// <summary>
     /// T35: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
     /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
-    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
-    /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on, which widens where a
+    /// value of its type would (T8). A type there, or a value of another type, is <c>type-mismatch</c>, as a value of another type for a
+    /// parameter is (T1).
     /// </summary>
     private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
     {
@@ -1994,9 +2069,11 @@ public sealed partial class Checker
         {
             if (BoundConstant(n.Name) is { } bound)
             {
-                if (bound.Of.Equals(of))
+                if (Types.Assignable(bound.Of, of))
                 {
-                    return bound;
+                    // T8: a constant passed on widens as a value of its type does where a wider type is required, an `int` where a
+                    // `long` is, and rustc's refusal (E0308), from a language that widens nothing, is not taken (the owner, 2026-11-03)
+                    return bound.Of.Equals(of) ? bound : new ConstantArgument(of, bound.Value);
                 }
 
                 Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
@@ -2357,6 +2434,9 @@ public sealed partial class Checker
             }
 
             var slot = candidate.Slots[candidate.Binding[i]].Type;
+            // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
+            // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
+            var read = pre.Whole is { } whole && candidate.Keeps[i] && slot is UnionType ? whole.Cases[0] : ArgumentType(candidate, pres, i);
             if (slot is TypeParameterType tp && direct.TryGetValue(tp.Symbol, out var types))
             {
                 types.Add(ArgumentType(candidate, pres, i));
@@ -2367,11 +2447,14 @@ public sealed partial class Checker
                 // inferred as nothing, and no `cannot-infer` is reported beside it (E1; the owner, 2026-11-03, #156, comment 6600034940)
                 erred.UnionWith(candidate.TypeParameters.Where(p => Types.Mentions(slot, p)));
             }
-            // O4: a call whose cases a union with a type parameter keeps fills the type parameter with its success alone, and a case the
-            // union does not name is the fit's misfit (the owner, 2026-11-01, "T = success only")
-            else if (!Unify(slot, pre.Whole is { } whole && candidate.Keeps[i] && slot is UnionType ? whole.Cases[0] : ArgumentType(candidate, pres, i), map))
+            else if (!Unify(slot, read, map))
             {
+                // the type parameter that failed is the one whose type an argument before bound and this one contradicts, the `T` of a
+                // `List<T>` bound to `int` that a `List<string>` meets (#156, comment 6620467625)
                 candidate.CannotInfer = true;
+                var own = new Dictionary<TypeParameterSymbol, KurzType>();
+                Unify(slot, read, own);
+                candidate.Uninferred = candidate.TypeParameters.FirstOrDefault(p => own.TryGetValue(p, out var mine) && map.TryGetValue(p, out var bound) && !Types.Same(mine, bound));
                 return;
             }
         }
@@ -2382,8 +2465,9 @@ public sealed partial class Checker
             if (known.Count == 0)
             {
                 // an argument with no error of its own that gives `p` nothing in another position, the `5` of a `List<T>`, leaves the
-                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575)
-                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null)
+                // `cannot-infer` standing, which names it (T27; the owner, 2026-11-03, #156, comment 6603205575), and so does a lambda
+                // that fits no function type its parameter could be (the owner, 2026-11-05, #156, comment 6659026667)
+                if (types.Count > 0 && GivingNothing(candidate, pres, p) is null && !FitsNoFunction(candidate, pres, p))
                 {
                     map[p] = Types.Error; // every argument of the position carries its own error: nothing is inferred and nothing more is reported (E1)
                 }
@@ -2398,6 +2482,7 @@ public sealed partial class Checker
             if (common is null || !known.All(u => Types.Same(u, common) || (u is DataType && common is DataType && Types.Assignable(u, common))))
             {
                 candidate.CannotInfer = true;
+                candidate.Uninferred = p;
                 return;
             }
 
@@ -2440,6 +2525,7 @@ public sealed partial class Checker
             if (!types.All(t => Types.Same(t, types[0])))
             {
                 candidate.CannotInfer = true;
+                candidate.Uninferred = p;
                 return;
             }
 
@@ -2453,9 +2539,11 @@ public sealed partial class Checker
                 continue;
             }
 
-            if (p.Default is { } constant)
+            if (p.HasDefault)
             {
-                map[p] = constant; // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default
+                // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default, one that was not
+                // read the error type, since its diagnostic stands at the default (E1)
+                map[p] = (KurzType?)p.Default ?? Types.Error;
                 continue;
             }
 
@@ -2494,8 +2582,9 @@ public sealed partial class Checker
             }
 
             // as in a direct position, an argument with no error of its own that gives `p` nothing leaves the `cannot-infer` standing (T27;
-            // the owner, 2026-11-03, #156, comment 6603205575)
-            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null)
+            // the owner, 2026-11-03, #156, comment 6603205575), and so does a lambda that fits no function type its parameter could be
+            if (fixedType is null && (untypable || untypedLists.Contains(p) || erred.Contains(p)) && GivingNothing(candidate, pres, p) is null
+                && !FitsNoFunction(candidate, pres, p))
             {
                 map[p] = Types.Error;
                 continue;
@@ -2504,6 +2593,7 @@ public sealed partial class Checker
             if (fixedType is null)
             {
                 candidate.CannotInfer = true;
+                candidate.Uninferred = p;
                 return;
             }
 
@@ -2758,8 +2848,45 @@ public sealed partial class Checker
             return;
         }
 
-        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required");
+        ReportMismatch(own, parameter, pre.Argument.Line, $"{Types.A(own)} where {Types.A(parameter)} is required{LambdaAtTheCall(c, pre.Argument, own, parameter)}");
     }
+
+    /// <summary>
+    /// T1 with F11 and O10: the hint for a function value whose result is <c>void</c>, passed by its name where a function type whose
+    /// result's first case is <c>void</c> is required, <c>Run(say)</c> for a <c>() => void</c> where a <c>() => void | Oops</c> is: the
+    /// lambda written at the call fits, <c>Run(() => say())</c> (the owner, 2026-11-05, #110, comment 6664353093). Its parameters take
+    /// the first names nothing here takes (V9), the call's other arguments are written as a default is (F13), and <c>...</c> stands for
+    /// a callee or type arguments of another form (assumed).
+    /// </summary>
+    private string LambdaAtTheCall(CallExpression c, Argument argument, KurzType own, KurzType parameter)
+    {
+        if (argument.Value is not NameExpression name || own is not FunctionType from || !Types.IsVoid(from.Result)
+            || (Types.NonNull(parameter) ?? parameter) is not FunctionType to || !SuccessIsVoid(to.Result) || to.Parameters.Count != from.Parameters.Count
+            || to.Parameters.Where((p, i) => !Types.Assignable(p, from.Parameters[i])).Any() || !c.Arguments.Any(a => ReferenceEquals(a, argument)))
+        {
+            return "";
+        }
+
+        var names = FreeNames(to.Parameters.Count);
+        var lambda = $"{(names.Count == 1 ? names[0] : $"({string.Join(", ", names)})")} => {name.Name}({string.Join(", ", names)})";
+        var arguments = c.Arguments.Select(a => $"{(a.Name is null ? "" : a.Name + ": ")}{(a.Mut ? "mut " : "")}{(ReferenceEquals(a, argument) ? lambda : DefaultText(a.Value))}");
+        return $"; write a lambda at the call: `{CalleeText(c.Callee)}{(c.TypeArguments.Count > 0 ? "<...>" : "")}({string.Join(", ", arguments)})`";
+    }
+
+    private static readonly string[] FirstNames = ["x", "y", "z"];
+
+    /// <summary>The names of <paramref name="count"/> lambda parameters that no variable or declaration here takes (V9, F16): <c>x</c>, <c>y</c>, <c>z</c>, then <c>x1</c>, <c>x2</c> and on.</summary>
+    private List<string> FreeNames(int count) =>
+        FirstNames.Concat(Enumerable.Range(1, int.MaxValue - 1).Select(i => $"x{i}"))
+            .Where(n => Lookup(n, capture: false).Variable is null && !IsDeclaredName(n) && frame.Reserved?.Contains(n) != true).Take(count).ToList();
+
+    /// <summary>A callee for a message: a name or a member of one, <c>HttpResponse.Stream</c>; <c>...</c> for another form.</summary>
+    private static string CalleeText(Expression e) => e switch
+    {
+        NameExpression n => n.Name,
+        MemberAccess m => $"{CalleeText(m.Target)}{(m.Conditional ? "?." : ".")}{m.Member}",
+        _ => "...",
+    };
 
     /// <summary>A function as its declaration writes it, for a message: <c>void Show(int n)</c>, each default after its parameter (<c>int b = 0</c>).</summary>
     private static string Signature(FunctionSymbol f)
@@ -2826,19 +2953,21 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T27: the clause of a <c>cannot-infer</c> that names the first argument whose type has no part where a type parameter of its
-    /// parameter stands, so that it gives that type parameter nothing, a <c>5</c> where a <c>List&lt;T&gt;</c> is required; empty where
-    /// every argument gives its type parameters a type, and the types differ or no argument stands in a position.
+    /// T27: the clause of a <c>cannot-infer</c> that names the first argument whose type has no part where the type parameter that
+    /// failed, <see cref="Candidate.Uninferred"/>, stands in its parameter, so that it gives that type parameter nothing, a <c>5</c> where
+    /// a <c>List&lt;T&gt;</c> is required (#156, comment 6620467625); empty where every argument gives that type parameter a type, and the
+    /// types differ or no argument stands in a position.
     /// </summary>
-    private static string GivesNothing(Candidate candidate, List<Pre> pres) => GivingNothing(candidate, pres, null) is { } given
-        ? $": argument {given.Index + 1} is {Types.A(ArgumentType(candidate, pres, given.Index))} where {Types.A(candidate.Slots[candidate.Binding[given.Index]].Type)} is required, and gives `{given.Parameter.Name}` nothing"
+    private static string GivesNothing(Candidate candidate, List<Pre> pres) => candidate.Uninferred is { } failed && GivingNothing(candidate, pres, failed) is { } index
+        ? $": argument {index + 1} is {Types.A(ArgumentType(candidate, pres, index))} where {Types.A(candidate.Slots[candidate.Binding[index]].Type)} is required, and gives `{failed.Name}` nothing"
         : "";
 
     /// <summary>
-    /// T27: the first argument whose type has no part where a type parameter of its parameter stands (<paramref name="only"/>, where it is
-    /// given), and that type parameter, which the argument gives nothing; null where every argument gives its type parameters a type.
+    /// T27: the first argument whose type has no part where <paramref name="p"/> stands in its parameter, so that it gives
+    /// <paramref name="p"/> nothing; null where every argument gives <paramref name="p"/> a type. A lambda (F11) and an argument with an
+    /// error of its own (E1) are passed over: neither has a type to name.
     /// </summary>
-    private static (int Index, TypeParameterSymbol Parameter)? GivingNothing(Candidate candidate, List<Pre> pres, TypeParameterSymbol? only)
+    private static int? GivingNothing(Candidate candidate, List<Pre> pres, TypeParameterSymbol p)
     {
         for (var i = 0; i < pres.Count; i++)
         {
@@ -2851,14 +2980,31 @@ public sealed partial class Checker
             var slot = candidate.Slots[candidate.Binding[i]].Type;
             var found = new Dictionary<TypeParameterSymbol, KurzType>();
             Unify(slot, ArgumentType(candidate, pres, i), found);
-            if (candidate.TypeParameters.FirstOrDefault(p => (only is null || ReferenceEquals(p, only)) && Types.Mentions(slot, p) && !found.ContainsKey(p)) is { } nothing)
+            if (Types.Mentions(slot, p) && !found.ContainsKey(p))
             {
-                return (i, nothing);
+                return i;
             }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// T27 with F11: whether a lambda stands where <paramref name="p"/> stands in its parameter and fits no function type that parameter
+    /// could be, one where a <c>List&lt;T&gt;</c> is required or one with another count of parameters, as <see cref="Fit"/> reads it: such a
+    /// lambda is wrong whatever <paramref name="p"/> is, so beside another argument's own error the <c>cannot-infer</c> stands, and it names
+    /// no argument, since a lambda has no type of its own before the pick. A lambda that could fit, under a function type with as many
+    /// parameters, leaves the own error alone (E1; the owner, 2026-11-05, #156, comment 6659026667), and so does one under a type
+    /// parameter, which can be a function type (assumed, #156, comment 6659124253).
+    /// </summary>
+    private static bool FitsNoFunction(Candidate candidate, List<Pre> pres, TypeParameterSymbol p) => pres.Where((pre, i) => pre.Lambda is { } lambda
+        && candidate.Slots[candidate.Binding[i]].Type is var slot && Types.Mentions(slot, p)
+        && (Types.NonNull(slot) ?? slot) switch
+        {
+            FunctionType f => f.Parameters.Count != lambda.Parameters.Count,
+            TypeParameterType => false,
+            _ => true,
+        }).Any();
 
     /// <summary>The picked candidate: literals and lambdas typed by their parameters (L17, F11), the <c>mut</c> markers checked (M7); false where an argument typed so does not fit its parameter.</summary>
     private bool Commit(Candidate candidate, List<Pre> pres)

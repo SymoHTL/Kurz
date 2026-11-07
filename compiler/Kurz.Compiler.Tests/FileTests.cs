@@ -471,6 +471,96 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         RanWithCloseInFlight(LockAtRead, "lock-at-read", ["1", "1", "5", "-1", "0", "0"], ["raw"], WithTheLockAtEveryRead);
     }
 
+    private const string ReadsCounted = Armed + """
+        static mut int seen = 0
+
+        // the reads of the system so far, which the IR of the fact counts in `seen`
+        int Reads() {
+            mut counted = 0
+            raw {
+                counted = seen
+            }
+
+            return counted
+        }
+
+        void | IoError Count() {
+            mut small = Bytes()
+            for i in 0..<3000 {
+                small.Add(byte(i % 251))
+            }
+
+            listener = TcpListener.Bind("127.0.0.1:0")
+            client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+            server = listener.Accept()
+            client.Write(small)
+            mut got = Bytes()
+            before = Reads()
+            for i in 0..<3000 {
+                server.Read(mut got, 1)
+            }
+
+            made = Reads() - before
+            print("{got == small} {made >= 1 && made < 100}")
+            mut sent = Bytes()
+            for i in 0..<20000 {
+                sent.Add(byte(i % 251))
+            }
+
+            File.WriteAll("reads-counted.txt", sent)
+            f = File.Open("reads-counted.txt")
+            File.Delete("reads-counted.txt")
+            mut read = Bytes()
+            start = Reads()
+            for i in 0..<3000 {
+                f.Read(mut read, 1)
+            }
+
+            print(Reads() - start)
+            held = f.Read(mut read, 0)
+            print("{held} {Reads() - start}")
+            rest = f.Read(mut read, 10000)
+            print("{rest} {Reads() - start}")
+            empty = f.Read(mut read, 0)
+            print("{empty} {Reads() - start}")
+            f.Close()
+        }
+
+        Count() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>The IR of <paramref name="ir"/>, a program of <see cref="ReadsCounted"/>, in which every read of the system adds 1 to <c>seen</c> as it starts.</summary>
+    private static string WithTheReadsCounted(string ir)
+    {
+        var seen = SeenOf(ir);
+        var reads = new System.Text.RegularExpressions.Regex("call i64 (@\"[^\"]*\\.ReadFile\\.[^\"]*\")\\(i32 ");
+        Assert.Matches(reads, ir);
+        return reads.Replace(ir, "call i64 @\"test.counted\"(ptr $1, i32 ") + $$"""
+
+            define internal i64 @"test.counted"(ptr %read, i32 %fd, ptr %bytes, i64 %count) {
+              %n = load i32, ptr {{seen}}
+              %more = add i32 %n, 1
+              store i32 %more, ptr {{seen}}
+              %r = call i64 %read(i32 %fd, ptr %bytes, i64 %count)
+              ret i64 %r
+            }
+
+            """;
+    }
+
+    [Fact]
+    public void A_read_of_the_system_fills_the_buffer_for_the_reads_after_it_and_a_max_of_0_reads_only_where_the_buffer_holds_none()
+    {
+        // S3: 3000 reads of one byte from a stream take its bytes in order with fewer than 100 reads of the system, where one for each
+        // byte would make 3000, and from a file of 20000 bytes with one, the fill of 8192; a `max` of 0 then takes none of the 5192 bytes
+        // the buffer holds with no read of the system, a read of 8 KiB or more takes them with none, and a `max` of 0 with the buffer
+        // empty goes straight, one read of the system that reads nothing
+        RanWithCloseInFlight(ReadsCounted, "reads-counted", ["true true", "1", "0 1", "5192 1", "0 2"], ["raw"], WithTheReadsCounted);
+    }
+
     private const string LockAtFill = Armed + """
         static mut int seen = 0
 
@@ -627,6 +717,13 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 IoError e => -e.Code
             })
 
+            looked = TcpStream.Connect("127.0.0.1:{pair.Port}")
+            looked.SetReadTimeout(100ms)
+            ArmClose(2)
+            print(looked.Fill(mut bytes) else {
+                IoError e => -e.Code
+            })
+
             timed = TcpListener.Bind("127.0.0.1:0")
             a = TcpStream.Connect("127.0.0.1:{timed.Port}")
             ArmClose(2)
@@ -654,14 +751,15 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_close_of_a_socket_shuts_it_down_so_a_call_in_flight_on_it_ends_with_the_closed_handle_s_error()
     {
-        // S5, S9: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is released,
-        // which `F_GETFD` shows; the port binds again, which the shutdown frees; a read in flight takes the bytes the socket holds, and one
-        // that finds none, as a write, ends with that error; a setter in flight sets its time; each next call is `EBADF`
-        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "false", "9", "true", "3", "-9", "9", "-9", "9", "9"], ["raw", "native"]);
+        // S5, S9, S24: the shutdown ends the `Accept` in flight with the closed handle's error, and once it is out the descriptor is
+        // released, which `F_GETFD` shows; the port binds again, which the shutdown frees; a read in flight takes the bytes the socket
+        // holds, and one that finds none, as a write and as a `Fill` that finds none, ends with that error; a setter in flight sets its
+        // time; each next call is `EBADF`
+        RanWithCloseInFlight(InFlightSockets, "in-flight-sockets", ["other (os error 9): 127.0.0.1:0", "false", "9", "true", "3", "-9", "9", "-9", "-9", "9", "9"], ["raw", "native"]);
 
         // the positive control: built as it is, the second accept takes the second connection, the listener holds its descriptor and its
-        // port, the second read takes the fourth byte, and the idle read runs out of its time
-        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11"], grants: ["raw", "native"]);
+        // port, the second read takes the fourth byte, and the idle read and the idle `Fill` run out of their time
+        Ran(InFlightSockets, "in-flight-sockets-open", ["accepted", "true", "accepted", "98", "3", "1", "-11", "-11"], grants: ["raw", "native"]);
     }
 
     private const string QueuedConnections = Armed + """

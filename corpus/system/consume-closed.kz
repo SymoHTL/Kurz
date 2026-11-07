@@ -1,0 +1,25 @@
+// expect: output
+// | other (os error 9): consume-closed.txt
+// | 3
+// rules: S24, S5
+
+// a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 5, past the bytes
+// held, gets the closed handle's error, which the call finds as it enters, before it reads what the buffer holds
+void | IoError Closed() {
+    File.WriteAll("consume-closed.txt", "abc".Bytes)
+    f = File.Open("consume-closed.txt")
+    File.Delete("consume-closed.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    g.Consume(5) else {
+        IoError e => print(e)
+    }
+
+    print(seen.Count)
+}
+
+Closed() else {
+    IoError e => print(e)
+}

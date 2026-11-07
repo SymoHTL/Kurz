@@ -105,9 +105,9 @@ print(b == b)
 
 Case: [data/equality-holds-file.kz](../corpus/data/equality-holds-file.kz)
 ```kurz
-data Log(File Out)
+data Journal(File Out)
 
-void Same(Log a, Log b) {
+void Same(Journal a, Journal b) {
     print(a == b)
 }
 
@@ -417,9 +417,17 @@ fields (D2). Its bare name is its one value (D8) only where no base above it has
 where one has, the bare name stands for no value (D2).
 The cost is that this reading depends on every base above the type: where `Tag` of `data Mark : Tag`
 takes a first field, each bare `Mark` becomes `syntax` (D2) and each `Mark(...)` takes that field, in
-any file, with no edit to `Mark`. What softens it is that every use whose reading changes is a
-compile error at its line, and that a derived type that writes fields of its own meets the same when
-its base takes a field, since the fields of the base come first in its constructor (D7).
+any file, with no edit to `Mark`. What softens it is that each use of `Mark` whose reading changes
+is a compile error at its line: its one use was the bare name, since `Mark()` of a type without
+fields is `syntax` (D8), and the bare name becomes `syntax` (D2). A derived type that writes fields
+of its own meets the same when its base takes a field, wherever an argument of its call no longer
+fits, since the fields of the base come first in its constructor (D7): such a call lacks an argument
+for a field without a default, `argument-mismatch` (D11), or else passes one of a type the field it
+moved to does not take, `type-mismatch` (T1). The cost that stays is the silent case, a positional argument that moves into
+the base's new field before a default: where the moved arguments fit and a default fills the last
+field, the call compiles with another reading. With `data Admin(int Level = 1) : User`, `Admin(5)`
+gives `Level` 5, and once `User` takes a first field `int Id` it gives `Id` 5 and `Level` 1 (the
+owner, 2026-11-04, comment 6643376941 on issue 156).
 
 Case: [data/inherit-no-own-fields.kz](../corpus/data/inherit-no-own-fields.kz)
 ```kurz
@@ -755,14 +763,14 @@ arguments, and a parameter without a default that gets none are the compile erro
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
-int Log(string s, int v) {
+int Show(string s, int v) {
     print(s)
     return v
 }
 
 int Add(int a, int b) => a + b
 
-print(Add(b: Log("b", 2), a: Log("a", 1)))
+print(Add(b: Show("b", 2), a: Show("a", 1)))
 ```
 
 Case: [data/default-and-named.kz](../corpus/data/default-and-named.kz)

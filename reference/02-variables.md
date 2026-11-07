@@ -124,7 +124,19 @@ print(x)
 `int x = 5` is a declaration, and so is every other form that declares (V2, V4): `mut x = 5`
 and `mut int x = 5`. When a variable named `x` is already visible, each of them is the compile
 error `redeclared`; none of them assigns, and none hides the outer variable. *(the two `mut`
-forms are a proposed reading of V8, whose argument covers only `x = 5`)*
+forms are a proposed reading of V8, whose argument covers only `x = 5`)* A declaration whose name
+is a type parameter of the function around it, one that holds a constant among them (T35), is
+`redeclared` too, in each of the forms T33 lists, a parameter, a loop's variable, a binding of a
+`match` arm and a lambda's parameter among them, so that `T.Kind`, `T.Fields` and `T.Make` read the
+type a copy binds and the name of such a constant its value (T33). C# refuses a parameter, a local
+variable and a `foreach` variable named like a method's type parameter (CS0412), and Kurz refuses a
+lambda's parameter so named as C# did up to its language version 7.3 (§4, the owner, 2026-11-03,
+"redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same reading for both"). The
+refusal stands where the body is checked (T33): once from its text, or in each copy a call makes
+where T33 or T35 checks the function in its copies alone, so not at all where no call reaches such a
+function. `M = 3` with the name `M` of such a type parameter is a declaration, since no variable of
+that name is visible to assign (V8), and so it is `redeclared`. Whether a declaration in a method of
+a generic type, named like a type parameter of that type, is refused is open (§14).
 
 Case: [variables/redeclared.kz](../corpus/variables/redeclared.kz)
 ```kurz

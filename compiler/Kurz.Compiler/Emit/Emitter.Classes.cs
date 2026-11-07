@@ -6,14 +6,19 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// Chapter 7: an instance of a class is the address of its block, as Rust's <c>Rc&lt;T&gt;</c> is the address of its <c>RcBox</c>
 /// (section 3): the count of the references that hold it, the count of the weak ones, one for all the strong ones together, then its
-/// fields in their order (<see cref="Layout.ClassBlock"/>); a nullable instance is the address alone, null its <c>null</c>. The
-/// instance is counted as a list is (K2): every place that holds one holds a count, a variable lets go of it at the end of its block,
-/// and the last count lets go of the fields in their order, as Rust drops them, and then of the weak count the strong ones held; the
-/// last weak count frees the block. An instance whose last count a release lets go of waits on a work list until that release ends
-/// (<see cref="ReleaseInstance"/>). No count is elided. A method is a function of the module whose first parameter is the instance,
-/// <c>this</c>, which it borrows from the caller as a function borrows its arguments (K7). A read of a counted field through an
-/// instance takes a count of its own, a temporary of the region, since a call can assign the field through another reference while the
-/// value is still in use (K2, K9).
+/// fields in their order, a base's first (<see cref="Layout.ClassBlock"/>); a nullable instance of a class that nothing derives from
+/// is the address alone, null its <c>null</c>. A value of a class that another class derives from is the pair of the address and the
+/// table of the instance's class, as Rust's <c>Rc&lt;dyn Trait&gt;</c> is the address and its vtable (K6, <see cref="Layout.Fat"/>),
+/// and a nullable one is the pair too, its <c>null</c> the pair of zeros (N1): the table holds the helpers that end the instance and
+/// free its block, its equality and its hash where the program uses them, and its <c>virtual</c> methods, the base's first
+/// (<see cref="EmitTables"/>). The instance is counted as a list is (K2): every place that holds one holds a count, a
+/// variable lets go of it at the end of its block, and the last count lets go of the fields in their order, as Rust drops them, and
+/// then of the weak count the strong ones held; the last weak count frees the block. An instance whose last count a release lets go of
+/// waits on a work list until that release ends (<see cref="ReleaseInstance"/>). No count is elided. A method is a function of the
+/// module whose first parameter is the instance, <c>this</c>, which it borrows from the caller as a function borrows its arguments
+/// (K7), with its table where its class has a base or derived classes. A read of a counted field through an instance takes a count of
+/// its own, a temporary of the region, since a call can assign the field through another reference while the value is still in use
+/// (K2, K9).
 /// </summary>
 public sealed partial class Emitter
 {
@@ -23,34 +28,102 @@ public sealed partial class Emitter
     // list (the owner, 2026-11-01, "Iterative, never crashes")
     private readonly List<(string Drop, string List)> released = [];
 
+    // K6: the classes whose tables the program names, in the order first named, and the classes whose values `==` and a map's hash
+    // read through the table (K13)
+    private readonly List<ClassSymbol> tabled = [];
+    private readonly HashSet<ClassSymbol> comparedThroughTable = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<ClassSymbol> hashedThroughTable = new(ReferenceEqualityComparer.Instance);
+
+    // K6: the slots of a table before its `virtual` methods: the release, the weak release, the equality and the hash
+    private const int MethodSlots = 4;
+
     // each class whose body's defaults are queued for their function, with its name (K7)
     private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
 
     /// <summary>
-    /// K1, K7: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
-    /// default, then each field of the body its default, in their order, read in the class's file through the instance being built, as
-    /// C# runs a field's initializer before the constructor's body.
+    /// K1, K7, K10: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
+    /// default; where a class of the chain writes the explicit form, the fields of each class from its constructor's arguments
+    /// (<see cref="FillFields"/>); then each field of the body its default, in their order, read in the class's file through the
+    /// instance being built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7,
+    /// K18). A class with derived classes gives the pair of the address and its table.
     /// </summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
     {
         var symbol = ((ClassType)info.Target!).Symbol;
-        var fields = symbol.Fields.Where(f => f.Body is null).Select(f => f.Type).ToList();
-        var arguments = Arguments(c, info, j => fields[j], _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
         var block = layout.ClassBlock(symbol);
-        var p = Allocate(block);
-        fn.Emit($"store i64 1, ptr {p}");
-        fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
-        for (var i = 0; i < fields.Count; i++)
+        string p;
+        if (symbol.Chain.All(x => x.BaseCall is null))
         {
-            fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, i)}");
+            // each parameter of the constructor is a field, which owns the argument bound to it
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
+            p = Allocate(block);
+            fn.Emit($"store i64 1, ptr {p}");
+            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            for (var i = 0; i < arguments.Count; i++)
+            {
+                fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, symbol.Fields.IndexOf(symbol.Constructor[i].Field))}");
+            }
+
+            // K7: the fields of the body follow the primary constructor's, each given its default by the class's function of
+            // them (ClassDefaults); a class in a chain declares none
+            if (symbol.Fields.Any(f => f.Body is not null))
+            {
+                fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
+            }
+        }
+        else
+        {
+            var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false);
+            p = Allocate(block);
+            fn.Emit($"store i64 1, ptr {p}");
+            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            FillFields(symbol, arguments, p);
         }
 
-        if (fields.Count < symbol.Fields.Count)
+        return Layout.Fat(symbol) ? Pair(p, Table(symbol)) : p;
+    }
+
+    /// <summary>
+    /// K10, K11: the fields of class <paramref name="x"/> in the block <paramref name="p"/> of an instance being made, from the arguments
+    /// bound to its constructor, which it borrows: the base's first, from the arguments the explicit form computes over the parameters
+    /// or from those the short form passes on, then the class's own, each with a count of its own.
+    /// </summary>
+    private void FillFields(ClassSymbol x, List<string> arguments, string p)
+    {
+        var own = x.Base?.Fields.Count ?? 0;
+        if (x.Base is { } b && x.BaseCall is { } call)
         {
-            fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
+            for (var i = 0; i < x.Constructor.Count; i++)
+            {
+                // the parameters, as variables the arguments of the base read
+                var slot = fn.Alloca(Ir(x.Constructor[i].Field.Type), x.Constructor[i].Declaration.Name);
+                fn.Emit($"store {arguments[i]}, ptr {slot}");
+                slots[Model.DeclarationOf(x.Constructor[i].Declaration)] = slot;
+            }
+
+            FillFields(b, Arguments(call, Model.CallOf(call), j => b.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(b, j), cConvention: false, owned: false), p);
+        }
+        else if (x.Base is { } shortBase)
+        {
+            FillFields(shortBase, arguments.Take(shortBase.Constructor.Count).ToList(), p);
         }
 
-        return p;
+        for (var i = 0; i < x.Constructor.Count; i++)
+        {
+            var field = x.Constructor[i].Field;
+            var index = x.Fields.IndexOf(field);
+            if (index < own)
+            {
+                continue; // the base's field, which the base's arguments gave (K11)
+            }
+
+            if (Counted(field.Type))
+            {
+                Retain(arguments[i][(Ir(field.Type).Length + 1)..], field.Type);
+            }
+
+            fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(x, p, index)}");
+        }
     }
 
     /// <summary>
@@ -103,19 +176,52 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>The default written for the field of the primary constructor in the slot, and the file of the class.</summary>
+    /// <summary>The default written for the parameter of the primary constructor in the slot, and the file of the class that writes it.</summary>
     private (Expression Value, Unit File) ClassFieldDefault(ClassSymbol symbol, int slot) =>
-        ((symbol.Declaration.PrimaryConstructor ?? [])[slot].Default ?? throw new InvalidOperationException($"the field {slot} of `{symbol.Name}` has no argument and no default"), classOwners[symbol]);
+        (symbol.Constructor[slot].Declaration.Default ?? throw new InvalidOperationException($"the parameter {slot} of `{symbol.Name}` has no argument and no default"), classOwners[symbol.Constructor[slot].Owner]);
+
+    /// <summary>K6: the address of the block a value of the class holds, the first of the pair where the class has derived classes.</summary>
+    private string Address(string value, ClassSymbol symbol) => Layout.Fat(symbol) ? fn.Value($"extractvalue %kz.obj {value}, 0") : value;
+
+    /// <summary>K6: the pair of an instance's address and its class's table.</summary>
+    private string Pair(string address, string table) =>
+        fn.Value($"insertvalue %kz.obj {fn.Value($"insertvalue %kz.obj undef, ptr {address}, 0")}, ptr {table}, 1");
+
+    /// <summary>K6: the table of the class, emitted after the last function (<see cref="EmitTables"/>).</summary>
+    private string Table(ClassSymbol symbol)
+    {
+        if (!tabled.Contains(symbol))
+        {
+            tabled.Add(symbol);
+        }
+
+        layout.Pair();
+        return $"@\"table.{symbol.Name}\"";
+    }
+
+    /// <summary>K6, K7: whether the methods of the class take the instance with its table: a class with a base or with derived classes.</summary>
+    private static bool Related(ClassSymbol symbol) => symbol.Base is not null || symbol.Derived;
+
+    /// <summary>K7: the method a chain of overrides starts from, the one marked <c>virtual</c>, whose slot each override fills.</summary>
+    private static FunctionSymbol Root(FunctionSymbol method) => method.Overridden is { } overridden ? Root(overridden) : method;
+
+    /// <summary>K7: the <c>virtual</c> methods of a class in the order of their slots: its base's first, then those it marks <c>virtual</c>, in the order written.</summary>
+    private static List<FunctionSymbol> VirtualMethods(ClassSymbol symbol) =>
+        [.. symbol.Base is { } b ? VirtualMethods(b) : [], .. symbol.Methods.Values.SelectMany(list => list).Where(m => (m.Declaration!.Modifiers & Modifiers.Virtual) != 0).OrderBy(m => m.Line)];
+
+    /// <summary>K7: what a call of the <c>virtual</c> method runs on an instance of the class: the override nearest the class, or the method itself.</summary>
+    private static FunctionSymbol Implementation(ClassSymbol symbol, FunctionSymbol root) =>
+        symbol.Chain.SelectMany(c => c.Methods.TryGetValue(root.Name, out var list) ? list : []).First(m => ReferenceEquals(Root(m), root));
 
     /// <summary>The address of field <paramref name="index"/> in the block of an instance: the two counts come first.</summary>
     private string InstanceFieldPointer(ClassSymbol symbol, string pointer, int index) =>
         fn.Value($"getelementptr {layout.ClassBlock(symbol)}, ptr {pointer}, i32 0, i32 {Number(index + 2)}");
 
     /// <summary>K1, K2: a field of an instance, of a counted type with a count of its own that the region lets go of.</summary>
-    private string InstanceField(string pointer, ClassSymbol symbol, int index)
+    private string InstanceField(string instance, ClassSymbol symbol, int index)
     {
         var type = symbol.Fields[index].Type;
-        var value = fn.Value($"load {Ir(type)}, ptr {InstanceFieldPointer(symbol, pointer, index)}");
+        var value = fn.Value($"load {Ir(type)}, ptr {InstanceFieldPointer(symbol, Address(instance, symbol), index)}");
         if (type is WeakRefType weak)
         {
             return Upgrade(value, weak); // R3: a strong `T?`, held to the end of the statement
@@ -138,7 +244,7 @@ public sealed partial class Emitter
             throw new InvalidOperationException($"`this` that the checker did not read at line {line}");
         }
 
-        return fn.Value($"load ptr, ptr {Place(self, line)}");
+        return fn.Value($"load {Ir(self.Type)}, ptr {Place(self, line)}");
     }
 
     /// <summary>K7: a field of the instance read by its name inside a method.</summary>
@@ -162,7 +268,7 @@ public sealed partial class Emitter
         var owned = Convert(Owned(value), TypeOf(value), targetType, value.Line);
         var (pointer, symbol) = instance();
         var index = symbol.FieldIndex(field);
-        Store(owned, symbol.Fields[index].Type, InstanceFieldPointer(symbol, pointer, index));
+        Store(owned, symbol.Fields[index].Type, InstanceFieldPointer(symbol, Address(pointer, symbol), index));
     }
 
     /// <summary>M5, M9: the place of a list, a map or a hasher held by a field of an instance, for a <c>mut</c> member; null for any other receiver.</summary>
@@ -174,13 +280,13 @@ public sealed partial class Emitter
                 {
                     var symbol = ClassOfThis(n, n.Line).Symbol;
                     var index = symbol.FieldIndex(field.Name);
-                    return NarrowedPlace(InstanceFieldPointer(symbol, This(n, n.Line), index), field.Type, TypeOf(receiver), n.Line).Place;
+                    return NarrowedPlace(InstanceFieldPointer(symbol, Address(This(n, n.Line), symbol), index), field.Type, TypeOf(receiver), n.Line).Place;
                 }
 
             case MemberAccess m when TypeOf(m.Target) is ClassType c:
                 {
                     var index = c.Symbol.FieldIndex(m.Member);
-                    return NarrowedPlace(InstanceFieldPointer(c.Symbol, EmitExpression(m.Target), index), c.Symbol.Fields[index].Type, TypeOf(receiver), m.Line).Place;
+                    return NarrowedPlace(InstanceFieldPointer(c.Symbol, Address(EmitExpression(m.Target), c.Symbol), index), c.Symbol.Fields[index].Type, TypeOf(receiver), m.Line).Place;
                 }
 
             default:
@@ -195,10 +301,10 @@ public sealed partial class Emitter
     private string EmitMethodCall(CallExpression c, CallInfo info)
     {
         var f = info.Function!;
-        var receiver = c.Callee switch
+        var (receiver, receiverType) = c.Callee switch
         {
-            MemberAccess m => EmitExpression(m.Target),
-            NameExpression n => This(n, n.Line),
+            MemberAccess m => (EmitExpression(m.Target), (ClassType)TypeOf(m.Target)),
+            NameExpression n => (This(n, n.Line), ClassOfThis(n, n.Line)),
             _ => throw new InvalidOperationException($"a method called through `{c.Callee.GetType().Name}` at line {c.Line}"),
         };
         var arguments = Arguments(
@@ -209,14 +315,39 @@ public sealed partial class Emitter
             j => Default(f.Declaration!.Parameters[j].Default, owners[f]),
             cConvention: false,
             owned: false);
+        return CallOn(f, receiver, receiverType, arguments);
+    }
+
+    /// <summary>
+    /// K7: a call of the method on an instance held by a value of <paramref name="receiverType"/>, the instance first, with its table
+    /// where the method's class has a base or derived classes. A <c>virtual</c> method called through a value that can be an instance of
+    /// a derived class runs what the table of the instance's class holds (K6, A9); every other call is direct.
+    /// </summary>
+    private string CallOn(FunctionSymbol f, string receiver, ClassType receiverType, IEnumerable<string> arguments)
+    {
+        var self = $"ptr {receiver}";
+        var callee = Instance(f, NoMap);
+        if (Related(f.Owner!))
+        {
+            var pair = Layout.Fat(receiverType.Symbol) ? receiver : Pair(receiver, Table(receiverType.Symbol));
+            self = $"%kz.obj {pair}";
+            if (f.IsVirtual && Layout.Fat(receiverType.Symbol))
+            {
+                var root = Root(f);
+                var slot = MethodSlots + VirtualMethods(root.Owner!).IndexOf(root);
+                var table = fn.Value($"extractvalue %kz.obj {pair}, 1");
+                callee = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(slot)}")}");
+            }
+        }
+
         var result = Sub(f.ReturnType);
-        var call = $"call {Ir(result)} {Instance(f, NoMap)}({string.Join(", ", arguments.Prepend($"ptr {receiver}"))})";
+        var call = $"call {Ir(result)} {callee}({string.Join(", ", arguments.Prepend(self))})";
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
     }
 
-    /// <summary>A5: the text of an instance, which its <c>Text()</c> gives; the caller holds a count of it.</summary>
+    /// <summary>A5, A9: the text of an instance, which its <c>Text()</c> gives, the override of the instance's class where it is <c>virtual</c>; the caller holds a count of it.</summary>
     private string InstanceText(string value, ClassType type) =>
-        fn.Value($"call %kz.str {Instance(type.Symbol.TextMethod ?? throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)"), NoMap)}(ptr {value})");
+        CallOn(type.Symbol.TextMethod ?? throw new InvalidOperationException($"`{type}` has no `Text()`: `no-text`, which the checker reports (A4)"), value, type, []);
 
     /// <summary>One more strong count of an instance.</summary>
     private string RetainInstance() => Helper("retain.instance", "void", ["ptr"], () =>
@@ -326,9 +457,19 @@ public sealed partial class Emitter
     /// <c>null</c> or its target's strong count is 0, as Rust's <c>Weak::upgrade</c>. A target on its class's work list is never read
     /// here: no code of the program runs while the lists are worked off (<see cref="EmitDrain"/>).
     /// </summary>
-    private string Upgrade(string value, WeakRefType type) => Temp(Upgraded(value), Types.Read(type));
+    private string Upgrade(string value, WeakRefType type) => Temp(Upgraded(value, type), Types.Read(type));
 
-    /// <summary>R3: the strong <c>T?</c> a <c>weak</c> reference reads as (<see cref="Upgrade"/>), whose count the caller holds.</summary>
+    /// <summary>R3: the strong <c>T?</c> a <c>weak</c> reference reads as (<see cref="Upgrade"/>), whose count the caller holds; with K6 the table goes with the address.</summary>
+    private string Upgraded(string value, WeakRefType type)
+    {
+        if (Layout.Fat(type.Target.Symbol))
+        {
+            return fn.Value($"insertvalue %kz.obj {value}, ptr {Upgraded(fn.Value($"extractvalue %kz.obj {value}, 0"))}, 0");
+        }
+
+        return Upgraded(value);
+    }
+
     private string Upgraded(string value)
     {
         var name = Helper("upgrade.instance", "ptr", ["ptr"], () =>
@@ -359,12 +500,139 @@ public sealed partial class Emitter
     {
         if (from is NullType)
         {
-            return "null";
+            return Layout.Fat(to.Target.Symbol) ? "zeroinitializer" : "null";
         }
 
-        fn.Emit($"call void {RetainWeak()}(ptr {value})");
-        Temp(value, owned ? from : to);
-        return value;
+        // a `T` or a `T?`, whose class is the target's or derived from it (K6): its address, and the pair with its table where the
+        // target's class has derived classes
+        var symbol = ((ClassType)(Types.NonNull(from) ?? from)).Symbol;
+        var address = Address(value, symbol);
+        fn.Emit($"call void {RetainWeak()}(ptr {address})");
+        var weak = Layout.Fat(to.Target.Symbol) && !Layout.Fat(symbol) ? Pair(address, Table(symbol)) : value;
+        Temp(owned ? value : weak, owned ? from : to);
+        return weak;
+    }
+
+    /// <summary>
+    /// K6: one strong count less of an instance held through a value of a class with derived classes: the release of the instance's
+    /// class, which its table holds.
+    /// </summary>
+    private void ReleaseThroughTable(string value)
+    {
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        fn.Emit($"call void {fn.Value($"load ptr, ptr {table}")}(ptr {fn.Value($"extractvalue %kz.obj {value}, 0")})");
+    }
+
+    /// <summary>R3 with K6: one weak count less of the block a <c>weak</c> reference of a class with derived classes points at, none for <c>null</c>, by the weak release of the instance's class, which its table holds.</summary>
+    private string ReleaseWeakThroughTable() => Helper("release.weak.instance", "void", ["%kz.obj"], () =>
+    {
+        var count = fn.Label("count");
+        var none = fn.Label("none");
+        var address = fn.Value("extractvalue %kz.obj %a0, 0");
+        fn.CondBranch(fn.Value($"icmp eq ptr {address}, null"), none, count);
+        fn.Block(count);
+        var slot = fn.Value($"getelementptr ptr, ptr {fn.Value("extractvalue %kz.obj %a0, 1")}, i64 1");
+        fn.Emit($"call void {fn.Value($"load ptr, ptr {slot}")}(ptr {address})");
+        fn.Return(null);
+        fn.Block(none);
+        fn.Return(null);
+    });
+
+    /// <summary>
+    /// K13: <c>==</c> on two values of a class with derived classes: false where the instances' classes differ, which their tables tell,
+    /// else the equality of that class, which its table holds (<see cref="ClassEqual"/>).
+    /// </summary>
+    private string EqualThroughTable(string left, string right, ClassSymbol symbol)
+    {
+        comparedThroughTable.Add(symbol);
+        var name = Helper("equal.instance", "i1", ["%kz.obj", "%kz.obj"], () =>
+        {
+            var table = fn.Value("extractvalue %kz.obj %a0, 1");
+            var same = fn.Label("same");
+            var differ = fn.Label("differ");
+            fn.CondBranch(fn.Value($"icmp eq ptr {table}, {fn.Value("extractvalue %kz.obj %a1, 1")}"), same, differ);
+            fn.Block(differ);
+            fn.Return("i1 false");
+            fn.Block(same);
+            var slot = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 2")}");
+            fn.Return($"i1 {fn.Value($"call i1 {slot}(ptr {fn.Value("extractvalue %kz.obj %a0, 0")}, ptr {fn.Value("extractvalue %kz.obj %a1, 0")})")}");
+        });
+        return fn.Value($"call i1 {name}(%kz.obj {left}, %kz.obj {right})");
+    }
+
+    /// <summary>K13 with M9: the hash of a key of a class with derived classes, by the hash of the instance's class, which its table holds (<see cref="ClassHash"/>).</summary>
+    private string HashThroughTable(string block, string key, ClassSymbol symbol)
+    {
+        hashedThroughTable.Add(symbol);
+        var name = Helper("hash.instance", "i64", ["ptr", "%kz.obj"], () =>
+        {
+            var slot = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {fn.Value("extractvalue %kz.obj %a1, 1")}, i64 3")}");
+            fn.Return($"i64 {fn.Value($"call i64 {slot}(ptr %a0, ptr {fn.Value("extractvalue %kz.obj %a1, 0")})")}");
+        });
+        return fn.Value($"call i64 {name}(ptr {block}, %kz.obj {key})");
+    }
+
+    /// <summary>
+    /// K6: the helpers and methods a table of each class the program names holds, made while functions are still emitted: the release,
+    /// the weak release and the method each <c>virtual</c> slot runs (<see cref="Implementation"/>).
+    /// </summary>
+    private void PrepareTable(ClassSymbol symbol)
+    {
+        ReleaseInstance(symbol);
+        ReleaseWeak(symbol);
+        foreach (var root in VirtualMethods(symbol))
+        {
+            Instance(Implementation(symbol, root), NoMap);
+        }
+    }
+
+    /// <summary>
+    /// K13: the equality and the hash in the table of each class the program names, where <c>==</c> or a map's key reads a base of the
+    /// class through the table; returns whether it made one not made before, which can name more functions.
+    /// </summary>
+    private bool TableFacets(HashSet<string> made)
+    {
+        var more = false;
+        foreach (var symbol in tabled.ToList())
+        {
+            if (symbol.Chain.Any(comparedThroughTable.Contains) && made.Add($"equal {symbol.Name}"))
+            {
+                ClassEqual(symbol);
+                more = true;
+            }
+
+            if (symbol.Chain.Any(hashedThroughTable.Contains) && made.Add($"hash {symbol.Name}"))
+            {
+                ClassHash(symbol);
+                more = true;
+            }
+        }
+
+        return more;
+    }
+
+    /// <summary>
+    /// K6, K13: the table of each class the program names, a constant array of addresses: the release of an instance, its weak
+    /// release, its equality where `==` reads a base of the class through the table and its hash where a map's key does, else null,
+    /// and the method each <c>virtual</c> slot runs, the base's slots first, so that a base's slot has one place in every derived
+    /// class's table. Emitted after the last function, when every use is known.
+    /// </summary>
+    private void EmitTables()
+    {
+        foreach (var symbol in tabled)
+        {
+            var compared = symbol.Chain.Any(comparedThroughTable.Contains);
+            var hashed = symbol.Chain.Any(hashedThroughTable.Contains);
+            var entries = new List<string>
+            {
+                ReleaseInstance(symbol),
+                ReleaseWeak(symbol),
+                compared ? ClassEqual(symbol) : "null",
+                hashed ? ClassHash(symbol) : "null",
+            };
+            entries.AddRange(VirtualMethods(symbol).Select(root => Instance(Implementation(symbol, root), NoMap)));
+            module.Global($"{Table(symbol)} = internal constant [{Number(entries.Count)} x ptr] [{string.Join(", ", entries.Select(e => "ptr " + e))}]");
+        }
     }
 
     /// <summary>
