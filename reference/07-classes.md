@@ -381,8 +381,9 @@ and one with `prot` is `prot` (§4, the owner, 2026-11-02, #110, comment 6573113
 written", against C#'s compile error CS0507 for an override that changes the visibility and against
 the override taking the base method's visibility; the cost is a method that a call through the base
 reaches and a call on the derived type is refused). A class derived from the one with such an
-override takes it as the method of that name, so a call of it on that class is `not-visible` too
-*(assumed: the nearest override stands for the method it overrides, as F13's candidates are read)*.
+override takes it as the method of that name, so a call of it on that class is `not-visible` too, inside
+that class as outside it, since both are outside the class that wrote the override, and its own override
+is as visible as it writes, `pub` where it writes `pub` *(assumed: the nearest override stands for the method it overrides, as F13's candidates are read)*.
 A read-only property is written as C#'s expression-bodied property, `pub int Count => names.Count`: a type,
 a name, `=>` and one expression. It is read as `h.Count`, as a list's `xs.Count` is (M9), without a call,
 and has no setter (§4, the owner, 2026-11-03, #110, comment 6615254370, against a method `h.Count()`,

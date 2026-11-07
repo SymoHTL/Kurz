@@ -5,7 +5,6 @@
 // | Protocol: malformed request: bad request line
 // | Protocol: malformed request: bad request line
 // | Protocol: malformed request: line not ended by CR LF
-// | Protocol: malformed request: CONNECT
 // | Protocol: malformed request: no Host
 // | Protocol: malformed request: two Host headers
 // | Protocol: malformed request: bad Host
@@ -17,6 +16,12 @@
 // | Protocol: malformed request: bad Content-Length
 // | Protocol: malformed request: bad Content-Length
 // | Protocol: malformed request: Content-Length beside Transfer-Encoding
+// | Protocol: malformed request: transfer encoding not ending in chunked
+// | Protocol: malformed request: transfer encoding not ending in chunked
+// | Protocol: malformed request: transfer encoding not ending in chunked
+// | Protocol: malformed request: transfer encoding in HTTP/1.0
+// | Protocol: malformed request: bad Host
+// | Protocol: malformed request: bad Host
 // | Protocol: malformed request: target not UTF-8
 // | Protocol: malformed request: header not UTF-8
 // rules: W5
@@ -51,7 +56,6 @@ void | IoError All() {
     Show("GET /\r\nHost: h\r\n\r\n".Bytes)
     Show("G(T / HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\nHost: h\n\n".Bytes)
-    Show("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nAccept: */*\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n".Bytes)
     Show("GET / HTTP/1.1\r\nHost: a b\r\n\r\n".Bytes)
@@ -63,6 +67,12 @@ void | IoError All() {
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +5\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello".Bytes)
     Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\n\r\n".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked, gzip\r\n\r\n".Bytes)
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: br\r\n\r\n".Bytes)
+    Show("POST / HTTP/1.0\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n".Bytes)
+    Show("GET http://u@h/ HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    Show("GET http:///a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
     Show(Split("GET /", " HTTP/1.1\r\nHost: h\r\n\r\n"))
     Show(Split("GET / HTTP/1.1\r\nHost: h\r\nX: ", "\r\n\r\n"))
 }
