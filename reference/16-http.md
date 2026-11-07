@@ -310,7 +310,9 @@ reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
 owner, 2026-11-05, issue 156, comment 6666386552, Q8). Only the server can close without a read:
 while the read half is away and the handler's call has returned, the server times the grace from the
-body's last read, or from the return for a body that no read has reached, and at its end
+body's last read, or from the return for a moved body that no read has reached, other than the body
+of a request that expects `100-continue`, whose connection Q10's close ends at the return (above),
+and at its end
 it ends the body through the halves' pair of types, closes the connection and serves the next one,
 so that the body's next read gives `request timed out` and its drop drains nothing (§12)
 *(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
@@ -338,8 +340,8 @@ moves is a moved body, whose last read is the handler's until another actor read
 its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
 wait or a deadline the scheduler reads at each switch, while the time between reads is the
-server's once the handler's call has returned, timed from the body's last read, and during the call
-a read checks it itself (above) (§12).
+server's once the handler's call has returned, timed as the server times the grace, and during the
+call a read checks it itself (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
