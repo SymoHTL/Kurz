@@ -260,6 +260,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 mut piece = Bytes()
                 while piece.Count < 524288 {
@@ -309,11 +310,10 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-stream-failed-write");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
-        using (var client = Connect(port, run, receiveBuffer: 65536))
+        using (var client = Connect(executable, run, receiveBuffer: 65536))
         {
             var stream = client.GetStream();
             stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\n"u8);
