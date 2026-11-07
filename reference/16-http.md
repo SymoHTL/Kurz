@@ -2975,7 +2975,8 @@ Case: [http/client-get.kz](../corpus/http/client-get.kz)
 Case: [http/client-response.kz](../corpus/http/client-response.kz)
 ```kurz
 // a response's body is chunked, of its `Content-Length`, or read to the close where its head says neither, and a `1xx`, a `204` and
-// a `304` have none; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
+// a `304` have none; the trailer of a chunked body is read past, each line within the size line, and the connection serves the
+// next response; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
 // `Connection: keep-alive`, and one with `Connection: close` or read to the close keeps it not; `ReadAllText(max)` past its bound and a
 // body that ends early or is malformed give the response's errors
 extern "C" {
@@ -3121,6 +3122,7 @@ void Responses(int port) {
     print(Show(client, port, 100))
     print(Show(client, port, 100))
     print(Show(client, port, 100))
+    print(Show(client, port, 100))
     print(Show(client, port, 10))
     print(Show(client, port, 10))
     print(Show(client, port, 100))
@@ -3129,6 +3131,7 @@ void Responses(int port) {
 
 Against([
     "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwiki\r\n5\r\npedia\r\n0\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nafter\r\n0\r\nX-Checksum: 1\r\nX-Count: 2\r\n\r\n",
     "HTTP/1.1 304 Not Modified\r\nX-Connection: #\r\nContent-Length: 5\r\n\r\n",
     "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </s>\r\n\r\nHTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
     "HTTP/1.1 204 No Content\r\nX-Connection: #\r\n\r\n",
