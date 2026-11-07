@@ -1116,8 +1116,9 @@ public sealed partial class Checker
     /// <summary>
     /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
     /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
-    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
-    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
+    /// compares by content; and from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types (K13 with D3, a reading <c>compiler/README.md</c> marks assumed). A class met again inside its own
+    /// fields was read where the walk met it first.
     /// </summary>
     private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
