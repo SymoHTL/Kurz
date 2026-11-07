@@ -471,8 +471,8 @@ Gate: review rule "rules for sessions".
     and it had no conflict, or its only conflicts are of these kinds:
     - text in which the two sides changed different words, and the merge keeps every word of both;
     - text in which both sides only appended, at the same end of an id list or of a table row, and
-      the merge keeps every word of both; an append of prose at the end of a line is no such append
-      (comment 6694541027);
+      the merge keeps every word of both; two appends of prose at the end of a line that is neither
+      an id list nor a table row are no such append (comments 6694541027 and 6710283110);
     - a block whose sides have different line counts, read line by line (comment 6710283110), in
       which the two sides changed different lines, one side's whole lines standing between lines the
       other side changed, or only added items or table rows, both at the end of one list, in either
