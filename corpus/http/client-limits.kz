@@ -1,0 +1,159 @@
+// expect: output
+// | TooLarge: response header too large
+// | 204 []
+// | 204 []
+// | TooLarge: response header too large
+// | TooLarge: response header too large
+// | 204 []
+// allow: raw native
+// rules: W14
+
+// a response's head is held to the limits of a request's head in the client's `Limits`: its status line to `MaxRequestLineSize`
+// bytes with its CR LF, its header lines to `MaxRequestHeadersTotalSize` bytes with theirs, and their count to
+// `MaxRequestHeaderCount`, each past its limit `response header too large`
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, and the connection closed where the next is `close` or the client ends it
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    if next < answers.Count && answers[next] == "close" {
+                        next = next + 1
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its status and body, or its failure
+string Show(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient(HttpClientOptions(Limits: HttpLimits(MaxRequestLineSize: 20, MaxRequestHeadersTotalSize: 40, MaxRequestHeaderCount: 2)))
+    for i in 0..<6 {
+        print(Show(client, port))
+    }
+}
+
+Against([
+    "HTTP/1.1 204 ABCDEF\r\n\r\n",
+    "HTTP/1.1 204 ABCDE\r\n\r\n",
+    "HTTP/1.1 204 OK\r\nX: 12345678901234567890123456789012345\r\n\r\n",
+    "HTTP/1.1 204 OK\r\nX: 123456789012345678901234567890123456\r\n\r\n",
+    "HTTP/1.1 204 OK\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n",
+    "HTTP/1.1 204 OK\r\nA: 1\r\nB: 2\r\n\r\n",
+], (int port) => Responses(port))

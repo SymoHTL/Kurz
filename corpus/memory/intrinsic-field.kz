@@ -1,0 +1,13 @@
+// expect: output
+// | 3
+// | 4
+// rules: R18
+
+// a field takes the name `X86`, `Arm`, `Vector128` or `Vector256`, a parameter of a primary constructor among them (R18)
+data Lanes(int X86, int Vector128)
+class Unit(int Arm, int Vector256)
+
+lanes = Lanes(1, 2)
+print(lanes.X86 + lanes.Vector128)
+unit = Unit(3, 1)
+print(unit.Arm + unit.Vector256)

@@ -1,0 +1,12 @@
+// expect: output
+// | 3
+// | 4
+// rules: S14
+
+// a field takes the name `EnvError`, `EnvKind` or `Environment`, a parameter of a primary constructor among them (S14)
+data Failure(int EnvError, int EnvKind)
+class Process(int Environment)
+
+failure = Failure(1, 2)
+print(failure.EnvError + failure.EnvKind)
+print(Process(4).Environment)

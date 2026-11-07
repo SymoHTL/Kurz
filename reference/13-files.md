@@ -1463,7 +1463,7 @@ In a build for Windows, a call of this chapter is `not supported`, and the runti
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
 and `File.Modified` (S13 to S15; §12, assumed), `instant.Now` and `t.Elapsed` (S25; §12, the owner,
 2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls, `Stdin` and `Environment.Exit`
-(S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
+(S17 to S23; §12, assumed), and a log call (P6; §12, the owner, 2026-11-05, L2). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 
@@ -1641,6 +1641,17 @@ data EnvError(int Code)
 print(1)
 ```
 
+Case: [system/environment-field.kz](../corpus/system/environment-field.kz)
+```kurz
+// a field takes the name `EnvError`, `EnvKind` or `Environment`, a parameter of a primary constructor among them (S14)
+data Failure(int EnvError, int EnvKind)
+class Process(int Environment)
+
+failure = Failure(1, 2)
+print(failure.EnvError + failure.EnvKind)
+print(Process(4).Environment)
+```
+
 ### S15 (decided, §12) The clock and the time of a file
 
 `timestamp.Now` is the time of the wall clock, a `timestamp` (T24), read from
@@ -1680,22 +1691,25 @@ Times() else {
 
 ### S25 (decided, §12) The monotonic clock
 
-`instant.Now` is a reading of the monotonic clock, an `instant` (T36), read from
+`instant.Now` is a reading of the monotonic clock, an `instant` (T36), read outside a test from
 `clock_gettime(CLOCK_MONOTONIC)` on Linux, which counts no time while the system is suspended, as
 Rust's `Instant::now()` and .NET's `Stopwatch` read it there, and `start.Elapsed`, a `duration`,
 measures the time since `start` (§12, the owner, 2026-11-04, issue 110, comment 6643368937, the
 monotonic clock, Q1 (a) and Q5 (a)). In a test, `instant.Now` reads the runtime's clock, which
-`advance` moves (§11, the same answer, Q7 (a)); the reference has no rule for `advance` or for a
-test, so no case reads that clock. A reading's text is its time since the clock's zero in the text
-of a duration (A12), and a `data` value that holds one shows it so (§12, the same answer, Q4 (a)).
-`instant.Now` is `not supported` in a build for Windows, as `timestamp.Now` is, and so is
-`t.Elapsed`, which reads the clock (S11; §12, the same answer, Q6 (a)). *(assumed, §12: the defaults
-of that round, not objected to: `t.Elapsed` is `instant.Now - t` in its value, the order of its
-reads being the next sentence's; two readings may be equal, since the clock need not move between
-two reads; the zero is one the record does not name, on Linux the boot; and `instant.Now` reads the
-runtime's one monotonic clock, which the bounds of `Connect` read too.)* `t.Elapsed` reads its
-target and then the clock, as Rust's `t.elapsed()` evaluates `t` before it reads `Instant::now()`
-*(assumed: the record names no order)*.
+`advance` moves (§11, the same answer, Q7 (a)), and the real clock keeps running beneath it, so that
+a reading in a test is the real one plus what `advance` added *(assumed, §11: the round's default,
+not objected to)*; the reference has no rule for `advance` or for a test, so no case reads that
+clock. A reading's text is its time since the clock's zero in the text of a duration (A12), and a
+`data` value that holds one shows it so (§12, the same answer, Q4 (a)). `instant.Now` is
+`not supported` in a build for Windows, as `timestamp.Now` is, and so is `t.Elapsed`, which reads
+the clock (S11; §12, the same answer, Q6 (a)). *(assumed, §12: the defaults of that round, not
+objected to: `t.Elapsed` is `instant.Now - t`; two readings may be equal, since the clock need not
+move between two reads; the zero is one the record does not name, on Linux the boot; and
+`instant.Now` reads the runtime's one monotonic clock, which the bounds of `Connect` read too.)*
+That default is the value of `t.Elapsed` and not the order of its reads: `t.Elapsed` reads its
+target first and then the clock, the order C# gives a property, whose receiver is evaluated before
+its getter runs, and the order of Rust's `t.elapsed()`, which evaluates `t` before it reads
+`Instant::now()` *(assumed, §12: the order, which the round did not name)*.
 
 Case: [system/monotonic-clock.kz](../corpus/system/monotonic-clock.kz)
 ```kurz
@@ -1742,10 +1756,11 @@ print(Mark(Reading(1000000000)))
 ### S26 (decided, §12) A reading stays in its process
 
 A reading in an actor's message or in a `durable` actor's state is the compile error
-`instant-leaves-process`, since a reading means nothing in another process or after a restart, and
-a deadline crosses as the `duration` left (§12, the owner, 2026-11-04, issue 110, comment
-6643368937, the monotonic clock, Q8 (a)) *(assumed, §12: the error's name, which the record does
-not give)*.
+`instant-leaves-process`, since a reading means nothing in another process or after a restart, and a
+deadline crosses as the `duration` left (§12, the owner, 2026-11-04, issue 110, comment 6643368937,
+the monotonic clock, Q8 (a)) *(assumed, §12: the error's name, which the record does not give; a
+reading at any depth of the message's or the state's type, and the error at the argument that
+carries the message and at the declaration of the state)*.
 
 No case: a case runs one actor and keeps no state past its run, and the compiler builds neither a
 send to another actor nor a `durable` actor, so no case can hold the error, and its id stands in

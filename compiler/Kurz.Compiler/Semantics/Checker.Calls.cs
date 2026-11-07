@@ -122,7 +122,8 @@ public sealed partial class Checker
                         return CallValue(value.Type, c);
                     }
 
-                    if (ImplicitMethods(n.Name) is { } methods && methods.Find(f => f.IsProperty) is { } property && !InStaticMember())
+                    var named = BesideField(ImplicitMethods(n.Name), ImplicitField(n.Name) is not null);
+                    if (ImplicitPropertyOf(n.Name) is { } property && !InStaticMember())
                     {
                         var read = ReadImplicitProperty(n, property);
                         if (read.IsError)
@@ -135,7 +136,7 @@ public sealed partial class Checker
                         return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
                     }
 
-                    if (ImplicitMethods(n.Name) is { } named)
+                    if (named is not null)
                     {
                         return CallImplicitMethod(named, n, c, expected); // K7: a method of `this`
                     }
@@ -915,6 +916,8 @@ public sealed partial class Checker
         {
             case ErrorType or EnumType:
                 return null;
+            case TypeParameterType when textFieldTypes.ContainsValue(type):
+                return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
             case PrimitiveType p:
@@ -1113,8 +1116,9 @@ public sealed partial class Checker
     /// <summary>
     /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
     /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
-    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
-    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
+    /// compares by content; and from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types (K13 with D3, a reading <c>compiler/README.md</c> marks assumed). A class met again inside its own
+    /// fields was read where the walk met it first.
     /// </summary>
     private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {
@@ -1289,6 +1293,11 @@ public sealed partial class Checker
             if (n.Name == "Environment")
             {
                 return CheckEnvironmentFunction(m, c); // S13, S14
+            }
+
+            if (n.Name == "Log")
+            {
+                return CheckLogFunction(m, c); // P1, P2
             }
 
             if (IsHashName(n.Name))
@@ -1969,15 +1978,16 @@ public sealed partial class Checker
             var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
-                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => p.Default is null))
+                if (typeArguments.Count > f.TypeParameters.Count || left.Any(p => !p.HasDefault))
                 {
-                    candidate.BindingError = $"`{f.Name}` takes {f.TypeParameters.Count} type arguments (T19; E4 for another count)";
+                    candidate.BindingError = $"`{f.Name}` takes {TypeArgumentCount(f)} type arguments (T19; E4 for another count)";
                     candidate.BindingErrorId = ErrorIds.Syntax;
                 }
                 else
                 {
-                    // T35: a type parameter the call leaves out takes its default
-                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType)p.Default!))).ToDictionary(p => p.First, p => p.Second);
+                    // T35: a type parameter the call leaves out takes its default, one that was not read the error type, since its
+                    // diagnostic stands at the default (E1)
+                    candidate.Map = f.TypeParameters.Zip(typeArguments.Concat(left.Select(p => (KurzType?)p.Default ?? Types.Error))).ToDictionary(p => p.First, p => p.Second);
                 }
             }
 
@@ -1989,6 +1999,14 @@ public sealed partial class Checker
         return typed;
     }
 
+    /// <summary>T19, T35: how many type arguments a call of the function writes, "2", "2 or 3" or "1 to 3", where it may leave out those with a default.</summary>
+    private static string TypeArgumentCount(FunctionSymbol f)
+    {
+        var all = f.TypeParameters.Count;
+        var least = f.TypeParameters.FindLastIndex(p => !p.HasDefault) + 1;
+        return least == all ? $"{all}" : least + 1 == all ? $"{least} or {all}" : $"{least} to {all}";
+    }
+
     /// <summary>
     /// T35: a call's type argument at a place, a constant where the candidates' type parameter there holds one, else a type; overloads
     /// that hold a type there and a constant, or constants of two types, are not supported, since the argument is read before the
@@ -1997,6 +2015,11 @@ public sealed partial class Checker
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
+        if (there.Count == 0 && argument is ConstantTypeArgument)
+        {
+            return Types.Error; // T19: a literal past every candidate's type parameters carries the call's count, and no error of its own (E1)
+        }
+
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
         if (kinds.Count > 1)
         {
@@ -2012,8 +2035,9 @@ public sealed partial class Checker
     /// <summary>
     /// T35: the constant a call gives a type parameter that holds one: a literal of an integer type, <c>bool</c> or <c>char</c>,
     /// <c>Buffer&lt;64&gt;</c>, checked against the parameter's type as an argument is, a value of its enum by name,
-    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on. A type there, or a
-    /// value of another type, is <c>type-mismatch</c>, as a value of another type for a parameter is (T1).
+    /// <c>JsonKeys.SnakeCase</c>, or, in a copy, the name of a type parameter of its own that holds one, passed on, which widens where a
+    /// value of its type would (T8). A type there, or a value of another type, is <c>type-mismatch</c>, as a value of another type for a
+    /// parameter is (T1).
     /// </summary>
     private KurzType ResolveConstantArgument(TypeSyntax argument, TypeParameterSymbol holds)
     {
@@ -2039,9 +2063,11 @@ public sealed partial class Checker
         {
             if (BoundConstant(n.Name) is { } bound)
             {
-                if (bound.Of.Equals(of))
+                if (Types.Assignable(bound.Of, of))
                 {
-                    return bound;
+                    // T8: a constant passed on widens as a value of its type does where a wider type is required, an `int` where a
+                    // `long` is, and rustc's refusal (E0308), from a language that widens nothing, is not taken (the owner, 2026-11-03)
+                    return bound.Of.Equals(of) ? bound : new ConstantArgument(of, bound.Value);
                 }
 
                 Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{bound.Of.Text}`, where `{holds.Name}` takes one of `{of.Text}` (T35, T1)");
@@ -2498,9 +2524,11 @@ public sealed partial class Checker
                 continue;
             }
 
-            if (p.Default is { } constant)
+            if (p.HasDefault)
             {
-                map[p] = constant; // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default
+                // T35: no argument fixes a constant, so a call that writes no type arguments gives it its default, one that was not
+                // read the error type, since its diagnostic stands at the default (E1)
+                map[p] = (KurzType?)p.Default ?? Types.Error;
                 continue;
             }
 
