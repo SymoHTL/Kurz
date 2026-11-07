@@ -1,0 +1,5 @@
+// expect: error cannot-infer at 4
+// rules: F18
+
+x = Hint.BlackBox([])
+print(x)

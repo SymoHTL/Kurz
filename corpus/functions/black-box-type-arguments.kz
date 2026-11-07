@@ -1,0 +1,5 @@
+// expect: error syntax at 4
+// rules: F18
+
+x = Hint.BlackBox<int>(1)
+print(x)
