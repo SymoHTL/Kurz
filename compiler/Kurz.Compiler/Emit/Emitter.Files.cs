@@ -282,9 +282,10 @@ public sealed partial class Emitter
     /// S3: <c>f.Read(mut into, max)</c>: a <c>max</c> below 0 raises <c>index-out-of-range</c>; then the room for <c>max</c> more bytes
     /// is made in <c>into</c>, as <c>Add</c> grows a list, before any byte is read, and the bytes read are added at its end; the kind of a
     /// failure is the one the runtime's function <paramref name="kinds"/> gives (<see cref="FailBelowZero"/>).
-    /// The read goes through the handle's buffer of <see cref="LineBuffer"/> bytes, which a loop over a file's lines fills too (S16), under
-    /// the lock a pull takes, as Rust's <c>BufReader::read</c> reads (§12, the owner, 2026-11-02): the bytes the buffer holds go first, at
-    /// most <c>max</c> of them, with no system call; where it holds none, a <c>max</c> of 8 KiB or more, and one of 0, lets the lock go and
+    /// The read goes through the handle's buffer of <see cref="LineBuffer"/> bytes (§12, the owner, 2026-11-02), which a loop over a file's
+    /// lines fills too (S16), under the lock a pull takes, as Rust's <c>BufReader::read</c> reads (§12, the owner, 2026-11-03, issue 39,
+    /// comment 6605104107): the bytes the buffer holds go first, at most <c>max</c> of them, with no system call; where it holds none, a
+    /// <c>max</c> of 8 KiB or more, and one of 0 (assumed), lets the lock go and
     /// is read straight into the list, and a smaller one fills the buffer with one read, the buffer made at the first fill, holding the lock
     /// while that read waits, and takes at most <c>max</c> of what it read. A failed read stores nothing.
     /// S5: the read is a call in flight on the handle (<see cref="Enter"/>), after the room is made, and a socket's read that a <c>Close</c>
@@ -400,7 +401,8 @@ public sealed partial class Emitter
     /// S24: <c>s.Consume(n)</c>, as Rust's <c>BufRead::consume</c> (§12, the owner, 2026-11-03): the first <c>n</c> bytes the handle's
     /// buffer holds are dropped, under the lock, with no system call. An <c>n</c> below 0 raises <c>index-out-of-range</c>, as a
     /// <c>Read</c>'s <c>max</c> below 0 does, and so does one past the bytes the buffer holds, the bound Rust's <c>consume</c> states held
-    /// as C#'s <c>PipeReader.AdvanceTo</c> holds it (assumed). A call in flight on the handle (S5), so that a closed handle gives its error.
+    /// as C#'s <c>PipeReader.AdvanceTo</c> holds it (§12, the owner, 2026-11-03, issue 110, comment 6615355264, both bounds). A call in
+    /// flight on the handle (S5), so that a closed handle gives its error.
     /// </summary>
     private void EmitFileConsume(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {

@@ -1,0 +1,40 @@
+// expect: output
+// | 8191 1 true
+// | 8192 10000 true
+// rules: S3
+
+// a read of `first` bytes into the empty buffer of a file of 20000 bytes, then a read of 8 KiB or more: the counts and whether the
+// bytes read are the file's first ones in order
+void | IoError Reads(int first) {
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-limit.txt", sent)
+    f = File.Open("read-buffer-limit.txt")
+    File.Delete("read-buffer-limit.txt")
+    mut read = Bytes()
+    a = f.Read(mut read, first)
+    b = f.Read(mut read, 10000)
+    mut same = true
+    for i in 0..<read.Count {
+        if read[i] != sent[i] {
+            same = false
+        }
+    }
+
+    print("{a} {b} {same}")
+    f.Close()
+}
+
+// 8191, one byte short of the buffer, fills it with 8192 bytes and takes 8191, so that the next read takes the one byte the buffer
+// holds and no more; 8192 goes straight to the list and leaves the buffer empty, so that the next read goes straight too, where a fill
+// of 8192 would give the same bytes and leave the buffer as empty
+Reads(8191) else {
+    IoError e => print(e)
+}
+
+Reads(8192) else {
+    IoError e => print(e)
+}
