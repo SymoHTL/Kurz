@@ -429,7 +429,8 @@ public sealed partial class Checker
     /// Every call of a function that reads its type from code that is checked, the top-level code, a function that reads none and a copy,
     /// calls a copy for its type arguments: made at the first such call and checked once, the calls of a copy's body before the calls
     /// that follow the call that made the copy, so that the first call that needs a copy in the order the checker reads the file makes
-    /// it: the bodies of its functions, in the order their names first appear, then the methods of its classes, then the top-level
+    /// it: the bodies of its functions, in the order of their declarations, the overloads of one name at the first of them, then the methods of its
+    /// classes, class by class and method by method in the order of their declarations, then the top-level
     /// code, which is not always the first call in the text (section 4, the owner, 2026-11-06, as built).
     /// </summary>
     private void MakeCopies() => MakeCopies(0, genericCalls.Count);
