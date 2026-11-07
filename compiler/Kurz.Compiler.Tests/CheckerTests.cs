@@ -3753,7 +3753,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.DefaultNotConstant, 2)], Errors("class C(int V) {\n    pub int G(C c = this) => c.V\n}\n\nprint(C(1).G())"));
         Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int A) {\n    pub static int F(int x = A) => x\n}\n\nprint(C.F(2))"));
         Assert.Equal([(ErrorIds.StaticMismatch, 3)], Errors("class C {\n    pub int G() => 1\n    pub static int F(int x = G()) => x\n}\n\nprint(C.F(1))"));
-        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C {\n    pub static int F(int x = this) => x\n}\n\nprint(C.F(1))"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int V) {\n    pub static int F(C c = this) => c.V\n}\n\nprint(C.F(C(1)))"));
         // F12: a call takes the default of the method its receiver's static type names, so an override without one has none on its
         // own type, while a call through the base takes the base's (the owner, 2026-11-05, #156, comment 6659240390)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 10)], Errors("class A {\n    pub virtual int F(int x = 1) => x\n}\n\nclass B : A {\n"
