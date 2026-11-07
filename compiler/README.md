@@ -2053,14 +2053,21 @@ round can ask about it by the rule's id.
   has are `cannot-infer`; a type a nested position fixes (`List<T>` of a `List<User>`) is the one
   the direct arguments meet, each of them that type or one derived from it. T27 names the base for
   classes; the checker reads it for data types.
-- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where its
-  parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
-  `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
-  arguments give their type parameters types that differ, or no argument stands in a position, it names
-  none. The id stays T27's: no argument stands in the type parameter's position. An argument with an
+- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where the
+  type parameter that failed stands in its parameter, so that it gives that type parameter nothing
+  (`Count(5)` for a `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T`
+  nothing"). With two type parameters, `G(5, 1, 6)` for `int G<T, U>(List<U> a, U d, List<T> c)` names
+  argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
+  comment 6620467625); the type parameter that failed is the one at which the inference ended (the
+  owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  gives that type parameter a type and they differ, or no argument stands in a position, it names none
+  (the owner, 2026-11-04, #156, comment 6643376941). The id stays
+  T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) (the owner, 2026-11-03, #156, comment 6600034940). Its reason, that a call whose own argument
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument fails to give that
+  type parameter a type (below). Its reason, that a call whose own argument
   does not fit reports that misfit alone, is a convention of the messages the pipeline took, not the
   owner (#156, comment 6566609960). The call's result is read as a direct position reads it: one that
   does not name the type parameter stays, so `Count(nothing)` is an `int`, and one that does reports
@@ -2068,9 +2075,16 @@ round can ask about it by the rule's id.
   is unknown, and this reading was taken since a direct position already gives it). A type parameter
   that an argument with no error of its own fails to give a type is still `cannot-infer`, and the
   text names that argument, also where an argument with an error of its own stands in another of its
-  positions, nested, direct or a `[]` (`Two(5, nothing)` for `int Two<T>(List<T> a, List<T> b)`: the
-  `cannot-infer` naming argument 1, and the `unknown-name`) (the owner, 2026-11-03, #156, comment
-  6603205575).
+  positions, nested, direct, a `[]` or a literal's own error (`Two(5, nothing)` for
+  `int Two<T>(List<T> a, List<T> b)`: the `cannot-infer` naming argument 1, and the `unknown-name`)
+  (the owner, 2026-11-03, #156, comment 6603205575). A lambda keeps the `cannot-infer` when it fits no
+  function type its parameter could be, one where a `List<T>` is required or one with another count of
+  parameters, and the text names no argument, since a lambda has no type of its own before the pick
+  (F11): `Two(nothing, x => x)` is the `unknown-name` and that `cannot-infer`. A lambda that fits its
+  parameter's function type is no such argument, so `Apply(nothing, x => print(x))` for
+  `void Apply<T>(List<T> xs, (T) => void f)` reports the `unknown-name` alone (the owner, 2026-11-05,
+  #156, comment 6659026667), and nor is one where a bare `T` is required, since `T` can be a function
+  type (assumed, #156, comment 6659124253).
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
