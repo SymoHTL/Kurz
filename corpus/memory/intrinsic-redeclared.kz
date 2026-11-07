@@ -1,5 +1,6 @@
-// expect: error redeclared at 5
+// expect: error redeclared at 6
 // rules: R18
 
-// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared, while a field
+// takes the name, a parameter of a primary constructor among them (R18)
 data Vector128(int X)
