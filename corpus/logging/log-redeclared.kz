@@ -1,0 +1,6 @@
+// expect: error redeclared at 4
+// rules: P1
+
+data Log(int Level)
+
+print(1)

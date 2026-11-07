@@ -1,0 +1,34 @@
+// expect: output
+// | 1 0 8191 true
+// rules: S3
+
+void | IoError Show() {
+    mut sent = Bytes()
+    for i in 0..<20000 {
+        sent.Add(byte(i % 251))
+    }
+
+    File.WriteAll("read-buffer-zero-held.txt", sent)
+    f = File.Open("read-buffer-zero-held.txt")
+    File.Delete("read-buffer-zero-held.txt")
+
+    // a read of one byte fills the buffer with 8192 bytes and takes one; a `max` of 0 then takes none of the 8191 the buffer holds and
+    // keeps them, so that the next read of 8 KiB or more takes all of them, the file's first 8192 bytes in order
+    mut read = Bytes()
+    one = f.Read(mut read, 1)
+    zero = f.Read(mut read, 0)
+    rest = f.Read(mut read, 10000)
+    mut same = read.Count == 8192
+    for i in 0..<read.Count {
+        if read[i] != sent[i] {
+            same = false
+        }
+    }
+
+    print("{one} {zero} {rest} {same}")
+    f.Close()
+}
+
+Show() else {
+    IoError e => print(e)
+}

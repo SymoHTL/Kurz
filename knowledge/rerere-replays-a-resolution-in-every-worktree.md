@@ -30,9 +30,10 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
   "Automatic merge failed", and `git diff --name-only --diff-filter=U` still lists the file.
   The file itself has no conflict markers, so a reader sees a clean text. A `git add` then
   takes a resolution made for another branch without anyone reading it.
-- **The standing approval covers no conflict.** It covers a merge over red at the cap only for a
-  head that took `main` with no conflict, its own diff unchanged line for line (issue 39,
-  comments 6577407245 and 6577439799). A conflict that rerere resolved is still a conflict.
+- **The standing approval covers a conflict only of the kinds it names.** The over-red rule of
+  `CLAUDE.md` names them: text whose two sides changed different words, every word kept, and the
+  floor of `RunTests` measured on the merged tree. A conflict that rerere resolved is still a
+  conflict, read as any other.
 
 ## How to apply
 

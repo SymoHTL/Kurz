@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 4
+// rules: F18
+
+x = Hint.BlackBox(null)
+print(x)
