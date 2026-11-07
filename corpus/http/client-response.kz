@@ -1,5 +1,6 @@
 // expect: output
 // | 200 1 2 [wikipedia]
+// | 200 1 2 [after]
 // | 304 1 2 []
 // | 200 1 2 [ok]
 // | 204 1 1 []
@@ -15,7 +16,8 @@
 // rules: W14
 
 // a response's body is chunked, of its `Content-Length`, or read to the close where its head says neither, and a `1xx`, a `204` and
-// a `304` have none; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
+// a `304` have none; the trailer of a chunked body is read past, each line within the size line, and the connection serves the
+// next response; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
 // `Connection: keep-alive`, and one with `Connection: close` or read to the close keeps it not; `ReadAllText(max)` past its bound and a
 // body that ends early or is malformed give the response's errors
 extern "C" {
@@ -66,6 +68,19 @@ void Serve(TcpListener on, List<string> answers) {
             }
         }
     }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
 }
 
 // the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
@@ -89,6 +104,12 @@ void Against(List<string> answers, (int) => void part) {
     mut child = 0
     raw {
         child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
     }
 
     if child == 0 {
@@ -142,6 +163,7 @@ void Responses(int port) {
     print(Show(client, port, 100))
     print(Show(client, port, 100))
     print(Show(client, port, 100))
+    print(Show(client, port, 100))
     print(Show(client, port, 10))
     print(Show(client, port, 10))
     print(Show(client, port, 100))
@@ -150,6 +172,7 @@ void Responses(int port) {
 
 Against([
     "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwiki\r\n5\r\npedia\r\n0\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nafter\r\n0\r\nX-Checksum: 1\r\nX-Count: 2\r\n\r\n",
     "HTTP/1.1 304 Not Modified\r\nX-Connection: #\r\nContent-Length: 5\r\n\r\n",
     "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </s>\r\n\r\nHTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
     "HTTP/1.1 204 No Content\r\nX-Connection: #\r\n\r\n",

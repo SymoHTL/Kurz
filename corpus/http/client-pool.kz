@@ -10,6 +10,9 @@
 // | 2 /b
 // | 2 /b
 // | 2 /b
+// | 2 /b
+// | 1 /a
+// | 1 /c
 // allow: raw native
 // rules: W13
 
@@ -17,7 +20,8 @@
 // `MaxConnectionsPerServer` an `HttpError`; a body read to its end gives its connection back, even where its response is let go of
 // after the read, and the next `Get` takes it; a new connection is opened where the response let go of its body unread, where an
 // idle connection outlived `PooledConnectionIdleTimeout` or `PooledConnectionLifetime`, where the response said `Connection: close`,
-// and where the server closed the idle connection, whose request is then sent again on a new one
+// and where the server closed the idle connection, the request answered on a new one; and of two idle connections to the host
+// the next `Get` takes the one whose body ended last
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -26,42 +30,103 @@ extern "C" {
     void _exit(int code)
 }
 
-// the server, in a child of the program's process, within `limits`: each connection in turn, each request answered with the number
-// of its connection and its path, and the path `/close` with `Connection: close`
-void Serve(TcpListener on, HttpLimits limits) {
-    mut count = 0
+// the server, in a child of the program's process: each connection in turn, each request answered with the number of its
+// connection and its path, the path `/close` with `Connection: close`, and the connection closed after `most` responses, or where
+// the client ends it, its reads bounded by no time, so that no timer of the server ends a connection; `most` 0 is `Two`'s server
+void Serve(TcpListener on, int most) {
+    if most == 0 {
+        Two(on)
+        return
+    }
+
+    mut number = 0
     while true {
         stream = on.Accept() else {
             IoError e => return
         }
 
-        count = count + 1
-        number = count
-        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(number, r), limits) else {
+        number = number + 1
+        stream.SetReadTimeout(null) else {
             IoError e => {
             }
-            HttpError e => {
+        }
+
+        mut served = 0
+        mut open = true
+        while open && served < most {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    open = Answer(stream, number, r.Path) && r.Path != "/close"
+                    served = served + 1
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
             }
         }
     }
 }
 
-HttpResponse Answer(int number, HttpRequest r) {
-    response = HttpResponse.Text(200, "{number} {r.Path}")
-    if r.Path == "/close" {
-        response.Headers.Set("Connection", "close") else {
-            HttpError e => {
-            }
+// two connections open at once, each answering one request, and the third request read on the first connection, or on the second
+// where none comes on the first within 10 seconds, each answered with the number of its connection
+void Two(TcpListener on) {
+    one = on.Accept() else {
+        IoError e => return
+    }
+
+    Next(one, 1)
+    two = on.Accept() else {
+        IoError e => return
+    }
+
+    Next(two, 2)
+    one.SetReadTimeout(10s) else {
+        IoError e => {
         }
     }
 
-    return response
+    if !Next(one, 1) {
+        Next(two, 2)
+    }
+}
+
+// the next request of `stream` read and answered: whether one came
+bool Next(TcpStream stream, int number) {
+    match HttpRequest.Read(stream) {
+        HttpRequest r => return Answer(stream, number, r.Path)
+        IoError e => return false
+        HttpError e => return false
+    }
+}
+
+// the response of the connection `number` to a request of `path`, its body the number and the path: whether it was written
+bool Answer(TcpStream stream, int number, string path) {
+    body = "{number} {path}"
+    length = body.Bytes.Count
+    mut close = ""
+    if path == "/close" {
+        close = "Connection: close\r\n"
+    }
+
+    stream.Write("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n{close}\r\n{body}".Bytes) else {
+        IoError e => return false
+    }
+
+    return true
 }
 
 // a server started in a child on a port of its own, and the client's part run against it, and the child ended; the listener's
 // `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by itself and does not
 // hold the output the suite reads
-void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf8 part) {
+void Against(int most, (int) => void | IoError | HttpError | InvalidUtf8 part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => {
             print(e)
@@ -81,8 +146,14 @@ void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf
         child = fork()
     }
 
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
     if child == 0 {
-        Serve(on, limits)
+        Serve(on, most)
         raw {
             _exit(0)
         }
@@ -183,15 +254,24 @@ void | IoError | HttpError | InvalidUtf8 Closing(int port) {
 void | IoError | HttpError | InvalidUtf8 ClosedByServer(int port) {
     client = HttpClient()
     Fetch(client, port, "/a")
-    Wait(500)
     print(Fetch(client, port, "/b"))
 }
 
-Against(HttpLimits(KeepAliveTimeout: 100ms), (int port) => SideBySide(port))
-Against(HttpLimits(), (int port) => Limited(port))
-Against(HttpLimits(), (int port) => ReadThenLetGo(port))
-Against(HttpLimits(), (int port) => LetGoUnread(port))
-Against(HttpLimits(), (int port) => IdleTooLong(port))
-Against(HttpLimits(), (int port) => LivedTooLong(port))
-Against(HttpLimits(), (int port) => Closing(port))
-Against(HttpLimits(KeepAliveTimeout: 50ms), (int port) => ClosedByServer(port))
+void | IoError | HttpError | InvalidUtf8 LatestIdle(int port) {
+    client = HttpClient()
+    first = client.Get(Address(port, "/a"))
+    second = client.Get(Address(port, "/b"))
+    print(second.Body.ReadAllText(100))
+    print(first.Body.ReadAllText(100))
+    print(Fetch(client, port, "/c"))
+}
+
+Against(1, (int port) => SideBySide(port))
+Against(2, (int port) => Limited(port))
+Against(2, (int port) => ReadThenLetGo(port))
+Against(2, (int port) => LetGoUnread(port))
+Against(2, (int port) => IdleTooLong(port))
+Against(2, (int port) => LivedTooLong(port))
+Against(2, (int port) => Closing(port))
+Against(1, (int port) => ClosedByServer(port))
+Against(0, (int port) => LatestIdle(port))

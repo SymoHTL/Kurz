@@ -2229,20 +2229,26 @@ void Unread() {
 failure and the position of the first byte the parse refused, counted in bytes from 0, as `HexError`
 holds its `At`, and no input (§12, the owner, 2026-10-31, "A Uri type", and 2026-11-01, Q3 (a)). A
 `Uri` is `scheme://host:port/path?query#fragment`, and `u.Scheme`, `u.Host`, `u.Port`, `u.Path` and
-`u.Query` are its parts as written, with no escaping and no unescaping, as .NET's `Uri` names them
-(§12, assumed). *(assumed, §12, not put to the owner: the port 80 for `http` and 443 for `https` where
-none is written, an empty port among them, and -1 for another scheme; `/` for an empty path; the query
+`u.Query` are its parts as written, with no escaping and no unescaping, named after .NET's `Uri`, whose
+path is its `AbsolutePath`, whose `Query` keeps the `?` and which lowers the scheme and the host (§12,
+assumed). *(assumed, §12, not put to the owner: the port 80 for `http` and 443 for `https` where
+none is written, an empty port among them, and -1 for another scheme, the scheme compared without
+regard to ASCII case, here and for `Get`'s refusal (W13), as RFC 3986, section 3.1, compares it; `/` for an empty path; the query
 without its `?`, as `HttpRequest.Query` holds it (W5); a fragment after `#` and a user's part before
 an `@` of the host read, and no part; a host that is a name, an IPv4 address, or an IPv6 address
 between brackets, held with them; a `Uri` a class whose parts `Uri.Parse` alone sets, so that it
-compares by identity (K4); and the values of `UriKind`: `Character`, checked first, for a byte
+compares by identity (K4), and `Uri()`, with no text, the empty scheme and host, the port -1, the path
+`/` and the empty query, which `Get` refuses as a scheme other than `http` and `https` (W13); and the
+values of `UriKind`: `Character`, checked first, for a byte
 that no part of a `Uri` takes, all but RFC 3986's letters, digits, `-._~`, delimiters
 `:/?#[]@!$&'()*+,;=` and `%`, a space, a control byte and a byte past ASCII among them, and for a `%`
 without two hex digits after it; `Scheme` for a scheme that is missing, begins with no letter, or holds
 a byte other than a letter, a digit, `+`, `-` and `.`; `Host` for no `//` after the scheme, an empty
 host, an address between brackets that is not closed, is empty or holds a byte other than a hex digit,
-`:` and `.`, a name that holds `[` or `]`, and a byte after the brackets other than `:`; and `Port` for
-a byte that is no digit, at that byte, and a number past 65535, at the digit that passes it)*
+`:` and `.`, a name that holds `[` or `]`, and a byte after the brackets, before the first `/`, `?` or
+`#`, other than `:`; and `Port` for a byte that is no digit, at that byte, and a number past 65535, at
+the digit that passes it; `At` 0 for a text that is empty or begins with no letter, the text's length
+for a scheme with no `:` after it, and the `%` for a `%` without two hex digits)*
 
 Case: [http/uri-parse.kz](../corpus/http/uri-parse.kz)
 ```kurz
@@ -2302,14 +2308,18 @@ by `HttpClientOptions` (§12, the owner, 2026-11-01, Q5 (a)). A call that finds 
 connections to its host and port held by open bodies gives `HttpError(TooLarge, "too many connections to
 the host")` at once, since in a program of one actor no other actor gives one back (C3); a scheme other
 than `http` and `https` gives `HttpError(Unsupported, "unsupported scheme")`, before any connect (C4);
-and the reads and writes of a connection are bounded by no time and its connect by the 5 seconds of
-`Connect`, while `std/` holds no bound of the call's 100 seconds, so that a server that accepts and
-never answers holds the call (C1) (§12, the owner, 2026-11-05, issue 110, comment 6657251329). While
-the compiler builds no actors, the
-pool lives in the program's one actor (§12, assumed). *(assumed, §12: the options with .NET's names,
+and the reads, the writes and the connect of a connection are bounded by the call's time alone (W16),
+in the place of C1's reading, which bounded the reads and writes by no time and the connect by the 5
+seconds of `Connect` while `std/` held no bound of the call's 100 seconds (C1) (§12, the owner,
+2026-11-05, issue 110, comment 6657251329). A program of one actor keeps the pool in that actor, which
+it cannot tell from the pool's own actor (§12, assumed). *(assumed, §12: the options with .NET's names,
 `MaxConnectionsPerServer = 2147483647`, .NET's `int.MaxValue`, `PooledConnectionIdleTimeout = 1min`,
 `PooledConnectionLifetime` the largest `duration`, since no member of `HttpLimits` turns off (W7),
-`MaxAutomaticRedirections = 5` (W15) and `Limits = HttpLimits()` (W14); a pool with no timer, which at
+`MaxAutomaticRedirections`, the count of redirects (W15), and `Limits = HttpLimits()` (W14); a
+`MaxConnectionsPerServer` at or below 0 giving `too many connections to the host` to every call, a
+`PooledConnectionIdleTimeout` or `PooledConnectionLifetime` at or below 0 passed by each connection by
+the checkout after its body, which closes it, and a `MaxAutomaticRedirections` at or below 0 following
+none (W15), none of these values refused; a pool with no timer, which at
 each call takes back each connection whose body ended, closes each whose response said
 `Connection: close`, was of HTTP/1.0 without `Connection: keep-alive`, was read to the close or failed,
 and each whose body was let go of unread, then closes each connection idle longer than
@@ -2318,8 +2328,9 @@ hyper-util's pool passes over expired connections at its checkout, and takes the
 host and port that went idle last, as hyper-util's `pop()` takes it; a request on a connection of the
 pool that cannot be written, or whose connection ends before the first byte of a response, sent once
 more on a new connection, as .NET sends a request again on a connection the server shut down, and a
-new connection given no second try; the request a `GET` with `Host`, the port in it
-where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
+new connection given no second try; the request line `GET`, the path, with `?` and the query after it
+where the query is not empty, and `HTTP/1.1`, so that `http://h/p?` and `http://h/p` send `/p`, and the
+request with `Host`, the port in it where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
 the path of a call of `Get` needs `allow network` (S12); and the pool's times read from `instant.Now` (S25), as the server's
 bounds read theirs)*
 
@@ -2425,6 +2436,12 @@ raw {
     child = fork()
 }
 
+// a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+if child < 0 {
+    print("fork failed")
+    return
+}
+
 if child == 0 {
     Serve(listener)
     raw {
@@ -2450,7 +2467,8 @@ Case: [http/client-pool.kz](../corpus/http/client-pool.kz)
 // `MaxConnectionsPerServer` an `HttpError`; a body read to its end gives its connection back, even where its response is let go of
 // after the read, and the next `Get` takes it; a new connection is opened where the response let go of its body unread, where an
 // idle connection outlived `PooledConnectionIdleTimeout` or `PooledConnectionLifetime`, where the response said `Connection: close`,
-// and where the server closed the idle connection, whose request is then sent again on a new one
+// and where the server closed the idle connection, the request answered on a new one; and of two idle connections to the host
+// the next `Get` takes the one whose body ended last
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -2459,42 +2477,103 @@ extern "C" {
     void _exit(int code)
 }
 
-// the server, in a child of the program's process, within `limits`: each connection in turn, each request answered with the number
-// of its connection and its path, and the path `/close` with `Connection: close`
-void Serve(TcpListener on, HttpLimits limits) {
-    mut count = 0
+// the server, in a child of the program's process: each connection in turn, each request answered with the number of its
+// connection and its path, the path `/close` with `Connection: close`, and the connection closed after `most` responses, or where
+// the client ends it, its reads bounded by no time, so that no timer of the server ends a connection; `most` 0 is `Two`'s server
+void Serve(TcpListener on, int most) {
+    if most == 0 {
+        Two(on)
+        return
+    }
+
+    mut number = 0
     while true {
         stream = on.Accept() else {
             IoError e => return
         }
 
-        count = count + 1
-        number = count
-        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(number, r), limits) else {
+        number = number + 1
+        stream.SetReadTimeout(null) else {
             IoError e => {
             }
-            HttpError e => {
+        }
+
+        mut served = 0
+        mut open = true
+        while open && served < most {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    open = Answer(stream, number, r.Path) && r.Path != "/close"
+                    served = served + 1
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
             }
         }
     }
 }
 
-HttpResponse Answer(int number, HttpRequest r) {
-    response = HttpResponse.Text(200, "{number} {r.Path}")
-    if r.Path == "/close" {
-        response.Headers.Set("Connection", "close") else {
-            HttpError e => {
-            }
+// two connections open at once, each answering one request, and the third request read on the first connection, or on the second
+// where none comes on the first within 10 seconds, each answered with the number of its connection
+void Two(TcpListener on) {
+    one = on.Accept() else {
+        IoError e => return
+    }
+
+    Next(one, 1)
+    two = on.Accept() else {
+        IoError e => return
+    }
+
+    Next(two, 2)
+    one.SetReadTimeout(10s) else {
+        IoError e => {
         }
     }
 
-    return response
+    if !Next(one, 1) {
+        Next(two, 2)
+    }
+}
+
+// the next request of `stream` read and answered: whether one came
+bool Next(TcpStream stream, int number) {
+    match HttpRequest.Read(stream) {
+        HttpRequest r => return Answer(stream, number, r.Path)
+        IoError e => return false
+        HttpError e => return false
+    }
+}
+
+// the response of the connection `number` to a request of `path`, its body the number and the path: whether it was written
+bool Answer(TcpStream stream, int number, string path) {
+    body = "{number} {path}"
+    length = body.Bytes.Count
+    mut close = ""
+    if path == "/close" {
+        close = "Connection: close\r\n"
+    }
+
+    stream.Write("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n{close}\r\n{body}".Bytes) else {
+        IoError e => return false
+    }
+
+    return true
 }
 
 // a server started in a child on a port of its own, and the client's part run against it, and the child ended; the listener's
 // `Accept` waits at most 10 seconds, so that a child whose program ended before it could end the child ends by itself and does not
 // hold the output the suite reads
-void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf8 part) {
+void Against(int most, (int) => void | IoError | HttpError | InvalidUtf8 part) {
     on = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => {
             print(e)
@@ -2514,8 +2593,14 @@ void Against(HttpLimits limits, (int) => void | IoError | HttpError | InvalidUtf
         child = fork()
     }
 
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
     if child == 0 {
-        Serve(on, limits)
+        Serve(on, most)
         raw {
             _exit(0)
         }
@@ -2616,25 +2701,35 @@ void | IoError | HttpError | InvalidUtf8 Closing(int port) {
 void | IoError | HttpError | InvalidUtf8 ClosedByServer(int port) {
     client = HttpClient()
     Fetch(client, port, "/a")
-    Wait(500)
     print(Fetch(client, port, "/b"))
 }
 
-Against(HttpLimits(KeepAliveTimeout: 100ms), (int port) => SideBySide(port))
-Against(HttpLimits(), (int port) => Limited(port))
-Against(HttpLimits(), (int port) => ReadThenLetGo(port))
-Against(HttpLimits(), (int port) => LetGoUnread(port))
-Against(HttpLimits(), (int port) => IdleTooLong(port))
-Against(HttpLimits(), (int port) => LivedTooLong(port))
-Against(HttpLimits(), (int port) => Closing(port))
-Against(HttpLimits(KeepAliveTimeout: 50ms), (int port) => ClosedByServer(port))
+void | IoError | HttpError | InvalidUtf8 LatestIdle(int port) {
+    client = HttpClient()
+    first = client.Get(Address(port, "/a"))
+    second = client.Get(Address(port, "/b"))
+    print(second.Body.ReadAllText(100))
+    print(first.Body.ReadAllText(100))
+    print(Fetch(client, port, "/c"))
+}
+
+Against(1, (int port) => SideBySide(port))
+Against(2, (int port) => Limited(port))
+Against(2, (int port) => ReadThenLetGo(port))
+Against(2, (int port) => LetGoUnread(port))
+Against(2, (int port) => IdleTooLong(port))
+Against(2, (int port) => LivedTooLong(port))
+Against(2, (int port) => Closing(port))
+Against(1, (int port) => ClosedByServer(port))
+Against(0, (int port) => LatestIdle(port))
 ```
 
 Case: [http/client-errors.kz](../corpus/http/client-errors.kz)
 ```kurz
 // an address of `https` and one of another scheme than `http` are refused before any connect, the failure of a connect is the
-// network's `IoError`, and `HttpClientOptions()` holds .NET's defaults: no bound on the connections to one host, an idle
-// connection kept 1 minute, no bound on a connection's life, 5 redirects, and the limits of a request's head for a response's
+// network's `IoError`, and `HttpClientOptions()` holds .NET's defaults, no bound on the connections to one host, an idle
+// connection kept 1 minute and no bound on a connection's life, and 20 redirects, the owner's count, as browsers allow, where
+// .NET follows 50, and the limits of a request's head for a response's
 void Show(HttpClient client, string text) {
     at = Uri.Parse(text) else {
         UriError e => {
@@ -2723,6 +2818,19 @@ void Serve(TcpListener on, List<string> answers) {
             }
         }
     }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
 }
 
 // the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
@@ -2746,6 +2854,12 @@ void Against(List<string> answers, (int) => void part) {
     mut child = 0
     raw {
         child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
     }
 
     if child == 0 {
@@ -2821,8 +2935,7 @@ Against([
 ```
 
 No case: of the port 80 left out of `Host`, since that case would listen on port 80, which a run of the suite may not be
-allowed to bind; of a server that accepts and never answers, since that case would wait without end (C1); and of the grant,
-since a case is a program and no package, and the program needs no grant (S12).
+allowed to bind; and of the grant, since a case is a program and no package, and the program needs no grant (S12).
 
 ### W14 (decided, §12) Reading a response
 
@@ -2833,15 +2946,19 @@ malformed response is `HttpError(Protocol, "malformed response: <what>")`, and a
 `HttpError(TooLarge, "response header too large")` (§12, the owner, 2026-10-31, "IoError + HttpError").
 A status of `404` or `500` is a response like any other: `response.IsSuccess` holds from 200 to 299,
 and `response.EnsureSuccess()` gives `void | HttpError`, of the kind `Status` for a status that is no
-success (§12, the owner, 2026-10-31, "Never, a value", and 2026-11-01, Q6 (a), the range assumed).
+success (§12, the owner, 2026-10-31, "Never, a value", and 2026-11-01, issue 110, comment 6557433114,
+Q6 (a), the range assumed).
 The response is an `HttpResponseMessage`, as .NET names it, with `Status`, `Headers` and `Body`, as the
-client's request is an `HttpRequestMessage` (C2), and its failures take the texts of the server for a
+client's request is an `HttpRequestMessage` (2026-11-04, issue 156, comment 6643376941, Q2 (a) of comment
+6620774918), and
+its failures take the texts of the server for a
 request with `response` in their place (C4) (§12, the owner, 2026-11-05, issue 110, comment
 6657251329): `malformed response: no status line` for a
 connection that ends before the first byte of a response, `incomplete` for one that ends inside the
 head, `bad status line`, `line not ended by CR LF`, the server's words for a header line, `bad
 Content-Length` and `Content-Length beside Transfer-Encoding`, `unexpected end of body`, `bad chunk`
-and `bad chunk size`, `unexpected 101` for a `101`, `HttpError(Unsupported, "unsupported HTTP
+and `bad chunk size`, `unexpected 101` for a `101`, each after `malformed response: ` and of the kind
+`Protocol` (above), `HttpError(Unsupported, "unsupported HTTP
 version")` for a version other than 1.0 and 1.1 and `HttpError(Unsupported, "unsupported transfer
 encoding")` for a coding other than `chunked`, and `HttpError(Status, "response status 404")` from
 `EnsureSuccess()`, the status in it. *(assumed, §12: a status line of `HTTP/1.0` or `HTTP/1.1`, three digits from 100
@@ -2850,14 +2967,16 @@ reads past it; no body for a `1xx`, a `204` and a `304`, chunks where `Transfer-
 `chunked`, the length of `Content-Length`, and otherwise the bytes up to the close (RFC 9112, section
 6.3); and a response's head held to the limits of a request's head in the client's `Limits`, the status
 line to `MaxRequestLineSize` bytes with its CR LF, the header lines to `MaxRequestHeadersTotalSize`
-bytes with theirs, and their count to `MaxRequestHeaderCount`)*
+bytes with theirs, the empty line that ends the head counted in neither, and their count to
+`MaxRequestHeaderCount`, each past its limit `response header too large` (above))*
 
 Case: [http/client-get.kz](../corpus/http/client-get.kz)
 
 Case: [http/client-response.kz](../corpus/http/client-response.kz)
 ```kurz
 // a response's body is chunked, of its `Content-Length`, or read to the close where its head says neither, and a `1xx`, a `204` and
-// a `304` have none; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
+// a `304` have none; the trailer of a chunked body is read past, each line within the size line, and the connection serves the
+// next response; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
 // `Connection: keep-alive`, and one with `Connection: close` or read to the close keeps it not; `ReadAllText(max)` past its bound and a
 // body that ends early or is malformed give the response's errors
 extern "C" {
@@ -2908,6 +3027,19 @@ void Serve(TcpListener on, List<string> answers) {
             }
         }
     }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
 }
 
 // the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
@@ -2931,6 +3063,12 @@ void Against(List<string> answers, (int) => void part) {
     mut child = 0
     raw {
         child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
     }
 
     if child == 0 {
@@ -2984,6 +3122,7 @@ void Responses(int port) {
     print(Show(client, port, 100))
     print(Show(client, port, 100))
     print(Show(client, port, 100))
+    print(Show(client, port, 100))
     print(Show(client, port, 10))
     print(Show(client, port, 10))
     print(Show(client, port, 100))
@@ -2992,6 +3131,7 @@ void Responses(int port) {
 
 Against([
     "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwiki\r\n5\r\npedia\r\n0\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nafter\r\n0\r\nX-Checksum: 1\r\nX-Count: 2\r\n\r\n",
     "HTTP/1.1 304 Not Modified\r\nX-Connection: #\r\nContent-Length: 5\r\n\r\n",
     "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </s>\r\n\r\nHTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
     "HTTP/1.1 204 No Content\r\nX-Connection: #\r\n\r\n",
@@ -3064,6 +3204,19 @@ void Serve(TcpListener on, List<string> answers) {
             }
         }
     }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
 }
 
 // the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
@@ -3087,6 +3240,12 @@ void Against(List<string> answers, (int) => void part) {
     mut child = 0
     raw {
         child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
     }
 
     if child == 0 {
@@ -3147,22 +3306,25 @@ Against([
 
 ### W15 (decided, §12) Redirects
 
-The client follows up to 5 redirects: a `301`, `302` or `303` becomes a `GET`, a `307` or `308` keeps
+The client follows up to 20 redirects: a `301`, `302` or `303` becomes a `GET`, a `307` or `308` keeps
 its method, a redirect to `https` is the error of an address of `https`, a chain past its count
 `HttpError(Protocol, "too many redirects")`, and the options set the count, 0 for none (§12, the
-owner, 2026-10-31, "Up to 5, as ureq"). `Get` sends neither `Authorization` nor `Cookie`, so that their
+owner, 2026-10-31, "Up to 5, as ureq", and 2026-11-06, issue 39, comment 6683103582, the count 20, as
+browsers allow). `Get` sends neither `Authorization` nor `Cookie`, so that their
 drop where the host changes (§12, the same answer) has nothing to drop in it. *(assumed, §12: the
-option's name `MaxAutomaticRedirections`, as .NET's; a `Location` resolved against the address it
+option's name `MaxAutomaticRedirections`, as .NET's, and a count at or below 0 giving the first
+redirect as the response; a `Location` resolved against the address it
 answers (RFC 3986, section 5.2), its dot segments removed; a redirect without a `Location`, or with
 one that resolves to no `Uri`, the response, as .NET gives it; and the body of a redirect drained up to
 `MaxDrainSize` (W7), so that its connection goes back to the pool, and its connection closed past it)*
 
 Case: [http/client-redirects.kz](../corpus/http/client-redirects.kz)
 ```kurz
-// a client follows up to 5 redirects of a `GET`, a `301`, `302`, `303`, `307` and `308` alike, each `Location` resolved against the
-// address it answers, on the connection the chain began on; a sixth is `too many redirects`, a redirect to `https` the error of an
-// address of `https`, and a redirect without a `Location`, or with one that is no `Uri`, is the response; `MaxAutomaticRedirections`
-// sets the count, 0 for none; and a redirect whose body is longer than `MaxDrainSize` closes its connection
+// a client follows up to 20 redirects of a `GET`, a `301`, `302`, `303`, `307` and `308` alike, each `Location` resolved against
+// the address it answers, on the connection the chain began on; a twenty-first is `too many redirects`, a redirect to `https` the
+// error of an address of `https`, and a redirect without a `Location`, or with one that is no `Uri`, is the response;
+// `MaxAutomaticRedirections` sets the count, 0 for none; and a redirect whose body is longer than `MaxDrainSize` closes its
+// connection
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -3204,7 +3366,12 @@ HttpResponse Redirect(int status, string location) {
 HttpResponse Answer(int port, int number, HttpRequest r) {
     path = r.Path
     if path.StartsWith("/r/") {
-        n = path.Bytes[3] - 48
+        b = path.Bytes
+        mut n = 0
+        for i in 3..<b.Count {
+            n = n * 10 + (b[i] - 48)
+        }
+
         if n == 0 {
             return HttpResponse.Text(200, "{number} {path}")
         }
@@ -3276,6 +3443,12 @@ void Against((int) => void part) {
         child = fork()
     }
 
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
     if child == 0 {
         Serve(on)
         raw {
@@ -3312,7 +3485,7 @@ string Show(HttpClient client, int port, string path) {
 
 void Followed(int port) {
     client = HttpClient()
-    print(Show(client, port, "/r/5"))
+    print(Show(client, port, "/r/20"))
     print(Show(client, port, "/see"))
     print(Show(client, port, "/moved"))
     print(Show(client, port, "/dir/temp"))
@@ -3320,7 +3493,7 @@ void Followed(int port) {
     print(Show(client, port, "/secure"))
     print(Show(client, port, "/none"))
     print(Show(client, port, "/bad"))
-    print(Show(client, port, "/r/6"))
+    print(Show(client, port, "/r/21"))
     print(Show(client, port, "/r/0"))
 }
 
@@ -3343,3 +3516,420 @@ Against((int port) => None(port))
 Against((int port) => One(port))
 Against((int port) => Long(port))
 ```
+
+### W16 (decided, §12) The call's time
+
+A call of the client ends with `IoError(TimedOut)` after 100 seconds, from the lookup of the name to the
+last byte the helpers read, and the options change it, as .NET's `HttpClient.Timeout` (§12, the owner,
+2026-10-31, "100 s, as .NET"); each read on the client's sockets is bounded by what remains of the call's
+time, set before it, and a socket's 5 seconds do not apply inside the client (§12, the owner, 2026-11-01,
+"Reads use the 100 s budget"). The member `Timeout` of `HttpClientOptions`, a `duration`, sets the call's
+time, 100 seconds by default; a time of zero or below makes each call `TimedOut` at once, before any
+lookup or connect, and no value turns the bound off; every end of the call's time is `IoError(TimedOut,
+0, "")`, as the bound of `Connect` gives it, a read or a write that the system ended with its 11 among
+them; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
+sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
+the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). *(assumed, §12: a `TimedOut` the system
+gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
+since the client does not tell it from its own; the client reading what remains before each step and
+giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
+`Connect`, which refuse it (S9); each write bounded by what remains in the same way, and the connect
+through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
+`Read` held to the call's time as the helpers' reads are; a request whose time ran out not sent once more
+on a new connection, and its connection not given back to the pool, closed when the program lets go of
+the response or, where the time ran out before a response, at once; the bound held by the socket's own
+times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
+server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
+name bounded by nothing and its time counted against the call's, how the call's time holds over it
+standing open (§14), so that a connect given what remains can end later than the call's time by the
+lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
+as the time passed against the bound, never as the sum of the start and the bound, which can overflow
+(T36))*
+
+Case: [http/client-timeout.kz](../corpus/http/client-timeout.kz)
+```kurz
+// a call of the client has 100 seconds by default, which the options set; a time of zero or below gives `TimedOut` with the number
+// 0 before any connect; the largest `duration` is a time like any other, which the call's arithmetic holds without passing the
+// clock's range; a read waits what remains of the call's time and not a socket's 5 seconds; a chain of redirects has one
+// time in all; a server that does not answer in time ends the call with `TimedOut` after its time, and so does a connect that the
+// server's queue holds
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request answered by `Answer`
+void Serve(TcpListener on) {
+    mut count = 0
+    while true {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        count = count + 1
+        number = count
+        HttpServer.ServeConnection(stream, (HttpRequest r) => Answer(number, r)) else {
+            IoError e => {
+            }
+            HttpError e => {
+            }
+        }
+    }
+}
+
+// the child's thread held for `ms` milliseconds
+void Sleep(int ms) {
+    raw {
+        usleep(ms * 1000)
+    }
+}
+
+// `/slow/5200` and `/slow/1000` answered after that many milliseconds, `/r/N` a `302` to `/r/N-1` after 150 milliseconds, and the
+// other paths with the number of the connection and the path
+HttpResponse Answer(int number, HttpRequest r) {
+    path = r.Path
+    if path == "/slow/5200" || path == "/slow/1000" {
+        if path == "/slow/5200" {
+            Sleep(5200)
+        } else {
+            Sleep(1000)
+        }
+
+        return HttpResponse.Text(200, "late")
+    }
+
+    if path.StartsWith("/r/") && path != "/r/0" {
+        n = path.Bytes[3] - 48
+        Sleep(150)
+        response = HttpResponse.Empty(302)
+        response.Headers.Set("Location", "/r/{n - 1}") else {
+            HttpError e => {
+            }
+        }
+
+        return response
+    }
+
+    return HttpResponse.Text(200, "{number} {path}")
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against((int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        Serve(on)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// a `GET` of `path` with a call's time of `timeout`, and its status and body, or its failure
+string Show(int port, string path, duration timeout) {
+    at = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return "{e.Kind} {e.At}"
+    }
+
+    match HttpClient(HttpClientOptions(Timeout: timeout)).Get(at) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e.Kind} {e.Code}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e.Kind} {e.Code}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Calls(int port) {
+    print(Show(port, "/n", 0s))
+    print(Show(port, "/n", -1s))
+    print(Show(port, "/n", 100s))
+    print(Show(port, "/n", 9223372036854775807ns))
+    print(Show(port, "/slow/5200", 10s))
+    print(Show(port, "/r/3", 5s))
+    print(Show(port, "/r/3", 400ms))
+    start = instant.Now
+    print(Show(port, "/slow/1000", 200ms))
+    elapsed = instant.Now - start
+    print(elapsed >= 200ms && elapsed < 900ms)
+}
+
+// a connect the queue of a listener that accepts nothing holds, as `connect-timeout.kz` fills it: the call ends at its time
+void | IoError Queued() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    mut held = List<TcpStream>()
+    mut full = false
+    while !full && held.Count < 1000 {
+        match TcpStream.Connect("127.0.0.1:{listener.Port}", 100ms) {
+            TcpStream s => held.Add(s)
+            IoError e => {
+                full = true
+            }
+        }
+    }
+
+    start = instant.Now
+    print(Show(listener.Port, "/", 300ms))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 4s)
+}
+
+print(HttpClientOptions().Timeout == 100s)
+Against((int port) => Calls(port))
+Queued() else {
+    IoError e => print(e)
+}
+```
+
+Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
+```kurz
+// a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
+// to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; a call whose
+// time ran out on a connection of the pool is not sent again, and no connection whose call ran out is used again; and a body whose
+// bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
+// remains of it: a body of a length, one read to the close, and a chunk's size line
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, followed by each next that begins with `~`, written a byte at a time, the
+// connection held where the next is `hold` until the client ends it, and closed then
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    while next < answers.Count && answers[next].StartsWith("~") {
+                        Trickle(stream, answers[next])
+                        next = next + 1
+                    }
+
+                    if next < answers.Count && answers[next] == "hold" {
+                        next = next + 1
+                        Hold(stream)
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the bytes of `text` after its `~` written one at a time, 100 milliseconds apart, until a write fails
+void Trickle(TcpStream stream, string text) {
+    for i in 1..<text.Bytes.Count {
+        raw {
+            usleep(100000)
+        }
+
+        stream.Write(text.Substring(i, 1).Bytes) else {
+            IoError e => return
+        }
+    }
+}
+
+// the stream read until the client ends it
+void Hold(TcpStream stream) {
+    mut sink = Bytes()
+    while true {
+        n = stream.Read(mut sink, 4096) else {
+            IoError e => return
+        }
+
+        if n == 0 {
+            return
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its status, the server's number of the connection and the body read as text, or the failure
+string Show(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            number = r.Headers.Get("X-Connection") ?? "-"
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} {number} [{text}]"
+                IoError e => return "{r.Status} {number} {e.Kind} {e.Code}"
+                HttpError e => return "{r.Status} {number} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} {number} not UTF-8"
+            }
+        }
+        IoError e => return "{e.Kind} {e.Code}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient(HttpClientOptions(Timeout: 300ms))
+    for i in 0..<7 {
+        print(Show(client, port))
+    }
+}
+
+// one call of a time of 300 milliseconds whose body comes a byte at a time, and whether it ended at its time and not at the body's
+// last byte, a second later
+void Trickled(int port) {
+    start = instant.Now
+    print(Show(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 900ms)
+}
+
+Against([
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\nabc",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\nabc",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Conn",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
+    "",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 4\r\n\r\nnext",
+], (int port) => Responses(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\n", "~abcdefghij"], (int port) => Trickled(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\n", "~abcdefghij"], (int port) => Trickled(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n", "~3;abcdefghij\r\nabc\r\n0\r\n\r\n"],
+    (int port) => Trickled(port))
+```
+
+No case: of a write that waits, since the request of `Get` is a head of a few bytes, which the socket's buffer takes at once
+whatever the server reads; of the lookup, since a case would need a name server that does not answer, which a run of the suite
+does not have; and of an actor's socket, since a program of the compiler runs in one actor (W13).

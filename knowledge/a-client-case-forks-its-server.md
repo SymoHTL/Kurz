@@ -1,6 +1,6 @@
 ---
 name: a-client-case-forks-its-server
-description: A case of the HTTP client cannot answer its own `Get` from the same thread, since the program is one actor whose calls block, and `Command.Spawn()` is not emitted; the client's cases fork the program under `allow: raw native`, serve in the child and kill it at the end; the child serves its connections one at a time, so that a second connection is accepted only once the first ends, at the server's `KeepAliveTimeout` or the client's close (2026-11-05); and the listener's `Accept` is bounded before the fork, since a child whose program ended by an error waits on `Accept` without end and holds the output the suite reads, which hung a run of the suite for 80 minutes (2026-11-05)
+description: A case of the HTTP client cannot answer its own `Get` from the same thread, since the program is one actor whose calls block, and `Command.Spawn()` is not emitted; the client's cases fork the program under `allow: raw native`, serve in the child and kill it at the end; the child serves its connections one at a time, each ended by the script and by no timer of the server, a connection past its answers closed at once (2026-11-06); a fork that fails ends the case before any `kill`, since `kill(-1, 9)` reaches every process the user may signal (2026-11-06); and the listener's `Accept` is bounded before the fork, since a child whose program ended by an error waits on `Accept` without end and holds the output the suite reads, which hung a run of the suite for 80 minutes (2026-11-05)
 metadata:
   type: reference
 ---
@@ -27,6 +27,10 @@ A child process would serve it, but the emitter says `not supported` to `Command
   knows the port. The child serves and leaves with `_exit(0)` in a `raw` block, so that it runs none
   of the parent's statements after the fork and prints nothing. The parent runs the client and ends
   the child with `kill(child, 9)` and `waitpid(child, 0, 0)`.
+- A fork that fails gives -1. The parent prints `fork failed` and returns before the client, so that
+  no `kill` or `waitpid` takes a pid of 0 or below: `kill(-1, 9)` sends the signal to every process
+  the user may signal, and `kill(0, 9)` to the whole process group. Every forking case had the
+  pattern without the check, which the review of pull request 317 found (2026-11-06).
 - The program bounds the listener's `Accept` before the fork, `SetAcceptTimeout(10s)`, so that a
   child whose program ended by an error before it could end the child ends by itself 10 seconds after
   its last connection and lets go of the output the suite reads. `Accept` waits without a bound by
@@ -34,13 +38,17 @@ A child process would serve it, but the emitter says `not supported` to `Command
   suite waited on it for 80 minutes (2026-11-05). A case's own calls leave less than 10 seconds
   between two connections.
 - The child serves one connection at a time, as `HttpServer.Serve` does. A client whose first
-  connection is idle in its pool and that opens a second one waits until the first ends: at the
-  server's `KeepAliveTimeout`, or when the client closes it. A case that needs a second connection sets
-  a short `KeepAliveTimeout`, 100 ms in `client-pool.kz`. A case that needs the first connection again
-  keeps the default 5 seconds, so that the client's next request comes long before it.
+  connection is idle in its pool and that opens a second one waits until the first ends. The script
+  ends a connection, never a timer: the child of `client-pool.kz` closes each connection after the
+  number of responses the case gives it and reads with no bound (`SetReadTimeout(null)`), so that
+  the output does not rest on the time the parent takes between two requests. A keep-alive of
+  100 ms, 50 ms or 5 seconds made the pool case's connection numbers rest on the runner's speed
+  (the review of pull request 317, 2026-11-06).
 - A case whose server is raw, its answers scripted, reads each request with `HttpRequest.Read` before it
   writes the answer. A close with the request unread would send the client a reset in place of the
-  answer (S9).
+  answer (S9). Past its answers the child keeps accepting and closes each connection at once, so that
+  a request the client should not have sent shows as a wrong line, and not as a call that waits on a
+  connection the parent's listener holds and nobody serves.
 - A case of the pool tells connections apart by a number the child writes into each answer: the
   server's number of its connection, counted at each `Accept`.
 
