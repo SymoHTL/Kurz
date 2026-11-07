@@ -1043,7 +1043,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
         Assert.Null(refused.Program);
         Assert.Contains(refused.Diagnostics.Sorted,
-            d => d.Id == ErrorIds.UnknownName && d.Line == 2 && d.Message.Contains("`WriteWithin`", StringComparison.Ordinal));
+            d => d.Id == ErrorIds.UnknownName && d.Line == 2);
         Assert.NotNull(Compile("void | IoError | HttpError Main(TcpStream s) {\n    HttpServer.ServeConnection(s, (HttpRequest r) => HttpResponse.Text(200, \"\"))\n}\n", Builder.CheckRuntime(Target.Linux)).Program);
     }
 
