@@ -2309,8 +2309,8 @@ by `HttpClientOptions` (§12, the owner, 2026-11-01, Q5 (a)). A call that finds 
 connections to its host and port held by open bodies gives `HttpError(TooLarge, "too many connections to
 the host")` at once, since in a program of one actor no other actor gives one back (C3); a scheme other
 than `http` and `https` gives `HttpError(Unsupported, "unsupported scheme")`, before any connect (C4);
-and the reads of a connection are bounded by the call's time alone, and its writes and its connect by
-what remains of it, as W16 assumes, in the place of C1's reading, which bounded the reads and writes by no time and the connect by the 5
+and each read of a connection is bounded by what remains of the call's time, and its writes and its connect by
+what remains of it as W16 assumes, in the place of C1's reading, which bounded the reads and writes by no time and the connect by the 5
 seconds of `Connect` while `std/` held no bound of the call's 100 seconds (C1) (§12, the owner,
 2026-11-05, issue 110, comment 6657251329). A program of one actor keeps the pool in that actor, which
 it cannot tell from the pool's own actor (§12, assumed). *(assumed, §12: the options with .NET's names,
@@ -2965,7 +2965,8 @@ encoding")` for a coding other than `chunked`, and `HttpError(Status, "response 
 `EnsureSuccess()`, the status in it. *(assumed, §12: a status line of `HTTP/1.0` or `HTTP/1.1`, three digits from 100
 and a reason that may be left out, as httparse reads it; a `1xx` other than `101` read past, as hyper
 reads past it; a response's trailer read and dropped, each line held to `MaxChunkSizeLine` with its CR LF,
-as a chunk's size line is, `bad chunk` past it; no body for a `1xx`, a `204` and a `304`, chunks where
+as a chunk's size line is, `bad chunk` past it, the count of its lines held by nothing but the call's time (W16), where a
+request's trailer shares the budget of its head; no body for a `1xx`, a `204` and a `304`, chunks where
 `Transfer-Encoding` is
 `chunked`, the length of `Content-Length`, and otherwise the bytes up to the close (RFC 9112, section
 6.3); and a response's head held to the limits of a request's head in the client's `Limits`, the status
@@ -3315,8 +3316,8 @@ Against([
 ### W15 (decided, §12) Redirects
 
 The client follows up to 20 redirects: a `301`, `302` or `303` becomes a `GET`, a `307` or `308` keeps
-its method, a redirect to `https` is the error of an address of `https`, a chain past a count of 1
-or more `HttpError(Protocol, "too many redirects")`, and the options set the count, 0 for none (§12, the
+its method, a redirect to `https` is the error of an address of `https`, where the count is 1 or more
+a chain past it gives `HttpError(Protocol, "too many redirects")`, and the options set the count, 0 for none (§12, the
 owner, 2026-10-31, "Up to 5, as ureq", and 2026-11-06, issue 39, comment 6683103582, the count 20, as
 browsers allow). `Get` sends neither `Authorization` nor `Cookie`, so that their
 drop where the host changes (§12, the same answer) has nothing to drop in it. *(assumed, §12: the
@@ -3533,21 +3534,24 @@ options change it, as .NET's `HttpClient.Timeout` holds a send that reads the wh
 its default (§12, the owner, 2026-10-31, "100 s, as .NET"); each read on the client's sockets is bounded by what remains of the call's
 time, set before it, and a socket's 5 seconds do not apply inside the client (§12, the owner, 2026-11-01,
 "Reads use the 100 s budget"). The member `Timeout` of `HttpClientOptions`, a `duration`, sets the call's
-time, 100 seconds by default; a time of zero or below makes each call `TimedOut` at once, before any
+time, 100 seconds by default; a time of zero or below makes each call that passes the call's refusals `TimedOut` at once, before any
 lookup or connect, and no value turns the bound off; every end of the call's time is `IoError(TimedOut,
 0, "")`, as the bound of `Connect` gives it, a read that the system ended with its 11 among them, and a
 write so ended under the bound of the writes assumed below; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
 sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
-the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). Once the call's time has run out, every read of the call gives `TimedOut`, even where
+the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host is at `MaxConnectionsPerServer`, is refused as
+at any other time, before the time is read, so that `ftp://127.0.0.1/` at a time of zero gives `Unsupported`, as C#'s
+`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts (§12, the owner, 2026-11-07, issue
+39, comment 6711941714, "Refusals first"). Once the call's time has run out, every read of the call gives `TimedOut`, even where
 its bytes are already in the stream's buffer, where Rust's `tokio::time::timeout` polls the read first and gives a
 byte already there (§12, the owner, 2026-11-07, issue 39, comment 6710610814). *(assumed, §12: a `TimedOut` the system
 gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
-since the client does not tell it from its own; the client reading what remains before each step and
+since the client does not tell it from its own, and its request not sent once more, as one whose time ran
+out; the client reading what remains before each step and
 giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
-`Connect`, which refuse it (S9), a remainder under 1 microsecond set as 1 microsecond; the refusals that
-need no lookup, of a scheme other than `http`, of `https` and of a host whose connections reach
-`MaxConnectionsPerServer`, given before the time is read, so that a call whose time is zero or below and
-that meets one of them gives that refusal; each write bounded by what remains in the same way, and the connect
+`Connect`, which refuse it (S9), a remainder under 1 microsecond set as 1 microsecond; the address of `https`
+among the call's refusals, refused before the time is read as the two the owner named; the call's refusals
+given so at each address of a chain, as at its first, since `Get` sends each redirect as a request of its own (W15); each write bounded by what remains in the same way, and the connect
 through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
 `Read` held to the call's time as the helpers' reads are, as Go's `Client.Timeout` holds the reads of a
 body after its call returned, where .NET's `ResponseHeadersRead` ends the send at the head (checked
@@ -3557,7 +3561,7 @@ on a new connection, and its connection not given back to the pool, closed when 
 the response or, where the time ran out before a response, at once; the bound held by the socket's own
 times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
 server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
-name bounded by nothing and its time counted against the call's, how the call's time holds over it
+name bounded by no time of the call's, only by the resolver's own, and its time counted against the call's, how the call's time holds over it
 standing open (§14), so that a connect given what remains can end later than the call's time by the
 lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
 as the time passed against the bound, never as the sum of the start and the bound, which can overflow
@@ -3757,8 +3761,8 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 ```kurz
 // a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
 // to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
-// connection whose call ran out is used again, the next call opening a new one; a body whose bytes are all in the stream's buffer,
-// read after the call's time ran out, gives `TimedOut` and not its bytes; and a body whose
+// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came with its head,
+// read after the call's time ran out, gives `TimedOut` and not its bytes, which were there; and a body whose
 // bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
 // remains of it: a body of a length, one read to the close, and a chunk's size line
 extern "C" {
@@ -3944,8 +3948,8 @@ void Trickled(int port) {
     print(elapsed >= 300ms && elapsed < 900ms)
 }
 
-// one call of a time of 300 milliseconds whose body comes with its head, so that its every byte is in the stream's buffer,
-// read after the call's time ran out
+// one call of a time of 300 milliseconds whose body comes with its head, read 400 milliseconds later, after the call's time ran
+// out, when its every byte is there, in the stream's buffer or the system's, which the case does not tell apart
 string Late(HttpClient client, int port) {
     match client.Get(Address(port, "/")) {
         HttpResponseMessage r => {
@@ -3997,4 +4001,7 @@ does not have; of an actor's socket, since a program of the compiler runs in one
 of the redirects' bodies and of a request sent once more on a new connection, each under the call's one
 time (T3), which the cases' redirects, of no body, and their requests, each sent once, do not reach; and
 of a request whose time ran out not sent once more, since a second send under the one time finds nothing
-remaining and ends as `TimedOut` before any connect, which no output tells from none.
+remaining and ends as `TimedOut` before any connect, which no output tells from none; and of a `TimedOut` the system
+gives of its own, its 110, while time remains, whose request is not sent once more either, which a second send would
+show, since no run of the suite makes the system give it: it comes where the system's retries of a segment nobody
+answers run out.
