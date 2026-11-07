@@ -2375,6 +2375,57 @@ pub long ShutdownWrite(int fd) {
     return result
 }
 
+// The `count` bytes at `bytes` written to the socket `fd` within `nanoseconds` for the whole write, as `WriteFile` writes them but
+// with `SO_SNDTIMEO` (21) set to what remains of that bound, by the monotonic clock, before each call of `write`, so that a peer that
+// takes a part just inside each bound cannot hold the write past it, as the reads of the HTTP server set what remains before each
+// refill (section 12): `count`, the bytes written before a call that took none, the failure of the call that failed, or -4100,
+// `TimedOut` with the number 0, where nothing remains before a call, which is then not made, as the bound of `Connect` gives it.
+pub long WriteWithin(int fd, byte* bytes, long count, long nanoseconds) {
+    mut long deadline = 0
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return -12
+        }
+
+        deadline = Deadline(held, nanoseconds)
+    }
+
+    mut long done = 0
+    while done < count {
+        mut long left = 0
+        raw {
+            left = deadline - Monotonic(Endpoints())
+        }
+
+        if left <= 0 {
+            return -4100
+        }
+
+        long set = SetTimeout(fd, 21, left, true)
+        if set < 0 {
+            return set
+        }
+
+        mut long written = -1
+        raw {
+            written = Write(fd, bytes + done, count - done)
+        }
+
+        if written < 0 {
+            return Checked(written)
+        }
+
+        if written == 0 {
+            return done
+        }
+
+        done = done + written
+    }
+
+    return done
+}
+
 // The default bound set on the reads and the writes of the stream `fd`, which `Connect` or `Accept` made
 // (S9): 0, or the failure.
 long Bounded(int fd) {

@@ -6185,7 +6185,8 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
     }
 }
 
-// The body of a request, read from its stream as the client sends it: `Read` appends at most `max` bytes and gives 0 at the end,
+// The body of a request, read from its stream as the client sends it, or of a response a client reads (W14): `Read` appends at most
+// `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
 // expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
 // writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
@@ -6206,9 +6207,18 @@ pub class HttpBody {
     mut long arrived = 0
     mut bool timedOut = false
     mut bool begun = false
+    mut string side = "request"
+    mut bool toEnd = false
+    mut int trailerBytes = 0
+    mut int trailerLines = 0
 
-    // The body a head declares, read from `s`: a declared length, chunks, or none (F9: `internal`, the maker std/'s reader calls).
-    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed) {
+    // The connection of a client's response, told once when the body ends or fails, so that the pool takes it back (W13).
+    internal mut HttpConnection? home = null
+    internal mut HttpCall? call = null
+
+    // The body a head declares, read from `s`: a declared length, chunks, or none, a trailer of chunks held to what the head left of
+    // its limits, `headBytes` and `headLines` (section 12, the owner, 2026-11-05, Q8) (F9: `internal`, the maker std/'s reader calls).
+    internal static HttpBody Make(TcpStream s, long length, bool isChunked, bool expectsContinue, HttpLimits limits, bool isTimed, int headBytes, int headLines) {
         b = HttpBody()
         b.stream = s
         b.remaining = length
@@ -6219,6 +6229,23 @@ pub class HttpBody {
         b.sizeLine = limits.MaxChunkSizeLine
         b.timed = isTimed
         b.rate = limits.MinRequestBodyDataRate
+        b.trailerBytes = limits.MaxRequestHeadersTotalSize - headBytes
+        b.trailerLines = limits.MaxRequestHeaderCount - headLines
+        return b
+    }
+
+    // The body of a response a client reads from `s`: a declared length, chunks, or the bytes up to the stream's end where the head
+    // declares neither (RFC 9112, section 6.3), each failure in the words of a response, and no bound but the one a helper takes (W12).
+    internal static HttpBody MakeResponse(TcpStream s, long length, bool isChunked, bool isToEnd, int chunkLine) {
+        b = HttpBody()
+        b.stream = s
+        b.remaining = length
+        b.chunked = isChunked
+        b.toEnd = isToEnd && !isChunked
+        b.ended = !isChunked && !isToEnd && length == 0
+        b.most = 9223372036854775807
+        b.sizeLine = chunkLine
+        b.side = "response"
         return b
     }
 
@@ -6243,12 +6270,12 @@ pub class HttpBody {
     // holds the connection's next request (F9).
     internal bool | IoError | HttpError Drain(int bound) {
         mut dropped = Bytes()
-        mut room = bound + 1
+        mut room = long(bound) + 1
         while room > 0 {
             dropped.Clear()
             mut piece = 65536
             if room < piece {
-                piece = room
+                piece = int(room)
             }
 
             n = Read(mut dropped, piece)
@@ -6266,7 +6293,7 @@ pub class HttpBody {
     pub int | IoError | HttpError Read(mut Bytes into, int max) {
         s = stream
         if !timed || s == null || ended || failed != null || max <= 0 {
-            return Take(mut into, max)
+            return Take(mut into, max, null)
         }
 
         // the rate, as Kestrel holds `MinRequestBodyDataRate`: after the grace, the bytes that arrived over the time the reads
@@ -6284,9 +6311,10 @@ pub class HttpBody {
             return HttpTimedOut()
         }
 
-        s.SetReadTimeout(HttpNanos(spare))
+        // what remains of `spare` set before each refill the read makes, the size line and the trailer of a chunk among them, as
+        // the head's reads set what remains of its time (section 12, the owner, 2026-11-04, Q9 (a))
         start = instant.Now
-        n = Take(mut into, max) else {
+        n = Take(mut into, max, start + HttpNanos(spare)) else {
             IoError e => {
                 waited = waited + HttpNanosOf(instant.Now - start)
                 if e.Kind == IoKind.TimedOut {
@@ -6304,8 +6332,35 @@ pub class HttpBody {
         return n
     }
 
-    // `Read` with no bound of time.
-    int | IoError | HttpError Take(mut Bytes into, int max) {
+    // `Read`, with no bound of time where `deadline` is null, which tells a client's connection when the body ends or fails (W13).
+    int | IoError | HttpError Take(mut Bytes into, int max, instant? deadline) {
+        n = Pull(mut into, max, deadline) else {
+            HttpError e => {
+                Tell()
+                return e
+            }
+        }
+
+        Tell()
+        return n
+    }
+
+    // Tells the connection of a client's response, once, that the body ended, or failed, so that what the stream holds after it is
+    // not known.
+    void Tell() {
+        h = home
+        if h == null {
+            return
+        }
+
+        if ended || failed != null {
+            h.Ends(failed == null)
+            home = null
+        }
+    }
+
+    // `Take` without the telling.
+    int | IoError | HttpError Pull(mut Bytes into, int max, instant? deadline) {
         f = failed
         if f != null {
             return f
@@ -6323,8 +6378,21 @@ pub class HttpBody {
             }
         }
 
+        if toEnd {
+            HttpCallReads(s, call)
+            n = s.Read(mut into, max) else {
+                IoError e => return HttpCallFailed(e, call)
+            }
+
+            if n == 0 {
+                ended = true
+            }
+
+            return n
+        }
+
         if chunked && remaining == 0 {
-            NextChunk(s) else {
+            NextChunk(s, deadline) else {
                 HttpError e => {
                     failed = e
                     return e
@@ -6341,9 +6409,17 @@ pub class HttpBody {
             want = int(remaining)
         }
 
-        n = s.Read(mut into, want)
+        if deadline != null {
+            HttpWaitUntil(s, deadline)
+        }
+
+        HttpCallReads(s, call)
+        n = s.Read(mut into, want) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
-            e = HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+            e = HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
             failed = e
             return e
         }
@@ -6360,17 +6436,18 @@ pub class HttpBody {
         return n
     }
 
-    // The whole body, or `request body over limit` where it holds more than `max` bytes.
+    // The whole body, or `request body over limit` where it holds more than `max` bytes, `response body over limit` for a response.
     pub Bytes | IoError | HttpError ReadAll(int max) {
-        if !chunked && remaining > max {
-            return HttpError(HttpKind.TooLarge, "request body over limit")
+        if !chunked && !toEnd && remaining > max {
+            return HttpError(HttpKind.TooLarge, "{side} body over limit")
         }
 
         mut all = Bytes()
         while true {
             mut piece = 65536
-            if max - all.Count + 1 < piece {
-                piece = max - all.Count + 1
+            room = long(max) - all.Count + 1
+            if room < piece {
+                piece = int(room)
             }
 
             n = Read(mut all, piece)
@@ -6379,7 +6456,7 @@ pub class HttpBody {
             }
 
             if all.Count > max {
-                return HttpError(HttpKind.TooLarge, "request body over limit")
+                return HttpError(HttpKind.TooLarge, "{side} body over limit")
             }
         }
 
@@ -6393,19 +6470,21 @@ pub class HttpBody {
     }
 
     // The size of the next chunk, read past the line end of the chunk before it, and at the last chunk its trailer, whose lines are
-    // read and dropped (RFC 9112, section 7.1); a chunk's extensions are ignored.
-    bool | IoError | HttpError NextChunk(TcpStream s) {
+    // read and dropped (RFC 9112, section 7.1), held to what the head left of `MaxRequestHeadersTotalSize` and
+    // `MaxRequestHeaderCount` (section 12, the owner, 2026-11-05, Q8); a chunk's extensions are ignored. Each refill by `deadline`.
+    bool | IoError | HttpError NextChunk(TcpStream s, instant? deadline) {
+        bad = HttpError(HttpKind.Protocol, "malformed {side}: bad chunk")
         if atChunkEnd {
-            end = HttpLine(s, 2)
+            end = HttpLine(s, 2, bad, deadline, side, call)
             if end.Count != 0 {
-                return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+                return bad
             }
 
             atChunkEnd = false
         }
 
-        line = HttpLine(s, sizeLine) else {
-            HttpError e => return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+        line = HttpLine(s, sizeLine, bad, deadline, side, call) else {
+            HttpError e => return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk size")
         }
 
         mut size = 0L
@@ -6422,11 +6501,11 @@ pub class HttpBody {
             } else if c == 59 || c == 32 || c == 9 {
                 break
             } else {
-                return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+                return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk size")
             }
 
             if most - taken - d < 0 || size > (most - taken - d) / 16 {
-                return HttpError(HttpKind.TooLarge, "request body over limit")
+                return HttpError(HttpKind.TooLarge, "{side} body over limit")
             }
 
             size = size * 16 + d
@@ -6434,17 +6513,42 @@ pub class HttpBody {
         }
 
         if digits == 0 {
-            return HttpError(HttpKind.Protocol, "malformed request: bad chunk size")
+            return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk size")
         }
 
         taken = taken + size
         remaining = size
-        if size == 0 {
+        if size == 0 && side == "response" {
+            // a response's trailer: its lines read and dropped, each held to the size line, as a chunk's (W14)
             while true {
-                trailer = HttpLine(s, sizeLine)
+                trailer = HttpLine(s, sizeLine, bad, deadline, side, call)
                 if trailer.Count == 0 {
                     ended = true
                     return true
+                }
+            }
+        }
+
+        if size == 0 {
+            // one budget with the head's, each line counted with its CR LF and the empty line that ends the trailer, as the head's,
+            // beside the budget (section 12, assumed)
+            large = HttpError(HttpKind.TooLarge, "request header too large")
+            while true {
+                mut fits = trailerBytes
+                if fits < 2 {
+                    fits = 2
+                }
+
+                trailer = HttpLine(s, fits, large, deadline, side, call)
+                if trailer.Count == 0 {
+                    ended = true
+                    return true
+                }
+
+                trailerBytes = trailerBytes - trailer.Count - 2
+                trailerLines = trailerLines - 1
+                if trailerLines < 0 {
+                    return large
                 }
             }
         }
@@ -6574,7 +6678,7 @@ pub class HttpResponse {
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {
                 IoError e => {
-                    HttpUnwritable(s, mut pending, date)
+                    HttpUnwritable(s, mut pending, date, pace)
                     return e
                 }
             }
@@ -6586,19 +6690,19 @@ pub class HttpResponse {
         lengths = headers.GetAll("Content-Length")
         chunked = !bodiless && !plain && (codings.Count > 0 || body != null)
         if (chunked || body != null) && lengths.Count > 0 {
-            HttpFlush(s, mut pending)
+            HttpFlush(s, mut pending, pace)
             return IoError(IoKind.InvalidInput, 0, "")
         }
 
         if code == 205 && length > 0 {
-            HttpUnwritable(s, mut pending, date)
+            HttpUnwritable(s, mut pending, date, pace)
             return false
         }
 
         if !bodiless {
             for text in lengths {
                 if HttpLength(text) != length {
-                    HttpUnwritable(s, mut pending, date)
+                    HttpUnwritable(s, mut pending, date, pace)
                     return false
                 }
             }
@@ -6655,8 +6759,7 @@ pub class HttpResponse {
                 return true
             }
 
-            HttpPace(s, pace, out.Count)
-            s.Write(out)
+            HttpWrite(s, pace, out)
             return true
         }
 
@@ -6687,11 +6790,9 @@ pub class HttpResponse {
         if held.Count <= 65536 {
             out.AddRange(held)
         } else {
-            HttpPace(s, pace, out.Count)
-            s.Write(out)
+            HttpWrite(s, pace, out)
             out = HttpNoBytes()
-            HttpPace(s, pace, held.Count)
-            s.Write(held)
+            HttpWrite(s, pace, held)
         }
 
         if chunked {
@@ -6708,8 +6809,7 @@ pub class HttpResponse {
         }
 
         if out.Count > 0 {
-            HttpPace(s, pace, out.Count)
-            s.Write(out)
+            HttpWrite(s, pace, out)
         }
 
         return true
@@ -6819,18 +6919,15 @@ pub class HttpWriter {
             out.AddRange(bytes)
         } else {
             if out.Count > 0 {
-                HttpPace(s, pace, out.Count)
-                s.Write(out)
+                HttpWrite(s, pace, out)
                 out = Bytes()
             }
 
-            HttpPace(s, pace, bytes.Count)
-            s.Write(bytes)
+            HttpWrite(s, pace, bytes)
         }
 
         if out.Count > 0 {
-            HttpPace(s, pace, out.Count)
-            s.Write(out)
+            HttpWrite(s, pace, out)
         }
 
         if chunked {
@@ -6869,8 +6966,7 @@ pub class HttpWriter {
         }
 
         if out.Count > 0 {
-            HttpPace(s, pace, out.Count)
-            s.Write(out)
+            HttpWrite(s, pace, out)
         }
     }
 
@@ -6886,11 +6982,7 @@ pub class HttpWriter {
         Started()
         out = ahead
         ahead = Bytes()
-        HttpPace(s, pace, out.Count) else {
-            IoError e => return
-        }
-
-        s.Write(out) else {
+        HttpWrite(s, pace, out) else {
             IoError e => return
         }
     }
@@ -6903,17 +6995,17 @@ Bytes HttpNoBytes() => Bytes()
 long | IoError HttpFileSize(string path) => File.Size(path)
 
 // What the writer answers a response that it cannot write: `500` with no body and a close (W8).
-void | IoError HttpUnwritable(TcpStream s, mut Bytes pending, string date) {
+void | IoError HttpUnwritable(TcpStream s, mut Bytes pending, string date, HttpRate? pace) {
     pending.AddRange("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
-    HttpFlush(s, mut pending)
+    HttpFlush(s, mut pending, pace)
 }
 
-// The responses `pending` holds written, and `pending` emptied.
-void | IoError HttpFlush(TcpStream s, mut Bytes pending) {
+// The responses `pending` holds written, held to `pace` where it is given, and `pending` emptied.
+void | IoError HttpFlush(TcpStream s, mut Bytes pending, HttpRate? pace) {
     if pending.Count > 0 {
         out = pending
         pending = HttpNoBytes()
-        s.Write(out)
+        HttpWrite(s, pace, out)
     }
 }
 
@@ -6961,8 +7053,7 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
             break
         }
 
-        HttpPace(s, pace, piece.Count)
-        s.Write(piece)
+        HttpWrite(s, pace, piece)
         piece = Bytes()
     }
 
@@ -6976,8 +7067,7 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
     }
 
     if piece.Count > 0 {
-        HttpPace(s, pace, piece.Count)
-        s.Write(piece)
+        HttpWrite(s, pace, piece)
     }
 }
 
@@ -7142,6 +7232,485 @@ pub class HttpServer {
     }
 }
 
+// The kinds of a failed parse of a `Uri` (design record, section 12; W12): a scheme that is missing or holds a byte a scheme does
+// not take; a host that is missing, `//` before it among it, or holds a byte a host does not take; a port that is no number from 0
+// to 65535; and a byte no part of a `Uri` takes, a space, a control byte or one past ASCII among them, or a `%` without two hex
+// digits after it (RFC 3986, section 2).
+pub enum UriKind { Scheme, Host, Port, Character }
+
+// A failed parse of a `Uri`: its kind, and the position of the first byte the parse refused, counted in bytes from 0, as `HexError`
+// holds its `At`; it holds no input (design record, section 12; W12).
+pub data UriError(UriKind Kind, int At)
+
+// An address of HTTP made from text, `scheme://host:port/path?query#fragment`, as .NET's `Uri` (design record, section 12; W12):
+// `Uri.Parse` gives it, and its parts are held as the text writes them, with no escaping and no unescaping.
+pub class Uri {
+    mut string scheme = ""
+    mut string host = ""
+    mut int port = -1
+    mut string path = "/"
+    mut string query = ""
+
+    // The scheme as written, `http` or `HTTP`.
+    pub string Scheme => scheme
+
+    // The host as written: a name, an IPv4 address, or an IPv6 address between its brackets, `[::1]`.
+    pub string Host => host
+
+    // The port written after the host, or the scheme's own where none is: 80 for `http`, 443 for `https` and -1 for another.
+    pub int Port => port
+
+    // The path from its first `/`, and `/` where the text has none.
+    pub string Path => path
+
+    // The query after the `?`, without it, as `HttpRequest.Query` holds it, and empty where the text has none.
+    pub string Query => query
+
+    // The `Uri` of `text`, or the `UriError` of the first byte the parse refuses; a fragment after `#` is read and is no part, and
+    // so is a user's part before an `@` of the host.
+    pub static Uri | UriError Parse(string text) {
+        b = text.Bytes
+        for i in 0..<b.Count {
+            if !UriByte(b[i]) {
+                return UriError(UriKind.Character, i)
+            }
+
+            if b[i] == 37 && (i + 2 >= b.Count || !UriHex(b[i + 1]) || !UriHex(b[i + 2])) {
+                return UriError(UriKind.Character, i)
+            }
+        }
+
+        if b.Count == 0 || !UriLetter(b[0]) {
+            return UriError(UriKind.Scheme, 0)
+        }
+
+        mut at = 1
+        while at < b.Count && b[at] != 58 {
+            c = b[at]
+            if !UriLetter(c) && !(c >= 48 && c <= 57) && c != 43 && c != 45 && c != 46 {
+                return UriError(UriKind.Scheme, at)
+            }
+
+            at = at + 1
+        }
+
+        if at == b.Count {
+            return UriError(UriKind.Scheme, at)
+        }
+
+        u = Uri()
+        u.scheme = text.Substring(0, at)
+        at = at + 1
+        if at + 1 >= b.Count || b[at] != 47 || b[at + 1] != 47 {
+            return UriError(UriKind.Host, at)
+        }
+
+        at = at + 2
+        mut stop = at
+        while stop < b.Count && b[stop] != 47 && b[stop] != 63 && b[stop] != 35 {
+            stop = stop + 1
+        }
+
+        mut hostStart = at
+        for i in at..<stop {
+            if b[i] == 64 {
+                hostStart = i + 1
+            }
+        }
+
+        mut hostEnd = hostStart
+        if hostStart < stop && b[hostStart] == 91 {
+            hostEnd = hostStart + 1
+            while hostEnd < stop && b[hostEnd] != 93 {
+                c = b[hostEnd]
+                if !(c >= 48 && c <= 58 || c >= 97 && c <= 102 || c >= 65 && c <= 70 || c == 46) {
+                    return UriError(UriKind.Host, hostEnd)
+                }
+
+                hostEnd = hostEnd + 1
+            }
+
+            if hostEnd == stop || hostEnd == hostStart + 1 {
+                return UriError(UriKind.Host, hostEnd)
+            }
+
+            hostEnd = hostEnd + 1
+            if hostEnd < stop && b[hostEnd] != 58 {
+                return UriError(UriKind.Host, hostEnd)
+            }
+        } else {
+            while hostEnd < stop && b[hostEnd] != 58 {
+                if b[hostEnd] == 91 || b[hostEnd] == 93 {
+                    return UriError(UriKind.Host, hostEnd)
+                }
+
+                hostEnd = hostEnd + 1
+            }
+        }
+
+        if hostEnd == hostStart {
+            return UriError(UriKind.Host, hostStart)
+        }
+
+        u.host = text.Substring(hostStart, hostEnd - hostStart)
+        lower = u.scheme.ToLowerAscii()
+        if lower == "http" {
+            u.port = 80
+        } else if lower == "https" {
+            u.port = 443
+        }
+
+        if hostEnd + 1 < stop {
+            mut number = 0
+            for i in hostEnd + 1..<stop {
+                c = b[i]
+                if c < 48 || c > 57 {
+                    return UriError(UriKind.Port, i)
+                }
+
+                number = number * 10 + (c - 48)
+                if number > 65535 {
+                    return UriError(UriKind.Port, i)
+                }
+            }
+
+            u.port = number
+        }
+
+        mut q = stop
+        while q < b.Count && b[q] != 63 && b[q] != 35 {
+            q = q + 1
+        }
+
+        if q > stop {
+            u.path = text.Substring(stop, q - stop)
+        }
+
+        if q < b.Count && b[q] == 63 {
+            mut f = q + 1
+            while f < b.Count && b[f] != 35 {
+                f = f + 1
+            }
+
+            u.query = text.Substring(q + 1, f - q - 1)
+        }
+
+        return u
+    }
+
+    // `reference` resolved against `base` as RFC 3986, section 5.2.2, resolves it, its path's dot segments removed (section 5.2.4):
+    // a reference with a scheme stands alone, one that starts with `//` takes the base's scheme, one that starts with `/` its host and
+    // port too, one that starts with `?` its path too, and any other its path up to its last `/` as well; null where the result is
+    // no `Uri` (W15).
+    internal static Uri? Resolve(Uri base, string reference) {
+        mut text = reference
+        if !UriHasScheme(reference) {
+            prefix = "{base.Scheme}://{base.Host}:{base.Port}"
+            if reference.StartsWith("//") {
+                text = "{base.Scheme}:{reference}"
+            } else if reference.StartsWith("/") {
+                text = "{prefix}{reference}"
+            } else if reference.StartsWith("?") {
+                text = "{prefix}{base.Path}{reference}"
+            } else if reference == "" || reference.StartsWith("#") {
+                text = "{prefix}{base.Path}"
+                if base.Query != "" {
+                    text = "{prefix}{base.Path}?{base.Query}"
+                }
+            } else {
+                text = "{prefix}{UriDirectory(base.Path)}{reference}"
+            }
+        }
+
+        match Parse(text) {
+            Uri u => {
+                u.path = UriDotless(u.path)
+                return u
+            }
+            UriError e => return null
+        }
+    }
+}
+
+// The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
+// connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
+// life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects
+// followed, 20, as browsers allow, where .NET follows 50 (W15), and 0 for none; the
+// limits of a response's head, a request's (W7); and the time of a call, 100 seconds, as .NET's `HttpClient.Timeout` (W16).
+pub data HttpClientOptions(
+    int MaxConnectionsPerServer = 2147483647,
+    duration PooledConnectionIdleTimeout = 1min,
+    duration PooledConnectionLifetime = 9223372036854775807ns,
+    int MaxAutomaticRedirections = 20,
+    HttpLimits Limits = HttpLimits(),
+    duration Timeout = 100s)
+
+// A response a client got: its status, its headers, and its body, read as a stream as a request's is, which holds its connection
+// until it ends (design record, section 12; W14).
+pub class HttpResponseMessage(int Status, HttpHeaders Headers, HttpBody Body) {
+    // Whether the status is a success, from 200 to 299, as .NET's `IsSuccessStatusCode`.
+    pub bool IsSuccess => Status >= 200 && Status <= 299
+
+    // `void` for a success, and the `HttpError` of the kind `Status` for any other status, as .NET's `EnsureSuccessStatusCode`
+    // throws one.
+    pub void | HttpError EnsureSuccess() {
+        if !IsSuccess {
+            return HttpError(HttpKind.Status, "response status {Status}")
+        }
+    }
+}
+
+// A connection of a client's pool: its stream, its host and port, when it opened and when it last went idle, and, while a response
+// holds it, that response's body, held weakly, so that a body let go of unread closes the connection at the next call (W13).
+class HttpConnection(TcpStream Stream, string Key, instant Opened) {
+    internal mut instant idleSince = Opened
+    internal mut weak HttpBody? body = null
+    internal mut bool keep = true
+    internal mut bool ended = false
+    internal mut bool clean = false
+
+    // Marks the connection's body ended, `clean` where it ended with no failure, so that the stream holds what follows it, and
+    // idle from now, as hyper-util's pool takes the time a connection goes back.
+    internal void Ends(bool isClean) {
+        ended = true
+        clean = isClean
+        idleSince = instant.Now
+    }
+}
+
+// A client of HTTP/1.1, as .NET's `HttpClient` (design record, section 12; W13): `HttpClient()` with `HttpClientOptions()`, and
+// `HttpClient(options)`; it keeps a pool of connections, several to each host, as .NET's `SocketsHttpHandler` keeps one, each
+// connection carrying one request at a time, as hyper's client `conn` carries it, and held by its response until the body ends.
+// While the compiler builds no actors, the pool lives in the program's one actor (section 12).
+pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
+    mut List<HttpConnection> idle = List<HttpConnection>()
+    mut List<HttpConnection> busy = List<HttpConnection>()
+
+    // The response to a `GET` of `uri`, with its redirects followed up to `MaxAutomaticRedirections` (W15), or the failure of the
+    // network or of HTTP.
+    pub HttpResponseMessage | IoError | HttpError Get(Uri uri) {
+        call = HttpCall(instant.Now, Options.Timeout)
+        mut target = uri
+        mut followed = 0
+        while true {
+            response = Exchange(target, call)
+            next = HttpRedirect(target, response)
+            if next == null || Options.MaxAutomaticRedirections <= 0 {
+                return response
+            }
+
+            Let(response)
+            if followed >= Options.MaxAutomaticRedirections {
+                return HttpError(HttpKind.Protocol, "too many redirects")
+            }
+
+            followed = followed + 1
+            target = next
+        }
+
+        return HttpError(HttpKind.Protocol, "too many redirects")
+    }
+
+    // One request and its response, on the connection the pool holds for the host and port that went idle last, or on a new one: a
+    // connection of the pool that ends before the first byte of a response carries the request again on a new one, once, as .NET
+    // sends a request again on a connection the server shut down (W13); all of it within what remains of the `call` (W16).
+    HttpResponseMessage | IoError | HttpError Exchange(Uri uri, HttpCall call) {
+        scheme = uri.Scheme.ToLowerAscii()
+        if scheme == "https" {
+            return HttpError(HttpKind.Unsupported, "https is not supported: no TLS")
+        }
+
+        if scheme != "http" {
+            return HttpError(HttpKind.Unsupported, "unsupported scheme")
+        }
+
+        key = "{uri.Host.ToLowerAscii()}:{uri.Port}"
+        request = HttpGetHead(uri).Bytes
+        pooled = Checkout(key)
+        if pooled != null {
+            match Carry(pooled, request, call) {
+                HttpResponseMessage r => return r
+                IoError e => return e
+                HttpError e => return e
+                HttpSilent quiet => {
+                }
+            }
+        }
+
+        c = Open(uri, key, call)
+        match Carry(c, request, call) {
+            HttpResponseMessage r => return r
+            IoError e => return e
+            HttpError e => return e
+            HttpSilent quiet => {
+                e = quiet.Error
+                if e != null {
+                    return e
+                }
+
+                return HttpError(HttpKind.Protocol, "malformed response: no status line")
+            }
+        }
+    }
+
+    // The request written on the connection and the head of its response read, each under what remains of the `call`, whose time
+    // the body's reads keep (W16): the connection is busy while the response's body is open, `HttpSilent` where it ended before the
+    // first byte of a head, and closed then, as on every failure; the call's time running out is no such end.
+    HttpResponseMessage | IoError | HttpError | HttpSilent Carry(HttpConnection c, Bytes request, HttpCall call) {
+        s = c.Stream
+        HttpCallWrites(s, call) else {
+            IoError e => {
+                HttpShut(s)
+                return e
+            }
+        }
+
+        s.Write(request) else {
+            IoError e => {
+                HttpShut(s)
+                if e.Kind == IoKind.TimedOut {
+                    return HttpCallTimedOut()
+                }
+
+                return HttpSilent(e)
+            }
+        }
+
+        match HttpReadResponse(s, Options.Limits, call) {
+            HttpResponseHead h => {
+                body = HttpBody.MakeResponse(s, h.Length, h.Chunked, h.ToEnd, Options.Limits.MaxChunkSizeLine)
+                body.call = call
+                c.body = body
+                c.keep = h.Keep
+                if body.Ended {
+                    c.Ends(true)
+                } else {
+                    body.home = c
+                }
+
+                busy.Add(c)
+                return HttpResponseMessage(h.Status, h.Headers, body)
+            }
+            IoError e => {
+                HttpShut(s)
+                return e
+            }
+            HttpError e => {
+                HttpShut(s)
+                return e
+            }
+            HttpSilent quiet => {
+                HttpShut(s)
+                return quiet
+            }
+        }
+    }
+
+    // The connection of `key` that went idle last, or null. First each busy connection whose body ended goes idle, or closes where its
+    // response said so, its body failed or its life is over, and each whose body was let go of unread closes; then each idle
+    // connection idle longer than `PooledConnectionIdleTimeout`, or open longer than `PooledConnectionLifetime`, closes, as
+    // hyper-util's pool passes over expired connections at its checkout (W13).
+    HttpConnection? Checkout(string key) {
+        now = instant.Now
+        mut i = 0
+        while i < busy.Count {
+            c = busy[i]
+            if c.ended {
+                busy.RemoveAt(i)
+                if c.keep && c.clean && now - c.Opened <= Options.PooledConnectionLifetime {
+                    idle.Add(c)
+                } else {
+                    HttpShut(c.Stream)
+                }
+            } else if c.body == null {
+                busy.RemoveAt(i)
+                HttpShut(c.Stream)
+            } else {
+                i = i + 1
+            }
+        }
+
+        mut j = 0
+        while j < idle.Count {
+            c = idle[j]
+            if now - c.idleSince > Options.PooledConnectionIdleTimeout || now - c.Opened > Options.PooledConnectionLifetime {
+                idle.RemoveAt(j)
+                HttpShut(c.Stream)
+            } else {
+                j = j + 1
+            }
+        }
+
+        mut pick = -1
+        mut k = 0
+        while k < idle.Count {
+            c = idle[k]
+            if c.Key == key && (pick < 0 || c.idleSince - idle[pick].idleSince >= 0s) {
+                pick = k
+            }
+
+            k = k + 1
+        }
+
+        if pick < 0 {
+            return null
+        }
+
+        chosen = idle[pick]
+        idle.RemoveAt(pick)
+        chosen.ended = false
+        chosen.clean = false
+        return chosen
+    }
+
+    // A new connection to the host and port of `uri`, its connect bounded by what remains of the `call` (W16), or the `HttpError` of
+    // a host whose connections reach `MaxConnectionsPerServer`, since in a program of one actor no other actor gives one back (W13).
+    HttpConnection | IoError | HttpError Open(Uri uri, string key, HttpCall call) {
+        mut count = 0
+        for c in busy {
+            if c.Key == key {
+                count = count + 1
+            }
+        }
+
+        if count >= Options.MaxConnectionsPerServer {
+            return HttpError(HttpKind.TooLarge, "too many connections to the host")
+        }
+
+        remains = HttpCallLeft(call)
+        s = TcpStream.Connect("{uri.Host}:{uri.Port}", remains) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
+        return HttpConnection(s, key, instant.Now)
+    }
+
+    // Lets go of a response the client follows past: its body read and dropped up to `MaxDrainSize`, so that its connection goes idle,
+    // and the connection closed where the body is longer or fails (W15).
+    void Let(HttpResponseMessage response) {
+        drained = response.Body.Drain(Options.Limits.MaxDrainSize) else {
+            IoError e => false
+            HttpError e => false
+        }
+
+        if drained {
+            return
+        }
+
+        mut i = 0
+        while i < busy.Count {
+            c = busy[i]
+            if c.body == response.Body {
+                busy.RemoveAt(i)
+                HttpShut(c.Stream)
+                return
+            }
+
+            i = i + 1
+        }
+    }
+}
+
 // A limit of zero or below, `InvalidInput` naming the member, as a time of zero or below is at `Connect`.
 void | IoError HttpCheckLimits(HttpLimits limits) {
     if limits.MaxRequestLineSize <= 0 {
@@ -7229,20 +7798,23 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
             date = "Date: {HttpDate(now)}\r\n"
         }
 
+        pace = limits.MinResponseDataRate
         match HttpReadRequest(s, limits, begun + limits.RequestHeadersTimeout) {
             HttpRefused no => {
-                HttpRefuse(s, mut pending, no.Status, date) else {
+                HttpRefuse(s, mut pending, no.Status, date, pace) else {
                     IoError e => return no.Error
                 }
 
+                HttpLinger(s, limits)
                 return no.Error
             }
             IoError e => {
                 if e.Kind == IoKind.TimedOut {
-                    HttpRefuse(s, mut pending, 408, date) else {
+                    HttpRefuse(s, mut pending, 408, date, pace) else {
                         IoError lost => return HttpTimedOut()
                     }
 
+                    HttpLinger(s, limits)
                     return HttpTimedOut()
                 }
 
@@ -7253,7 +7825,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 if pending.Count > 0 && !r.Body.Ended {
                     // a handler that reads a body may wait for it, and its first read may send `100 Continue`: the responses
                     // before it go out first
-                    HttpFlush(s, mut pending)
+                    HttpFlush(s, mut pending, pace)
                 }
 
                 response = handler(r)
@@ -7265,10 +7837,11 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
 
                 body = r.Body
                 if body.TimedOut {
-                    HttpRefuse(s, mut pending, 408, date) else {
+                    HttpRefuse(s, mut pending, 408, date, pace) else {
                         IoError lost => return HttpTimedOut()
                     }
 
+                    HttpLinger(s, limits)
                     return HttpTimedOut()
                 }
 
@@ -7281,10 +7854,11 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                         HttpError e => {
                             // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), answered `408`
                             if body.TimedOut {
-                                HttpRefuse(s, mut pending, 408, date) else {
+                                HttpRefuse(s, mut pending, 408, date, pace) else {
                                     IoError lost => return HttpTimedOut()
                                 }
 
+                                HttpLinger(s, limits)
                                 return HttpTimedOut()
                             }
 
@@ -7302,9 +7876,12 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                     dated = ""
                 }
 
-                close = !keep && headers.Get("Connection") == null
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, limits.MinResponseDataRate, mut pending, keep && r.next, body)
+                // the server's own `Connection: close` before a close, beside a handler's `Connection` that does not say it (section
+                // 12, the owner, 2026-11-05, Q6)
+                close = !keep && !HttpCloses(headers)
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, pace, mut pending, keep && r.next, body)
                 if !keep || !written {
+                    HttpLinger(s, limits)
                     return
                 }
 
@@ -7338,13 +7915,49 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
 }
 
 // The status line alone that answers a request the server refuses, with an empty body, its `Date` and a close, and nothing where the
-// status is 0 (section 12, "Status line only"), after the responses `pending` holds and in the same write.
-void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string date) {
+// status is 0 (section 12, "Status line only"), after the responses `pending` holds and in the same write, held to `pace`.
+void | IoError HttpRefuse(TcpStream s, mut Bytes pending, int status, string date, HttpRate pace) {
     if status != 0 {
         pending.AddRange("HTTP/1.1 {status} {HttpReason(status)}\r\nContent-Length: 0\r\nConnection: close\r\n{date}\r\n".Bytes)
     }
 
-    HttpFlush(s, mut pending)
+    HttpFlush(s, mut pending, pace)
+}
+
+// The close in stages of a connection the server closes once it has written a response or a refusal, as RFC 9112, section 9.6, has a
+// server close one (section 12, the owner, 2026-11-02, "a half-close on `TcpStream`"): its writes ended, so that the client reads the
+// end of what was written, then what the client still sends read and dropped, at most `MaxDrainSize` bytes within `KeepAliveTimeout`,
+// so that a close with bytes unread sends no reset that takes the response from the client; a half-close the system refuses, or a read
+// that fails, ends it at once (section 12, assumed). `ServeConnection` then closes the stream.
+void HttpLinger(TcpStream s, HttpLimits limits) {
+    s.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    deadline = instant.Now + limits.KeepAliveTimeout
+    mut room = long(limits.MaxDrainSize)
+    mut dropped = Bytes()
+    while room > 0 {
+        HttpWaitUntil(s, deadline) else {
+            IoError e => return
+        }
+
+        dropped.Clear()
+        mut piece = 65536
+        if room < piece {
+            piece = int(room)
+        }
+
+        n = s.Read(mut dropped, piece) else {
+            IoError e => return
+        }
+
+        if n == 0 {
+            return
+        }
+
+        room = room - n
+    }
 }
 
 // The error a connection gives where the server answered its request `408 Request Timeout`, among the server's texts of the kind
@@ -7362,19 +7975,23 @@ void | IoError HttpWaitUntil(TcpStream s, instant deadline) {
     s.SetReadTimeout(spare)
 }
 
-// Sets the time of the stream's next write to the longer of the grace of `pace` and the time `count` bytes take at its rate, as
-// Kestrel holds a response to `MinResponseDataRate` for each write; nothing where no rate is given (W10).
-void | IoError HttpPace(TcpStream s, HttpRate? pace, long count) {
+// `bytes` written to `s`, where a rate is given within the longer of the grace of `pace` and the time `bytes.Count` bytes take at its
+// rate, as Kestrel holds a response to `MinResponseDataRate` for each write, and with no time of its own where none is given (W10).
+// The bound holds across the calls of the system the write makes: the runtime sets what remains of it before each, through a member
+// of the stream that the checker admits in `std/` alone (section 12, the default of the follow-up's product pass, Q10).
+void | IoError HttpWrite(TcpStream s, HttpRate? pace, Bytes bytes) {
     if pace == null {
+        s.Write(bytes)
         return
     }
 
-    bound = HttpNanosAt(count, pace.BytesPerSecond)
-    if bound > HttpNanosOf(pace.Grace) {
-        s.SetWriteTimeout(HttpNanos(bound))
-    } else {
-        s.SetWriteTimeout(pace.Grace)
+    mut bound = HttpNanosAt(bytes.Count, pace.BytesPerSecond)
+    grace = HttpNanosOf(pace.Grace)
+    if bound < grace {
+        bound = grace
     }
+
+    s.WriteWithin(bytes, HttpNanos(bound))
 }
 
 // The nanoseconds `count` bytes take at `perSecond` bytes a second, without passing the range of a `long` on the way.
@@ -7404,10 +8021,13 @@ long HttpNanosOf(duration d) {
 
 // Whether headers say `Connection: close`, among the options of every `Connection` line, without regard to ASCII case (RFC 9110,
 // section 7.6.1).
-bool HttpCloses(HttpHeaders headers) {
+bool HttpCloses(HttpHeaders headers) => HttpConnectionSays(headers, "close")
+
+// Whether headers name `option`, in lower case, among the options of every `Connection` line, without regard to ASCII case.
+bool HttpConnectionSays(HttpHeaders headers, string option) {
     for value in headers.GetAll("Connection") {
-        for option in value.Split(",") {
-            if option.Trim().ToLowerAscii() == "close" {
+        for one in value.Split(",") {
+            if one.Trim().ToLowerAscii() == option {
                 return true
             }
         }
@@ -7483,21 +8103,36 @@ string HttpTwo(long n) {
 // What std/'s reader refuses: the status the server answers, 0 where it answers none, beside the error a program sees (W5).
 data HttpRefused(int Status, HttpError Error)
 
-// The next line of the stream without its CR LF, of at most `most` bytes with them, taken through the stream's buffer (S24).
-Bytes | IoError | HttpError HttpLine(TcpStream s, int most) {
+// The next line of the stream without its CR LF, of at most `most` bytes with them, `tooLong` past them, taken through the stream's
+// buffer (S24), what remains until `deadline` set before each refill where one is given (section 12, the owner, 2026-11-04, Q9 (a)),
+// its other failures in the words of the `side`, `request` or `response`, whose body it reads, each read under what remains of a
+// client's `call` where one is given (W16).
+Bytes | IoError | HttpError HttpLine(TcpStream s, int most, HttpError tooLong, instant? deadline, string side, HttpCall? call) {
     mut line = Bytes()
     while true {
+        if deadline != null {
+            HttpWaitUntil(s, deadline)
+        }
+
         start = line.Count
-        n = s.Fill(mut line)
+        HttpCallReads(s, call)
+        n = s.Fill(mut line) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
-            return HttpError(HttpKind.Protocol, "malformed request: unexpected end of body")
+            return HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
         }
 
         for i in start..<line.Count {
             if line[i] == 10 {
                 s.Consume(i + 1 - start)
-                if i == 0 || line[i - 1] != 13 || i + 1 > most {
-                    return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+                if i + 1 > most {
+                    return tooLong
+                }
+
+                if i == 0 || line[i - 1] != 13 {
+                    return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk")
                 }
 
                 return line[0..<i - 1]
@@ -7506,7 +8141,7 @@ Bytes | IoError | HttpError HttpLine(TcpStream s, int most) {
 
         s.Consume(n)
         if line.Count >= most {
-            return HttpError(HttpKind.Protocol, "malformed request: bad chunk")
+            return tooLong
         }
     }
 
@@ -7564,7 +8199,9 @@ HttpRequest | IoError | HttpRefused HttpReadRequest(TcpStream s, HttpLimits limi
 
                     match HttpParseHead(head, firstEnd, i - 1, limits) {
                         HttpHead h => {
-                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits, deadline != null))
+                            // the bytes and the lines of the head's headers, without its empty line, which a trailer counts on from
+                            body = HttpBody.Make(s, h.Length, h.Chunked, h.Continue, limits, deadline != null, i - firstEnd - 3, count)
+                            r = HttpRequest(h.Method, h.Path, h.Query, h.Headers, body)
                             r.minor = h.Minor
                             r.next = !h.Chunked && h.Length == 0 && HttpHeadFollows(head, i + 1)
                             return r
@@ -7676,9 +8313,81 @@ bool HttpHostValid(string host) {
     return true
 }
 
-// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5). A header
-// line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse refuses it
-// (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
+// The header lines of a head, from `from` to the CR at `end`, each a name, a colon and a value, or the words of what is wrong
+// with the first that is not, which the server puts after `malformed request: ` and the client after `malformed response: `
+// (W5, W12).
+// A header line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse
+// refuses it (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
+HttpHeaders | string HttpParseHeaderLines(Bytes head, int from, int end) {
+    headers = HttpHeaders()
+    mut lineStart = from
+    while lineStart < end {
+        mut lineStop = lineStart
+        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
+            lineStop = lineStop + 1
+        }
+
+        if head[lineStart] == 32 || head[lineStart] == 9 {
+            return "folded header"
+        }
+
+        mut colon = lineStart
+        while colon < lineStop && head[colon] != 58 {
+            if head[colon] == 32 || head[colon] == 9 {
+                return "space before a header's colon"
+            }
+
+            if !HttpTokenByte(head[colon]) {
+                return "bad header name"
+            }
+
+            colon = colon + 1
+        }
+
+        if colon == lineStop {
+            return "header without a colon"
+        }
+
+        if colon == lineStart {
+            return "bad header name"
+        }
+
+        mut valueStart = colon + 1
+        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
+            valueStart = valueStart + 1
+        }
+
+        mut valueEnd = lineStop
+        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
+            valueEnd = valueEnd - 1
+        }
+
+        for p in valueStart..<valueEnd {
+            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
+                return "control byte in a header"
+            }
+        }
+
+        name = string.FromUtf8(head[lineStart..<colon]) else {
+            InvalidUtf8 => ""
+        }
+
+        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
+            InvalidUtf8 => return "header not UTF-8"
+        }
+
+        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
+        headers.Add(name, value) else {
+            HttpError e => return "control byte in a header"
+        }
+
+        lineStart = lineStop + 2
+    }
+
+    return headers
+}
+
+// The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5).
 HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimits limits) {
     if head[0] == 32 {
         return HttpBad("empty method")
@@ -7730,80 +8439,44 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
 
     minor = v[7] - 48
     if method == "CONNECT" {
-        return HttpBad("CONNECT")
+        return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported method"))
     }
 
-    mut path = target
-    mut query = ""
-    question = target.IndexOf("?")
-    if question != null {
-        path = target.Substring(0, question)
-        query = target.Substring(question + 1, target.Bytes.Count - question - 1)
-    }
-
-    headers = HttpHeaders()
-    mut lineStart = lineEnd + 2
-    while lineStart < end {
-        mut lineStop = lineStart
-        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
-            lineStop = lineStop + 1
+    // a target in absolute form gives its path, and its authority stands as the `Host` (section 12, the owner, 2026-11-05, Q2)
+    mut form = target
+    mut authority = ""
+    begins = HttpAuthorityStart(head[targetStart..<at])
+    absolute = begins >= 0
+    if absolute {
+        mut stop = targetStart + begins
+        while stop < at && head[stop] != 47 && head[stop] != 63 {
+            stop = stop + 1
         }
 
-        if head[lineStart] == 32 || head[lineStart] == 9 {
-            return HttpBad("folded header")
-        }
-
-        mut colon = lineStart
-        while colon < lineStop && head[colon] != 58 {
-            if head[colon] == 32 || head[colon] == 9 {
-                return HttpBad("space before a header's colon")
-            }
-
-            if !HttpTokenByte(head[colon]) {
-                return HttpBad("bad header name")
-            }
-
-            colon = colon + 1
-        }
-
-        if colon == lineStop {
-            return HttpBad("header without a colon")
-        }
-
-        if colon == lineStart {
-            return HttpBad("bad header name")
-        }
-
-        mut valueStart = colon + 1
-        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
-            valueStart = valueStart + 1
-        }
-
-        mut valueEnd = lineStop
-        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
-            valueEnd = valueEnd - 1
-        }
-
-        for p in valueStart..<valueEnd {
-            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
-                return HttpBad("control byte in a header")
-            }
-        }
-
-        name = string.FromUtf8(head[lineStart..<colon]) else {
+        authority = string.FromUtf8(head[targetStart + begins..<stop]) else {
             InvalidUtf8 => ""
         }
 
-        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
-            InvalidUtf8 => return HttpBad("header not UTF-8")
+        rest = string.FromUtf8(head[stop..<at]) else {
+            InvalidUtf8 => ""
         }
 
-        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
-        headers.Add(name, value) else {
-            HttpError e => return HttpBad("control byte in a header")
+        form = rest
+        if stop == at || head[stop] == 63 {
+            form = "/{rest}"
         }
+    }
 
-        lineStart = lineStop + 2
+    mut path = form
+    mut query = ""
+    question = form.IndexOf("?")
+    if question != null {
+        path = form.Substring(0, question)
+        query = form.Substring(question + 1, form.Bytes.Count - question - 1)
+    }
+
+    headers = HttpParseHeaderLines(head, lineEnd + 2, end) else {
+        string what => return HttpBad(what)
     }
 
     hosts = headers.GetAll("Host")
@@ -7817,6 +8490,16 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
 
     if hosts.Count == 1 && !HttpHostValid(hosts[0]) {
         return HttpBad("bad Host")
+    }
+
+    if absolute {
+        if authority == "" || !HttpHostValid(authority) {
+            return HttpBad("bad Host")
+        }
+
+        headers.Set("Host", authority) else {
+            HttpError e => return HttpBad("bad Host")
+        }
     }
 
     lengths = headers.GetAll("Content-Length")
@@ -7852,7 +8535,29 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         return HttpBad("Content-Length beside Transfer-Encoding")
     }
 
-    if codings.Count > 1 || codings.Count == 1 && codings[0].ToLowerAscii() != "chunked" {
+    // the lines of `Transfer-Encoding` one list in their order: in HTTP/1.0 none, a last coding other than `chunked` malformed, and
+    // another coding before a last `chunked` not served (section 12, the owner, 2026-11-05, Q1 and Q7)
+    mut last = ""
+    mut named = 0
+    for line in codings {
+        for part in line.Split(",") {
+            coding = part.TrimAscii()
+            if coding != "" {
+                last = coding.ToLowerAscii()
+                named = named + 1
+            }
+        }
+    }
+
+    if codings.Count > 0 && minor == 0 {
+        return HttpBad("transfer encoding in HTTP/1.0")
+    }
+
+    if codings.Count > 0 && last != "chunked" {
+        return HttpBad("transfer encoding not ending in chunked")
+    }
+
+    if named > 1 {
         return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported transfer encoding"))
     }
 
@@ -7875,5 +8580,380 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         sized = 0
     }
 
-    return HttpHead(method, path, query, headers, minor, sized, codings.Count == 1, expects)
+    return HttpHead(method, path, query, headers, minor, sized, codings.Count > 0, expects)
+}
+
+// Where the authority of a target in absolute form starts, after its scheme and `://`, or -1 for a target in another form (RFC 9112,
+// section 3.2.2): a scheme is a letter and then letters, digits, `+`, `-` and `.` (RFC 3986, section 3.1) (section 12, assumed).
+int HttpAuthorityStart(Bytes t) {
+    if t.Count == 0 || !(t[0] >= 97 && t[0] <= 122 || t[0] >= 65 && t[0] <= 90) {
+        return -1
+    }
+
+    mut i = 1
+    while i < t.Count && (t[i] >= 97 && t[i] <= 122 || t[i] >= 65 && t[i] <= 90 || t[i] >= 48 && t[i] <= 57 || t[i] == 43 || t[i] == 45 || t[i] == 46) {
+        i = i + 1
+    }
+
+    if i + 2 < t.Count && t[i] == 58 && t[i + 1] == 47 && t[i + 2] == 47 {
+        return i + 3
+    }
+
+    return -1
+}
+
+// Whether a byte stands in a `Uri`: a letter, a digit, one of `-._~`, of the delimiters `:/?#[]@!$&'()*+,;=`, or `%` (RFC 3986,
+// section 2).
+bool UriByte(byte c) {
+    return c >= 33 && c <= 126 && c != 34 && c != 60 && c != 62 && c != 92 && c != 94 && c != 96 && c != 123 && c != 124 && c != 125
+}
+
+// Whether a byte is a hex digit, as one of the two after a `%`.
+bool UriHex(byte c) => c >= 48 && c <= 57 || c >= 97 && c <= 102 || c >= 65 && c <= 70
+
+// Whether a byte is an ASCII letter, the first byte of a scheme.
+bool UriLetter(byte c) => c >= 97 && c <= 122 || c >= 65 && c <= 90
+
+// Whether `text` starts with a scheme and its `:`, a letter and then letters, digits, `+`, `-` and `.`.
+bool UriHasScheme(string text) {
+    b = text.Bytes
+    if b.Count == 0 || !UriLetter(b[0]) {
+        return false
+    }
+
+    for i in 1..<b.Count {
+        c = b[i]
+        if c == 58 {
+            return true
+        }
+
+        if !UriLetter(c) && !(c >= 48 && c <= 57) && c != 43 && c != 45 && c != 46 {
+            return false
+        }
+    }
+
+    return false
+}
+
+// The path up to its last `/`, with it, where a relative reference is merged (RFC 3986, section 5.2.3).
+string UriDirectory(string path) {
+    b = path.Bytes
+    mut last = 0
+    for i in 0..<b.Count {
+        if b[i] == 47 {
+            last = i
+        }
+    }
+
+    return path.Substring(0, last + 1)
+}
+
+// The path without its dot segments, `.` and `..`, as RFC 3986, section 5.2.4, removes them: `/a/b/../c/./d` is `/a/c/d`, and a
+// path that ends in one ends in `/`.
+string UriDotless(string path) {
+    pieces = path.Split("/")
+    mut segments = List<string>()
+    for i in 1..<pieces.Count {
+        piece = pieces[i]
+        if piece == "." || piece == ".." {
+            if piece == ".." && segments.Count > 0 {
+                segments.RemoveAt(segments.Count - 1)
+            }
+
+            if i == pieces.Count - 1 {
+                segments.Add("")
+            }
+        } else {
+            segments.Add(piece)
+        }
+    }
+
+    joined = string.Join("/", segments)
+    return "/{joined}"
+}
+
+// The head of a `GET` of `uri`: its path and query as written, and `Host` with the port where it is not 80, `http`'s own, and no
+// other header (section 12, the client's product pass).
+string HttpGetHead(Uri uri) {
+    mut host = uri.Host
+    if uri.Port != 80 {
+        host = "{uri.Host}:{uri.Port}"
+    }
+
+    mut target = uri.Path
+    if uri.Query != "" {
+        target = "{uri.Path}?{uri.Query}"
+    }
+
+    return "GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n"
+}
+
+// The address a redirect leads to, its `Location` resolved against the address `from` it answers, or null where the response is
+// no `301`, `302`, `303`, `307` or `308`, has no `Location`, or one that resolves to no `Uri`, so that the client gives that response,
+// as .NET gives it (W15).
+Uri? HttpRedirect(Uri from, HttpResponseMessage response) {
+    code = response.Status
+    if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 {
+        return null
+    }
+
+    location = response.Headers.Get("Location")
+    if location == null {
+        return null
+    }
+
+    return Uri.Resolve(from, location)
+}
+
+// Closes a stream whose connection the client lets go of, an error of that close dropped, as the close at the last count drops it
+// (S5).
+void HttpShut(TcpStream s) {
+    s.Close() else {
+        IoError e => {
+        }
+    }
+}
+
+// What the head of a response says, for its body and the client's pool (W14): its status and headers, the length of its body, or
+// that it is chunked, or read to the close, and whether its connection may carry another request.
+data HttpResponseHead(int Status, HttpHeaders Headers, long Length, bool Chunked, bool ToEnd, bool Keep)
+
+// The end of a connection before the first byte of a response's head, with the network's error where it gave one (W13).
+data HttpSilent(IoError? Error)
+
+// A response's head past the limits of a request's head, the status line or the headers (section 12).
+HttpError HttpHeadTooLarge() => HttpError(HttpKind.TooLarge, "response header too large")
+
+// The head of the next response of `s` that is no `1xx`, the `1xx` before it read past, as hyper reads past it (W14): taken through
+// the stream's buffer line by line, each line ended by CR LF, and held to the limits of a request's head, the status line to
+// `MaxRequestLineSize` bytes with its CR LF, the header lines to `MaxRequestHeadersTotalSize` bytes with theirs and the empty line's,
+// at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body. Each read waits what
+// remains of the `call`, and its time running out is the call's `TimedOut` (W16).
+HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s, HttpLimits limits, HttpCall call) {
+    mut any = false
+    while true {
+        mut head = Bytes()
+        mut lineStart = 0
+        mut lineEnd = -1
+        mut end = -1
+        mut count = 0
+        while end < 0 {
+            start = head.Count
+            HttpCallReads(s, call)
+            n = s.Fill(mut head) else {
+                IoError e => {
+                    if e.Kind == IoKind.TimedOut {
+                        return HttpCallTimedOut()
+                    }
+
+                    if start == 0 && !any {
+                        return HttpSilent(e)
+                    }
+
+                    return e
+                }
+            }
+
+            if n == 0 {
+                if start == 0 && !any {
+                    return HttpSilent(null)
+                }
+
+                return HttpError(HttpKind.Protocol, "malformed response: incomplete")
+            }
+
+            mut i = start
+            while end < 0 && i < head.Count {
+                if head[i] == 10 {
+                    if i == 0 || head[i - 1] != 13 {
+                        s.Consume(i + 1 - start)
+                        return HttpError(HttpKind.Protocol, "malformed response: line not ended by CR LF")
+                    }
+
+                    if lineEnd < 0 {
+                        if i + 1 > limits.MaxRequestLineSize {
+                            s.Consume(i + 1 - start)
+                            return HttpHeadTooLarge()
+                        }
+
+                        lineEnd = i - 1
+                    } else if i - 1 == lineStart {
+                        s.Consume(i + 1 - start)
+                        if i + 1 - (lineEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+                            return HttpHeadTooLarge()
+                        }
+
+                        end = i - 1
+                    } else {
+                        count = count + 1
+                        if count > limits.MaxRequestHeaderCount {
+                            s.Consume(i + 1 - start)
+                            return HttpHeadTooLarge()
+                        }
+                    }
+
+                    lineStart = i + 1
+                }
+
+                i = i + 1
+            }
+
+            if end < 0 {
+                s.Consume(n)
+                if lineEnd < 0 && head.Count >= limits.MaxRequestLineSize {
+                    return HttpHeadTooLarge()
+                }
+
+                if lineEnd >= 0 && head.Count - (lineEnd + 2) > limits.MaxRequestHeadersTotalSize + 2 {
+                    return HttpHeadTooLarge()
+                }
+            }
+        }
+
+        any = true
+        match HttpParseResponseHead(head, lineEnd, end) {
+            HttpResponseHead h => {
+                if h.Status == 101 {
+                    return HttpError(HttpKind.Protocol, "malformed response: unexpected 101")
+                }
+
+                if h.Status >= 200 {
+                    return h
+                }
+            }
+            HttpError e => return e
+        }
+    }
+
+    return HttpError(HttpKind.Protocol, "malformed response: incomplete")
+}
+
+// The head of a response, its status line ending at the CR at `lineEnd` and its header lines at the CR at `end`: `HTTP/1.0` or
+// `HTTP/1.1`, a status of three digits from 100, and a reason that may be empty or left out, as httparse reads it; the body framed
+// as RFC 9112, section 6.3, frames a response's, none for `1xx`, `204` and `304`, chunks where `Transfer-Encoding` is `chunked`, the
+// length of `Content-Length`, and otherwise the bytes up to the close; and the connection kept where the response is of HTTP/1.1 or
+// says `Connection: keep-alive`, does not say `Connection: close`, and is not read to the close (W14).
+HttpResponseHead | HttpError HttpParseResponseHead(Bytes head, int lineEnd, int end) {
+    if lineEnd < 12 || head[0] != 72 || head[1] != 84 || head[2] != 84 || head[3] != 80 || head[4] != 47 || head[6] != 46 || head[5] < 48 || head[5] > 57 || head[7] < 48 || head[7] > 57 || head[8] != 32 {
+        return HttpError(HttpKind.Protocol, "malformed response: bad status line")
+    }
+
+    if head[5] != 49 || head[7] > 49 {
+        return HttpError(HttpKind.Unsupported, "unsupported HTTP version")
+    }
+
+    minor = head[7] - 48
+    mut status = 0
+    for i in 9..<12 {
+        if head[i] < 48 || head[i] > 57 {
+            return HttpError(HttpKind.Protocol, "malformed response: bad status line")
+        }
+
+        status = status * 10 + (head[i] - 48)
+    }
+
+    if status < 100 || lineEnd > 12 && head[12] != 32 {
+        return HttpError(HttpKind.Protocol, "malformed response: bad status line")
+    }
+
+    for i in 12..<lineEnd {
+        if head[i] < 32 && head[i] != 9 || head[i] == 127 {
+            return HttpError(HttpKind.Protocol, "malformed response: bad status line")
+        }
+    }
+
+    headers = HttpParseHeaderLines(head, lineEnd + 2, end) else {
+        string what => return HttpError(HttpKind.Protocol, "malformed response: {what}")
+    }
+
+    keep = !HttpCloses(headers) && (minor == 1 || HttpConnectionSays(headers, "keep-alive"))
+    if status < 200 || status == 204 || status == 304 {
+        return HttpResponseHead(status, headers, 0, false, false, keep)
+    }
+
+    codings = headers.GetAll("Transfer-Encoding")
+    lengths = headers.GetAll("Content-Length")
+    if codings.Count > 0 && lengths.Count > 0 {
+        return HttpError(HttpKind.Protocol, "malformed response: Content-Length beside Transfer-Encoding")
+    }
+
+    if codings.Count > 1 || codings.Count == 1 && codings[0].ToLowerAscii() != "chunked" {
+        return HttpError(HttpKind.Unsupported, "unsupported transfer encoding")
+    }
+
+    if codings.Count == 1 {
+        return HttpResponseHead(status, headers, 0, true, false, keep)
+    }
+
+    if lengths.Count == 0 {
+        return HttpResponseHead(status, headers, 0, false, true, false)
+    }
+
+    mut length = -1L
+    for text in lengths {
+        mut n = 0L
+        if text.Bytes.Count == 0 {
+            return HttpError(HttpKind.Protocol, "malformed response: bad Content-Length")
+        }
+
+        for c in text.Bytes {
+            if c < 48 || c > 57 || n > (9223372036854775807L - (c - 48)) / 10 {
+                return HttpError(HttpKind.Protocol, "malformed response: bad Content-Length")
+            }
+
+            n = n * 10 + (c - 48)
+        }
+
+        if length >= 0 && n != length {
+            return HttpError(HttpKind.Protocol, "malformed response: bad Content-Length")
+        }
+
+        length = n
+    }
+
+    return HttpResponseHead(status, headers, length, false, false, keep)
+}
+
+// The time of one call of a client (W16): when it began, read from the monotonic clock, and its bound, the options' `Timeout`.
+data HttpCall(instant Start, duration Limit)
+
+// The failure of a call whose time ran out, `TimedOut` with the number 0, as the bound of `Connect` and the server's own timeout
+// give it (S9, W10).
+IoError HttpCallTimedOut() => IoError(IoKind.TimedOut, 0, "")
+
+// What remains of the call's time, or the call's `TimedOut` where nothing does: what has passed is held against the bound, and
+// never the start and the bound added, which can pass the clock's range (T36).
+duration | IoError HttpCallLeft(HttpCall call) {
+    passed = instant.Now - call.Start
+    if passed >= call.Limit {
+        return HttpCallTimedOut()
+    }
+
+    return call.Limit - passed
+}
+
+// The stream's next read set to wait what remains of the `call`, where one is given, or the call's `TimedOut`, with no call of the
+// system, where nothing remains (W16).
+void | IoError HttpCallReads(TcpStream s, HttpCall? call) {
+    if call == null {
+        return
+    }
+
+    remains = HttpCallLeft(call)
+    s.SetReadTimeout(remains)
+}
+
+// The stream's next write set the same way (W16).
+void | IoError HttpCallWrites(TcpStream s, HttpCall call) {
+    remains = HttpCallLeft(call)
+    s.SetWriteTimeout(remains)
+}
+
+// A failure of a read or a connect under a `call`: the call's own `TimedOut` where the time the client set ran out (W16).
+IoError HttpCallFailed(IoError e, HttpCall? call) {
+    if call != null && e.Kind == IoKind.TimedOut {
+        return HttpCallTimedOut()
+    }
+
+    return e
 }

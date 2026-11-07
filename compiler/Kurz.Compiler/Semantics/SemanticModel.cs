@@ -209,6 +209,9 @@ public enum CallKind
     /// <summary>A stream's <c>SetNoDelay(on)</c>, which only <c>std/</c> reaches (W11, assumed).</summary>
     TcpSetNoDelay,
 
+    /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls (section 12).</summary>
+    TcpWriteWithin,
+
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
 
@@ -245,6 +248,9 @@ public enum CallKind
     /// <summary><c>FixedTime.Equal(a, b)</c> (H4).</summary>
     FixedTimeEqual,
 
+    /// <summary>A log call, <c>Log.Information("Paid {order.Id}")</c> (P1); <see cref="SemanticModel.LogSiteOf"/> is its record.</summary>
+    Log,
+
     /// <summary>An intrinsic of a class under <c>X86</c> or <c>Arm</c>, or a lane operation of a vector (R18); <see cref="CallInfo.Intrinsic"/> is the one picked, and <see cref="CallInfo.Target"/> the vector a lane operation is called on.</summary>
     Intrinsic,
 }
@@ -269,6 +275,13 @@ public sealed record CallInfo(
     /// <summary>The intrinsic or lane operation a call of <see cref="CallKind.Intrinsic"/> calls (R18).</summary>
     public Intrinsic? Intrinsic { get; init; }
 }
+
+/// <summary>
+/// The static record of a log call (P1, P2): its level, from 0 for <c>Trace</c> to 5 for <c>Critical</c>, its category, the name of the
+/// class whose method holds it, or null outside a class, where the category is the file's, and the name of the field of each hole of its
+/// template, in their order, as Rust's <c>tracing</c> gives each of its macros a static <c>Callsite</c>.
+/// </summary>
+public sealed record LogSite(int Level, string? Category, IReadOnlyList<string> Fields);
 
 /// <summary>A lambda as the checker read it: its parameters, the variables of the functions around it that it reads (F11, F15) and its type.</summary>
 public sealed record LambdaInfo(IReadOnlyList<VariableSymbol> Parameters, IReadOnlyList<VariableSymbol> Captures, FunctionType Type);
@@ -310,6 +323,7 @@ public sealed class SemanticModel
     private readonly Dictionary<Expression, CallExpression> propertyReads = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> clockReads = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<MemberAccess> monotonicReads = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<CallExpression, LogSite> logSites = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Expression, StaticFieldSymbol> staticFields = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<MemberAccess, IntrinsicClass> supportTests = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Node, IReadOnlyList<IntrinsicClass>> guards = new(ReferenceEqualityComparer.Instance);
@@ -363,8 +377,8 @@ public sealed class SemanticModel
     /// <summary>The call's record, null where the checker kept none.</summary>
     internal CallInfo? TryCallOf(CallExpression call) => calls.GetValueOrDefault(call);
 
-    /// <summary>Every call the checker read in the file, in no order: R9 reads a type parameter a lambda captures through their type arguments.</summary>
-    internal IEnumerable<CallInfo> Calls => calls.Values;
+    /// <summary>Every call the checker read in the file, with its record, in no order: R9 reads a type parameter a lambda captures through their type arguments, and reports a ring at the call that gives one.</summary>
+    internal IEnumerable<(CallExpression Call, CallInfo Info)> Calls => calls.Select(p => (p.Key, p.Value));
 
     /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
     public IReadOnlyList<FunctionSymbol> Copies => copies;
@@ -437,6 +451,14 @@ public sealed class SemanticModel
     public bool IsMonotonicRead(MemberAccess access) => monotonicReads.Contains(access);
 
     internal void RecordMonotonicRead(MemberAccess access) => monotonicReads.Add(access);
+
+    /// <summary>The record of a log call (P1).</summary>
+    public LogSite LogSiteOf(CallExpression call) => logSites.TryGetValue(call, out var site) ? site : throw Missing("log call", call.Line);
+
+    /// <summary>Whether the file holds a log call the checker read, so that the program reads <c>KURZ_LOG</c> at its start (P4).</summary>
+    public bool HasLogSites => logSites.Count > 0;
+
+    internal void RecordLogSite(CallExpression call, LogSite site) => logSites[call] = site;
 
     /// <summary>K18: whether the expression, a name inside the class or <c>T.F</c>, reads a <c>static</c> field, whose constant a read gives.</summary>
     public bool IsStaticField(Expression read, out StaticFieldSymbol field) => staticFields.TryGetValue(read, out field!);

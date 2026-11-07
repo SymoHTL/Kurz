@@ -1393,8 +1393,21 @@ print(Vector128.Create(1, 2, 3).GetElement(0))
 
 Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
 ```kurz
-// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared, while a field
+// takes the name, a parameter of a primary constructor among them (R18)
 data Vector128(int X)
+```
+
+Case: [memory/intrinsic-field.kz](../corpus/memory/intrinsic-field.kz)
+```kurz
+// a field takes the name `X86`, `Arm`, `Vector128` or `Vector256`, a parameter of a primary constructor among them (R18)
+data Lanes(int X86, int Vector128)
+class Unit(int Arm, int Vector256)
+
+lanes = Lanes(1, 2)
+print(lanes.X86 + lanes.Vector128)
+unit = Unit(3, 1)
+print(unit.Arm + unit.Vector256)
 ```
 
 Case: [memory/intrinsic-element-range.kz](../corpus/memory/intrinsic-element-range.kz)

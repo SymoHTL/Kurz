@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-11-06
-digest: 4a6e95b703bd4fd0527d443f5391d06bce0a3f2f6d3723755d744acfc9c23dac
+generated: 2026-11-07
+digest: 3d6fc6009582fdf280e15a148ea9650da2d64af09d4fe78990b5f3d5c861b2e1
 ttl_days: 60
 metadata:
   type: reference
@@ -80,13 +80,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 86 |
+| Entries in INDEX.md | 88 |
 | tagged (untagged) | 2 |
 | tagged HARD | 33 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 16 |
-| tagged RECIPE | 8 |
-| tagged TRAP | 39 |
+| tagged RECIPE | 9 |
+| tagged TRAP | 40 |
 | Review rule sections | 12 |
 | Review rules | 71 |
 <!-- /generated:store -->
@@ -105,8 +105,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 390 |
-| Bullets of the Open section | 58 |
+| Occurrences of the marker *(assumed)* | 405 |
+| Bullets of the Open section | 60 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -118,13 +118,13 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 271 |
-| of them decided | 231 |
+| Rules in the reference | 283 |
+| of them decided | 242 |
 | of them assumed | 40 |
 | of them proposed | 0 |
-| of them open | 0 |
-| Corpus cases, none of them run | 946 |
-| Compile-error ids | 74 |
+| of them open | 1 |
+| Corpus cases, none of them run | 959 |
+| Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
 
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 318 |
-| Pull requests merged | 286 |
-| Merged over red, with a recorded waiver | 137 |
-| Review findings posted: high | 289 |
-| Review findings posted: medium | 4144 |
-| Review findings posted: low | 4318 |
+| Pull requests opened by a writer, or merged | 324 |
+| Pull requests merged | 297 |
+| Merged over red, with a recorded waiver | 147 |
+| Review findings posted: high | 296 |
+| Review findings posted: medium | 4240 |
+| Review findings posted: low | 4389 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->
