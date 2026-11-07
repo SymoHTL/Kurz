@@ -1,0 +1,15 @@
+// expect: error argument-mismatch at 12
+// rules: F13
+
+class Counter(int Start) {
+    int Next() => Start + 1
+}
+
+class Ticket(int Seat) : Counter {
+    pub int Next(int step) => Seat + step
+
+    // `Next()` fits only the `Next` of `Counter`, which `Ticket` does not see: it is no candidate, and the call is `Next(int)`'s
+    pub int Take() => Next()
+}
+
+print(Ticket(1, 2).Take())

@@ -2340,6 +2340,29 @@ pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
     return result
 }
 
+// The system's `TCP_NODELAY` (1), at the level `IPPROTO_TCP` (6), of the socket `fd` set to `on`, so that a small write goes out at
+// once and not after the acknowledgement of the one before, which std/'s writer of a streamed response sets (W11), as Kestrel sets it
+// on every connection: 0, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped.
+pub long SetNoDelay(int fd, bool on) {
+    mut long result = -12
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return result
+        }
+
+        mut int value = 0
+        if on {
+            value = 1
+        }
+
+        *Ptr<int>(held + 128) = value
+        result = Checked(long(setsockopt(fd, 6, 1, Ptr<void>(held + 128), 4)))
+    }
+
+    return result
+}
+
 // The writes of the socket `fd` ended, by `shutdown` with `SHUT_WR` (1), as Rust's `shutdown(Shutdown::Write)`
 // ends them (S9): the peer's read then gives 0, and the socket still reads. 0, or the failure, which the system
 // gives as it is: none for a second call, `ENOTCONN` (107) where the peer reset the connection.
@@ -2350,6 +2373,57 @@ pub long ShutdownWrite(int fd) {
     }
 
     return result
+}
+
+// The `count` bytes at `bytes` written to the socket `fd` within `nanoseconds` for the whole write, as `WriteFile` writes them but
+// with `SO_SNDTIMEO` (21) set to what remains of that bound, by the monotonic clock, before each call of `write`, so that a peer that
+// takes a part just inside each bound cannot hold the write past it, as the reads of the HTTP server set what remains before each
+// refill (section 12): `count`, the bytes written before a call that took none, the failure of the call that failed, or -4100,
+// `TimedOut` with the number 0, where nothing remains before a call, which is then not made, as the bound of `Connect` gives it.
+pub long WriteWithin(int fd, byte* bytes, long count, long nanoseconds) {
+    mut long deadline = 0
+    raw {
+        byte* held = Endpoints()
+        if held == null {
+            return -12
+        }
+
+        deadline = Deadline(held, nanoseconds)
+    }
+
+    mut long done = 0
+    while done < count {
+        mut long left = 0
+        raw {
+            left = deadline - Monotonic(Endpoints())
+        }
+
+        if left <= 0 {
+            return -4100
+        }
+
+        long set = SetTimeout(fd, 21, left, true)
+        if set < 0 {
+            return set
+        }
+
+        mut long written = -1
+        raw {
+            written = Write(fd, bytes + done, count - done)
+        }
+
+        if written < 0 {
+            return Checked(written)
+        }
+
+        if written == 0 {
+            return done
+        }
+
+        done = done + written
+    }
+
+    return done
 }
 
 // The default bound set on the reads and the writes of the stream `fd`, which `Connect` or `Accept` made
