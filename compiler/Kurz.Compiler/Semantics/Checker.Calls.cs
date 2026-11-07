@@ -1967,8 +1967,7 @@ public sealed partial class Checker
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
-            var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
-            var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
+            var candidate = CandidateOf(f);
             var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
@@ -2152,27 +2151,7 @@ public sealed partial class Checker
 
         foreach (var candidate in candidates)
         {
-            if (candidate.BindingError is null)
-            {
-                Bind(candidate, pres);
-            }
-
-            if (candidate.BindingError is null)
-            {
-                // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
-                // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
-            }
-
-            if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
-            {
-                Infer(candidate, pres);
-            }
-
-            if (candidate.Fits)
-            {
-                Fit(candidate, pres, candidates.Count == 1);
-            }
+            Weigh(candidate, pres, candidates.Count == 1);
         }
 
         // E1: an argument with an error of its own may have been meant for any of the functions of the name, so neither
@@ -2319,6 +2298,56 @@ public sealed partial class Checker
     {
         Propagate(whole.Cases.Skip(1), call.Line);
         RecordThrough(value, new Typed(whole.Cases[0]));
+    }
+
+    /// <summary>A function's candidate for a call: its parameters are the slots the arguments bind to (D11), its type parameters what they infer (T27).</summary>
+    private static Candidate CandidateOf(FunctionSymbol f) => new()
+    {
+        Function = f,
+        Slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList(),
+        TypeParameters = f.TypeParameters,
+        Result = f.ReturnType,
+    };
+
+    /// <summary>
+    /// One candidate of a call weighed against the arguments (D11, T27, F13): bound to them, its type arguments inferred, and each
+    /// argument fitted to the parameter it lands on, where <paramref name="only"/> says that it is the call's one function.
+    /// </summary>
+    private void Weigh(Candidate candidate, List<Pre> pres, bool only)
+    {
+        if (candidate.BindingError is null)
+        {
+            Bind(candidate, pres);
+        }
+
+        if (candidate.BindingError is null)
+        {
+            // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
+            // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
+            candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
+        }
+
+        if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
+        {
+            Infer(candidate, pres);
+        }
+
+        if (candidate.Fits)
+        {
+            Fit(candidate, pres, only);
+        }
+    }
+
+    /// <summary>
+    /// C6: whether the call of a method with one <c>int</c> argument, the index of the walk of a class, fits the method, weighed as that
+    /// call is, so that a default for a second parameter and a widening of the <c>int</c> count (section 4, the owner, 2026-11-06, #39,
+    /// comment 6681669642).
+    /// </summary>
+    private bool FitsAnIndex(FunctionSymbol method)
+    {
+        var candidate = CandidateOf(method);
+        Weigh(candidate, [new Pre { Argument = new Argument(method.Line, null, false, new NameExpression(method.Line, "i")), Typed = new Typed(Types.Int) }], only: false);
+        return candidate.Fits;
     }
 
     /// <summary>D11: arguments without a name fill the parameters in order, arguments by name follow them; what does not fit is <c>argument-mismatch</c>.</summary>
