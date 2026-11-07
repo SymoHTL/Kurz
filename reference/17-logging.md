@@ -50,9 +50,10 @@ and no path, `{a + b}`, gives a field named by its text; `log-template`)* The sp
 hole's braces and its text are no part of the field's name, `{ who }` the field `who`. A log
 call with no argument, or with more than one, is `argument-mismatch` (D11), whatever its arguments
 are, `Log.Information(1, "b")` among them; its one parameter is named `template`, so that
-`Log.Information(template: "a")` is a log call, an argument of another name,
-`Log.Information(text: "a")`, is `argument-mismatch`, and the one argument of a call that is no
-string literal is `log-template`, named or not. *(proposed)*
+`Log.Information(template: "a")` is a log call; a string literal under another name,
+`Log.Information(text: "a")`, is `argument-mismatch`; and the one argument of a call that is no
+string literal is `log-template` whatever its name, `Log.Information(text: 1)` among them.
+*(proposed)*
 
 Case: [logging/template-not-literal.kz](../corpus/logging/template-not-literal.kz)
 ```kurz
@@ -137,8 +138,8 @@ written, `Orders` for a method of `Orders`. A call in a constructor, in a proper
 default takes the name of the type it stands in, as a call in its method does, and a call in a
 method of a generic type takes the type's name without its type arguments, so that every instance of
 one generic type shares its category, as .NET's category of `ILogger<T>` leaves them out (§12, the
-owner, 2026-11-07, answer M11); a constructor declared in a class's body and a generic type are
-`not supported` (K14, T19). The category of top-level code is its file's. The
+owner, 2026-11-07, answer M11). The compiler says `not supported` to a constructor declared in a
+class's body (K14) and to a generic type (T19). The category of top-level code is its file's. The
 message is the template with its holes filled as an interpolation fills them (L6). A line's time
 is UTC in the named form of RFC 3339 with milliseconds, and a line break inside a value, a line
 feed in the message or in a field (P7), is written as `\n`, so that no value forges a line. Logs
@@ -163,9 +164,7 @@ type `string` stands in double quotes, with `"` and `\` in it after a `\`. A lin
 message or in a field is written as `\n`. The category of top-level code is the name of its file
 without `.kz`, `main` for `main.kz`. Where lines were dropped (P9), the line
 `<time> Warning Kurz.Log: dropped <n> lines` stands before the next line written (§12, the owner,
-2026-11-05, answers L3, L4 and L8). The layout has no place for the chain ID while P8 stands open,
-and a line is written without it: a line holds the chain ID (P6, P8), and only where it stands is
-open.
+2026-11-05, answers L3, L4 and L8). The layout has no place for the chain ID while P8 stands open.
 The fields stand in the template's order, a value of any type but `string` is its text (A2 to
 A16), a carriage return is written as `\r` and a `\` in the message as `\\`, as Rust's
 `escape_debug` writes them, so that a `\n` in a line is a line feed; one dropped line is

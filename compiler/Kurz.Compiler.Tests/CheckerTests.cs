@@ -3578,6 +3578,7 @@ public sealed class CheckerTests
     [InlineData("Log.Information(1, \"b\")", ErrorIds.ArgumentMismatch)] // the count wins over a template that is no literal
     [InlineData("Log.Information(text: \"a\")", ErrorIds.ArgumentMismatch)] // another name than `template`
     [InlineData("Log.Information(template: 1)", ErrorIds.LogTemplate)] // the one argument, named, no literal
+    [InlineData("Log.Information(text: 1)", ErrorIds.LogTemplate)] // the template is checked before the name
     public void A_log_function_is_called_with_its_one_template_and_gives_nothing(string program, string id)
     {
         // P1 and P2: `Log` and a log function are no values, a log call is a statement, and it takes one argument
