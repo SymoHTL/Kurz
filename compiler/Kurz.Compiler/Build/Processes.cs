@@ -247,7 +247,9 @@ public static class Processes
     /// error of a run that ends a program at its limit: its state, the first field after the name in its <c>stat</c>; the kernel function
     /// it sleeps in, its <c>wchan</c>; and its <c>syscall</c>, the number of the call it is in with the call's six arguments, without the
     /// stack pointer and the program counter that follow them, or <c>-1</c> alone for a process that waits outside a call, or
-    /// <c>running</c> (proc(5)). Where an entry cannot be read, it says so.
+    /// <c>running</c> (proc(5)). An argument that can be an address is given as <c>addr</c> (<see cref="Address"/>), so that the error
+    /// names the call and its descriptors, counts and flags, and not where the program's memory lies. Where an entry cannot be read, it
+    /// says so.
     /// </summary>
     internal static string Stood(string proc, int pid)
     {
@@ -259,7 +261,7 @@ public static class Processes
             var state = close < 0 || close + 2 >= stat.Length ? string.Empty : stat[(close + 2)..].Split(' ')[0];
             var wchan = File.ReadAllText(Path.Combine(entry, "wchan")).Trim();
             var words = File.ReadAllText(Path.Combine(entry, "syscall")).Trim().Split(' ');
-            var call = words[0] == "-1" ? "-1" : string.Join(' ', words.Take(7));
+            var call = words[0] == "-1" ? "-1" : string.Join(' ', words.Take(7).Select((word, i) => i > 0 && Address(word) ? "addr" : word));
             return state.Length == 0 || call.Length == 0
                 ? "; where it stood could not be read"
                 : $"; where it stood, as /proc gave it: state {state}, wchan {wchan}, syscall {call}";
@@ -270,6 +272,16 @@ public static class Processes
             return "; where it stood could not be read";
         }
     }
+
+    /// <summary>
+    /// Whether an argument of <c>syscall</c> can be an address: 0x10000 or more. Below that Linux maps no program's memory (the default
+    /// of <c>vm.mmap_min_addr</c>), so a smaller value is a descriptor, a count or a flag; a count of 0x10000 or more is given as
+    /// <c>addr</c> too.
+    /// </summary>
+    private static bool Address(string word) =>
+        word.StartsWith("0x", StringComparison.Ordinal)
+        && ulong.TryParse(word.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var value)
+        && value >= 0x10000;
 
     /// <summary>
     /// What the error stream of a run says of the <paramref name="found"/> holders: each one's pid, and whether it is among the
