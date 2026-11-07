@@ -1,0 +1,8 @@
+// expect: error syntax at 4
+// rules: T35
+
+void Name<const string S>() {
+    print(S)
+}
+
+print(1)

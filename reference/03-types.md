@@ -1890,18 +1890,28 @@ print("done")
 ### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
-type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
+type and the parameter's name, `T | JsonError | Invalid Parse<T, const JsonKeys K = JsonKeys.AsWritten>(string text)`
+(§12 gives `K` its default). A call
 writes the constant among its type arguments, `Json.Parse<Order, JsonKeys.SnakeCase>(text)`; each
 constant makes a copy of the function of its own (T19), and the function's code reads the
 parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
-`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
+`enum`)* A default is a constant expression, as a parameter's default value is (F12), of one
+operand: a literal with its `-`, an `enum`'s value, or an expression in brackets,
+`const int N = (1 + 2)`, as Rust takes `{ 1 + 2 }` there, and `const int N = 1 + 2` is `syntax`;
+the name of an earlier parameter there is `unknown-name` (V10); a type outside the list is
+`syntax`; a call that writes fewer type arguments than the parameters without a
+default, or more than all of them, is T19's count, `syntax`, which names each count the call may
+write. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
+`enum`'s value are there; a constant passed on to a parameter of a wider integer type widens as a
+value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
+reads it"). *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
 `assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
-`syntax`; the parameter's name stands as a value of its type, and where a type stands it is
-`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
-where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
+`syntax`; the parameter's name stands as a value of its type; a value of another type or a type
+where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
 loop's variable, a binding of a `match` arm or a lambda's parameter of the parameter's name in the function is
@@ -1914,7 +1924,10 @@ owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer take
 `Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
 an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
 another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
-`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
+`List<64>.FromRaw(p, 0)` is `syntax`)* An integer literal of every form, with its suffix and its
+base, starts the list, `f(a < 64L, c > (d))`, while a `double`, a string, a literal with a unit and
+`null` keep the comparisons, since no such parameter holds one (§4, the owner, 2026-11-03, "every
+default").
 
 Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
 ```kurz
@@ -1964,11 +1977,35 @@ Case: [types/const-parameter-default-order.kz](../corpus/types/const-parameter-d
 ```kurz
 enum Mode { Plain, Loud }
 
-void Late<const Mode M = Mode.Plain, T>(T value) {
+void Late<const Mode M = Mode.Plain,
+    T>(T value) {
     print("{M} {value}")
 }
 
 Late<Mode.Loud, int>(1)
+```
+
+Case: [types/const-parameter-name-as-type-argument.kz](../corpus/types/const-parameter-name-as-type-argument.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Other<T>() {
+}
+
+void Outer<const Mode M>() {
+    Other<M>()
+}
+
+Outer<Mode.Plain>()
+```
+
+Case: [types/const-parameter-other-type.kz](../corpus/types/const-parameter-other-type.kz)
+```kurz
+void Name<const string S>() {
+    print(S)
+}
+
+print(1)
 ```
 
 Case: [types/const-parameter-as-type.kz](../corpus/types/const-parameter-as-type.kz)
@@ -2015,9 +2052,13 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Pass<const long L>() {
-    Show<5>()
-    print(L)
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Show<L>()
+    Wide<L>()
 }
 
 print(Scaled<64>(2))
@@ -2030,8 +2071,8 @@ Pass<7>()
 
 Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
 ```kurz
-int Scaled<const int N>(int x) => x * N
-print(Scaled<true>(2))
+int Size<const int N>() => N
+print(Size<true>())
 ```
 
 Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)

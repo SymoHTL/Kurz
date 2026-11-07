@@ -710,7 +710,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
   `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
   the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
-  in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
+  in which the parameter's name is a constant of its type and a call passes it on by that name, to a parameter of its type
+  or of an integer type it widens to (T35, T8);
 - `const assert(condition, text)`, checked while the program compiles and emitting nothing: its condition and the holes of its
   text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
   holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
@@ -1911,8 +1912,8 @@ larger type each time makes without end, by a call T34's walk does not read: out
 bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy it
 would have made is not made, and its errors show only in a build where the chain is ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
-`redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
-leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
+`redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
+with no error of its own, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
 which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the
 program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
