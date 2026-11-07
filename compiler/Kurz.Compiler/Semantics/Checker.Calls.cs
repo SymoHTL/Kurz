@@ -122,7 +122,8 @@ public sealed partial class Checker
                         return CallValue(value.Type, c);
                     }
 
-                    if (ImplicitMethods(n.Name) is { } methods && methods.Find(f => f.IsProperty) is { } property && !InStaticMember())
+                    var named = BesideField(ImplicitMethods(n.Name), ImplicitField(n.Name) is not null);
+                    if (ImplicitPropertyOf(n.Name) is { } property && !InStaticMember())
                     {
                         var read = ReadImplicitProperty(n, property);
                         if (read.IsError)
@@ -135,7 +136,7 @@ public sealed partial class Checker
                         return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
                     }
 
-                    if (ImplicitMethods(n.Name) is { } named)
+                    if (named is not null)
                     {
                         return CallImplicitMethod(named, n, c, expected); // K7: a method of `this`
                     }
@@ -915,6 +916,8 @@ public sealed partial class Checker
         {
             case ErrorType or EnumType:
                 return null;
+            case TypeParameterType when textFieldTypes.ContainsValue(type):
+                return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || Types.IsFloating(p) || p.Kind is Primitive.String or Primitive.Char or Primitive.Bool:
                 return null;
             case PrimitiveType p:
@@ -1113,8 +1116,9 @@ public sealed partial class Checker
     /// <summary>
     /// K4, K5: why <c>==</c> or a key does not take an instance of the class, from the types of the fields that count, each read by
     /// <paramref name="why"/>: none for a class that compares by identity, those its <c>equal by</c> names, or every field of a class that
-    /// compares by content; and K13: from each class derived from it, whose instance a value of the class can be, as D3 reads a data
-    /// type's derived types. A class met again inside its own fields was read where the walk met it first.
+    /// compares by content; and from each class derived from it, whose instance a value of the class can be, as D3 reads a data
+    /// type's derived types (K13 with D3, a reading <c>compiler/README.md</c> marks assumed). A class met again inside its own
+    /// fields was read where the walk met it first.
     /// </summary>
     private (bool Mismatch, string Why)? ByFieldsThatCount(ClassType c, Func<KurzType, (bool Mismatch, string Why)?> why)
     {

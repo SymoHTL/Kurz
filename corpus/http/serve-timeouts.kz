@@ -20,7 +20,8 @@
 // rules: W10
 
 // a head that does not arrive whole within `RequestHeadersTimeout` from its first byte, and a body whose reads fall under
-// `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection, the handler's response
+// `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection in stages, which waits at
+// most `KeepAliveTimeout` for the end of a client that sends nothing more, the handler's response
 // unwritten, the handler's read of such a body giving `HttpError(Protocol, "request timed out")`, and the connection gives that error
 // too; a connection whose first request sends no byte within `KeepAliveTimeout` is closed with nothing written; a response whose
 // write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate closes it, since its status
@@ -105,14 +106,14 @@ reading = (HttpRequest r) => {
 }
 
 hello = (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}")
-Stall("GET /a HTTP/1.1\r\nHost: h\r\n", hello, HttpLimits(RequestHeadersTimeout: 100ms))
-Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+Stall("GET /a HTTP/1.1\r\nHost: h\r\n", hello, HttpLimits(RequestHeadersTimeout: 100ms, KeepAliveTimeout: 500ms))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms), KeepAliveTimeout: 500ms))
 
 // the same where the request says `Connection: close`, so that no drain of the body follows the handler
-Stall("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 10\r\n\r\nab", reading, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms), KeepAliveTimeout: 500ms))
 
 // a handler that reads none of such a body, which the server drains after it
-Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", hello, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms)))
+Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", hello, HttpLimits(MinRequestBodyDataRate: HttpRate(1000, 100ms), KeepAliveTimeout: 500ms))
 
 // a client that sends nothing at all
 Stall("", hello, HttpLimits(KeepAliveTimeout: 100ms))

@@ -681,10 +681,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   generic functions that gives it back to that type parameter, is `growing-type-argument` at that
   call, read on the text of every generic function that reads no type and on the calls in a loop
   over `T.Fields` of one that does, called or not, and of no copy, but for a call in an arm of a
-  `match` on `T.Kind` outside any loop over `T.Fields` opened inside that arm; the text of a function
+  `match` on `T.Kind` outside any loop over `T.Fields` opened inside the nearest such arm around it; the text of a function
   that reads its type is read a second time for those calls alone where it reads `T.Fields`, and the
   chain of copies stops at a call so refused, the copies before it reporting what else their bodies
-  hold (T34);
+  hold; on the text, `f.Type` of such a loop is a type of its own, no type parameter of the function,
+  so that a type argument that holds it beside a type parameter of the function grows by that
+  parameter, `Map<f.Type, T>` for `T`, and one that holds it with none takes no part (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -773,7 +775,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and the two words of the pair where its class has derived classes, which holds the instance's weak
   count, as Rust's `Weak<T>` holds its `RcBox`, in a field, an item of a list, a variable, a parameter
   and a result, and whose read gives a `T?`: `null` once the strong count is 0, and else one more
-  strong count, a temporary held to the end of its statement, as `Weak::upgrade` gives one (R3); `==` on
+  strong count, a temporary held to the end of its statement, or of its condition in an `if` or a
+`while`, as `Weak::upgrade` gives one (R3); `==` on
   two instances, by the fields an `equal by` names, in its order, where the class has the clause (K5,
   K8, K15), else by their addresses where a field is `mut` or its type reaches a `weak` reference (K4), and else field by field as a
   `data` value compares (K4, D3), in a
@@ -1765,7 +1768,7 @@ class instance or through a `weak` reference, with the two more ends of such a p
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, of K6 the base class, for a class with its primary constructor or none,
 its base class in both forms, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4), a class of `std/` the prelude names (W1) being no step of a ring of the file, since it names no class of the file and `std/`'s checker judges its own and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
@@ -1836,7 +1839,8 @@ class it reads, a field in its body or a `static` member where the class has a b
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
-`override` on one method, and `virtual` on a private method (K7, F9), a `prot` method called through a value
+`override` on one method, `virtual` on a private method, and either on a `static` method, which has no
+instance to dispatch on (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
 of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
 over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one
@@ -1844,8 +1848,7 @@ over an instance of a class whose `Count` is a field or a property of an `int` a
 reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
-but for one that is or holds a class, which is `static-state` (K18), a field of a function type, whose
-cycle R9 judges by the lambdas of the program (R9), a method as a value, a property of `void` or
+but for one that is or holds a class, which is `static-state` (K18), a method as a value, a property of `void` or
 of a type that lists cases beside its success, which section 14 leaves open (K7, O2, O10), a
 property read after `?.` (K7, N5) or after `&`, where the checker reads a field alone (K7, R10), an assignment into a
 `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
@@ -1904,8 +1907,9 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is or holds the field's type, the first such chain ending every copy of the
-same outer call (T33, T34); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+`match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34): when the first such chain reaches the
+bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy it
+would have made is not made, and its errors show only in a build where the chain is ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
 leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
@@ -2174,9 +2178,8 @@ round can ask about it by the rule's id.
   ("confirmed"), at any depth: a type met again on the way, `Q<() => int>` through the field `N` of a
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
-  itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, and a class, which section 4 assumes
-  can hold one, the checker says `not supported` to (chapter 7) before the walk asks, and a
-  nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
+  itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, a class when a field of it can, as section 4
+  assumes, a field of a function type among them (R9), and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.
@@ -2414,6 +2417,19 @@ round can ask about it by the rule's id.
   each class derived from it too, whose instance the value can be, so that such a field of a type `==`
   does not take makes `==` on the base `type-mismatch`, as D3 reads a `data` type's derived types
   *(assumed)*.
+- R9 with R2: a field whose type can hold a function value, `mut` or not, reaches every class an
+  instance of which a lambda of the program captures: the lambdas of the file, of `std/` and of the
+  folders the file uses, each captured variable read through its type as a field is, and a type
+  parameter through every type argument a call of the program gives it. A list, a map, a union, a
+  nullable type and a `data` value that hold a function value count as a function type does
+  *(assumed)*. The rule is judged after every body, when the lambdas are known, and the text of a ring
+  through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
+  of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
+  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*, and
+  one no lambda of the file closes is `std/`'s own. A stored lambda is counted as a function value
+  is, a read of the field for a call takes a count of its own (K2), so a lambda that replaces the
+  field it is called through runs on, and the instance's release lets go of the environment. Pinned
+  by the function fields' programs of `ListTests`.
 - R10 and R13 with K2: an instance is a counted reference, so a pointer to a class, or to a value that
   holds one, is `counted-pointee` and state outside a function of such a type `static-state`.
 - A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print` and interpolation of

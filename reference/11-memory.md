@@ -121,6 +121,42 @@ b = Button("ok", () => print("clicked"))
 b.OnClick()
 ```
 
+What a lambda captures is read as a field of its type. A `weak` reference it captures reaches no
+class, as R3 says of a `weak` field, so a handler that reads its button through a `weak` reference
+closes no ring (§3, the owner, 2026-11-02, #110, comment 6573113786, R9a, against counting it as
+strong, which would close to a lambda the escape `weak` gives a field). A value of a type parameter
+reaches the classes of the type argument every call of its function names or infers, and through a
+generic caller's type parameter those of that caller's calls, as the copy of section 4 for each list
+of type arguments holds them (R9b, against every class of the program, under which one such lambda
+anywhere makes every ring through a field of function type an error). A method taken as a value
+captures its instance, as the lambda `() => c.Get()` does and as a C# delegate keeps its target
+(R9c, against capturing nothing, under which `b.OnClick = b.Show` would hold `b` in `b` with no ring
+reported); a method as a value is `not supported` (K7, F11), so R9c has no case of its own.
+
+Case: [memory/function-field-weak-capture.kz](../corpus/memory/function-field-weak-capture.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("x"))
+weak Button? w = b
+b.OnClick = () => print(w?.Name ?? "gone")
+b.OnClick()
+```
+
+Case: [memory/cycle-through-type-argument.kz](../corpus/memory/cycle-through-type-argument.kz)
+```kurz
+class Button(string Name, mut () => void OnClick)
+
+T Hook<T>(T x) {
+    f = () => x
+    return f()
+}
+
+b = Button("ok", () => print("x"))
+b.OnClick()
+print(Hook(b).Name)
+```
+
 ### R3 (decided, §3) `weak`
 
 A `weak` reference points at an instance without keeping it alive. It is nullable, and it is
@@ -1233,8 +1269,21 @@ print(Vector128.Create(1, 2, 3).GetElement(0))
 
 Case: [memory/intrinsic-redeclared.kz](../corpus/memory/intrinsic-redeclared.kz)
 ```kurz
-// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared (R18)
+// a file's own `X86`, `Arm`, `Vector128` or `Vector256`, a type, a function, a variable or a parameter, is redeclared, while a field
+// takes the name, a parameter of a primary constructor among them (R18)
 data Vector128(int X)
+```
+
+Case: [memory/intrinsic-field.kz](../corpus/memory/intrinsic-field.kz)
+```kurz
+// a field takes the name `X86`, `Arm`, `Vector128` or `Vector256`, a parameter of a primary constructor among them (R18)
+data Lanes(int X86, int Vector128)
+class Unit(int Arm, int Vector256)
+
+lanes = Lanes(1, 2)
+print(lanes.X86 + lanes.Vector128)
+unit = Unit(3, 1)
+print(unit.Arm + unit.Vector256)
 ```
 
 Case: [memory/intrinsic-element-range.kz](../corpus/memory/intrinsic-element-range.kz)

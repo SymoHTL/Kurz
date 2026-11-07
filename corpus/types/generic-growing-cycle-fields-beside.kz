@@ -1,0 +1,17 @@
+// expect: error growing-type-argument at 11
+// rules: T34
+
+data Point(int X, int Y)
+data Pair<A, B>(A First, B Second)
+
+// `Deep` gives `Pair<f.Type, T>` for `T` in its loop over `T.Fields`: the field's type is a type of its own on the text, and the `T` beside it grows
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)
+        }
+    }
+}
+
+Deep(Point(1, 2), 3)
+print("done")

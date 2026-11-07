@@ -206,6 +206,9 @@ public enum CallKind
     /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
     TcpShutdownWrite,
 
+    /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls (section 12).</summary>
+    TcpWriteWithin,
+
     /// <summary><c>Environment.Args()</c> (S13).</summary>
     EnvironmentArgs,
 
@@ -371,6 +374,9 @@ public sealed class SemanticModel
     /// <summary>The call's record, null where the checker kept none.</summary>
     internal CallInfo? TryCallOf(CallExpression call) => calls.GetValueOrDefault(call);
 
+    /// <summary>Every call the checker read in the file, in no order: R9 reads a type parameter a lambda captures through their type arguments.</summary>
+    internal IEnumerable<CallInfo> Calls => calls.Values;
+
     /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
     public IReadOnlyList<FunctionSymbol> Copies => copies;
 
@@ -397,6 +403,9 @@ public sealed class SemanticModel
     public bool HasCall(CallExpression call) => calls.ContainsKey(call);
 
     public LambdaInfo LambdaOf(LambdaExpression lambda) => lambdas.TryGetValue(lambda, out var l) ? l : throw Missing("lambda", lambda.Line);
+
+    /// <summary>Every lambda the checker read in the file, with what it captures (F15), in no order: R9 judges a field of a function type by them.</summary>
+    internal IEnumerable<(LambdaExpression Lambda, LambdaInfo Info)> Lambdas => lambdas.Select(p => (p.Key, p.Value));
 
     /// <summary>Whether the checker read the lambda.</summary>
     public bool HasLambda(LambdaExpression lambda) => lambdas.ContainsKey(lambda);
