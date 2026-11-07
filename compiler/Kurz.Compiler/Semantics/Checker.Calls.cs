@@ -1295,6 +1295,11 @@ public sealed partial class Checker
                 return CheckEnvironmentFunction(m, c); // S13, S14
             }
 
+            if (n.Name == "Log")
+            {
+                return CheckLogFunction(m, c); // P1, P2
+            }
+
             if (IsHashName(n.Name))
             {
                 return CheckHashFunction(n.Name, m, c); // H1 to H4
