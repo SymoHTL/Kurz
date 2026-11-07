@@ -466,7 +466,7 @@ Gate: review rule "rules for sessions".
   when all of these hold:
   - its round at the cap completed, as in the first case;
   - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words, or only appended, both at the same end of a line or of a table cell, or changed
+    different words, or only appended, both at the same end of an id list or of a table row, or changed
     different lines, one side's whole lines standing between lines the other side changed, or only
     added items or table rows, both at the end of one list, and the merge keeps every word and every
     line of both, or the floor of `RunTests` (`RunFloor`),
