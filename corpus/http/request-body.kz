@@ -6,6 +6,7 @@
 // | GET /none: 0 []
 // | 2 2 1 0 0
 // | TooLarge: request body over limit
+// | 5
 // | hi
 // | not UTF-8
 // rules: W6
@@ -51,6 +52,15 @@ void | IoError | HttpError All() {
     client.Write("POST /big HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
     big = HttpRequest.Read(server)
     match big.Body.ReadAll(4) {
+        Bytes b => print(b.Count)
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+
+    // a bound of the largest `int`, which the read counts past without passing the range of an `int`
+    client.Write("POST /most HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
+    most = HttpRequest.Read(server)
+    match most.Body.ReadAll(2147483647) {
         Bytes b => print(b.Count)
         IoError e => print(e)
         HttpError e => print("{e.Kind}: {e.Detail}")
