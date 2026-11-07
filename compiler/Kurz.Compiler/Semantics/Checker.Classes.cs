@@ -1730,13 +1730,15 @@ public sealed partial class Checker
     /// can be, every lambda where a type on the way names a type parameter (R9, assumed), so the rule runs after every body, when the
     /// lambdas are known. Each ring is reported once, at the class of
     /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
-    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring.
+    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring,
+    /// and one that a lambda of <c>std/</c> or of a folder closes through a type argument only a call of the file gives, at the first
+    /// such call (the owner, 2026-11-05).
     /// </summary>
     private void CheckReferenceCycles()
     {
-        var firstLambda = new Dictionary<ClassSymbol, int>();
+        var firstUse = new Dictionary<ClassSymbol, int>();
         var byLambda = new List<CapturingLambda>();
-        var captured = CapturedClasses(firstLambda, byLambda);
+        var captured = CapturedClasses(firstUse, byLambda);
         var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
         List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
         {
@@ -1788,7 +1790,7 @@ public sealed partial class Checker
         }
 
         var reported = new HashSet<ClassSymbol>();
-        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstLambda.GetValueOrDefault(c, int.MaxValue))))
+        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstUse.GetValueOrDefault(c, int.MaxValue))))
         {
             if (reported.Contains(start))
             {
@@ -1802,10 +1804,11 @@ public sealed partial class Checker
                 var path = string.Join(", ", ring.Select(step => $"`{step.From.Name}.{step.Field.Name}`{(step.Field.Mut ? " (mut)" : "")}"));
                 var rules = ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? "R2, R9" : "R2";
                 var first = members.Where(classDeclared.Contains).MinBy(classDeclared.IndexOf);
-                var line = first?.Line ?? members.Where(firstLambda.ContainsKey).Select(m => firstLambda[m]).DefaultIfEmpty(0).Min();
+                var line = first?.Line ?? members.Where(firstUse.ContainsKey).Select(m => firstUse[m]).DefaultIfEmpty(0).Min();
                 if (line > 0)
                 {
-                    // a ring of std/'s classes alone that no lambda of the file closes is std/'s, which std/'s checker judged
+                    // a ring of classes of std/ or of a folder alone that neither a lambda nor a call of the file closes is theirs, which
+                    // their own checker judged
                     Report(ErrorIds.ReferenceCycle, line, $"`{(first ?? members[0]).Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring ({rules})");
                 }
             }
@@ -1815,10 +1818,12 @@ public sealed partial class Checker
     /// <summary>
     /// R9: the classes an instance of which a lambda of the program captures, the file's, std/'s and those of the folders the file uses:
     /// every class the type of a captured variable holds (<see cref="ClassesHeld"/>), and of a type parameter every class a type argument
-    /// that a call of the program gives it holds. <paramref name="firstLambda"/> gets the line of the file's first lambda that captures
-    /// each class.
+    /// that a call of the program gives it holds. <paramref name="firstUse"/> gets the line in the file where each class is first
+    /// captured: the file's first lambda that captures it, or, where a lambda of <c>std/</c> or of a folder captures it only through a
+    /// type argument a call of the file gives, the first call of the file that gives a type parameter on that way such an argument,
+    /// since the checker of <c>std/</c> or of the folder does not see the file's calls.
     /// </summary>
-    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstLambda, List<CapturingLambda> byLambda)
+    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstUse, List<CapturingLambda> byLambda)
     {
         var models = new List<SemanticModel> { model };
         models.AddRange(used.Values.Select(u => u.model));
@@ -1827,8 +1832,64 @@ public sealed partial class Checker
             models.Add(std.model);
         }
 
+        var arguments = TypeArguments(models.SelectMany(m => m.Calls));
+        var theirs = TypeArguments(models.Where(m => !ReferenceEquals(m, model)).SelectMany(m => m.Calls));
+        var all = new HashSet<ClassSymbol>();
+        foreach (var m in models)
+        {
+            foreach (var (lambda, info) in m.Lambdas)
+            {
+                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                var reached = CapturedBy(info, arguments, met);
+                all.UnionWith(reached);
+                var functions = new List<FunctionType>();
+                foreach (var v in info.Captures)
+                {
+                    FunctionTypesHeld(v.Type, functions, []);
+                }
+
+                byLambda.Add(new CapturingLambda(info.Type, new HashSet<ClassSymbol>(reached), functions, info.Captures.Any(v => NamesTypeParameter(v.Type))));
+                if (ReferenceEquals(m, model))
+                {
+                    foreach (var c in reached)
+                    {
+                        firstUse[c] = Math.Min(firstUse.GetValueOrDefault(c, int.MaxValue), lambda.Line);
+                    }
+
+                    continue;
+                }
+
+                // a lambda of std/ or of a folder: the classes it captures only through the type arguments the file's calls give
+                reached.ExceptWith(CapturedBy(info, theirs, new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance)));
+                if (reached.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var (call, given) in model.Calls)
+                {
+                    foreach (var argument in given.Map.Where(p => met.Contains(p.Key)).Select(p => p.Value))
+                    {
+                        var held = new HashSet<ClassSymbol>();
+                        var seen = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                        ClassesHeld(argument, held, [], p => seen.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
+                        foreach (var c in held.Where(reached.Contains))
+                        {
+                            firstUse[c] = Math.Min(firstUse.GetValueOrDefault(c, int.MaxValue), call.Line);
+                        }
+                    }
+                }
+            }
+        }
+
+        return all;
+    }
+
+    /// <summary>R9b: every type argument the calls give each type parameter.</summary>
+    private static Dictionary<TypeParameterSymbol, List<KurzType>> TypeArguments(IEnumerable<(CallExpression Call, CallInfo Info)> calls)
+    {
         var arguments = new Dictionary<TypeParameterSymbol, List<KurzType>>(ReferenceEqualityComparer.Instance);
-        foreach (var (parameter, argument) in models.SelectMany(m => m.Calls).SelectMany(c => c.Map))
+        foreach (var (parameter, argument) in calls.SelectMany(c => c.Info.Map))
         {
             if (!arguments.TryGetValue(parameter, out var list))
             {
@@ -1838,34 +1899,19 @@ public sealed partial class Checker
             list.Add(argument);
         }
 
-        var all = new HashSet<ClassSymbol>();
-        foreach (var m in models)
+        return arguments;
+    }
+
+    /// <summary>R9: the classes the variables a lambda captures hold, a type parameter's through <paramref name="arguments"/>, each type parameter read once, into <paramref name="met"/>.</summary>
+    private HashSet<ClassSymbol> CapturedBy(LambdaInfo info, Dictionary<TypeParameterSymbol, List<KurzType>> arguments, HashSet<TypeParameterSymbol> met)
+    {
+        var reached = new HashSet<ClassSymbol>();
+        foreach (var v in info.Captures)
         {
-            foreach (var (lambda, info) in m.Lambdas)
-            {
-                var reached = new HashSet<ClassSymbol>();
-                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
-                foreach (var v in info.Captures)
-                {
-                    ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
-                }
-
-                all.UnionWith(reached);
-                var functions = new List<FunctionType>();
-                foreach (var v in info.Captures)
-                {
-                    FunctionTypesHeld(v.Type, functions, []);
-                }
-
-                byLambda.Add(new CapturingLambda(info.Type, reached, functions, info.Captures.Any(v => NamesTypeParameter(v.Type))));
-                foreach (var c in reached.Where(_ => ReferenceEquals(m, model)))
-                {
-                    firstLambda[c] = Math.Min(firstLambda.GetValueOrDefault(c, int.MaxValue), lambda.Line);
-                }
-            }
+            ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
         }
 
-        return all;
+        return reached;
     }
 
     /// <summary>A ring of fields from <paramref name="start"/> back to it with a <c>mut</c> field on it; null where there is none.</summary>
