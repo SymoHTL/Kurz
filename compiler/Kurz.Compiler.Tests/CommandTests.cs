@@ -16,9 +16,9 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class CommandTests : IDisposable
 {
-    private static readonly string Dll = Path.Combine(AppContext.BaseDirectory, "kurz.dll");
+    internal static readonly string Dll = Path.Combine(AppContext.BaseDirectory, "kurz.dll");
 
-    private static readonly string Host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+    internal static readonly string Host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
 
     private readonly string root = Directory.CreateTempSubdirectory("kurz-command-").FullName;
 

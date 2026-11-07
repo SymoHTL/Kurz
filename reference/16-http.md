@@ -273,10 +273,12 @@ corrects the reading said back on issue 156, comment 6644555381, item 2, as the 
 2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. A read
 of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
 as a handler's read does, and the connection closes; the `408` is sent only while no response has
-begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575); the error is the server's own,
-in place of the `IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull
-request 347, comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at
-the report of that read, which ends the body)*, and after a `408` the
+begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error `request timed out`
+being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment 6657251329, which replaced
+the `IoError` with `IoKind.TimedOut` of 2026-11-03); the error is the server's own, in place of the
+`IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull request 347,
+comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at the report of
+that read, which ends the body)*, and after a `408` the
 response the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
@@ -361,10 +363,11 @@ is made by `HttpHeaders()`, which holds no header; its members are `string? Get(
 a writer of a request or a response writes; and `print(h)` gives the text of a class without a
 `Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
 empty start among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
-`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as two names walk a
-map's entries; the `for` is a pattern (C6), as C#'s `foreach` takes any type with
-`GetEnumerator()`, so that any class with `Count`, `NameAt(i)` and `ValueAt(i)` is walked with two
-names (§12, the owner, 2026-11-02, #110, comment 6573113786, and its form, comment 6573265513).
+`h.ValueAt(i)`, and by `for name, value in h`, which walks them in their order as the index loop
+with `Count` read once (§4, the owner, 2026-11-04, "Index loop, Count once"); the `for` is a pattern
+(C6), as C#'s `foreach` takes any type with `GetEnumerator()`, so that any class with `Count`,
+`NameAt(i)` and `ValueAt(i)` is walked with two names (§12, the owner, 2026-11-02, #110, comment
+6573113786, and its form, comment 6573265513).
 The compiler does not build this walk: it refuses `for name, value in h` with `type-mismatch`, as
 two names over any class, so the cases walk the headers by `h.Count`, `h.NameAt(i)` and
 `h.ValueAt(i)`.
