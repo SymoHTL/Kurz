@@ -5323,7 +5323,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // allocator that refuses every block of 8192 bytes or more after the first, which the block of 1024 slots is, the read rehashes
         // the block and the map gives every entry. The positive control: under the same allocator, 400 keys more grow the block, and the
         // block of 2048 slots the growth asks for is refused
-        var oneBlock = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "thread static mut long large = 0\n\npub byte* Allocate(long size) {\n    if size >= 8192 {\n        mut long seen = 0\n        raw {\n            large = large + 1\n            seen = large\n        }\n\n        if seen > 1 {\n            return null\n        }\n    }\n\n    mut byte* p = null\n"));
+        var oneBlock = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "thread static mut long largeAsked = 0\n\npub byte* Allocate(long size) {\n    if size >= 8192 {\n        mut long seen = 0\n        raw {\n            largeAsked = largeAsked + 1\n            seen = largeAsked\n        }\n\n        if seen > 1 {\n            return null\n        }\n    }\n\n    mut byte* p = null\n"));
         Ran(BuildAndRun(InPlace(held, absent, 0), oneBlock, "map-read-past-in-place"), 0, ["-1", "520", "520"], "");
         var grownPast = BuildAndRun(InPlace(held, absent, 400), oneBlock, "map-read-past-in-place-grown");
         Assert.StartsWith("error: allocation-failed (", grownPast.Error, StringComparison.Ordinal);
