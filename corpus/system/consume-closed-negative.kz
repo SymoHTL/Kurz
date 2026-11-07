@@ -1,0 +1,26 @@
+// expect: throws index-out-of-range at 19
+// | other (os error 9): consume-closed-negative.txt
+// rules: S24, S5
+
+// a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 0 gets the closed
+// handle's error, as it enters the call, and a `Consume` of -1 raises `index-out-of-range` before the call enters, closed handle or not
+void | IoError Closed() {
+    File.WriteAll("consume-closed-negative.txt", "abc".Bytes)
+    f = File.Open("consume-closed-negative.txt")
+    File.Delete("consume-closed-negative.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+
+    g.Consume(-1) else {
+        IoError e => print(e)
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}

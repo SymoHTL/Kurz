@@ -58,7 +58,8 @@ public sealed class HttpRequestTests(Toolchain toolchain) : IClassFixture<Toolch
             ($"GET / HTTP/1.1\r\nHost: h\r\nX: {pad}v\r\n\r\n", 431),
             ("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 30000000\r\n\r\n", 200),
             ("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 30000001\r\n\r\n", 413),
-            ("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\n\r\n", 501),
+            ("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\n\r\n", 400),
+            ("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip, chunked\r\n\r\n", 501),
             ("GET / HTTP/2.0\r\nHost: h\r\n\r\n", 505),
             ("POST / HTTP/1.1\r\nHost: h\r\nExpect: 200-ok\r\n\r\n", 417),
         ];

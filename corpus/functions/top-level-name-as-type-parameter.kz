@@ -1,0 +1,8 @@
+// expect: error redeclared at 6
+// rules: F16
+
+int N = 3
+
+int Thrice<const int N>() => N * 3
+
+print(N)

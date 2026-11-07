@@ -227,7 +227,7 @@ public sealed partial class Checker
 
                 if (p.Mut != inherited.Mut)
                 {
-                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, K16)");
+                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, {(shortForm ? "K16" : "K17")})");
                 }
                 else if (shortForm && p.Default is not null)
                 {
@@ -649,12 +649,24 @@ public sealed partial class Checker
     /// nothing (F9). An override is as visible as it writes, whatever the method it overrides writes: one without <c>pub</c> is private
     /// to its class, which a call through the base reaches and a call on the derived type outside it is refused (F9; the owner,
     /// 2026-11-02, #110, "allowed as written"). The checker does not read <c>virtual</c> on a private method, which no derived class sees,
-    /// or <c>virtual</c> and <c>override</c> on one method: <c>not supported</c>.
+    /// <c>virtual</c> and <c>override</c> on one method, or either on a <c>static</c> method, which has no instance to dispatch on, as C#
+    /// refuses it (CS0112): <c>not supported</c>. A <c>static</c> method overrides and hides nothing; in a class with a base or with classes
+    /// derived from it, the checker refused it already (<see cref="RefuseChainMembers"/>).
     /// </summary>
     private void CheckOverride(ClassSymbol symbol, FunctionSymbol method)
     {
         var d = method.Declaration!;
         var marks = d.Modifiers & (Modifiers.Virtual | Modifiers.Override);
+        if (method.IsStatic)
+        {
+            if (marks != 0 && symbol.Base is null && !symbol.Derived)
+            {
+                NotSupported(d.Line, $"`{((marks & Modifiers.Virtual) != 0 ? "virtual" : "override")}` on a `static` method, which has no instance to dispatch on (K7)");
+            }
+
+            return;
+        }
+
         var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
@@ -1326,7 +1338,7 @@ public sealed partial class Checker
             return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
         }
 
-        if (MethodsOf(type.Symbol, m.Member) is not { } methods)
+        if (BesideField(MethodsOf(type.Symbol, m.Member), type.Symbol.Field(m.Member) is not null) is not { } methods)
         {
             if (type.Symbol.Field(m.Member) is { } field)
             {
@@ -1607,7 +1619,25 @@ public sealed partial class Checker
     }
 
     /// <summary>K7: inside a method, whether a name without a variable and without a field is a property of the class.</summary>
-    private bool ImplicitProperty(string name) => ImplicitField(name) is null && ImplicitMethods(name)?.Find(f => f.IsProperty) is not null;
+    private bool ImplicitProperty(string name) => ImplicitPropertyOf(name) is not null;
+
+    /// <summary>
+    /// K7: the property a name alone stands for inside a method of the class, which every reading of such a name takes from here: the
+    /// one a read through an instance reads (<see cref="Property"/>), of the nearest class in the chain that declares the name and none
+    /// beside a field of it, where the method reaches it (no property is static, so none in a field's default). A base's property the
+    /// class does not see stands behind a field or a method of the class's own of its name, which a name alone reads or calls (F9).
+    /// </summary>
+    private FunctionSymbol? ImplicitPropertyOf(string name) =>
+        CurrentClass() is { } c && Property(c, name) is { } property && ImplicitMethods(name) is { } reached && reached.Contains(property) ? property : null;
+
+    /// <summary>
+    /// K7: the methods a call of a name picks from where a field of the class has the name too. A property of a base stands beside such
+    /// a field only where the class does not see it (F9), since a member with the name of a property it sees is <c>hides-member</c>, and
+    /// the field stands before it, as a read takes the field and <see cref="Property"/> finds no property beside one. So the property is
+    /// no candidate of the call, and null is left where it was the only one.
+    /// </summary>
+    private static List<FunctionSymbol>? BesideField(List<FunctionSymbol>? methods, bool field) =>
+        field && methods is not null ? (methods.Where(f => !f.IsProperty).ToList() is { Count: > 0 } rest ? rest : null) : methods;
 
     /// <summary>K7, M5: a change of the value a property gives, which is a call's value: no place holds it, so no change reaches it.</summary>
     private void PropertyReceiver(string name, int line, string what) =>
