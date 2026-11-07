@@ -1,0 +1,13 @@
+// expect: throws overflow at 5
+// allow: raw
+// rules: T36
+
+duration Between(instant a, instant b) => b - a
+
+long low = -9223372036854775807 - 1
+long high = 9223372036854775807
+raw {
+    instant first = *Ptr<instant>(&low)
+    instant last = *Ptr<instant>(&high)
+    print(Between(first, last))
+}

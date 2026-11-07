@@ -341,8 +341,7 @@ flowchart TD
         step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
         the branch is brought up to date as a new head, which the owner's approval of that head merges
         over red, or the standing approval for such a head under the conditions the over-red rule of
-        CLAUDE.md names (a clean take or one with disjoint text or a measured floor, the round completed);
-        a new head the replay cache answers whole is green and needs none (R7)"]
+        CLAUDE.md names; a new head the replay cache answers whole is green and needs none (R7)"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end

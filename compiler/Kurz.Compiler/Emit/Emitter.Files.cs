@@ -87,7 +87,7 @@ public sealed partial class Emitter
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
         if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
-            or CallKind.TcpShutdownWrite)
+            or CallKind.TcpShutdownWrite or CallKind.TcpWriteWithin)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
             var socket = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener };
@@ -106,6 +106,9 @@ public sealed partial class Emitter
                     break;
                 case CallKind.FileWrite:
                     EmitFileWrite(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.TcpWriteWithin:
+                    EmitWriteWithin(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.TcpAccept:
                     EmitAccept(outcome, handle, kinds);
@@ -357,8 +360,8 @@ public sealed partial class Emitter
     /// first, as a <c>Read</c> below 8 KiB fills it (<see cref="FillBuffer"/>), and all that read gave is appended and kept from the
     /// buffer's start. The room in the list is made for the bytes appended, as <c>Add</c> grows a list. The count appended is the result,
     /// 0 at the end of the file or the stream (assumed, as a <c>Read</c>'s). A call in flight on the handle (S5), whose fill, where a
-    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it (assumed, as a <c>Read</c>'s fill
-    /// gives what it took).
+    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it, having no <c>max</c>, where a
+    /// <c>Read</c>'s fill gives at most <c>max</c> of it (assumed).
     /// </summary>
     private void EmitFileFill(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {
@@ -486,6 +489,25 @@ public sealed partial class Emitter
         var (items, count) = BytesOf(list);
         var o = Enter(outer, handle, kinds);
         var r = Woken(handle, SysCall("WriteFile", $"i32 {HandleDescriptor(handle)}, ptr {items}, i64 {count}"), kinds, read: false);
+        var path = HandlePath(handle);
+        FailBelowZero(o, r, path, kinds: kinds);
+        WriteZeroBelow(o, r, count, path);
+        Succeed(o, null);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// <c>s.WriteWithin(bytes, bound)</c> of <c>std/</c>: every byte, as <see cref="EmitFileWrite"/> writes them, within <c>bound</c> for
+    /// the whole write, the runtime's <c>WriteWithin</c> setting <c>SO_SNDTIMEO</c> to what remains of it before each call of the system,
+    /// the server's write of a response held to its rate (section 12); a call in flight on the handle (S5).
+    /// </summary>
+    private void EmitWriteWithin(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, j => j == 0 ? new ListType(Types.Byte) : Types.Duration, _ => false, _ => null, cConvention: false, owned: false);
+        var (items, count) = BytesOf(arguments[0]["ptr ".Length..]);
+        var bound = arguments[1]["i64 ".Length..];
+        var o = Enter(outer, handle, kinds);
+        var r = Woken(handle, SysCall("WriteWithin", $"i32 {HandleDescriptor(handle)}, ptr {items}, i64 {count}, i64 {bound}"), kinds, read: false);
         var path = HandlePath(handle);
         FailBelowZero(o, r, path, kinds: kinds);
         WriteZeroBelow(o, r, count, path);

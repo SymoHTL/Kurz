@@ -1,0 +1,5 @@
+// expect: error log-template at 5
+// rules: P2
+
+text = "Paid"
+Log.Information(text)

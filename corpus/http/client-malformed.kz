@@ -1,0 +1,188 @@
+// expect: output
+// | Protocol: malformed response: bad status line
+// | Unsupported: unsupported HTTP version
+// | Protocol: malformed response: bad status line
+// | Protocol: malformed response: bad status line
+// | Protocol: malformed response: bad status line
+// | 200 [ok]
+// | Protocol: malformed response: folded header
+// | Protocol: malformed response: space before a header's colon
+// | Protocol: malformed response: header without a colon
+// | Protocol: malformed response: control byte in a header
+// | Protocol: malformed response: bad Content-Length
+// | Protocol: malformed response: bad Content-Length
+// | Protocol: malformed response: Content-Length beside Transfer-Encoding
+// | Unsupported: unsupported transfer encoding
+// | Protocol: malformed response: unexpected 101
+// | Protocol: malformed response: line not ended by CR LF
+// | Protocol: malformed response: incomplete
+// | Protocol: malformed response: no status line
+// | 200 [after]
+// allow: raw native
+// rules: W13, W14
+
+// a head that is no response of HTTP/1.x is an `HttpError` in the words of the server's for a request, `response` in place of
+// `request`, and a connection that ends before a byte of a response `malformed response: no status line`, a new connection that
+// ends so given no second try; a status line may leave its reason out
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, and the connection closed where the next is `close` or the client ends it
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    if next < answers.Count && answers[next] == "close" {
+                        next = next + 1
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its status and body, or its failure
+string Show(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} [{text}]"
+                IoError e => return "{r.Status} {e}"
+                HttpError e => return "{r.Status} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} not UTF-8"
+            }
+        }
+        IoError e => return "{e}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient()
+    for i in 0..<19 {
+        print(Show(client, port))
+    }
+}
+
+Against([
+    "HTTX/1.1 200 OK\r\n\r\n",
+    "HTTP/2.0 200 OK\r\n\r\n",
+    "HTTP/1.1 20 OK\r\n\r\n",
+    "HTTP/1.1 099 Low\r\n\r\n",
+    "HTTP/1.1 200OK\r\n\r\n",
+    "HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nok",
+    "close",
+    "HTTP/1.1 200 OK\r\n Folded: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nBad Name: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nNoColon\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX: a\rbc: d\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n",
+    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\n\r\n",
+    "HTTP/1.1 200 OK\nX: y\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX: y",
+    "close",
+    "",
+    "close",
+    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nafter",
+], (int port) => Responses(port))

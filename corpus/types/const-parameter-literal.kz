@@ -4,8 +4,8 @@
 // | x
 // | 4
 // | -3
-// | 5
 // | 7
+// | 8
 // rules: T35
 
 int Scaled<const int N>(int x) => x * N
@@ -16,9 +16,13 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Pass<const long L>() {
-    Show<5>()
-    print(L)
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Show<L>()
+    Wide<L>()
 }
 
 print(Scaled<64>(2))

@@ -227,7 +227,7 @@ public sealed partial class Checker
 
                 if (p.Mut != inherited.Mut)
                 {
-                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, K16)");
+                    NotSupported(p.Line, $"`{p.Name}` {(p.Mut ? "with" : "without")} `mut`, unlike the field of the base `{b.Name}` it is (K11, {(shortForm ? "K16" : "K17")})");
                 }
                 else if (shortForm && p.Default is not null)
                 {
@@ -649,12 +649,24 @@ public sealed partial class Checker
     /// nothing (F9). An override is as visible as it writes, whatever the method it overrides writes: one without <c>pub</c> is private
     /// to its class, which a call through the base reaches and a call on the derived type outside it is refused (F9; the owner,
     /// 2026-11-02, #110, "allowed as written"). The checker does not read <c>virtual</c> on a private method, which no derived class sees,
-    /// or <c>virtual</c> and <c>override</c> on one method: <c>not supported</c>.
+    /// <c>virtual</c> and <c>override</c> on one method, or either on a <c>static</c> method, which has no instance to dispatch on, as C#
+    /// refuses it (CS0112): <c>not supported</c>. A <c>static</c> method overrides and hides nothing; in a class with a base or with classes
+    /// derived from it, the checker refused it already (<see cref="RefuseChainMembers"/>).
     /// </summary>
     private void CheckOverride(ClassSymbol symbol, FunctionSymbol method)
     {
         var d = method.Declaration!;
         var marks = d.Modifiers & (Modifiers.Virtual | Modifiers.Override);
+        if (method.IsStatic)
+        {
+            if (marks != 0 && symbol.Base is null && !symbol.Derived)
+            {
+                NotSupported(d.Line, $"`{((marks & Modifiers.Virtual) != 0 ? "virtual" : "override")}` on a `static` method, which has no instance to dispatch on (K7)");
+            }
+
+            return;
+        }
+
         var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
@@ -1326,7 +1338,7 @@ public sealed partial class Checker
             return CallValue(read.Type, c); // K7, F11: the property's value is called, as a field's value is
         }
 
-        if (MethodsOf(type.Symbol, m.Member) is not { } methods)
+        if (BesideField(MethodsOf(type.Symbol, m.Member), type.Symbol.Field(m.Member) is not null) is not { } methods)
         {
             if (type.Symbol.Field(m.Member) is { } field)
             {
@@ -1607,7 +1619,25 @@ public sealed partial class Checker
     }
 
     /// <summary>K7: inside a method, whether a name without a variable and without a field is a property of the class.</summary>
-    private bool ImplicitProperty(string name) => ImplicitField(name) is null && ImplicitMethods(name)?.Find(f => f.IsProperty) is not null;
+    private bool ImplicitProperty(string name) => ImplicitPropertyOf(name) is not null;
+
+    /// <summary>
+    /// K7: the property a name alone stands for inside a method of the class, which every reading of such a name takes from here: the
+    /// one a read through an instance reads (<see cref="Property"/>), of the nearest class in the chain that declares the name and none
+    /// beside a field of it, where the method reaches it (no property is static, so none in a field's default). A base's property the
+    /// class does not see stands behind a field or a method of the class's own of its name, which a name alone reads or calls (F9).
+    /// </summary>
+    private FunctionSymbol? ImplicitPropertyOf(string name) =>
+        CurrentClass() is { } c && Property(c, name) is { } property && ImplicitMethods(name) is { } reached && reached.Contains(property) ? property : null;
+
+    /// <summary>
+    /// K7: the methods a call of a name picks from where a field of the class has the name too. A property of a base stands beside such
+    /// a field only where the class does not see it (F9), since a member with the name of a property it sees is <c>hides-member</c>, and
+    /// the field stands before it, as a read takes the field and <see cref="Property"/> finds no property beside one. So the property is
+    /// no candidate of the call, and null is left where it was the only one.
+    /// </summary>
+    private static List<FunctionSymbol>? BesideField(List<FunctionSymbol>? methods, bool field) =>
+        field && methods is not null ? (methods.Where(f => !f.IsProperty).ToList() is { Count: > 0 } rest ? rest : null) : methods;
 
     /// <summary>K7, M5: a change of the value a property gives, which is a call's value: no place holds it, so no change reaches it.</summary>
     private void PropertyReceiver(string name, int line, string what) =>
@@ -1698,12 +1728,14 @@ public sealed partial class Checker
     /// data values, and a field whose type can hold a function value reaches every class an instance of which a lambda of the program
     /// captures besides (R9), so the rule runs after every body, when the lambdas are known. Each ring is reported once, at the class of
     /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
-    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring.
+    /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring,
+    /// and one that a lambda of <c>std/</c> or of a folder closes through a type argument only a call of the file gives, at the first
+    /// such call (the owner, 2026-11-05).
     /// </summary>
     private void CheckReferenceCycles()
     {
-        var firstLambda = new Dictionary<ClassSymbol, int>();
-        var captured = CapturedClasses(firstLambda);
+        var firstUse = new Dictionary<ClassSymbol, int>();
+        var captured = CapturedClasses(firstUse);
         var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
         List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
         {
@@ -1731,7 +1763,7 @@ public sealed partial class Checker
         }
 
         var reported = new HashSet<ClassSymbol>();
-        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstLambda.GetValueOrDefault(c, int.MaxValue))))
+        foreach (var start in classDeclared.Concat(captured.Where(c => !classDeclared.Contains(c)).OrderBy(c => firstUse.GetValueOrDefault(c, int.MaxValue))))
         {
             if (reported.Contains(start))
             {
@@ -1745,10 +1777,11 @@ public sealed partial class Checker
                 var path = string.Join(", ", ring.Select(step => $"`{step.From.Name}.{step.Field.Name}`{(step.Field.Mut ? " (mut)" : "")}"));
                 var rules = ring.Any(step => HoldsFunctionValue(step.Field.Type, [])) ? "R2, R9" : "R2";
                 var first = members.Where(classDeclared.Contains).MinBy(classDeclared.IndexOf);
-                var line = first?.Line ?? members.Where(firstLambda.ContainsKey).Select(m => firstLambda[m]).DefaultIfEmpty(0).Min();
+                var line = first?.Line ?? members.Where(firstUse.ContainsKey).Select(m => firstUse[m]).DefaultIfEmpty(0).Min();
                 if (line > 0)
                 {
-                    // a ring of std/'s classes alone that no lambda of the file closes is std/'s, which std/'s checker judged
+                    // a ring of classes of std/ or of a folder alone that neither a lambda nor a call of the file closes is theirs, which
+                    // their own checker judged
                     Report(ErrorIds.ReferenceCycle, line, $"`{(first ?? members[0]).Name}` can reach itself through strong fields, {path}, one of them `mut`, and nothing would free such a ring ({rules})");
                 }
             }
@@ -1758,10 +1791,12 @@ public sealed partial class Checker
     /// <summary>
     /// R9: the classes an instance of which a lambda of the program captures, the file's, std/'s and those of the folders the file uses:
     /// every class the type of a captured variable holds (<see cref="ClassesHeld"/>), and of a type parameter every class a type argument
-    /// that a call of the program gives it holds. <paramref name="firstLambda"/> gets the line of the file's first lambda that captures
-    /// each class.
+    /// that a call of the program gives it holds. <paramref name="firstUse"/> gets the line in the file where each class is first
+    /// captured: the file's first lambda that captures it, or, where a lambda of <c>std/</c> or of a folder captures it only through a
+    /// type argument a call of the file gives, the first call of the file that gives a type parameter on that way such an argument,
+    /// since the checker of <c>std/</c> or of the folder does not see the file's calls.
     /// </summary>
-    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstLambda)
+    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstUse)
     {
         var models = new List<SemanticModel> { model };
         models.AddRange(used.Values.Select(u => u.model));
@@ -1770,8 +1805,57 @@ public sealed partial class Checker
             models.Add(std.model);
         }
 
+        var arguments = TypeArguments(models.SelectMany(m => m.Calls));
+        var theirs = TypeArguments(models.Where(m => !ReferenceEquals(m, model)).SelectMany(m => m.Calls));
+        var all = new HashSet<ClassSymbol>();
+        foreach (var m in models)
+        {
+            foreach (var (lambda, info) in m.Lambdas)
+            {
+                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                var reached = CapturedBy(info, arguments, met);
+                all.UnionWith(reached);
+                if (ReferenceEquals(m, model))
+                {
+                    foreach (var c in reached)
+                    {
+                        firstUse[c] = Math.Min(firstUse.GetValueOrDefault(c, int.MaxValue), lambda.Line);
+                    }
+
+                    continue;
+                }
+
+                // a lambda of std/ or of a folder: the classes it captures only through the type arguments the file's calls give
+                reached.ExceptWith(CapturedBy(info, theirs, new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance)));
+                if (reached.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var (call, given) in model.Calls)
+                {
+                    foreach (var argument in given.Map.Where(p => met.Contains(p.Key)).Select(p => p.Value))
+                    {
+                        var held = new HashSet<ClassSymbol>();
+                        var seen = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
+                        ClassesHeld(argument, held, [], p => seen.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
+                        foreach (var c in held.Where(reached.Contains))
+                        {
+                            firstUse[c] = Math.Min(firstUse.GetValueOrDefault(c, int.MaxValue), call.Line);
+                        }
+                    }
+                }
+            }
+        }
+
+        return all;
+    }
+
+    /// <summary>R9b: every type argument the calls give each type parameter.</summary>
+    private static Dictionary<TypeParameterSymbol, List<KurzType>> TypeArguments(IEnumerable<(CallExpression Call, CallInfo Info)> calls)
+    {
         var arguments = new Dictionary<TypeParameterSymbol, List<KurzType>>(ReferenceEqualityComparer.Instance);
-        foreach (var (parameter, argument) in models.SelectMany(m => m.Calls).SelectMany(c => c.Map))
+        foreach (var (parameter, argument) in calls.SelectMany(c => c.Info.Map))
         {
             if (!arguments.TryGetValue(parameter, out var list))
             {
@@ -1781,27 +1865,19 @@ public sealed partial class Checker
             list.Add(argument);
         }
 
-        var all = new HashSet<ClassSymbol>();
-        foreach (var m in models)
-        {
-            foreach (var (lambda, info) in m.Lambdas)
-            {
-                var reached = new HashSet<ClassSymbol>();
-                var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
-                foreach (var v in info.Captures)
-                {
-                    ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
-                }
+        return arguments;
+    }
 
-                all.UnionWith(reached);
-                foreach (var c in reached.Where(_ => ReferenceEquals(m, model)))
-                {
-                    firstLambda[c] = Math.Min(firstLambda.GetValueOrDefault(c, int.MaxValue), lambda.Line);
-                }
-            }
+    /// <summary>R9: the classes the variables a lambda captures hold, a type parameter's through <paramref name="arguments"/>, each type parameter read once, into <paramref name="met"/>.</summary>
+    private HashSet<ClassSymbol> CapturedBy(LambdaInfo info, Dictionary<TypeParameterSymbol, List<KurzType>> arguments, HashSet<TypeParameterSymbol> met)
+    {
+        var reached = new HashSet<ClassSymbol>();
+        foreach (var v in info.Captures)
+        {
+            ClassesHeld(v.Type, reached, [], p => met.Add(p) && arguments.TryGetValue(p, out var list) ? list : []);
         }
 
-        return all;
+        return reached;
     }
 
     /// <summary>A ring of fields from <paramref name="start"/> back to it with a <c>mut</c> field on it; null where there is none.</summary>
