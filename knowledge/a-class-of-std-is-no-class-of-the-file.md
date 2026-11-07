@@ -19,9 +19,14 @@ error, and nothing ran. No case and no test had a class of the program with such
 tests of W4 used `HttpHeaders` from variables at the top level. Found on 2026-11-03, when the
 request reader's probe declared such a class.
 
-The search now passes over a class that has no entry in the table. A class of `std/` names no
-class of the file, so no ring of the file can run through it. `std/`'s own checker judges the rings
-among `std/`'s classes.
+The search then passed over a class that had no entry in the table, since a class of `std/` named
+no class of the file. R9 changed that: a field of a function type reaches every class a lambda of
+the program captures, so a class of `std/` with such a field reaches the file's classes. The walk
+now builds the entry of a class of `std/` from its fields when it first meets one, and it also
+searches from the classes the lambdas capture, for a ring of `std/`'s classes alone that a lambda
+of the file closes. `std/`'s own checker judges the rings among `std/`'s classes that no lambda of
+the file closes. `CheckerTests.A_class_of_std_with_a_field_of_a_function_type_reaches_the_classes_the_file_s_lambdas_capture`
+checks both rings, against an edited `std/`.
 
 The shape to look for: a table keyed by the file's own classes, filled from `classDeclared`, and
 read for a class that a type reached. Since W1 such a class can come from `std/`. Read the table

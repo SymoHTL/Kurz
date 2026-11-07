@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpServer"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -318,7 +318,6 @@ public sealed partial class Checker
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
-        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -333,6 +332,7 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
         CheckFieldDefaults(); // K7
@@ -372,6 +372,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         MakeCopies();
+        CheckReferenceCycles(); // R2, R4, R9: after every body, the copies' among them, when the lambdas of the file are known
     }
 
     /// <summary>
@@ -606,6 +607,20 @@ public sealed partial class Checker
         if (std is null)
         {
             return;
+        }
+
+        // W1, S1: the types every file sees without a declaration are one set of symbols across std/ and the file, so that the
+        // `IoError` a function of std/ gives, `HttpRequest.Read`'s among them, is the file's `IoError`
+        foreach (var t in BuiltInTypes.Statements.OfType<TypeDeclaration>())
+        {
+            if (std.dataTypes.TryGetValue(t.Name, out var builtIn))
+            {
+                dataTypes[t.Name] = builtIn;
+            }
+            else if (std.enums.TryGetValue(t.Name, out var builtInEnum))
+            {
+                enums[t.Name] = builtInEnum;
+            }
         }
 
         foreach (var name in Prelude)
@@ -1570,6 +1585,10 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
         }
+        else if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+        }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
@@ -1616,6 +1635,15 @@ public sealed partial class Checker
             f = f.Outer;
         }
     }
+
+    /// <summary>
+    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
+    /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
+    /// refuses it (CS0412) (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
+    /// </summary>
+    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
+
+    private static string TypeParameterClash(string name) => $"`{name}` is a type parameter of the function around it (V9)";
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
@@ -1753,6 +1781,12 @@ public sealed partial class Checker
         if (frame.Reserved is not null && frame.Reserved.Contains(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
+            return true;
+        }
+
+        if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
             return true;
         }
 
@@ -2127,7 +2161,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        if (variable is null && ImplicitPropertyOf(a.Name) is { Owner: { } owner })
         {
             AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
             CheckExpression(a.Value, Untyped(a.Value));
@@ -2189,10 +2223,10 @@ public sealed partial class Checker
             return;
         }
 
-        if (IsDeclaredName(a.Name))
+        if (IsTypeParameterName(a.Name) || IsDeclaredName(a.Name))
         {
             // E1: the declaration is the one error, and a read of the name after it reports nothing more, as F16's branch above
-            Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is visible already (V9)");
+            Report(ErrorIds.Redeclared, a.Line, IsTypeParameterName(a.Name) ? TypeParameterClash(a.Name) : $"`{a.Name}` is visible already (V9)");
             DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
@@ -2491,6 +2525,11 @@ public sealed partial class Checker
         }
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        if (fields)
+        {
+            KeepFieldTypeOfText(f);
+        }
+
         fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
         fieldsLoopDepth -= fields ? 1 : 0;

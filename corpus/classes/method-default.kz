@@ -1,0 +1,20 @@
+// expect: output
+// | 1
+// | 5
+// | 20
+// | 30
+// rules: K7, F12
+
+data Rate(int PerSecond = 1)
+
+class Meter(int Scale) {
+    pub static int Unit(Rate r = Rate()) => r.PerSecond
+
+    pub int Read(int n, Rate r = Rate(PerSecond: 2)) => Scale * n * r.PerSecond
+}
+
+print(Meter.Unit())
+print(Meter.Unit(Rate(5)))
+m = Meter(10)
+print(m.Read(1))
+print(m.Read(1, r: Rate(3)))

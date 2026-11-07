@@ -1,0 +1,15 @@
+// expect: output
+// | 8192 32768 100 30000000 30s
+// | 240 5s 240 5s
+// | 100 5s 65536 4096
+// | 1048576 32768
+// rules: W7
+
+// the bounds a server holds a connection to, each with the default ASP.NET Core's Kestrel gives it, and a rate a slow client is
+// held to after its grace
+d = HttpLimits()
+print("{d.MaxRequestLineSize} {d.MaxRequestHeadersTotalSize} {d.MaxRequestHeaderCount} {d.MaxRequestBodySize} {d.RequestHeadersTimeout}")
+print("{d.MinRequestBodyDataRate.BytesPerSecond} {d.MinRequestBodyDataRate.Grace} {d.MinResponseDataRate.BytesPerSecond} {d.MinResponseDataRate.Grace}")
+print("{d.MaxRequestsPerConnection} {d.KeepAliveTimeout} {d.MaxDrainSize} {d.MaxChunkSizeLine}")
+mine = HttpLimits(MaxRequestBodySize: 1mb)
+print("{mine.MaxRequestBodySize} {mine.MaxRequestHeadersTotalSize}")
