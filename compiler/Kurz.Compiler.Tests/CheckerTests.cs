@@ -5445,7 +5445,7 @@ public sealed class CheckerTests
         // constant on by name, to a parameter of its type or of a type it widens to, as T8 widens a value (the owner, 2026-11-03)
         Clean("int Scaled<const int N>(int x) => x * N\nbool Flag<const bool B>() => B\nchar Mark<const char C>() => C\n\n" +
             "void Show<const int N = 4>() {\n    print(\"{N}\")\n}\n\nvoid Pass<const int L>() {\n    Show<L>()\n    print(L + 1)\n}\n\n" +
-            "print(Scaled<64>(2))\nprint(Flag<true>())\nprint(Mark<'x'>())\nShow()\nShow<-3>()\nPass<7>()");
+            "print(Scaled<64>(2))\nprint(Flag<true>())\nprint(Flag<false>())\nprint(Mark<'x'>())\nShow()\nShow<-3>()\nPass<7>()");
         Clean("void Small<const byte B>() {\n    print(B)\n}\n\nSmall<255>()\nSmall<0>()");
         Clean("void Sum<const int N = (1 + 2)>() {\n    print(N)\n}\n\nSum()");
         Clean("void Wide<const long L>() {\n    print(L)\n}\n\nvoid Pass<const int N>() {\n    Wide<N>()\n}\n\nPass<7>()\nWide<7>()");
@@ -5454,6 +5454,10 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData("void Bad<const Mode M = Color.Red>() {\n}\n\nBad()\nBad<Mode.Plain>()", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
+    [InlineData("void Big<const byte N = 300>() {\n}\n\nBig()\nBig<1>()", "4: constant-overflow: 300 does not fit a `byte` (L10, T6)")]
+    [InlineData("void Get<const int N = (F())>() {\n}\n\nint F() => 1\n\nGet()\nGet<1>()", "4: default-not-constant: a default value is a constant expression: a literal, a data value without fields or of constant arguments, or literals that T6 folds (F12)")]
+    [InlineData("void Hold<T, const T N>() {\n}\n\nprint(1)", "4: syntax: `T` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Pair<const Mode M, const M N>() {\n}\n\nprint(1)", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
     [InlineData("void Show<const int N, const int M = N>() {\n    print(M)\n}\n\nShow<1>()", "4: unknown-name: no `N` is visible here (V10)")]
     [InlineData("void Name<const Unknown M>(M x) {\n    print(M)\n}\n\nName<1>(2)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
     [InlineData("void Pair<const Unknown M, const M N>() {\n}\n\nprint(1)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
@@ -5494,8 +5498,9 @@ public sealed class CheckerTests
         // as rustc refuses the three (E0747), and a literal that does not fit the parameter's integer type is its overflow (T6); the
         // parameter's name as a declaration's type is no type (V10, rustc's E0573); a call that writes no constant and leaves out one
         // with no default fixes nothing (T27), a count of type arguments names every count a call may write (T19), and a default before
-        // a parameter with none is syntax, as Rust and C# refuse it; a constant of a type outside T35's list is syntax, where rustc gives
-        // an error of its own; a default, or a constant's type, that was not read gives the calls no second error, and the type of
+        // a parameter with none is syntax, as Rust and C# refuse it; a constant of a type outside T35's list, a type parameter among them,
+        // is syntax, where rustc gives an error of its own, and an earlier constant's name as its type is no type (V10); a default is
+        // checked as a parameter's default value is, against the parameter's type (T1), its range (T6) and a constant (F12); a default, or a constant's type, that was not read gives the calls no second error, and the type of
         // a constant that names such a parameter none either, while a body whose constant's type was not read is read, and its own
         // error is reported, as before T35's refusals, and the uses of its constant none (E1); an argument past every type parameter, a
         // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); the
@@ -5605,6 +5610,7 @@ public sealed class CheckerTests
     [InlineData("void Show<T>(int T) {\n    print(T)\n}\n\nShow<long>(2)", "7: redeclared: `T` is a type parameter of the function around it (V9)")]
     [InlineData("void Show<T>(List<int> items) {\n    for T in items {\n        print(T)\n    }\n}\n\nShow<long>([2])", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
     [InlineData("void Show<T>() {\n    (int) => int f = T => T + 1\n    print(f(1))\n}\n\nShow<long>()", "8: redeclared: `T` is a type parameter of the function around it (V9)")]
+    [InlineData("void Show<T>() {\n    (int) => int f = x => {\n        T = x\n        return T\n    }\n    print(f(1))\n}\n\nShow<long>()", "9: redeclared: `T` is a type parameter of the function around it (V9)")]
     [InlineData("T Copy<T>(T value) => T.Make(T => 0)\n\nprint(Copy(Point(1, 2)))", "7: redeclared: `T` is a type parameter of the function around it (V9)")]
     [InlineData("void Each<T>(T value) {\n    for f in T.Fields {\n        T = 1\n        print(\"{T} {f.Get(value)}\")\n    }\n}\n\nEach(Point(1, 2))", "9: redeclared: `T` is a type parameter of the function around it (V9)")]
     [InlineData("void Count<const int M>() {\n    M = 3\n    print(M)\n}\n\nCount<2>()", "8: redeclared: `M` is a type parameter of the function around it (V9)")]
@@ -5617,9 +5623,9 @@ public sealed class CheckerTests
     [InlineData("void Count<const int M>(int | string value) {\n    match value {\n        int M => print(M)\n        string s => print(s)\n    }\n}\n\nCount<2>(1)", "9: redeclared: `M` is a type parameter of the function around it (V9)")]
     public void A_declaration_named_like_a_type_parameter_of_its_function_is_redeclared(string program, string expected)
     {
-        // V9 with T19: a variable, a parameter, either variable of a loop, a binding of a `match` arm and a lambda's parameter cannot take
+        // V9 with T19: a variable, inside a lambda too, a parameter, either variable of a loop, a binding of a `match` arm and a lambda's parameter cannot take
         // the name of a type parameter of the function around them, in its body and in a copy of it, one that holds a constant among them (T35), as C# refuses a method's parameter, local and `foreach`
-        // variable so named (CS0412), and a lambda's parameter as C# did up to its language version 7.3, so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
+        // variable so named (CS0412), and a lambda's parameter and a variable inside a lambda as C# did up to its language version 7.3, so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
         Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
 
