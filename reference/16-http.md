@@ -576,7 +576,7 @@ had no text take the kind `Unsupported`"). A request whose head or body runs out
 server's loop (W10) has one result, `HttpError(Protocol, "request timed out")`, which `ServeConnection`
 gives and the server answers `408` (§12, the owner, 2026-11-01, "Kestrel's bounds", and 2026-11-03,
 "The server's error texts mirror the client's"); the `TimedOut` of the loop's own read is turned into
-it and reaches no program, and `HttpRequest.Read`, which sets no time of the server's (W10), gives a
+it and reaches no program (§12, assumed), and `HttpRequest.Read`, which sets no time of the server's (W10), gives a
 read past the stream's own time as the stream's `IoError` of the kind `TimedOut` (§12, assumed). A `Transfer-Encoding` whose last coding is not `chunked` is
 answered `400`, of the kind `Protocol`, and one that names another coding before its last `chunked` is
 answered `501`, of the kind `Unsupported` (§12, the owner, 2026-11-05, Q1); a request of
