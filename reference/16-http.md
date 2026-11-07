@@ -219,16 +219,20 @@ type is written `move`, `(move HttpRequest r) => HttpResponse` (§12, the owner,
 
 The server calls the handler with the word at the argument, `handler(move r)`, as every call of a
 parameter written `move` does. An argument of such a parameter without the word is section 6's
-`move-at-call` (§6, the owner, 2026-11-05, issue 156, comment 6657251688, Q3), and so is `move` in
-front of an argument whose parameter is not written `move`, as `mut-at-call` is for `mut` (§6)
-*(assumed, §6: the name `move-at-call`, and the reading said back for the word in front of a
-parameter not written `move`)*. A lambda given for the handler whose parameter is written without
+`move-at-call` (§6, the owner, 2026-11-05, issue 156, comment 6657251688, Q3), and so is `move` at a
+call in front of an argument whose parameter is not written `move`, as `mut-at-call` is for `mut`
+(§6) *(assumed, §6: the name `move-at-call`, and the reading said back for the word in front of a
+parameter not written `move`)*. At a send, `move` at an argument is the send's word, however the
+method's parameter is written, and a `move` at a call that is both in front of a parameter not
+written `move` and of a value held as its caller's is `move-at-call`, the call's word checked
+first (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
 `move` fits the type and sends nothing of its request: its check holds the parameter as its
-caller's, so that a send or a `move` of it is section 6's `move-reachable`. A lambda's parameter
+caller's, so that a send or a `move` of it is section 6's `move-reachable` (§6) *(assumed, §6:
+that error for it)*. A lambda's parameter
 whose type is not written takes `move` from the type, and a lambda whose parameter is written with
 `move` fits no type without it, with `type-mismatch` (§6, the owner, 2026-11-05, issue 156, comment
-6657251688, Q4). A named function given for the handler fits by the same rule (§6) *(assumed, §6:
-that reading)*.
+6657251688, Q4). A named function, or a value of a function type whose parameter is written
+without `move`, given for the handler fits by the same rule (§6) *(assumed, §6: those readings)*.
 
 Of the connection's stream, the body takes the read half with it for its life, and the server keeps
 the write half, as tokio's `TcpStream::into_split` gives an `OwnedReadHalf` and an
@@ -237,54 +241,93 @@ the server when the body ends, read to its end or drained when its last owner dr
 read or the drain closed the connection (below) (§12, the owner, 2026-11-05, issue 156, comment
 6657251688, Q5, and comment 6666386552, Q7). The response, the `408` and the close stay the
 server's, on the write half, and a read of the body that timed out is reported back to the server
-at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). The response is
+at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). A body's first
+read, in any actor, signals the server through the halves' pair of types, and `100 Continue` is
+written on the server's write half for a request that expects it while no response has begun, while a
+handler that returns with the body unread by every actor keeps the close of a body unread at its
+return (§12, the owner, 2026-11-05, issue 156, comment 6668914650, Q10). The write is made by
+`std/`'s code of that pair at the first read, in the actor that reads, under its flag of whether a
+response has begun, since the server is inside the handler's call (§12, the owner, 2026-11-05,
+issue 156, comment 6669908509, Q12). The response is
 written when the handler returns, while the moved body stays the other actor's to read to its end:
 every read that keeps to the body's rate gives the body's bytes, then `0` at its end. A body left
 unread is drained when its last owner drops it, and the connection reads its next request only after
 that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306).
 
 The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
-by `MaxDrainSize`, and where either ends it the connection closes, with no error to any reader, while
+by `MaxDrainSize`, and where either ends it the connection closes, with no error to any reader, and
+the actor that drops the body waits on the drain, at most for the time the body's rate gives
+`MaxDrainSize`, about 273 seconds for the 64 KiB at 240 bytes a second, while
 a drain under the rate before any response has begun ends the body as a read that timed out does,
 so that the server sends the `408` (§12) *(assumed, §12: that reading)*. A `move` of the request
 ends every path into it, `b = r.Body` included, by the region check of the record's section 6, and
 is refused with `move-reachable` where section 6 refuses it (§12). Of the bounds of `HttpLimits`, a
-moved body's reads meet the body's rate, since the limit of a declared body is checked against
-`Content-Length` before the handler runs, and a body without a declared length, moved or not,
-counts its bytes against `MaxRequestBodySize` as it is read, as Kestrel counts them, a read past it
-giving `HttpError(TooLarge, "request body over limit")` (§12) *(assumed, §12: that reading)*. A read
+moved body's reads meet two, the body's rate and, for a body without a declared length,
+`MaxRequestBodySize`, while the limit of a declared body is none of them, since it is checked
+against `Content-Length` before the handler runs. A body without a declared length, moved or not,
+counts its bytes against `MaxRequestBodySize` as it is read, as Kestrel counts them: the read that
+would pass it gives `HttpError(TooLarge, "request body over limit")` and none of its bytes, every
+later read the same error, and the connection closes, the `413` sent only while no response has
+begun, as Kestrel's `BadHttpRequestException` of 413 is (§12) *(assumed, §12: the count, which
+corrects the reading said back on issue 156, comment 6644555381, item 2, as the owner's choice of
+2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. A read
 of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
 as a handler's read does, and the connection closes; the `408` is sent only while no response has
 begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error `request timed out`
 being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment 6657251329, which replaced
-the `IoError` with `IoKind.TimedOut` of 2026-11-03), and after a `408` the response
-the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
+the `IoError` with `IoKind.TimedOut` of 2026-11-03); the error is the server's own, in place of the
+`IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull request 347,
+comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at the report of
+that read, which ends the body)*, and after a `408` the
+response the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
-owner, 2026-11-05, issue 156, comment 6666386552, Q8). The timeout of a moved body's read is
-decided, and its timing is not: how the body's rate is timed on the socket of the actor that got the
-body stands open in §14, a timer in the poller's wait or a deadline the scheduler reads at each
-switch (§12).
+owner, 2026-11-05, issue 156, comment 6666386552, Q8). Only the server can close without a read:
+while the read half is away, the server times the grace from the body's last read, and at its end
+it ends the body through the halves' pair of types, closes the connection and serves the next one,
+so that the body's next read gives `request timed out` and its drop drains nothing (§12)
+*(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
+runs, the server times nothing: it times the grace once the call has returned, and a read that
+comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
+2026-11-05, issue 156, comment 6669908509). The grace runs from the body's last read and does not
+start again when the call returns, and a body that no read has reached counts it from that return
+(§12, the owner, 2026-11-06, pull request 347, P2). The time between
+reads counts in the body's rate as the time a read waits does, and a
+time past the grace since the last read ends the body at once; a body that the handler reads
+itself counts only the time a read waits, since Q8 was asked of a moved body (§12) *(assumed, §12:
+those readings)*. That a moved body's read under the rate ends the body and closes the connection
+is decided, as is its error (above), and the timing of a read's wait is open: how it is
+timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
+wait or a deadline the scheduler reads at each switch, while the time between reads is the
+server's, timed from the body's last read (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
 issue 156, comment 6603205575) *(assumed, §12: the error's name, `copy-server-request`; §6: the name
-`send-needs-word`)*. A send with `copy` of any value whose type can hold an `HttpRequest`, a class
-instance, a list, a map, a union, a nullable `HttpRequest?` or a `data` type among them, is refused
-with the same error, and so is one of `r.Body`, while `r.Headers` copies (§12) *(assumed, §12: that
-reading)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any value
+`send-needs-word`)*. A send with `copy` of any value whose type can hold an `HttpRequest` or an
+`HttpBody`, a class instance, a list, a map, a union, a nullable `HttpRequest?` or a `data` type
+among them, is refused with the same error, `r.Body` and an `HttpBody` made for an upload among
+them, while `r.Headers` copies, and a send of such a value with no word is `send-needs-word`, as a
+send of the request is (§12) *(assumed, §12: those readings)*. The request a client builds is a type of its own, `HttpRequestMessage`, sent as any value
 is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
 6643376941). It is a `data` type with a body of `Bytes`, and a body that streams is given to the
-call, `client.Send(request, body)` (§12, the owner, 2026-11-05, issue 156, comment 6657251688, Q6).
+call, `client.Send(request, move body)` (§12, the owner, 2026-11-05, issue 156, comment 6657251688,
+Q6, and comment 6668914650, Q11).
 That body is an `HttpBody`, and a message whose `Bytes` body is not empty, sent with a body as well,
 gives `HttpError(Protocol, "request has two bodies")` before any byte is sent (§12, the owner,
-2026-11-05, issue 156, comment 6666386552, Q9) *(assumed, §12: the error's text)*.
+2026-11-05, issue 156, comment 6666386552, Q9) *(assumed, §12: the error's text)*, an error that
+shows only when the code runs (§12) *(assumed, §12: that cost)*. The call's body parameter is
+written `move`, since the call reads the body to its end, so that the call writes `move` at the
+body, as section 6 asks of a call (§6, §12) *(assumed, §12: the parameter's word)*, and an
+`HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
+2026-11-05, issue 156, comment 6668914650, Q11) *(assumed, §12: the makers' names and forms)*.
 
 No case: the compiler reads no `copy` and no `move`, at a send, on a parameter or at a call (§6), so
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
-server or client of §12, which the halves of the stream, the rate between reads, the count of a
-body without a declared length and the two bodies of a client's call need. The id
+server or client of §12, which the halves of the stream, the first read's `100 Continue`, the rate
+between reads, the count of a body without a declared length, the two bodies of a client's call
+and the makers of an `HttpBody` need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
 section 6, as `move-reachable` does, and none of them in [12-errors.md](12-errors.md), since no case
 can expect them (§12, the owner, 2026-11-03, issue 156, comment 6603359338) *(assumed, §6: that
