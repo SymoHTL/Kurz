@@ -4336,7 +4336,7 @@ issue 110, comment 6715300573, not put to the owner: `Decode` reads hex digits o
 gives the decoded bytes as `string.FromUtf8` gives them, `InvalidUtf8` with the count of the
 decoded bytes in front of the first sequence that is no UTF-8 (T15); `%00` gives U+0000, as C# and
 the crate decode it; no path is checked, so that a key holds `/`, `..` or a NUL decoded as any
-other byte, and a program that maps a key to a file refuses `..` after `Decode`; `Encode` leaves
+other byte; `Encode` leaves
 RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, as `EscapeDataString`
 leaves them, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
 upper-case hex digits, as RFC 3986, section 2.1, writes them; `Decode(Encode(s))` is `s` for every
