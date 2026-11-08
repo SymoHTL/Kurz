@@ -45,7 +45,7 @@ public sealed class HttpTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("ValueAt", "-1", "2")]
     public void An_index_of_HttpQuery_outside_its_pairs_is_index_out_of_range(string member, string index, string last)
     {
-        // W19 *(assumed: the product pass of 2026-11-08, #110, comment 6716242509, as W4's)*: with `i` outside 0 to `Count - 1`,
+        // W19 (the owner, 2026-11-08, #110, comment 6721051459, as W4's): with `i` outside 0 to `Count - 1`,
         // `NameAt(i)` and `ValueAt(i)` of an `HttpQuery` stop the program with index-out-of-range, the error line naming the line of
         // std/ that raised, as W4's do; the read of the last pair before it is the positive control
         var program = $$"""

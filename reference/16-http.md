@@ -4396,11 +4396,12 @@ and `Uri.EscapeDataString`, made as Rust's `percent-encoding` crate decodes and 
 `r.Path` stays as the request gave it (W5). `Decode` reads each `%` with two hex digits after it
 as the byte they name, leaves a `%` without them as it is, and leaves a `+` a `+`, since RFC 3986
 gives it no meaning in a path (§12, the owner, 2026-11-06, issue 110, comment 6680237968, G1 (a),
-asked in comment 6673104097). *(assumed, §12, the readings of the product pass of 2026-11-08,
-issue 110, comment 6715300573, not put to the owner: `Decode` reads hex digits of either case and
-gives the decoded bytes as `string.FromUtf8` gives them, `InvalidUtf8` with the count of the
-decoded bytes in front of the first sequence that is no UTF-8 (T15); `%00` gives U+0000, as C# and
-the crate decode it; no path is checked, so that a key holds `/`, `..` or a NUL decoded as any
+asked in comment 6673104097). `%00` gives U+0000, as C# and the crate decode it (§12, the owner, 2026-11-08,
+issue 110, comment 6721051459, "U+0000", asked in comment 6715300573). *(assumed, §12, the other readings of
+the product pass of 2026-11-08, issue 110, comment 6715300573, not put to the owner: `Decode` reads
+hex digits of either case and gives the decoded bytes as `string.FromUtf8` gives them, `InvalidUtf8`
+with the count of the decoded bytes in front of the first sequence that is no UTF-8 (T15); no path
+is checked, so that a key holds `/`, `..` or a NUL decoded as any
 other byte; `Encode` leaves
 RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, as `EscapeDataString`
 leaves them, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
@@ -4462,8 +4463,8 @@ it, together with the two obsolete forms the RFC has a recipient read, RFC 850's
 class `HttpDate` of `std/`, which every file sees (W1), as Rust's `httpdate` crate, which hyper uses,
 writes and reads them, and the server writes its own `Date` (W9) by the same function (§12, the
 owner, 2026-11-06, issue 110, comment 6680237968, G3 (a), asked in comment 6673104097).
-*(assumed, §12, the readings of the product pass of 2026-11-08, issue 110, comment 6715835046, not
-put to the owner, each the crate's where it has one: `Format` takes the second towards the past, as
+The readings are the crate's where it has one (§12, the owner, 2026-11-08, issue 110, comment 6721051459,
+"httpdate's readings", asked in comment 6715835046 as one question): `Format` takes the second towards the past, as
 the crate drops the fraction, and writes every instant a `timestamp` holds, 1677 to 2262, one before
 1970 among them, where the crate stops the program; `Parse` takes ASCII's whitespace from both ends
 first (X4's `TrimAscii`), as the crate trims the text, compares the names of the days and the months
@@ -4473,7 +4474,7 @@ each separator; and it refuses, by X7's kinds, a text of whitespace alone as `Em
 1970, which the crate refuses, as `TooSmall`, an instant past the last second a `timestamp` holds,
 2262-04-11 23:47:16, as `TooLarge`, and every other text as `InvalidDigit`, a text of no form, an hour
 past 23, a minute or a second past 59, a second of 60 among them, a day the month does not have and a
-weekday that is not the date's, which the crate checks, among them)*
+weekday that is not the date's, which the crate checks, among them.
 
 Case: [http/http-date-format.kz](../corpus/http/http-date-format.kz)
 ```kurz
@@ -4540,10 +4541,9 @@ and reading a `+` as a space, as a form's query writes one, as ASP.NET Core's
 `QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read a query (§12, the owner,
 2026-11-06, issue 110, comment 6680237968, G2 (a), asked in comment 6673104097, with the option's
 `HttpQuery.Parse(r.Query)` made a method of the request, whose name says what it reads).
-*(assumed, §12: the name `QueryValues`, the reading taken of the owner's answer, with
-`HttpQuery.FromQuery(r.Query)` the form shown beside it, and the readings of
-the product pass of 2026-11-08, issue 110, comment 6716242509, not put to the owner, each the crate's
-where it has one: `HttpQuery()` holding no pair, and no member changing one; the query read anew at
+The name is `QueryValues`, and the readings are the crate's where it has one (§12, the owner,
+2026-11-08, issue 110, comment 6721051459, "form_urlencoded's", asked in comment 6716242509 as one question):
+`HttpQuery()` holding no pair, and no member changing one; the query read anew at
 each call, which a program tells from one parse held only by the time it takes; the text split at each `&`, an empty piece skipped, and a `;` no separator; each piece
 split at its first `=`, and a piece without one the name with the empty value; a `+` read as a space
 before the escapes, so that `%2B` gives a `+`; each `%` with two hex digits after it the byte they
@@ -4553,7 +4553,8 @@ them (T15), where `Url.Decode` refuses them, since `QueryValues()` cannot fail; 
 keeping each of its values apart, in their order; `GetAll` giving a new list; `NameAt(i)` and
 `ValueAt(i)` outside 0 to `Count - 1` stopping the program with `index-out-of-range`, as W4's do; and
 the walk `for name, value in q` of C6 and W4, which any class with `Count`, `NameAt(i)` and
-`ValueAt(i)` meets)*.
+`ValueAt(i)` meets. *(assumed, §12: `HttpQuery.FromQuery(r.Query)`, the form shown beside
+`r.QueryValues()`, the reading taken of the answer of 2026-11-06)*.
 The compiler does not build this walk, as W4 says of every class, so the case walks the query by
 index; the stop of `NameAt(i)` and `ValueAt(i)` outside the pairs is held by `HttpTests`, as W4's.
 
