@@ -109,8 +109,8 @@ public sealed class Toolchain : IDisposable
 /// </summary>
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. Each number is the count measured on its system, with no margin, so that one case that stops being built turns it red, and a change that adds a case to the run raises it (#156).</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 412 : 507;
+    /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows was not measured: the Windows job prints no count, and it passed with 411, so at least 411 cases build and run there. The count there may be higher, so the Windows number can have a margin, and a case that stops being built there may leave it green: it is a weaker gate than the Linux number.</summary>
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 414 : 525;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -125,12 +125,16 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/read-buffer-close.kz", "system/fill-consume.kz", "system/fill-held.kz", "system/fill-head.kz", "system/fill-timeout.kz",
         "system/consume-past.kz", "system/consume-negative.kz", "system/fill-closed.kz", "system/read-buffer-zero-held.kz",
         "system/read-buffer-limit.kz", "system/read-buffer-second.kz", "system/read-buffer-close-stream.kz", "system/consume-closed.kz",
+        "system/consume-closed-negative.kz", "system/read-buffer-zero-closed.kz",
         "http/request-read.kz", "http/request-refused.kz", "http/request-refused-unsupported.kz", "http/request-body.kz",
-        "http/request-body-errors.kz", "http/request-continue.kz", "http/request-limits.kz",
+        "http/request-body-errors.kz", "http/request-continue.kz", "http/request-limits.kz", "http/request-trailer.kz",
         "http/response-write.kz", "http/response-head.kz", "http/response-bodiless.kz", "http/response-unwritable.kz",
         "http/response-transfer-encoding.kz", "http/response-large.kz",
         "http/serve-keep-alive.kz", "http/serve-close.kz", "http/serve-refused.kz", "http/serve-head.kz", "http/serve-drain.kz",
         "http/serve-limits.kz", "http/serve-accept.kz", "http/serve-timeouts.kz",
+        "http/response-stream.kz", "http/serve-stream.kz", "http/serve-stream-timeouts.kz",
+        "http/client-get.kz", "http/client-pool.kz", "http/client-errors.kz", "http/client-response.kz", "http/client-malformed.kz",
+        "http/client-limits.kz", "http/client-redirects.kz", "http/client-timeout.kz", "http/client-timeout-body.kz",
     ];
 
     /// <summary>The cases of the reads of the command line, the environment and the clock that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
@@ -140,6 +144,9 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/monotonic-clock.kz", "system/elapsed-order.kz",
     ];
 
+    /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
+    private static readonly string[] LogCases = ["logging/off-runs-no-hole.kz"];
+
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -147,7 +154,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ["memory/asm-in-raw.kz"] = "inline assembly (R11)",
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
     }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
-        .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
+        .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
+        .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
     private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()

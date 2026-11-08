@@ -1447,17 +1447,20 @@ declares (F9, D16), in the order of their declaration, and never a field the bod
 `T.Make` sets the primary constructor's fields alone (§4, the owner, 2026-11-01, "Kinds + parts",
 "for f in T.Fields", "T.Make(f => ...)", "Type arg grants read" and "Readable ones"). In a copy whose
 type has constraints (record, section 13) `T.Make` gives `T | Invalid`, and `T` in any other copy;
-a generic function lists every outcome any of its copies can give, and a copy that gives one its
+a generic function lists every outcome that the copies its calls make can give, and a copy that gives one its
 function does not list is `unlisted-case` at the call that made the copy (§4, the owner,
 2026-11-02, "a generic function lists every outcome any of its copies can give", an option that named the id and its
-place); the outcomes are those of the copies calls make, each checked at the call that made it, as each copy is
-checked alone, so that
+place, which the answer of 2026-11-03 narrows to the copies calls make); each copy is checked at the call that made it,
+as each copy is checked alone, so that
 a function whose calls make no copy that gives `Invalid` need not list it, `Remake` below among them, while that
 call can be a caller's in another package than the function (§4, the owner, 2026-11-03, "checked at each copy a call
 makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
 type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
-CS0412 refuses it (§4, the owner, 2026-11-03, "redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same
-reading for both"). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
+refused a lambda's parameter so named up to its language version 7.3 (§4, the owner, 2026-11-03, "redeclared, as C#'s
+CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
+text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
+a function. *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1475,15 +1478,22 @@ the owner, 2026-11-02, "only a `match` on `T.Kind` narrows"). *(assumed, §4: th
 same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no type, and any other
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
 fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
-`match` on `T.Kind` that a copy does not read; a failure in a body leaves the function as from any argument of a call (§5),
+`match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
 the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make: an error in it shows at its first copy,
 and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
+*(assumed, with the build: a copy is made at the first call that names its type arguments, and a later call with the
+same type arguments reads that copy, so that an error of the copy is reported once, and one reported at the call,
+`kind-not-read` or `unlisted-case`, shows at that first call, the call that made it)*
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
-does not read that arm; a build stopped at the bound of 64 copies on a chain of copies (the record,
-section 14) reports that `not supported` and the errors of the copies made before it, while a copy
-of the same outer call that a chain asks for after the bound is not made, so that its errors show
-only in a build where the chain is ended)*
+does not read that arm; the copies are made depth first: the copies that the calls of a copy ask
+for are made after its body is checked, in the order of those calls in its text, each with its own
+copies before the copy of the call after it, and the copies that calls outside every copy ask for
+are made after the code outside the copies is checked; the outer call of a chain of copies is the
+call outside every copy that made its first copy; a build stopped at the bound of 64 copies on a
+chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
+of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
+for after the bound is not made, so that its errors show only in a build where the chain is ended)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1914,22 +1924,35 @@ print("done")
 ### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
-type and the parameter's name, `T | JsonError Parse<T, const JsonKeys K>(string text)`. A call
+type and the parameter's name, `T | JsonError | Invalid Parse<T, const JsonKeys K = JsonKeys.AsWritten>(string text)`
+(§12 gives `K` its default). A call
 writes the constant among its type arguments, `Json.Parse<Order, JsonKeys.SnakeCase>(text)`; each
 constant makes a copy of the function of its own (T19), and the function's code reads the
 parameter as a value known while the program compiles (§4, the owner, 2026-11-01, "Const generic,
 as Rust"). *(assumed, §4: such a parameter may have a default, `const Mode M = Mode.Plain`, which a
 call that leaves it out takes; the types it holds are the integer types, `bool`, `char` and an
-`enum`)* *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
+`enum`)* A default is a constant expression, as a parameter's default value is (F12), of one
+operand: a literal with its `-`, an `enum`'s value, or an expression in brackets,
+`const int N = (1 + 2)`, as Rust takes `{ 1 + 2 }` there, and `const int N = 1 + 2` is `syntax`;
+the name of an earlier parameter there is `unknown-name` (V10); a type outside the list is
+`syntax`; a call that writes fewer type arguments than the parameters without a
+default, or more than all of them, is T19's count, `syntax`, which names each count the call may
+write. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
+`enum`'s value are there; a constant passed on to a parameter of a wider integer type widens as a
+value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
+reads it"). *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
 `assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
-`syntax`; the parameter's name stands as a value of its type, and where a type stands it is
-`unknown-name` (V10); a value of another type or a type where the constant stands, and a constant
-where a type stands, are `type-mismatch` (T1); a call that writes no type arguments takes each
+`syntax`; the parameter's name stands as a value of its type; a value of another type or a type
+where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
-loop's variable, a binding of a `match` arm or a lambda's parameter of the parameter's name in the function is
-`redeclared`, as for any type parameter (V9, T33; §4, the owner, 2026-11-04, "the same reading for both").
+loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
+`redeclared`, as for any type parameter, in each copy a call makes, so not at all where no call reaches the function
+(V9, T33; §4, the owner, 2026-11-04, "the same reading for both"); `M = Mode.Loud` with that name is such a
+declaration (V8, V9). The type parameter itself takes no name of a variable at the outermost level of the top-level
+code, whether or not a call makes a copy (F16).
 
 A constant of an integer type, `bool` or `char` is a bare literal among a call's type arguments
 where `(` follows the list, `Buffer<64>()`, as Rust reads `f::<64>()`; `f(a < 64, c > (d))` is then
@@ -1938,7 +1961,10 @@ owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer take
 `Count<-1>()`, as Rust takes `f::<-1>()`; the literal is checked against the parameter's type as
 an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
 another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
-`List<64>.FromRaw(p, 0)` is `syntax`, and a `double` or a string literal keeps the comparisons)*
+`List<64>.FromRaw(p, 0)` is `syntax`)* An integer literal of every form, with its suffix and its
+base, starts the list, `f(a < 64L, c > (d))`, while a `double`, a string, a literal with a unit and
+`null` keep the comparisons, since no such parameter holds one (§4, the owner, 2026-11-03, "every
+default").
 
 Case: [types/const-parameter.kz](../corpus/types/const-parameter.kz)
 ```kurz
@@ -1988,11 +2014,35 @@ Case: [types/const-parameter-default-order.kz](../corpus/types/const-parameter-d
 ```kurz
 enum Mode { Plain, Loud }
 
-void Late<const Mode M = Mode.Plain, T>(T value) {
+void Late<const Mode M = Mode.Plain,
+    T>(T value) {
     print("{M} {value}")
 }
 
 Late<Mode.Loud, int>(1)
+```
+
+Case: [types/const-parameter-name-as-type-argument.kz](../corpus/types/const-parameter-name-as-type-argument.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Other<T>() {
+}
+
+void Outer<const Mode M>() {
+    Other<M>()
+}
+
+Outer<Mode.Plain>()
+```
+
+Case: [types/const-parameter-other-type.kz](../corpus/types/const-parameter-other-type.kz)
+```kurz
+void Name<const string S>() {
+    print(S)
+}
+
+print(1)
 ```
 
 Case: [types/const-parameter-as-type.kz](../corpus/types/const-parameter-as-type.kz)
@@ -2039,9 +2089,13 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Pass<const long L>() {
-    Show<5>()
-    print(L)
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Show<L>()
+    Wide<L>()
 }
 
 print(Scaled<64>(2))
@@ -2054,8 +2108,8 @@ Pass<7>()
 
 Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)
 ```kurz
-int Scaled<const int N>(int x) => x * N
-print(Scaled<true>(2))
+int Size<const int N>() => N
+print(Size<true>())
 ```
 
 Case: [types/const-parameter-comparisons.kz](../corpus/types/const-parameter-comparisons.kz)

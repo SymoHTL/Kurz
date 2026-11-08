@@ -566,8 +566,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ConstantOverflow, 4)], Errors("T Pick<T>(T a, T b) => a\n\nbyte small = 1\nprint(Pick(small, 300))"));
         Assert.Equal([(ErrorIds.CannotInfer, 3)], Errors("T Make<T>() => Make<T>()\n\nprint(Make())"));
 
-        // T27: the text names the first argument whose type has no part where its parameter's type parameter stands, so that it gives
-        // that type parameter nothing; where every argument gives its type parameters a type and they differ, where no argument stands
+        // T27: the text names the first argument whose type has no part where the type parameter that failed stands in its parameter,
+        // so that it gives that type parameter nothing; where every argument gives it a type and they differ, where no argument stands
         // in a position, and for a lambda, which has no type of its own before the pick (F11), the text names no argument
         const string notInferable = "the type arguments are neither written nor inferable from the arguments";
         Assert.Equal(notInferable + ": argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", Assert.Single(Check("int Count<T>(List<T> xs) => xs.Count\n\nprint(Count(5))").Diagnostics.Items).Message);
@@ -576,6 +576,34 @@ public sealed class CheckerTests
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("data User(string Name)\ndata Admin(int Level) : User\n\nT Put<T>(List<T> items, T item) => item\n\nprint(Put(List<Admin>(), User(\"b\")).Name)").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("T Make<T>() => Make<T>()\n\nprint(Make())").Diagnostics.Items).Message);
         Assert.Equal(notInferable + " (T27)", Assert.Single(Check("U Each<T, U>(T x, (T) => U f) => f(x)\n\nprint(Each(1, x => x + 1))").Diagnostics.Items).Message);
+        // with two type parameters the argument named gives the one that failed nothing, never one that gives the other nothing where
+        // another argument gives the other its type (#156, comment 6620467625), whether the inference ended where nothing gives it a type,
+        // where its direct arguments differ, where a nested position contradicts the type an argument before bound (assumed, #156, comment
+        // 6620846564), or where its list literals differ; where every argument gives the one that failed a type, the text names no
+        // argument (the owner, 2026-11-04, #156, comment 6643376941)
+        var pair = "int F<T, U>(List<U> a, U d, T b, List<T> c) => 1\n\nint G<T, U>(List<U> a, U d, List<T> c) => 1\n\n"
+            + "int H<T, U>(T a, T b, List<U> c) => 1\n\nint P<T, U>(List<U> e, T a, T b, List<T> c) => 1\n\n"
+            + "int K<T, U>(List<U> e, List<T> a, List<T> b, List<T> c) => 1\n\n";
+        Assert.Equal([(ErrorIds.CannotInfer, 11), (ErrorIds.UnknownName, 11)], Errors(pair + "print(F(5, 1, nothing, 6))"));
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Check(pair + "print(F(5, 1, nothing, 6))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "print(G(5, 1, 6))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(H(i, s, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(P(6, i, s, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "List<int> xs = [1]\nList<string> ys = [\"a\"]\nprint(K(6, xs, ys, 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check(pair + "List<int> xs = [1]\nList<string> ys = [\"a\"]\nprint(K(6, xs, ys, ys))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 4 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(K(6, [i], [s], 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", // `U` agrees, `T` is contradicted
+            Assert.Single(Check("data Pair<A, B>(A First, B Second)\n\nint R<U, T>(Pair<U, T> a, Pair<U, T> b, List<T> c) => 1\n\np = Pair(\"k\", 1)\nq = Pair(\"k\", \"s\")\nprint(R(p, q, 5))").Diagnostics.Items).Message);
+        Assert.Equal(
+            "the call fits none of the functions named `M` (F13):\n"
+                + "  `int M<T, U>(List<U> a, U d, List<T> c, int e)` at line 1: its type arguments are neither written nor inferable from the arguments: argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)\n"
+                + "  `int M<T, U>(List<U> a, U d, List<T> c, string e)` at line 2: its type arguments are neither written nor inferable from the arguments: argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check("int M<T, U>(List<U> a, U d, List<T> c, int e) => 1\nint M<T, U>(List<U> a, U d, List<T> c, string e) => 1\n\nprint(M(5, 1, 6, 7))").Diagnostics.Items).Message);
         // E1 with T27: an argument with an error of its own in a nested position, the `T` of a `List<T>`, gives `T` nothing and its own error
         // stands alone, as in a direct one; a result that does not name `T` stays, one that does reports nothing more (the owner, 2026-11-03,
         // #156, comment 6600034940); `T` that another argument fails to give a type is still `cannot-infer`
@@ -605,7 +633,20 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.CannotInfer, 5)], Errors(two + "print(Two([], 5))"));
         Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.ConstantOverflow, 5)], Errors(two + "print(Three(99999999999999999999, 5))"));
         Assert.Equal([(ErrorIds.UnknownName, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, nothing))"));
-        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))")); // a lambda has no type of its own before the pick (F11)
+        // T27 with F11 and E1: beside an argument with its own error, a lambda that fits no function type its parameter could be keeps the
+        // `cannot-infer`, which names no argument; one that could fit leaves the own error alone (the owner, 2026-11-05, #156, comment
+        // 6659026667), also under a bare `T`, which can be a function type (assumed, #156, comment 6659124253)
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Two(nothing, x => x))"));
+        Assert.Equal(notInferable + " (T27)", Check(two + "print(Two(nothing, x => x))").Diagnostics.Items.First(d => d.Id == ErrorIds.CannotInfer).Message);
+        Assert.Equal([(ErrorIds.CannotInfer, 5), (ErrorIds.UnknownName, 5)], Errors(two + "print(Three(nothing, x => x))")); // the own error direct
+        Assert.Equal([(ErrorIds.TypeMismatch, 3), (ErrorIds.UnknownName, 3)], Errors("int Size<T>(List<T> xs, int n) => 1\n\nprint(Size(nothing, x => x))")); // no `T` there: T1
+        var apply = "void Apply<T>(List<T> xs, (T) => void f) {\n    print(xs.Count)\n}\n\nvoid Apply2<T>(List<T> xs, (T, T) => void f) {\n    print(xs.Count)\n}\n\n"
+            + "void ApplyN<T>(List<T> xs, ((T) => void)? f) {\n    print(xs.Count)\n}\n\nT Pick<T>(T a, T b) => a\n\n";
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "Apply(nothing, x => print(x))"));
+        Assert.Equal([(ErrorIds.CannotInfer, 15), (ErrorIds.UnknownName, 15)], Errors(apply + "Apply(nothing, (a, b) => print(a))")); // another count
+        Assert.Equal([(ErrorIds.CannotInfer, 15), (ErrorIds.UnknownName, 15)], Errors(apply + "Apply2(nothing, x => print(x))"));
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "ApplyN(nothing, x => print(x))")); // a nullable function type
+        Assert.Equal([(ErrorIds.UnknownName, 15)], Errors(apply + "print(Pick(nothing, x => x))"));
         Assert.Equal([(ErrorIds.UnknownName, 6)], Errors(two + "List<int> xs = [1]\nprint(Two(xs, nothing))")); // `xs` gives `T` its type
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(two + "print(Two(5, [1]))")); // and so does the list literal
         Clean("T Pick<T>(T a, T b) => a\n\nprint(Pick<long>(1, 2))");
@@ -862,8 +903,8 @@ public sealed class CheckerTests
         // since the argument may have been meant for any of them
         var two = "void Show(int n) {\n    print(n)\n}\n\nvoid Show(string s) {\n    print(s)\n}\n\n";
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(two + "Show(missing)"));
-        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(two + "void Log() {\n}\nShow(Log())"));
-        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("void Log() {\n}\nvoid Take(int n) {\n    print(n)\n}\n\nTake(Log())"));
+        Assert.Equal([(ErrorIds.Syntax, 11)], Errors(two + "void Note() {\n}\nShow(Note())"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("void Note() {\n}\nvoid Take(int n) {\n    print(n)\n}\n\nTake(Note())"));
     }
 
     [Theory]
@@ -1129,6 +1170,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 4)], Errors("class Step(() => int Run)\n\n" + fs + "fs.Add(Step(() => fs.Count).Run)\nprint(fs.Count)"));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 6)], Errors("class Step(() => int Run)\n\nStep Keep(() => int g) => Step(g)\n\nmut ss = List<Step>()\nss.Add(Keep(() => ss.Count))\nprint(ss.Count)"));
         Clean("class Num(int V)\n\nNum Make(() => int g) => Num(g())\n\nmut ns = List<Num>()\nns.Add(Make(() => ns.Count))\nprint(ns.Count)");
+        // and a value of a base class what an instance of a class derived from it holds, which K6 lets stand where its base does: the
+        // base has no field, the derived class's keeps the lambda; a derived class whose fields hold none keeps nothing
+        const string shape = "class Shape {\n    pub virtual int Area() => 0\n}\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(shape + "class Timed(() => int Run) : Shape()\n\nShape Keep(() => int g) => Timed(g)\n\nmut ss = List<Shape>()\nss.Add(Keep(() => ss.Count))\nprint(ss.Count)"));
+        Clean(shape + "class Square(int Side) : Shape()\n\nShape Make(() => int g) => Square(g())\n\nmut ss = List<Shape>()\nss.Add(Make(() => ss.Count))\nprint(ss.Count)");
         Clean(wrap + "fs.Add(Wrap(() => 0))\nmut xs = List<int>()\nxs.Add(Count(() => xs.Count))\nprint(fs.Count + xs.Count)");
 
         // a value inside the argument that can hold no function value ends what the argument keeps (the owner, 2026-10-28, "Pass,
@@ -1169,8 +1215,8 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nif x {\n    print(\"yes\")\n}"));
         Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("x = 1\nwhile x {\n    print(\"yes\")\n}"));
         Clean("x = 7\nif (x > 5) {\n    print(\"big\")\n}");
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nif Log() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere but the body of a lambda with a result, which F11 makes type-mismatch
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nfor x in Log() {\n    print(1)\n}"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nif Note() {\n    print(1)\n}")); // O10: a void call where a value stands, as everywhere but the body of a lambda with a result, which F11 makes type-mismatch
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nfor x in Note() {\n    print(1)\n}"));
     }
 
     [Fact]
@@ -1236,7 +1282,7 @@ public sealed class CheckerTests
         var span = "int | duration d = 5days\nmatch d {\n";
         Clean(span + "    5days => print(0)\n    int n => print(n)\n    duration t => print(t)\n}");
         Assert.Equal([(ErrorIds.ConstantOverflow, 3)], Errors(span + "    106752days => print(0)\n    int n => print(n)\n    duration t => print(t)\n}"));
-        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Log() {\n}\nmatch Log() {\n    else => print(1)\n}")); // O10
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Note() {\n}\nmatch Note() {\n    else => print(1)\n}")); // O10
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("n = 1\nmatch n {\n    \"one\" => print(1)\n}")); // E1: the arm that names no case is the one error, not the match
     }
 
@@ -1265,7 +1311,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("n = 1\nstring s = match n {\n    0 => \"zero\"\n    else => 1\n}\nprint(s)"));
         Assert.Equal([(ErrorIds.Syntax, 3)], Errors("for i in 1..3 {\n    s = match i {\n        0 => break\n        else => \"many\"\n    }\n    print(s)\n}")); // C9: an arm of a value is an expression
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("n = 1\nm = 2\nx = match n {\n    0 => {\n        print(m)\n    }\n    else => 1\n}\nprint(x)")); // the arm's body is read all the same: `m` counts as read
-        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Log() {\n}\nn = 1\nx = match n {\n    else => Log()\n}\nprint(x)")); // E1: the arm carries the error, the match no second one
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Note() {\n}\nn = 1\nx = match n {\n    else => Note()\n}\nprint(x)")); // E1: the arm carries the error, the match no second one
         Clean("data User(string Name)\ndata Admin(int Level) : User\ndata NotFound\n\nvoid Show(User | NotFound u) {\n    match u {\n        Admin a => print(\"admin {a.Level}\")\n        User x => print(\"user {x.Name}\")\n        NotFound => print(\"none\")\n    }\n}\n\nShow(Admin(\"Ann\", 2))");
     }
 
@@ -1489,7 +1535,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 13)], Errors(find + "int OrZero(int id) {\n    value = Find(id) else {\n        NotFound => {\n            if id > 0 {\n                print(1)\n            }\n        }\n    }\n    return value\n}\n\nprint(OrZero(1))")); // O5: the arm neither recovers, returns nor throws
         Assert.Equal([(ErrorIds.Redeclared, 12)], Errors(find + "int OrZero(int id) {\n    value = Nope(id) else {\n        NotFound id => 0\n    }\n    return value\n}\n\nprint(OrZero(1))").Where(e => e.Item1 == ErrorIds.Redeclared).ToList()); // after a call that did not type, a binding is still checked
         Assert.Equal([(ErrorIds.UnknownName, 11)], Errors(find + "value = Find(2) else {\n    Nope => 0\n}\nprint(value)")); // E1: which case the arm meant is unknown, so no case is unlisted beside it
-        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Log() {\n}\n\nx = Nope() else {\n    NotFound => Log()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("data NotFound\nvoid Note() {\n}\n\nx = Nope() else {\n    NotFound => Note()\n}\nprint(x)")); // the success is unknown, and with a `void` one the arm is a statement (O10)
         Assert.Equal([(ErrorIds.Syntax, 11)], Errors(find + "value = Find(2) else {\n    0 => 0\n}\nprint(value)")); // O5: an arm of `else` names a case type, not a literal (E4)
     }
 
@@ -3498,6 +3544,19 @@ public sealed class CheckerTests
         Clean(program.Replace(name, "Own", StringComparison.Ordinal)); // the positive control
     }
 
+    [Theory]
+    [InlineData("data Log(int Level)\nprint(1)", 1)]
+    [InlineData("void Log() {\n}\n\nprint(1)", 1)]
+    [InlineData("Log = 3\nprint(Log)", 1)]
+    [InlineData("int Twice(int Log) => Log * 2\n\nprint(Twice(1))", 1)]
+    [InlineData("print(1)\nf = (int Log) => Log + 1\nprint(f(1))", 2)]
+    public void A_files_own_log_is_redeclared_at_any_level(string program, int line)
+    {
+        // P1: a type, a function, a variable or a parameter of the name, as S14 reads a file's own `Environment`
+        Assert.Equal([(ErrorIds.Redeclared, line)], Errors(program));
+        Clean(program.Replace("Log", "Own", StringComparison.Ordinal)); // the positive control
+    }
+
     [Fact]
     public void A_field_takes_x86_arm_vector128_or_vector256_as_a_field_takes_envError() =>
         // R18 as S14 reads a field `EnvError` (the owner, 2026-11-01): a field takes the name, as H1 says
@@ -3850,7 +3909,7 @@ public sealed class CheckerTests
         // K7 with F9 (the owner, 2026-11-02, #110, "allowed as written"): an override is as visible as it writes; one without `pub` is
         // private to its class, reached by a call through the base and inside the class, and `not-visible` on the derived type outside
         // it; a `prot` one is `prot`, and a `pub` override of a `prot` method is `pub`; a class derived from the one with the private
-        // override takes it as the method of that name *(assumed)*, and its own `pub` override is `pub`
+        // override takes it as the method of that name *(assumed)*, inside it as outside, and its own `pub` override is `pub`
         const string bare = "class Dog : Animal {\n    override string Sound() => \"woof\"\n    pub string Bark() => Sound()\n}\n";
         Clean(animal + bare + "\nAnimal a = Dog()\nprint(a.Sound())\nprint(Dog().Bark())");
         Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "\nprint(Dog().Sound())"));
@@ -3858,6 +3917,7 @@ public sealed class CheckerTests
         Clean("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nprint(B().Get())");
         Assert.Equal([(ErrorIds.NotVisible, 9)], Errors("class A {\n    prot virtual int Get() => 1\n}\nclass B : A {\n    pub override int Get() => 2\n}\n\nA x = B()\nprint(x.Get())"));
         Assert.Equal([(ErrorIds.NotVisible, 12)], Errors(animal + bare + "class Puppy : Dog\n\nprint(Puppy().Sound())"));
+        Assert.Equal([(ErrorIds.NotVisible, 11)], Errors(animal + bare + "class Puppy : Dog {\n    pub string Call() => Sound()\n}\n\nprint(Puppy().Call())"));
         Clean(animal + bare + "class Puppy : Dog {\n    pub override string Sound() => \"yip\"\n}\n\nAnimal p = Puppy()\nprint(p.Sound())\nprint(Puppy().Sound())");
         // K13: `==` on a base reads its derived classes, a field without `==` among them as D3 reads a data type's (`type-mismatch`)
         Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors("class A(int N)\nclass B(Map<string, int> M) : A\n\nx = A(1)\nprint(x == x)"));
@@ -3884,8 +3944,8 @@ public sealed class CheckerTests
         // N9: a test narrows it, and a call, `print` and an interpolation of an instance among them (A5), or an assignment ends that; an
         // assignment of a value without `null` narrows it again; a field without `mut` stays narrowed, and a lambda knows nothing of such a path
         Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(a.E.Bytes.Count)\n}");
-        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class A(mut string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}"));
-        Clean("class A(string? E)\n\nvoid Log() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Log()\n    print(a.E.Bytes.Count)\n}");
+        Assert.Equal([(ErrorIds.NullableUnchecked, 9)], Errors("class A(mut string? E)\n\nvoid Note() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Note()\n    print(a.E.Bytes.Count)\n}"));
+        Clean("class A(string? E)\n\nvoid Note() {\n}\n\na = A(\"x\")\nif a.E != null {\n    Note()\n    print(a.E.Bytes.Count)\n}");
         Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    print(1)\n    print(a.E.Bytes.Count)\n}"));
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors("class A(mut string? E) {\n    pub string Text() => \"a\"\n}\n\na = A(\"x\")\nif a.E != null {\n    s = \"{a}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}"));
         Clean("class A(mut string? E)\n\na = A(\"x\")\nif a.E != null {\n    n = a.E.Bytes.Count\n    s = \"{n}\"\n    print(a.E.Bytes.Count + s.Bytes.Count)\n}");
@@ -4200,10 +4260,15 @@ public sealed class CheckerTests
     [InlineData("class A(int N)\nclass B(int N) : A {\n    mut int m = 1\n}\n\nprint(1)", "3: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A(int N)\nclass B : A\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
     [InlineData("class A\nclass B : A()\n\nprint(1)", "2: arguments of the base `A`, given or taken, for a class without a primary constructor, which a constructor in its body passes (K10, K14)")]
-    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
+    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A(Name)\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K17)")]
+    [InlineData("class A(string Name)\nclass B(mut string Name, int L) : A\n\nprint(1)", "2: `Name` with `mut`, unlike the field of the base `A` it is (K11, K16)")]
     [InlineData("class A(string Name = \"a\")\nclass B(string Name = \"b\", int L) : A\n\nprint(1)", "2: a default on `Name`, which in the short form is the field of the base `A` with the base's default (K16)")]
     [InlineData("class A(int Id)\nclass B(int X) : A equal by X\n\nprint(1)", "2: `equal by` on a class whose base `A` has fields and no clause, where K13 does not say whether the base's fields count")]
     [InlineData("class A {\n    virtual int Get() => 1\n}\n\nprint(1)", "2: `virtual` on a private method, which no derived class sees (K7, F9)")]
+    [InlineData("class A {\n    pub static virtual int F() => 1\n}\n\nprint(A.F())", "2: `virtual` on a `static` method, which has no instance to dispatch on (K7)")]
+    [InlineData("class A {\n    pub static override int F() => 1\n}\n\nprint(A.F())", "2: `override` on a `static` method, which has no instance to dispatch on (K7)")]
+    [InlineData("class A {\n    pub static virtual int F() => 1\n}\nclass B : A\n\nprint(1)", "2: a field in the body or a `static` member of `A`, a class with a base or with classes derived from it (K6, K7, K18)")]
+    [InlineData("class A {\n    pub virtual int F() => 1\n}\nclass B : A {\n    pub static int F() => 2\n}\n\nprint(1)", "5: a field in the body or a `static` member of `B`, a class with a base or with classes derived from it (K6, K7, K18)")]
     [InlineData("class A {\n    pub virtual int Get() => 1\n}\nclass B : A {\n    pub virtual override int Get() => 2\n}\n\nprint(1)", "5: `virtual` and `override` on one method (K7)")]
     [InlineData("class A {\n    prot int Get() => 1\n}\nclass B : A {\n    pub int Peek(A other) => other.Get()\n}\n\nprint(1)", "5: the `prot` method `Get` called through an `A`, which is not the calling class or derived from it (F9)")]
     [InlineData("class A\nclass B : A\n\nA x = B()\nprint(match x {\n    B b => 1\n    else => 2\n})", "6: an arm of `B`, a class derived from a case of `A`, which tests the instance's class at run time (C4, K6)")]
@@ -4216,7 +4281,7 @@ public sealed class CheckerTests
         // constant (K18), a field in the body or a `static` member of a class in a chain (K6, K7, K18), a base that is no class, a
         // second one and a cycle of bases (K6), the arguments of a base for a class without a primary constructor (K10, K14), a passed-on
         // parameter whose `mut` or, in the short form, whose default differs from the base's field (K11, K16), `equal by` over a base with
-        // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, a `prot`
+        // fields and no clause (K13), `virtual` on a private method, `virtual` with `override`, either on a `static` method, a `prot`
         // method through a reference of a base's type (K7, F9), an arm of a derived class (C4), a key type whose derived class names a `mut`
         // field in its clause (K12), a method that is `extern`, or has type parameters,
         // `weak` (R3) in a type argument of a data type, a function type or a map, before a type parameter or a union of classes, or as a
@@ -4481,6 +4546,31 @@ public sealed class CheckerTests
 
         // the positive control: the same class with no base, whose method the name alone stands for, says the same, word for word
         Assert.Equal(Said(Program + "class D(int Y) {\n" + body), said);
+    }
+
+    [Theory]
+    [InlineData("    int Count => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count() => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count() => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count(int y) => y + X\n", "    pub long Run() => Count(3)\n", "D(1, 2).Run()", null, 0, 6)]
+    public void A_member_of_a_base_the_class_does_not_see_is_no_candidate_of_a_call_from_it(string member, string use, string call, string? id, int line, int hiddenLine)
+    {
+        // F13, F9 (the owner, 2026-11-06): a property or a method of a base the class does not see is no candidate of a call beside the
+        // class's own method of its name, by the name alone and through an instance: a call that fits only the base's member is the
+        // error of the class's own method, which takes a `long`, and in the last row, where the base's method fits exactly and the
+        // class's own with a widening, the call is the class's own and the program is clean
+        const string Own = "    pub long Count(long y) => y + Y\n";
+        var program = "class B(int X) {\n" + member + "}\n\nclass D(int Y) : B {\n" + Own + use + "}\n\nprint(" + call + ")\n";
+        (string, int)[] expected = id is null ? [] : [(id, line)];
+        Assert.Equal(expected, Errors(program));
+
+        // as the same class with no base says, four lines up
+        var noBase = program[program.IndexOf("class D", StringComparison.Ordinal)..].Replace(" : B {", " {").Replace("D(1, 2)", "D(2)");
+        Assert.Equal(expected.Select(e => (e.Item1, e.Item2 - 4)), Errors(noBase));
+
+        // the positive control: the same class without its own method, where the call is the base's member's, which the class does not see
+        Assert.Equal([(ErrorIds.NotVisible, hiddenLine)], Errors(program.Replace(Own, "")));
     }
 
     [Fact]
@@ -5043,14 +5133,36 @@ public sealed class CheckerTests
     {
         // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
         // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains; the check runs in a process of its
-        // own, `kurz exec`, whose limit of 20 seconds ends that process where the check does not end
+        // own, `kurz exec` started as the command's tests start it, whose limit of two minutes holds the start of the process and the
+        // load of the compiler beside the check, and ends that process where the check does not end
         const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
             + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
-        var (code, output, error) = Processes.Capture(CommandTests.Host, [CommandTests.Dll, "exec", Branching], null, TimeSpan.FromSeconds(20));
-        Assert.True(code == 1 && output.Length == 0, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of 20 seconds: {output}{error}");
+        var (code, output, error) = CommandTests.Kurz("exec", Branching);
+        var streams = $"the output stream: \"{output}\"; the error stream: \"{error}\"";
+        Assert.True(code == 1, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of the command's tests; {streams}");
+        Assert.True(output.Length == 0, $"`kurz exec` wrote to its output stream, where nothing was expected; {streams}");
         var bound = Assert.Single(error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
         Assert.StartsWith("exec:12: not supported: ", bound);
         Assert.EndsWith("(T33)", bound);
+    }
+
+    [Fact]
+    public void A_build_stopped_at_the_bound_reports_the_copies_made_before_it_and_the_code_outside_the_copies()
+    {
+        // T33 (assumed, §4): the copies are made depth first, in the order of the calls in a copy's text, so the copy that a call
+        // before the chain's call asks for is made and reports its error, while the one a call after it asks for is not made; the
+        // code outside the copies is checked before any copy is made, so its error shows in both orders
+        const string Program = "void Other<T>() {\n    match T.Kind {\n        TypeKind.Int => print(1)\n    }\n}\n\nvoid Deep<T>() {\n"
+            + "    match T.Kind {\n        else => {\n            FIRST\n            SECOND\n        }\n    }\n}\n\nDeep<int>()\nprint(1 + \"two\")";
+        static List<string> Reported(string first, string second) =>
+            Check(Program.Replace("FIRST", first).Replace("SECOND", second)).Diagnostics.Sorted
+                .Select(d => $"{d.Line}: {(d.IsNotSupported ? "not supported" : d.Id)}").Distinct().ToList();
+
+        var before = Reported("Other<T>()", "Deep<List<T>>()"); // the control: the copies of `Other` for `List<int>` and larger are made
+        Assert.Contains($"16: {ErrorIds.KindNotRead}", before);
+        Assert.Contains("16: not supported", before);
+        Assert.Contains($"17: {ErrorIds.TypeMismatch}", before);
+        Assert.Equal(["16: not supported", $"17: {ErrorIds.TypeMismatch}"], Reported("Deep<List<T>>()", "Other<T>()"));
     }
 
     [Fact]
@@ -5432,17 +5544,24 @@ public sealed class CheckerTests
     public void A_type_parameter_that_holds_a_constant_of_an_integer_type_bool_or_char_takes_a_literal()
     {
         // T35: a call writes the constant as a literal among its type arguments, an integer with its `-`, `true` or a `char` (the owner,
-        // 2026-11-02), a default is a literal too, the body reads the parameter as a constant of its type, and a copy passes its own
-        // constant on by name
+        // 2026-11-02), a default is a literal too, or an expression in brackets that F12 folds, the body reads the parameter as a constant of its type, and a copy passes its own
+        // constant on by name, to a parameter of its type or of a type it widens to, as T8 widens a value (the owner, 2026-11-03)
         Clean("int Scaled<const int N>(int x) => x * N\nbool Flag<const bool B>() => B\nchar Mark<const char C>() => C\n\n" +
             "void Show<const int N = 4>() {\n    print(\"{N}\")\n}\n\nvoid Pass<const int L>() {\n    Show<L>()\n    print(L + 1)\n}\n\n" +
             "print(Scaled<64>(2))\nprint(Flag<true>())\nprint(Mark<'x'>())\nShow()\nShow<-3>()\nPass<7>()");
         Clean("void Small<const byte B>() {\n    print(B)\n}\n\nSmall<255>()\nSmall<0>()");
+        Clean("void Sum<const int N = (1 + 2)>() {\n    print(N)\n}\n\nSum()");
+        Clean("void Wide<const long L>() {\n    print(L)\n}\n\nvoid Pass<const int N>() {\n    Wide<N>()\n}\n\nPass<7>()\nWide<7>()");
         Clean("bool Both(bool x, bool y) => x && y\n\na = 1\nc = 2\nd = 3\nprint(Both((a < 64), c > (d)))");
     }
 
     [Theory]
-    [InlineData("void Bad<const Mode M = Color.Red>() {\n}", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
+    [InlineData("void Bad<const Mode M = Color.Red>() {\n}\n\nBad()\nBad<Mode.Plain>()", "4: type-mismatch: the default is a `Color` where a `Mode` is required (T1)")]
+    [InlineData("void Show<const int N, const int M = N>() {\n    print(M)\n}\n\nShow<1>()", "4: unknown-name: no `N` is visible here (V10)")]
+    [InlineData("void Name<const Unknown M>(M x) {\n    print(M)\n}\n\nName<1>(2)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
+    [InlineData("void Pair<const Unknown M, const M N>() {\n}\n\nprint(1)", "4: unknown-name: no type named `Unknown` is visible here (V10)")]
+    [InlineData("void Name<const string S>() {\n    print(S)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: syntax: `double` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
     [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Color.Red>()", "7: type-mismatch: `Color.Red` is a value of `Color`, where `M` takes one of `Mode` (T35, T1)")]
@@ -5451,9 +5570,12 @@ public sealed class CheckerTests
     [InlineData("void Say<const Mode M>() {\n}\n\nSay()", "7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<Mode.Plain, int>()", "7: syntax: `Say` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Two<T, const Mode M>(T x) {\n}\n\nTwo<int>(1)", "7: syntax: `Two` takes 2 type arguments (T19; E4 for another count)")]
+    [InlineData("void Three<T, U, const Mode M = Mode.Plain>(T x, U y) {\n}\n\nThree<int>(1, 2)", "7: syntax: `Three` takes 2 or 3 type arguments (T19; E4 for another count)")]
+    [InlineData("void Three<T, const int A = 1, const int B = 2>(T x) {\n}\n\nThree<int, 1, 2, 3>(1)", "7: syntax: `Three` takes 1 to 3 type arguments (T19; E4 for another count)")]
     [InlineData("void Other<T>() {\n}\n\nOther<Mode.Plain>()", "7: type-mismatch: `Mode.Plain` is a value of `Mode`, where a type stands (T35, T1)")]
     [InlineData("void Inner<const Color C>() {\n}\n\nvoid Outer<const Mode M>() {\n    Inner<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where `C` takes one of `Color` (T35, T1)")]
-    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
+    [InlineData("void Other<T>() {\n}\n\nvoid Outer<const Mode M>() {\n    Other<M>()\n}\n\nOuter<Mode.Plain>()", "8: type-mismatch: `M` holds a value of `Mode`, where a type stands (T35, T1)")]
+    [InlineData("void Outer<const Mode M>() {\n    print(List<M>())\n}\n\nOuter<Mode.Plain>()", "5: type-mismatch: `M` holds a value of `Mode`, where a type stands (T35, T1)")]
     [InlineData("void Say<const Mode M>() {\n    int x = M\n    print(x)\n}\n\nSay<Mode.Plain>()", "5: type-mismatch: a `Mode` where an `int` is required (T1)")]
     [InlineData("int Scaled<const int N>(int x) => x * N\n\nprint(Scaled<true>(2))", "6: type-mismatch: `N` takes a constant of `int`, not a `bool` (T35, T1)")]
     [InlineData("void Say<const Mode M>() {\n}\n\nSay<1>()", "7: type-mismatch: `M` takes a constant of `Mode`, not an `int` (T35, T1)")]
@@ -5466,26 +5588,30 @@ public sealed class CheckerTests
     [InlineData("bool f(bool x, bool y) => x && y\n\na = 1\nc = 2\nd = 3\nprint(f(a < 64, c > (d)))", "7: unused-variable: `c` is never read (V5)|9: argument-mismatch: the parameter `y` gets no argument and has no default (D11)|9: type-mismatch: an `int` is no function and cannot be called (F11)")]
     public void A_constant_type_argument_is_held_to_the_parameter_it_lands_on(string program, string expected)
     {
-        // T35 with T1: a value of another enum or another type, a literal of another type, a type, and a constant or a literal where a
-        // type stands are type-mismatch, as a value of another type for a parameter is, and a literal that does not fit the parameter's
-        // integer type is its overflow (T6); the parameter's name is no type (V10); a call that writes no constant and leaves out one
-        // with no default fixes nothing (T27), and a default before a parameter with none is syntax, as Rust and C# refuse it; the
+        // T35 with T1: a value of another enum or another type, a literal of another type, a type, and a constant, a literal or the
+        // parameter's name among type arguments where a type stands are type-mismatch, as a value of another type for a parameter is and
+        // as rustc refuses the three (E0747), and a literal that does not fit the parameter's integer type is its overflow (T6); the
+        // parameter's name as a declaration's type is no type (V10, rustc's E0573); a call that writes no constant and leaves out one
+        // with no default fixes nothing (T27), a count of type arguments names every count a call may write (T19), and a default before
+        // a parameter with none is syntax, as Rust and C# refuse it; a constant of a type outside T35's list is syntax, where rustc gives
+        // an error of its own; a default, or a constant's type, that was not read gives the calls no second error, and the type of
+        // a constant that names such a parameter none either (E1); the
         // constant is a value of its type in the body; `f(a < 64, c > (d))` is the call `a<64, c>(d)` (the owner, 2026-11-02)
         Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
 
     [Theory]
-    [InlineData("void Name<const string S>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `string`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
-    [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: a type parameter that holds a constant of the type `double`, where an integer type, `bool`, `char` or an `enum` is read (T35)")]
     [InlineData("data Box<const Mode M>(int X)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T35)")]
+    [InlineData("data Box<const int N>(int X)\n\nb = Box<4>(1)\nprint(b.X)", "4: a type parameter that holds a constant, of a `data` type (T35)")]
+    [InlineData("data Box<const Mode M>(int X)\n\nvoid Show(Box<Mode.Plain> b) {\n    print(b.X)\n}\n\ndata Outer(Box<Mode.Plain> B)\n\nprint(1)", "4: a type parameter that holds a constant, of a `data` type (T35)")]
     [InlineData("void F<const Mode M>(int x) {\n}\n\nvoid F<T>(T x, int y) {\n}\n\nF<int>(1, 2)", "10: overloads of `F` that hold a constant of `Mode` and a type at type argument 1 (T35, F12)")]
     [InlineData("void F<T>(T x, int y) {\n}\n\nvoid F<const Mode M>(int x) {\n}\n\nF<Mode.Plain>(1)", "10: overloads of `F` that hold a type and a constant of `Mode` at type argument 1 (T35, F12)")]
     [InlineData("void F<const Mode M>() {\n}\n\nvoid F<const Color C>(int x) {\n}\n\nF<Color.Red>(1)", "10: overloads of `F` that hold a constant of `Mode` and a constant of `Color` at type argument 1 (T35, F12)")]
-    public void A_constant_type_parameter_of_another_type_or_of_a_data_type_is_not_supported(string program, string expected)
+    public void A_constant_type_parameter_of_a_data_type_and_overloads_that_mix_constants_are_not_supported(string program, string expected)
     {
-        // T35: the record lists the integer types, `bool`, `char` and an `enum` as the types a constant has, a `data` type's copies are
-        // no part of the build, and a call's type argument is read before an overload is picked (F12), so a parameter of another type,
-        // and overloads that hold a type and a constant at one place, or constants of two types, are not read
+        // T35: a `data` type's copies are no part of the build, so the type is not read and a use of it, in a call, a parameter's type
+        // or a field's, carries no error of its own (E1), and a call's type argument is read before an overload is picked (F12), so
+        // overloads that hold a type and a constant at one place, or constants of two types, are not read
         Assert.Equal(expected.Split('|'), NotSupported(Modes + program));
     }
 
@@ -5589,8 +5715,8 @@ public sealed class CheckerTests
     public void A_declaration_named_like_a_type_parameter_of_its_function_is_redeclared(string program, string expected)
     {
         // V9 with T19: a variable, a parameter, either variable of a loop, a binding of a `match` arm and a lambda's parameter cannot take
-        // the name of a type parameter of the function around them, in its body and in a copy of it, one that holds a constant among them (T35), as C# refuses it (CS0412),
-        // so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
+        // the name of a type parameter of the function around them, in its body and in a copy of it, one that holds a constant among them (T35), as C# refuses a method's parameter, local and `foreach`
+        // variable so named (CS0412), and a lambda's parameter as C# did up to its language version 7.3, so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
         Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
 
@@ -5598,10 +5724,50 @@ public sealed class CheckerTests
     public void A_name_of_a_type_parameter_is_free_outside_its_function()
     {
         // V9 with T19: the positive control of the test above; a type parameter's name is taken in its own function alone, so a
-        // top-level variable, a variable of another function and a parameter of a function without type parameters may hold it, the
-        // name of one that holds a constant too (T35)
+        // variable of another function and a parameter of a function without type parameters may hold it, the name of one that holds a
+        // constant too (T35); a top-level variable may not (F16, the test below)
         Clean(Shapes + "T Same<T>(T value) => value\n\nvoid Show() {\n    T = 1\n    print(T)\n}\n\nvoid Echo(int T) {\n    print(T)\n}\n\nShow()\nEcho(2)\nK = 3\nprint(Same(K))");
-        Clean(Shapes + "int Twice<const int M>() => M * 2\n\nint Thrice<const int N>() => N * 3\n\nvoid Show() {\n    M = 1\n    print(M)\n}\n\nShow()\nN = 3\nprint(Twice<2>() + Thrice<1>() + N)");
+        Clean(Shapes + "int Twice<const int M>() => M * 2\n\nint Thrice<const int N>() => N * 3\n\nvoid Show() {\n    M = 1\n    print(M)\n}\n\nShow()\nK = 3\nprint(Twice<2>() + Thrice<1>() + K)");
+    }
+
+    [Theory]
+    [InlineData("int N = 3\n\nint Thrice<const int N>() => N * 3\n\nprint(N)", 9, "N")]
+    [InlineData("N = 3\n\nint Thrice<const int N>() => N * 3\n\nprint(Thrice<2>() + N)", 9, "N")]
+    [InlineData("int Thrice<const int N>() => N * 3\n\nmut N = 3\nprint(N)", 7, "N")]
+    [InlineData("T = 1\n\nT Same<T>(T value) => value\n\nprint(Same(T))", 9, "T")]
+    [InlineData("T = 1\n\nT Zero<T>() => T.Make(f => 0)\n\nprint(Zero<Point>())\nprint(T)", 9, "T")]
+    [InlineData("K = 1\n\nV Pick<K, V>(K key, V value) => value\n\nprint(Pick(K, 2))", 9, "K")]
+    public void A_type_parameter_takes_no_name_of_a_top_level_variable(string program, int line, string name)
+    {
+        // F16 with S13: a type parameter of a function, one that holds a constant among them (T35), takes no name that a variable at
+        // the outermost level of the top-level code reserves, above the function or below it (F6), as a variable of the function takes
+        // none (section 4, the owner, 2026-11-05); the refusal is of the declaration, with no call or with one, and the parameter's uses
+        // in a copy report nothing more (E1)
+        Assert.Equal([$"{line}: redeclared: `{name}` is a top-level variable, whose name a type or constant parameter of a function cannot take (S13, F16)"],
+            Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Fact]
+    public void A_type_parameter_may_take_the_name_of_a_variable_that_reserves_none()
+    {
+        // F16 (the owner, 2026-10-21): the positive control of the test above; a loop variable, a variable inside a block of the
+        // top-level code and a lambda's parameter there reserve no name, so a type parameter may take it
+        Clean(Shapes + "for N in [1, 2] {\n    print(N)\n}\n\nint Thrice<const int N>() => N * 3\n\nprint(Thrice<2>())");
+        Clean(Shapes + "if true {\n    T = 1\n    print(T)\n}\n\nT Same<T>(T value) => value\n\nprint(Same(1))");
+        Clean(Shapes + "(int) => int inc = N => N + 1\n\nint Thrice<const int N>() => N * 3\n\nprint(inc(Thrice<2>()))");
+    }
+
+    [Fact]
+    public void A_copy_two_calls_share_reports_at_the_first_and_a_case_of_a_body_of_make_leaves_its_function()
+    {
+        // T33 (assumed, with the build): a later call with the same type arguments reads the copy the first call made, so an error
+        // at the call shows at that first call alone; a case that a call in a body of `T.Make` gives beside the field's type leaves
+        // the function that holds `T.Make`, as one of any argument of a call does (section 5), and a return type that lists it reads
+        // clean
+        Assert.Equal([(ErrorIds.KindNotRead, 3)], Errors("T Bad<T>() => T.Make(f => 0)\n\nprint(Bad<int>())\nprint(Bad<int>())"));
+        const string get = "data P(int A)\ndata NotFound\n\nint | NotFound Get(int x) => x\n\n";
+        Assert.Equal([(ErrorIds.UnlistedCase, 6)], Errors(get + "T Build<T>() => T.Make(f => Get(1))\n\nprint(Build<P>())"));
+        Clean(get + "T | NotFound Build<T>() => T.Make(f => Get(1))\n\nmatch Build<P>() {\n    P p => print(p)\n    NotFound => print(\"nf\")\n}");
     }
 
     [Theory]

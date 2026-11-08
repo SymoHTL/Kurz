@@ -935,6 +935,7 @@ public sealed class ParserTests
     [InlineData("void Say<const Mode M>(string text) {\n}", "(function void Say<const Mode M>(string text) {})")]
     [InlineData("void Twice<T, const Mode M = Mode.Plain>(T value) {\n}", "(function void Twice<T, const Mode M = (. Mode Plain)>(T value) {})")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>() {\n}", "(function void Late<const Mode M = (. Mode Plain), T>() {})")]
+    [InlineData("void Sum<const int N = (1 + 2)>() {\n}", "(function void Sum<const int N = (paren (+ (int 1) (int 2)))>() {})")]
     [InlineData("void Bare<const>() {\n}", "(function void Bare<const>() {})")]
     [InlineData("const = 1", "(assign-or-declare const (int 1))")]
     [InlineData("Say<Mode.Loud>(\"a\")", "(call Say<Mode.Loud> (string \"a\"))")]
@@ -943,8 +944,17 @@ public sealed class ParserTests
         // T35: `const`, its type and its name, with a default after `=`; `const` is that word before a type parameter's type, as it is
         // before `assert(` (T37) and among the words of an `asm`, and a name elsewhere, as `thread` is a word before `static` alone (L18),
         // so a type parameter named `const` and a variable stand; the
-        // call writes the constant among its type arguments; the order of a default is the checker's
+        // call writes the constant among its type arguments; the order of a default is the checker's, and a default with an operator
+        // takes brackets, as Rust takes `{ 1 + 2 }` there (the owner, 2026-11-03)
         Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void A_default_of_a_constant_type_parameter_with_an_operator_outside_brackets_is_syntax()
+    {
+        // T35: a default is one operand, read before `,` or `>`, so `1 + 2` there ends the list at `+`, as rustc refuses `= 1 + 2`
+        // ("expressions must be enclosed in braces") (the owner, 2026-11-03); the bracketed default is a row of the theory above
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("void Sum<const int N = 1 + 2>() {\n}"));
     }
 
     [Theory]
@@ -957,12 +967,16 @@ public sealed class ParserTests
     [InlineData("print(a < 64, c > d)", "(call print (< a (int 64)), (> c d))")]
     [InlineData("f(a < 64.5, c > (d))", "(call f (< a (real 64.5)), (> c (paren d)))")]
     [InlineData("f(a < \"s\", c > (d))", "(call f (< a (string \"s\")), (> c (paren d)))")]
+    [InlineData("f(a < 64L, c > (d))", "(call f (call a<(int 64L), c> d))")]
+    [InlineData("f(a < 0x10, c > (d))", "(call f (call a<(int 10r16), c> d))")]
+    [InlineData("f(a < 5ms, c > (d))", "(call f (< a (unit 5ms)), (> c (paren d)))")]
+    [InlineData("f(a < null, c > (d))", "(call f (< a null), (> c (paren d)))")]
     public void A_literal_stands_among_a_calls_type_arguments_where_its_parenthesis_follows(string program, string tree)
     {
-        // T35: an integer, with its `-`, `true`, `false` or a `char` among a call's type arguments where `(` follows the `>`, as Rust
-        // reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call `a<64, c>(d)` and the comparisons take
-        // parentheses; a list not followed by `(` stays two comparisons, and a real or a string literal is no constant a type parameter
-        // holds, so it keeps the comparisons
+        // T35: an integer of every form, with its suffix, its base and its `-`, `true`, `false` or a `char` among a call's type arguments
+        // where `(` follows the `>`, as Rust reads `f::<64>()` (the owner, 2026-11-02), so `f(a < 64, c > (d))` is the call
+        // `a<64, c>(d)` and the comparisons take parentheses; a list not followed by `(` stays two comparisons, and a real, a string, a
+        // literal with a unit or `null` is no constant a type parameter holds, so it keeps the comparisons (the owner, 2026-11-03)
         Assert.Equal(tree, Tree(program));
     }
 
