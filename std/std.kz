@@ -7378,6 +7378,105 @@ pub class Uri {
     }
 }
 
+// The escapes of RFC 3986, section 2.1, read and written as C#'s `Uri.UnescapeDataString` and `Uri.EscapeDataString` read and
+// write them, and made as Rust's `percent-encoding` crate makes them (design record, section 12; W17). `r.Path` stays as the
+// request gave it (W5), and a program decodes it where it wants the text.
+pub class Url {
+    // The text with each `%` that has two hex digits after it, of either case, read as the byte they name, and the bytes then read
+    // as UTF-8: the string, or `InvalidUtf8` at the first position of the decoded bytes that is no UTF-8, as `string.FromUtf8`
+    // gives it. A `%` without two hex digits after it stays as it is, and a `+` stays a `+`. No path is checked, so `%2F` gives
+    // a `/` and `%00` the character U+0000. A text without a `%` is given back as it is, as the crate borrows it.
+    pub static string | InvalidUtf8 Decode(string text) {
+        if !text.Contains('%') {
+            return text
+        }
+
+        b = text.Bytes
+        mut out = Bytes()
+        mut i = 0
+        while i < b.Count {
+            if b[i] == 37 && i + 2 < b.Count {
+                high = UrlHexValue(b[i + 1])
+                low = UrlHexValue(b[i + 2])
+                if high >= 0 && low >= 0 {
+                    out.Add(byte(high * 16 + low))
+                    i = i + 3
+                    continue
+                }
+            }
+
+            out.Add(b[i])
+            i = i + 1
+        }
+
+        return string.FromUtf8(out)
+    }
+
+    // The text with each byte of its UTF-8 other than RFC 3986's unreserved ones, the ASCII letters, the digits and `-._~`, written
+    // as `%` and two upper-case hex digits, as C#'s `EscapeDataString` writes it, so that `Decode` gives the text back. A text
+    // with no other byte is given back as it is, as the crate borrows it.
+    pub static string Encode(string text) {
+        b = text.Bytes
+        mut i = 0
+        while i < b.Count && UrlUnreserved(b[i]) {
+            i = i + 1
+        }
+
+        if i == b.Count {
+            return text
+        }
+
+        mut out = Bytes()
+        for j in 0..<b.Count {
+            c = b[j]
+            if UrlUnreserved(c) {
+                out.Add(c)
+            } else {
+                out.Add(byte(37))
+                out.Add(UrlHexDigit(int(c) >> 4))
+                out.Add(UrlHexDigit(int(c) & 15))
+            }
+        }
+
+        // every byte written is ASCII, so the bytes are UTF-8 and the arm is never taken
+        encoded = string.FromUtf8(out) else {
+            InvalidUtf8 => ""
+        }
+
+        return encoded
+    }
+}
+
+// The value of the hex digit `c`, of either case, or -1 where `c` is none.
+int UrlHexValue(byte c) {
+    if c >= 48 && c <= 57 {
+        return int(c) - 48
+    }
+
+    if c >= 97 && c <= 102 {
+        return int(c) - 87
+    }
+
+    if c >= 65 && c <= 70 {
+        return int(c) - 55
+    }
+
+    return -1
+}
+
+// The digit of `d`, 0 to 15, in upper-case hexadecimal, as RFC 3986, section 2.1, writes an escape.
+byte UrlHexDigit(int d) {
+    if d < 10 {
+        return byte(48 + d)
+    }
+
+    return byte(55 + d)
+}
+
+// Whether `c` is one of RFC 3986's unreserved bytes, which `Url.Encode` leaves as they are: an ASCII letter, a digit, `-`, `.`, `_`
+// or `~`.
+bool UrlUnreserved(byte c) => c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 45 || c == 46 || c == 95 || c == 126
+
 // The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
 // connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
 // life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects

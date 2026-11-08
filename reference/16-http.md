@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpResponseMessage`, `HttpBody` and
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpResponseMessage`, `HttpBody` and
 `HttpWriter`, with `UriError`, `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -34,7 +34,8 @@ of the streamed response §12 gives, "A response can be streamed"; the two of `U
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
 `HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a); and
 `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
-issue 110, comment 6657251329, C2)).
+issue 110, comment 6657251329, C2), and so is `Url` (W17; the owner, 2026-11-06, issue 110, comment
+6680237968, G1 (a))).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -4321,3 +4322,68 @@ Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r
 No case: of a write that waits, since the request of `Get` is a head of a few bytes, which the socket's buffer takes at once
 whatever the server reads; of the lookup, since a case would need a name server that does not answer, which a run of the suite
 does not have; and of an actor's socket, since a program of the compiler runs in one actor (W13).
+
+### W17 (decided, §12) `Url`
+
+`Url.Decode(text)` gives `string | InvalidUtf8` and `Url.Encode(text)` gives a `string`: static
+functions of the class `Url` of `std/`, which every file sees (W1), as C#'s `Uri.UnescapeDataString`
+and `Uri.EscapeDataString`, made as Rust's `percent-encoding` crate decodes and encodes, while
+`r.Path` stays as the request gave it (W5). `Decode` reads each `%` with two hex digits after it
+as the byte they name, leaves a `%` without them as it is, and leaves a `+` a `+`, since RFC 3986
+gives it no meaning in a path (§12, the owner, 2026-11-06, issue 110, comment 6680237968, G1 (a),
+asked in comment 6673104097). *(assumed, §12, the readings of the product pass of 2026-11-08,
+issue 110, comment 6715300573, not put to the owner: `Decode` reads hex digits of either case and
+gives the decoded bytes as `string.FromUtf8` gives them, `InvalidUtf8` with the count of the
+decoded bytes in front of the first sequence that is no UTF-8 (T15); `%00` gives U+0000, as C# and
+the crate decode it; no path is checked, so that a key holds `/`, `..` or a NUL decoded as any
+other byte, and a program that maps a key to a file refuses `..` after `Decode`; `Encode` leaves
+RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, as `EscapeDataString`
+leaves them, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
+upper-case hex digits, as RFC 3986, section 2.1, writes them; `Decode(Encode(s))` is `s` for every
+string; and both run in a build for Windows, as the parse of a `Uri` does)*
+
+Case: [http/url-decode.kz](../corpus/http/url-decode.kz)
+```kurz
+// `Url.Decode` reads each `%` and two hex digits, of either case, as the byte they name and the bytes as UTF-8: a `%` without
+// two hex digits after it stays as it is, a `+` stays a `+`, no path is checked, `%00` gives U+0000, and bytes that are no UTF-8
+// give `InvalidUtf8` with the count of the decoded bytes in front of them
+void Show(string text) {
+    match Url.Decode(text) {
+        string s => print("[{s}]")
+        InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+    }
+}
+
+Show("/docs/with%20space.txt")
+Show("plain")
+Show("a+b")
+Show("%41%2fb%2Fc")
+Show("100%")
+Show("%4")
+Show("%zz")
+Show("%41%")
+Show("%C3%A9")
+Show("..%2F..%2Fetc")
+match Url.Decode("%00x") {
+    string s => print("{s.Bytes.Count} {s.Bytes[0]}")
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}
+Show("%FF")
+Show("a%C3")
+```
+
+Case: [http/url-encode.kz](../corpus/http/url-encode.kz)
+```kurz
+// `Url.Encode` leaves RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, and writes each other byte of the
+// text's UTF-8 as `%` and two upper-case hex digits, `/` among them; `Url.Decode` gives the text back
+print(Url.Encode("AZaz09-._~"))
+print(Url.Encode("with space.txt"))
+print(Url.Encode("a/b?c=d&e+"))
+print(Url.Encode("é%"))
+print(Url.Encode(""))
+text = "key with/é and %41+"
+match Url.Decode(Url.Encode(text)) {
+    string s => print(s == text)
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}
+```
