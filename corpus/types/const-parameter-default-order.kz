@@ -1,9 +1,10 @@
-// expect: error syntax at 6
+// expect: error syntax at 7
 // rules: T35
 
 enum Mode { Plain, Loud }
 
-void Late<const Mode M = Mode.Plain, T>(T value) {
+void Late<const Mode M = Mode.Plain,
+    T>(T value) {
     print("{M} {value}")
 }
 

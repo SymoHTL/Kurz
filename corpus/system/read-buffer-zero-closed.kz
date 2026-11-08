@@ -1,0 +1,28 @@
+// expect: output
+// | 1
+// | other (os error 9): read-buffer-zero-closed.txt
+// | 1
+// rules: S3, S5
+
+// a `Close` through one holder after a read of one byte filled the buffer with the file's 3 bytes: through the other holder, a `max`
+// of 0 enters the call as every `Read` does, and gets the closed handle's error, not the 0 of a read that looks at no buffer; the list
+// keeps the one byte read before
+void | IoError Show() {
+    File.WriteAll("read-buffer-zero-closed.txt", "abc".Bytes)
+    f = File.Open("read-buffer-zero-closed.txt")
+    File.Delete("read-buffer-zero-closed.txt")
+    g = f
+    mut read = Bytes()
+    print(f.Read(mut read, 1))
+    f.Close()
+    match g.Read(mut read, 0) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    print(read.Count)
+}
+
+Show() else {
+    IoError e => print(e)
+}

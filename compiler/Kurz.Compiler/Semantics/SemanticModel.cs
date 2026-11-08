@@ -206,6 +206,9 @@ public enum CallKind
     /// <summary>A stream's <c>ShutdownWrite()</c> (S9).</summary>
     TcpShutdownWrite,
 
+    /// <summary>A stream's <c>SetNoDelay(on)</c>, which only <c>std/</c> reaches (W11).</summary>
+    TcpSetNoDelay,
+
     /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls (section 12).</summary>
     TcpWriteWithin,
 
@@ -374,8 +377,8 @@ public sealed class SemanticModel
     /// <summary>The call's record, null where the checker kept none.</summary>
     internal CallInfo? TryCallOf(CallExpression call) => calls.GetValueOrDefault(call);
 
-    /// <summary>Every call the checker read in the file, in no order: R9 reads a type parameter a lambda captures through their type arguments.</summary>
-    internal IEnumerable<CallInfo> Calls => calls.Values;
+    /// <summary>Every call the checker read in the file, with its record, in no order: R9 reads a type parameter a lambda captures through their type arguments, and reports a ring at the call that gives one.</summary>
+    internal IEnumerable<(CallExpression Call, CallInfo Info)> Calls => calls.Select(p => (p.Key, p.Value));
 
     /// <summary>T33: the copies of the generic functions of the file that read their type, each a function of its own, in the order they were made.</summary>
     public IReadOnlyList<FunctionSymbol> Copies => copies;
