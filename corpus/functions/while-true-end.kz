@@ -1,0 +1,61 @@
+// expect: output
+// | 3
+// | 40
+// | 2
+// | 5
+// | loop
+// | else
+// rules: F3
+
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+class C(int N) {
+    pub int Get() {
+        mut k = 0
+        while true {
+            k = k + 1
+            if k == N {
+                return k * 10
+            }
+        }
+    }
+}
+
+f = (int n) => {
+    while true {
+        return n + 1
+    }
+}
+
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+string Pick(bool b) {
+    if b {
+        while true {
+            return "loop"
+        }
+    } else {
+        return "else"
+    }
+}
+
+print(First([1, 2, 3, 4]))
+print(C(4).Get())
+print(f(1))
+print(Once())
+print(Pick(true))
+print(Pick(false))

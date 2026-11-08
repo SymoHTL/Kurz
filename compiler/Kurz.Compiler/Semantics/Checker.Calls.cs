@@ -114,6 +114,11 @@ public sealed partial class Checker
             return made; // T33: `T.Make(f => ...)` in a copy
         }
 
+        if (FieldGetOfText(c) is { } got)
+        {
+            return got; // T34: `f.Get(value)` of a loop over `T.Fields` on a function's text
+        }
+
         switch (c.Callee)
         {
             case NameExpression n:
@@ -1979,8 +1984,7 @@ public sealed partial class Checker
         var list = new List<Candidate>();
         foreach (var f in candidates)
         {
-            var slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList();
-            var candidate = new Candidate { Function = f, Slots = slots, TypeParameters = f.TypeParameters, Result = f.ReturnType };
+            var candidate = CandidateOf(f);
             var left = f.TypeParameters.Skip(typeArguments.Count).ToList();
             if (typeArguments.Count > 0)
             {
@@ -2021,9 +2025,9 @@ public sealed partial class Checker
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
-        if (there.Count == 0 && argument is ConstantTypeArgument)
+        if (there.Count == 0 || there.Any(p => p.Constant is { } c && Types.IsError(c)))
         {
-            return Types.Error; // T19: a literal past every candidate's type parameters carries the call's count, and no error of its own (E1)
+            return Types.Error; // T19: an argument past every candidate's type parameters carries the call's count, and one for a constant whose type was not read that type's error, and no error of its own (E1)
         }
 
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
@@ -2181,27 +2185,7 @@ public sealed partial class Checker
 
         foreach (var candidate in candidates)
         {
-            if (candidate.BindingError is null)
-            {
-                Bind(candidate, pres);
-            }
-
-            if (candidate.BindingError is null)
-            {
-                // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
-                // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
-                candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
-            }
-
-            if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
-            {
-                Infer(candidate, pres);
-            }
-
-            if (candidate.Fits)
-            {
-                Fit(candidate, pres, candidates.Count == 1);
-            }
+            Weigh(candidate, pres, candidates.Count == 1);
         }
 
         // E1: an argument with an error of its own may have been meant for any of the functions of the name, so neither
@@ -2350,6 +2334,56 @@ public sealed partial class Checker
         RecordThrough(value, new Typed(whole.Cases[0]));
     }
 
+    /// <summary>A function's candidate for a call: its parameters are the slots the arguments bind to (D11), its type parameters what they infer (T27).</summary>
+    private static Candidate CandidateOf(FunctionSymbol f) => new()
+    {
+        Function = f,
+        Slots = f.Parameters.Select(p => new Slot(p.Name, p.Type, p.Mut, p.HasDefault, f.TypeParameters.Any(t => Types.Mentions(p.Type, t)))).ToList(),
+        TypeParameters = f.TypeParameters,
+        Result = f.ReturnType,
+    };
+
+    /// <summary>
+    /// One candidate of a call weighed against the arguments (D11, T27, F13): bound to them, its type arguments inferred, and each
+    /// argument fitted to the parameter it lands on, where <paramref name="only"/> says that it is the call's one function.
+    /// </summary>
+    private void Weigh(Candidate candidate, List<Pre> pres, bool only)
+    {
+        if (candidate.BindingError is null)
+        {
+            Bind(candidate, pres);
+        }
+
+        if (candidate.BindingError is null)
+        {
+            // O4: read before the inference, with the type arguments written or given, so that a type parameter the arguments infer is no
+            // written union and takes the success (the owner, 2026-10-31, "Unwrap: T = int")
+            candidate.Keeps = pres.Select((p, i) => KeepsAt(Types.Substitute(candidate.Slots[candidate.Binding[i]].Type, candidate.Map), p)).ToArray();
+        }
+
+        if (candidate.BindingError is null && candidate.TypeParameters.Count > 0 && candidate.Map.Count < candidate.TypeParameters.Count)
+        {
+            Infer(candidate, pres);
+        }
+
+        if (candidate.Fits)
+        {
+            Fit(candidate, pres, only);
+        }
+    }
+
+    /// <summary>
+    /// C6: whether the call of a method with one <c>int</c> argument, the index of the walk of a class, fits the method, weighed as that
+    /// call is, so that a default for a second parameter and a widening of the <c>int</c> count (section 4, the owner, 2026-11-06, #39,
+    /// comment 6681669642).
+    /// </summary>
+    private bool FitsAnIndex(FunctionSymbol method)
+    {
+        var candidate = CandidateOf(method);
+        Weigh(candidate, [new Pre { Argument = new Argument(method.Line, null, false, new NameExpression(method.Line, "i")), Typed = new Typed(Types.Int) }], only: false);
+        return candidate.Fits;
+    }
+
     /// <summary>D11: arguments without a name fill the parameters in order, arguments by name follow them; what does not fit is <c>argument-mismatch</c>.</summary>
     private static void Bind(Candidate candidate, List<Pre> pres)
     {
@@ -2454,7 +2488,12 @@ public sealed partial class Checker
                 candidate.CannotInfer = true;
                 var own = new Dictionary<TypeParameterSymbol, KurzType>();
                 Unify(slot, read, own);
-                candidate.Uninferred = candidate.TypeParameters.FirstOrDefault(p => own.TryGetValue(p, out var mine) && map.TryGetValue(p, out var bound) && !Types.Same(mine, bound));
+                // where none differs so, the position contradicts itself, a `Pair<T, T>` that a `Pair<int, string>` meets, or an earlier
+                // binding at an occurrence after its first: the one named is the first in the order of declaration whose occurrences there
+                // still fail with every other type parameter left open (the owner, 2026-11-06, #156, comment 6692304530; the fix the owner
+                // chose, #39, comment 6691280436)
+                candidate.Uninferred = candidate.TypeParameters.FirstOrDefault(p => own.TryGetValue(p, out var mine) && map.TryGetValue(p, out var bound) && !Types.Same(mine, bound))
+                    ?? candidate.TypeParameters.FirstOrDefault(p => !Unify(slot, read, Alone(candidate, p)));
                 return;
             }
         }
@@ -2654,6 +2693,15 @@ public sealed partial class Checker
 
         return Types.Same(pa, pb) ? pa : null;
     }
+
+    /// <summary>The map under which a position is read for <paramref name="p"/> alone: every other type parameter of the candidate is
+    /// bound to the error type, which <see cref="Unify"/> lets meet any part, and <paramref name="p"/> is left open. So
+    /// <see cref="Unify"/> reaches every occurrence of <paramref name="p"/>, and the position fails under it only where those occurrences
+    /// disagree. <see cref="Infer"/> asks only where no first occurrence differs from the type an argument before bound, so a failure
+    /// there is where the position contradicts itself; <see cref="GivingNothing"/> asks whether an argument gives <paramref name="p"/> a
+    /// type.</summary>
+    private static Dictionary<TypeParameterSymbol, KurzType> Alone(Candidate candidate, TypeParameterSymbol p) =>
+        candidate.TypeParameters.Where(q => !ReferenceEquals(q, p)).ToDictionary(q => q, _ => (KurzType)Types.Error);
 
     /// <summary>Binds the type parameters inside a list, data or function type to the parts of the argument's type; a part bound already has to be the same (T27).</summary>
     private static bool Unify(KurzType parameter, KurzType argument, Dictionary<TypeParameterSymbol, KurzType> map)
@@ -2978,7 +3026,9 @@ public sealed partial class Checker
             }
 
             var slot = candidate.Slots[candidate.Binding[i]].Type;
-            var found = new Dictionary<TypeParameterSymbol, KurzType>();
+            // read for `p` alone: another type parameter whose parts disagree would end `Unify` before it reaches `p`, and such an argument
+            // still gives `p` its type, the `T` of a `Quad<U, U, T, T>` that a `Quad<int, string, int, string>` meets
+            var found = Alone(candidate, p);
             Unify(slot, ArgumentType(candidate, pres, i), found);
             if (Types.Mentions(slot, p) && !found.ContainsKey(p))
             {
