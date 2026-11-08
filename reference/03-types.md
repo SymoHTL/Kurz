@@ -180,6 +180,36 @@ long big = small
 print(big)
 ```
 
+A constant that a copy passes on to a type parameter holding a constant of a wider integer type widens the same way, and
+one passed on to a narrower type is `type-mismatch` (T1), as T35 reads a value of another type where a constant
+stands.
+
+Case: [types/const-parameter-widening.kz](../corpus/types/const-parameter-widening.kz)
+```kurz
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Wide<L>()
+}
+
+Pass<7>()
+```
+
+Case: [types/const-parameter-narrowing.kz](../corpus/types/const-parameter-narrowing.kz)
+```kurz
+void Narrow<const int N>() {
+    print(N)
+}
+
+void Pass<const long L>() {
+    Narrow<L>()
+}
+
+Pass<7>()
+```
+
 Where a union is required (D9), a value that is no case of it stands there when it widens into
 exactly one of its cases: a `byte` stands where `int | string` is required. One that would widen
 into two of them, a `byte` where `short | int` is required, is the compile error `type-mismatch`
@@ -1457,10 +1487,11 @@ call can be a caller's in another package than the function (§4, the owner, 202
 makes"). A variable, a parameter, a loop's variable, a binding of a `match` arm or a lambda's parameter named like a
 type parameter of the function around it, one that holds a constant among them (T35), is `redeclared` (V9), as C#'s
 CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
-refused a lambda's parameter so named up to its language version 7.3 (§4, the owner, 2026-11-03, "redeclared, as C#'s
+refused, up to its language version 7.3, the three forms its later versions let hide the type parameter, a lambda's
+parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
 text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
-a function. *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+a function, and once, at the declaration, however many copies give it (below). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1479,17 +1510,34 @@ same error)* *(assumed, §4: `T.Make` takes one lambda of one parameter with no 
 argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Fields`; a type with no
 fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
 `match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
-the bodies running in the order of the fields, as F12 evaluates arguments)* A generic function that reads its type, and one that passes its type parameter to such
-a function, is checked only in the copies that calls make: an error in it shows at its first copy,
-and one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig").
-*(assumed, with the build: a copy is made at the first call that names its type arguments, and a later call with the
-same type arguments reads that copy, so that an error of the copy is reported once, and one reported at the call,
-`kind-not-read` or `unlisted-case`, shows at that first call, the call that made it)*
+the bodies running in the order of the fields, as F12 evaluates arguments)* Where that function does not list such a case, it is `unlisted-case` at that call's line in
+the body, with O3's text, once for the copies that give it; the call that made the copy, where a copy that gives an
+outcome its function does not list is `unlisted-case` above, is the place of an outcome the type gives, `Invalid` (§4,
+the owner, 2026-11-06, against moving the report to the call that made the copy). A generic function that reads its type, and one that passes its type parameter to such
+a function, is checked only in the copies that calls make, in its body: an error in its body shows at its first copy,
+and the body of one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig"). Its
+signature, its type parameters among them, is checked from the text in every case, so that F16 refuses a type parameter
+of a function no call reaches too (§4, the owner, 2026-11-06, "Signature always, body per copy"; the cost is that a
+misnamed type parameter in a function nobody calls is an error, where Zig analyses no part of it).
+A copy is made at the first call that names its type arguments in the order the checker reads a file: the bodies of its
+functions, in the order their names first appear, then the methods of its classes, then the top-level code, the calls of
+a copy's body before the calls that follow the call that made it. A later call with the same type arguments reads that
+copy, so that an error of the copy is reported once, and one reported at the call, `kind-not-read` or the
+`unlisted-case` of an outcome the type gives, shows at that first call, the call that made it (§4, the owner,
+2026-11-06, against the first call in the order of the text and against a report at every call that names the copy;
+the cost is that the line named is not always the first in the file). *(assumed, §4, with the build: a call that infers
+its type arguments makes a copy as one that writes them; a fault of the function's text that several copies give,
+`redeclared` (V9) among them, is reported once, at its line, and one that differs between copies, `kind-not-read` for
+each kind, once for each copy)*
 *(assumed, §4: a variable that an arm of a `match` on `T.Kind` names counts as read in a copy that
-does not read that arm; a build stopped at the bound of 64 copies on a chain of copies (the record,
-section 14) reports that `not supported` and the errors of the copies made before it, while a copy
-of the same outer call that a chain asks for after the bound is not made, so that its errors show
-only in a build where the chain is ended)*
+does not read that arm; the copies are made depth first: the copies that the calls of a copy ask
+for are made after its body is checked, in the order of those calls in its text, each with its own
+copies before the copy of the call after it, and the copies that calls outside every copy ask for
+are made after the code outside the copies is checked; the outer call of a chain of copies is the
+call outside every copy that made its first copy; a build stopped at the bound of 64 copies on a
+chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
+of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
+for after the bound is not made, so that its errors show only in a build where the chain is ended)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1728,7 +1776,8 @@ in an arm of a `match` on `T.Kind` takes no part where no loop over `T.Fields` i
 call and the nearest such arm around it, in an arm inside such a loop as in one outside it, since
 each copy takes the one arm of its kind; a call in a loop opened inside the nearest such arm is the
 case of the assumed reading below. A type argument of a call in a loop over `T.Fields` that is the
-field's type takes no part either, since the text does not give that type. One that holds the
+field's type takes no part either, since on the text that type is a type of its own, no type
+parameter of the function, and each copy reads the field's real type. One that holds the
 field's type beside a type parameter of the calling function inside a form of a type, as
 `Map<f.Type, T>` for `T`, grows by that parameter, and the call is refused at its line: the walk
 types `f.Type` on the text as a type of its own, which is no type parameter of the function. A
@@ -1741,7 +1790,12 @@ a type argument that holds the field's type inside a form of a type with no type
 calling function, `List<f.Type>` and `Pair<f.Type, int>`, takes no part, as the field's type
 itself; one that holds the field's type and a type parameter of the calling function grows by that
 parameter wherever the form holds it, `List<Pair<f.Type, T>>` and `Pair<f.Type, List<T>>` among
-them, and the error names it as it is written; a call in a loop over `T.Fields` opened inside the
+them, and the error names it as the call gives it, written or inferred, with the field's type as
+the loop's variable writes it, `List<Pair<f.Type, T>>` for `Deep([Pair(f.Get(x), x)], n - 1)`; a
+type argument inferred from `f.Get(value)`, a value of the field's type, holds that type as a
+written one does, `Pair(f.Get(x), x)` as `Pair<f.Type, T>`; the field's type stands on the text
+where a type must meet a condition, as a map's key, and each copy checks the field's real type
+with its own error (T33); a call in a loop over `T.Fields` opened inside the
 nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
 every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
@@ -1893,6 +1947,24 @@ Deep(Point(1, 2), 3)
 print("done")
 ```
 
+Case: [types/generic-growing-cycle-fields-inferred.kz](../corpus/types/generic-growing-cycle-fields-inferred.kz)
+```kurz
+data Point(int X, int Y)
+data Pair<A, B>(A First, B Second)
+
+// `Deep` gives `Pair(f.Get(x), x)` for `T` in its loop over `T.Fields`: the type arguments of `Pair` are inferred, `f.Get(x)` is of the field's type, and the `T` beside it grows
+void Deep<T>(T x, int n) {
+    for f in T.Fields {
+        if n > 0 {
+            Deep(Pair(f.Get(x), x), n - 1)
+        }
+    }
+}
+
+Deep(Point(1, 2), 3)
+print("done")
+```
+
 ### T35 (decided, §4) A type parameter that holds a constant
 
 A type parameter can hold a constant, as Rust's `const` parameter does: `const`, the constant's
@@ -1906,18 +1978,22 @@ call that leaves it out takes; the types it holds are the integer types, `bool`,
 `enum`)* A default is a constant expression, as a parameter's default value is (F12), of one
 operand: a literal with its `-`, an `enum`'s value, or an expression in brackets,
 `const int N = (1 + 2)`, as Rust takes `{ 1 + 2 }` there, and `const int N = 1 + 2` is `syntax`;
-the name of an earlier parameter there is `unknown-name` (V10); a type outside the list is
-`syntax`; a call that writes fewer type arguments than the parameters without a
-default, or more than all of them, is T19's count, `syntax`, which names each count the call may
-write. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+it is checked against the parameter's type as a parameter's default value is (F12), so `const byte N = 300` is
+`constant-overflow` (T6), `const Mode M = Color.Red` is `type-mismatch` (T1) and `const int N = (F())` is
+`default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
+a type parameter among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the name of an earlier
+constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
+outside the list)*; a call that writes at least one type argument
+but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
+count the call may write, and one that writes none takes the defaults (below). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
-`enum`'s value are there; a constant passed on to a parameter of a wider integer type widens as a
+`enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
 reads it"). *(assumed, §4: `const` is that word before the type of a type parameter, as it is before
 `assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
-`syntax`; the parameter's name stands as a value of its type; a value of another type or a type
-where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
+`syntax`; the parameter's name stands as a value of its type; a value of a type that does not widen to the
+constant's (T8), or a type, where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
 loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
@@ -1934,7 +2010,7 @@ owner, 2026-11-02, "a bare literal before `(`"). *(assumed, §4: an integer take
 an argument is, so one that does not fit an integer type is `constant-overflow` (T6) and one of
 another type `type-mismatch` (T1); a list that holds a literal is kept before `(` alone, so
 `List<64>.FromRaw(p, 0)` is `syntax`)* An integer literal of every form, with its suffix and its
-base, starts the list, `f(a < 64L, c > (d))`, while a `double`, a string, a literal with a unit and
+base, starts the list, `f(a < 64L, c > (d))`, and so do `true`, `false` and a `char` literal, while a `double`, a string, a literal with a unit and
 `null` keep the comparisons, since no such parameter holds one (§4, the owner, 2026-11-03, "every
 default").
 
@@ -2061,13 +2137,8 @@ void Show<const int N = 4>() {
     print("{N}")
 }
 
-void Wide<const long W>() {
-    print(W + 1)
-}
-
 void Pass<const int L>() {
     Show<L>()
-    Wide<L>()
 }
 
 print(Scaled<64>(2))
@@ -2076,6 +2147,21 @@ print(Mark<'x'>())
 Show()
 Show<-3>()
 Pass<7>()
+```
+
+Case: [types/const-parameter-widening.kz](../corpus/types/const-parameter-widening.kz)
+
+Case: [types/const-parameter-narrowing.kz](../corpus/types/const-parameter-narrowing.kz)
+
+Case: [types/const-parameter-in-declaration-type.kz](../corpus/types/const-parameter-in-declaration-type.kz)
+```kurz
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(List<M> values) {
+    print(values)
+}
+
+Keep<Mode.Plain>([Mode.Plain])
 ```
 
 Case: [types/const-parameter-literal-mismatch.kz](../corpus/types/const-parameter-literal-mismatch.kz)

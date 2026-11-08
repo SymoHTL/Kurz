@@ -2688,8 +2688,12 @@ void Subtract128(mut ulong w0, mut ulong w1, ulong k) {
 static mut byte* logFilter = null
 static mut long logFilterCount = 0
 
-// The lines dropped since the last line written: a line whose write the system refused (P9).
+// The lines dropped since the last line written: a line whose write the system refused, or took in part (P9).
 static mut long logDropped = 0
+
+// A line the system took in part before a write that took nothing (P9): the stream stands inside it, and a line feed ends it before
+// the next line written.
+static mut bool logCut = false
 
 // The buffer of each thread in which `LogLine` puts a line together before its write, and its size.
 thread static mut byte* logBuffer = null
@@ -2961,12 +2965,16 @@ pub string LogQuoted(string text) {
 }
 
 // The line of a call site that is on (P6, P7, P9), `<time> <level> <category>: <message><fields>` and a line feed, a line feed in the
-// message or a field written as `\n` and a carriage return as `\r`, handed to the system's write call in one piece, which is called
-// again for what a call did not take. Where lines were dropped, the line `<time> Warning Kurz.Log: dropped <n> lines` stands before it,
-// in the same write. A write the system refuses, or one that takes no byte, raises nothing: the line is counted as dropped.
+// message or a field written as `\n`, a carriage return as `\r` and a `\` in the message as `\\`, handed to the system's write call in
+// one piece, which is called again for what a call did not take. Where lines were dropped, the line
+// `<time> Warning Kurz.Log: dropped <n> lines` stands before it, in the same write, and where a line was cut short, a line feed before
+// both. A write the system refuses, or one that takes no byte, raises nothing: the line is counted as dropped, and the stream stands
+// inside a line where the bytes taken end inside one; a line of the dropped lines taken whole is not counted again.
 pub void LogLine(int level, string category, string message, string fields, long nanoseconds) {
     long size = 128 + long(category.Bytes.Count) + 2 * long(message.Bytes.Count) + 2 * long(fields.Bytes.Count)
     mut long n = 0
+    mut long feed = 0
+    mut long notice = 0
     raw {
         if size > logRoom {
             if logBuffer != null {
@@ -2981,8 +2989,14 @@ pub void LogLine(int level, string category, string message, string fields, long
             logBuffer = Allocate(logRoom)
         }
 
+        if logCut {
+            logBuffer[0] = 10
+            n = 1
+        }
+
+        feed = n
         if logDropped > 0 {
-            n = LogStamp(logBuffer, 0, nanoseconds)
+            n = LogStamp(logBuffer, n, nanoseconds)
             n = LogPut(logBuffer, n, " Warning Kurz.Log: dropped ")
             long digits = DigitCount(ulong(logDropped))
             WriteDigits(logBuffer + n, ulong(logDropped), int(digits))
@@ -2994,6 +3008,7 @@ pub void LogLine(int level, string category, string message, string fields, long
             }
         }
 
+        notice = n
         n = LogStamp(logBuffer, n, nanoseconds)
         logBuffer[n] = 32
         n = LogPut(logBuffer, n + 1, LogLevelName(level))
@@ -3001,8 +3016,8 @@ pub void LogLine(int level, string category, string message, string fields, long
         n = LogPut(logBuffer, n + 1, category)
         logBuffer[n] = 58
         logBuffer[n + 1] = 32
-        n = LogEscaped(logBuffer, n + 2, message)
-        n = LogEscaped(logBuffer, n, fields)
+        n = LogEscaped(logBuffer, n + 2, message, true)
+        n = LogEscaped(logBuffer, n, fields, false)
         logBuffer[n] = 10
         n = n + 1
     }
@@ -3016,7 +3031,13 @@ pub void LogLine(int level, string category, string message, string fields, long
 
         if written <= 0 {
             raw {
-                logDropped = logDropped + 1
+                if done >= notice {
+                    logDropped = 1
+                } else {
+                    logDropped = logDropped + 1
+                }
+
+                logCut = done != feed && done != notice
             }
 
             return
@@ -3027,6 +3048,7 @@ pub void LogLine(int level, string category, string message, string fields, long
 
     raw {
         logDropped = 0
+        logCut = false
     }
 }
 
@@ -3070,9 +3092,9 @@ long LogPut(byte* p, long n, string text) {
     return n + count
 }
 
-// The bytes of the text at `p + n`, a line feed as `\n` and a carriage return as `\r`, so that no value makes a second line (P7); the
-// place after them.
-long LogEscaped(byte* p, long n, string text) {
+// The bytes of the text at `p + n`, a line feed as `\n` and a carriage return as `\r`, so that no value makes a second line, and where
+// `backslash` holds, a `\` as `\\`, so that a `\n` in the message is a line feed (P7); the place after them.
+long LogEscaped(byte* p, long n, string text, bool backslash) {
     long count = long(text.Bytes.Count)
     mut long at = n
     raw {
@@ -3086,6 +3108,10 @@ long LogEscaped(byte* p, long n, string text) {
             } else if from[i] == 13 {
                 p[at] = 92
                 p[at + 1] = 114
+                at = at + 2
+            } else if backslash && from[i] == 92 {
+                p[at] = 92
+                p[at + 1] = 92
                 at = at + 2
             } else {
                 p[at] = from[i]
