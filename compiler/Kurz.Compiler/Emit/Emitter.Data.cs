@@ -228,20 +228,16 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The end of a block of the family whose last count was let go of: by the number of the type it holds, the counted values in its
-    /// fields let go of in their order, as Rust drops a value's fields, then the block given back to <c>Free</c> with that type's size.
+    /// fields let go of in their order, as Rust drops a value's fields, those that put a value on a work list in the reverse order,
+    /// which ends those values in the fields' order (<see cref="ReleaseInOrder"/>), then the block given back to <c>Free</c> with that
+    /// type's size.
     /// </summary>
     private string DropBlock(DataSymbol family) => Helper($"drop.block.{Lower.Mangle(new DataType(family, []))}", "void", ["ptr"], () =>
         ByNumber("%a0", family, held =>
         {
             var block = layout.Block(held);
             var types = Layout.Fields(new DataType(held, []));
-            for (var i = 0; i < types.Count; i++)
-            {
-                if (Counted(types[i]))
-                {
-                    Release(fn.Value($"load {Ir(types[i])}, ptr {FieldPointer(block, "%a0", i)}"), types[i]);
-                }
-            }
+            ReleaseInOrder(types, i => fn.Value($"load {Ir(types[i])}, ptr {FieldPointer(block, "%a0", i)}"));
 
             var end = fn.Value($"getelementptr {block}, ptr null, i32 1");
             fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {fn.Value($"ptrtoint ptr {end} to i64")})");

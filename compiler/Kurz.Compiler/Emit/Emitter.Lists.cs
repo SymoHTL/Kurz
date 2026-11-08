@@ -41,6 +41,231 @@ public sealed partial class Emitter
         _ => false,
     };
 
+    /// <summary>
+    /// Whether letting go of a value of the type may put a value on a work list (<see cref="Enlist"/>): an instance, a block, a function
+    /// value, whose environment may hold either, and a list, a map, a plain data value or a union that holds one of them.
+    /// </summary>
+    private bool Listed(KurzType type) => Listed(type, []);
+
+    private bool Listed(KurzType type, HashSet<string> seen) => type switch
+    {
+        ClassType or FunctionType => true,
+        DataType d when layout.IsBlock(d) => true,
+        ListType l => Listed(l.Element, seen),
+        MapType m => Listed(m.Key, seen) || Listed(m.Value, seen),
+        DataType d => seen.Add(Lower.Mangle(d)) && Layout.Fields(d).Any(f => Listed(f, seen)),
+        UnionType u => u.Cases.Any(c => Listed(c, seen)),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether letting go of a value of the type may close a handle at once, not from a work list: a handle, a function value, whose
+    /// environment may hold one, and a list, a map, a plain data value or a union that holds one of them.
+    /// </summary>
+    private bool Closes(KurzType type, HashSet<string> seen) => type switch
+    {
+        HandleType or FunctionType => true,
+        ListType l => Closes(l.Element, seen),
+        MapType m => Closes(m.Key, seen) || Closes(m.Value, seen),
+        DataType d when !layout.IsBlock(d) => seen.Add(Lower.Mangle(d)) && Layout.Fields(d).Any(f => Closes(f, seen)),
+        UnionType u => u.Cases.Any(c => Closes(c, seen)),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether a value of the type is a container whose release all three walks split (<see cref="SplitBody"/>): a list or a map whose
+    /// items or entries may hold both a handle that closes at once and a value that a work list ends, and a function value in every
+    /// case, since its type does not say what it captures (R1, section 3, the owner, 2026-11-05, pull request 332, comment 6664352637).
+    /// </summary>
+    private bool Split(KurzType type) => type switch
+    {
+        FunctionType => true,
+        ListType or MapType => Listed(type) && Closes(type, []),
+        _ => false,
+    };
+
+    /// <summary>The three walks of a release, in their order (<see cref="ReleaseInOrder"/>).</summary>
+    private enum Walk
+    {
+        Ends,
+        Listed,
+        Free,
+    }
+
+    private static readonly Walk[] Walks = [Walk.Ends, Walk.Listed, Walk.Free];
+
+    /// <summary>
+    /// Whether a value of the type holds a counted part that the walk lets go of: a plain data value's fields and a union's cases are
+    /// its parts, and any other counted value is one part, of the first walk where it ends at once, of the second where it puts a
+    /// value on a work list, and of all three where its release is split (<see cref="Split"/>).
+    /// </summary>
+    private bool Holds(KurzType type, Walk walk) => type switch
+    {
+        DataType d when !layout.IsBlock(d) => Layout.Fields(d).Any(f => Holds(f, walk)),
+        UnionType u => u.Cases.Any(c => c is not VoidType && Holds(c, walk)),
+        _ when Split(type) => true,
+        _ => Counted(type) && walk != Walk.Free && Listed(type) == (walk == Walk.Listed),
+    };
+
+    /// <summary>
+    /// The counted parts of a value let go of in three walks (R1, section 4, the owner, 2026-11-05, issue 39, comment 6659239659, and
+    /// pull request 332, comment 6664352637): in their order the parts that end at once; then in the reverse order the parts that put a
+    /// value on a work list, which, last in first out, ends those values in the parts' order, each one's nested values of its type
+    /// before the next part's; then in their order the split containers, whose blocks it frees (<see cref="SplitBody"/>).
+    /// </summary>
+    private void ReleaseInOrder(IReadOnlyList<KurzType> types, Func<int, string> load)
+    {
+        foreach (var walk in Walks)
+        {
+            ReleaseWalk(types, load, walk);
+        }
+    }
+
+    /// <summary>One walk of <see cref="ReleaseInOrder"/>.</summary>
+    private void ReleaseWalk(IReadOnlyList<KurzType> types, Func<int, string> load, Walk walk)
+    {
+        for (var n = 0; n < types.Count; n++)
+        {
+            var i = walk == Walk.Listed ? types.Count - 1 - n : n;
+            if (Holds(types[i], walk))
+            {
+                ReleasePart(load(i), types[i], walk);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The parts of the value that one walk of <see cref="ReleaseInOrder"/> lets go of: of a plain data value or a union that holds a
+    /// part that puts a value on a work list, those of the walk, and of a split container its part of the walk (<see cref="SplitBody"/>),
+    /// each by a helper of their own; any other value whole.
+    /// </summary>
+    private void ReleasePart(string value, KurzType type, Walk walk)
+    {
+        var plain = type is UnionType || type is DataType d && !layout.IsBlock(d);
+        if (plain ? Holds(type, Walk.Listed) : Split(type))
+        {
+            var name = Helper($"release.{walk.ToString().ToLowerInvariant()}.{Lower.Mangle(type)}", "void", [Ir(type)], () =>
+            {
+                if (plain)
+                {
+                    EachHeld("%a0", type, (v, t) => ReleasePart(v, t, walk), t => Holds(t, walk), backward: walk == Walk.Listed);
+                    return;
+                }
+
+                SplitBody(type, walk);
+            });
+            fn.Emit($"call void {name}({Ir(type)} {value})");
+            return;
+        }
+
+        Release(value, type);
+    }
+
+    /// <summary>
+    /// In a helper over a split container (<see cref="Split"/>), its part of the walk, with the count of its block as the mark between
+    /// the walks, so that the split needs no memory of its own (pull request 332, comment 6664352637). The first walk lowers the count,
+    /// and the last holder closes the handles of the items, the entries or the captures in their order and leaves the count at 0. The
+    /// second, where the count is 0, lets go back to front of what they put on a work list; and since one value may hold one block in
+    /// two places, as <c>P(l, l)</c> does, where a block it freed would be read again, it lowers the count below 0 each time it
+    /// meets the block. The third raises the count each time it meets the block, and the last time, back at 0, it frees the block after
+    /// the third walk of what the block holds. A block that is held elsewhere keeps a count above 0, which the second and third walks
+    /// leave alone.
+    /// </summary>
+    private void SplitBody(KurzType type, Walk walk)
+    {
+        var block = "%a0";
+        if (type is FunctionType)
+        {
+            block = Environment("%a0");
+        }
+        else
+        {
+            var some = fn.Label("block");
+            var none = fn.Label("none");
+            fn.CondBranch(fn.Value("icmp eq ptr %a0, null"), none, some);
+            fn.Block(none);
+            fn.Return(null);
+            fn.Block(some);
+        }
+
+        var count = fn.Value($"load i64, ptr {block}");
+        var mine = fn.Label("mine");
+        var held = fn.Label("held");
+        var counted = fn.Label("counted");
+        switch (walk)
+        {
+            case Walk.Ends:
+                var lowered = fn.Value($"sub i64 {count}, 1");
+                fn.Emit($"store i64 {lowered}, ptr {block}");
+                fn.CondBranch(fn.Value($"icmp eq i64 {lowered}, 0"), mine, held);
+                fn.Block(mine);
+                SplitItems(type, block, walk);
+                break;
+            case Walk.Listed:
+                fn.CondBranch(fn.Value($"icmp sle i64 {count}, 0"), counted, held);
+                fn.Block(counted);
+                var first = fn.Label("first");
+                fn.CondBranch(fn.Value($"icmp eq i64 {count}, 0"), first, mine);
+                fn.Block(first);
+                SplitItems(type, block, walk);
+                fn.Branch(mine);
+                fn.Block(mine);
+                fn.Emit($"store i64 {fn.Value($"sub i64 {count}, 1")}, ptr {block}");
+                break;
+            default:
+                fn.CondBranch(fn.Value($"icmp slt i64 {count}, 0"), counted, held);
+                fn.Block(counted);
+                var raised = fn.Value($"add i64 {count}, 1");
+                fn.Emit($"store i64 {raised}, ptr {block}");
+                fn.CondBranch(fn.Value($"icmp eq i64 {raised}, 0"), mine, held);
+                fn.Block(mine);
+                SplitItems(type, block, walk);
+                if (type is ListType list)
+                {
+                    fn.Emit($"call void {StdFunction("ListFree")}(ptr {block}, i64 {ItemSize(list.Element)})");
+                }
+                else if (type is MapType map)
+                {
+                    fn.Emit($"call void {StdFunction("MapFree")}(ptr {block}, i64 {EntrySize(map)})");
+                }
+
+                break;
+        }
+
+        fn.Return(null);
+        fn.Block(held);
+        fn.Return(null);
+    }
+
+    /// <summary>
+    /// The walk over what a split container's block holds: a list's items and a map's entries, back to front in the second walk, and a
+    /// function value's captures, by the function that lets go of its environment, which frees it in the third walk.
+    /// </summary>
+    private void SplitItems(KurzType type, string block, Walk walk)
+    {
+        switch (type)
+        {
+            case ListType list:
+                if (Holds(list.Element, walk))
+                {
+                    EachItem(block, list.Element, item => ReleasePart(item, list.Element, walk), backward: walk == Walk.Listed);
+                }
+
+                break;
+            case MapType map:
+                if (Holds(map.Key, walk) || Holds(map.Value, walk))
+                {
+                    EachEntry(block, map, (k, v) => EntryParts(k, v, map, walk), backward: walk == Walk.Listed);
+                }
+
+                break;
+            default:
+                var drop = fn.Value($"load ptr, ptr {fn.Value($"getelementptr {{ i64, ptr }}, ptr {block}, i32 0, i32 1")}");
+                fn.Emit($"call void {drop}(ptr {block}, i32 {Number((int)walk + 1)})");
+                break;
+        }
+    }
+
     /// <summary>The IR name of a <c>pub</c> function of the standard library, which the emitted code calls by its name.</summary>
     private string StdFunction(string name) => Instance(
         std.Tree.Statements.OfType<FunctionDeclaration>()
@@ -316,7 +541,19 @@ public sealed partial class Emitter
                 var held = fn.Label("held");
                 fn.CondBranch(last, free, held);
                 fn.Block(free);
-                if (Counted(list.Element))
+                if (Holds(list.Element, Walk.Listed))
+                {
+                    // R1: the items' parts that end at once in their order, then, back to front, the parts that put a value on a work
+                    // list, then the split containers, freed
+                    Hold(() =>
+                    {
+                        foreach (var walk in Walks.Where(w => Holds(list.Element, w)))
+                        {
+                            EachItem("%a0", list.Element, item => ReleasePart(item, list.Element, walk), backward: walk == Walk.Listed);
+                        }
+                    });
+                }
+                else if (Counted(list.Element))
                 {
                     EachItem("%a0", list.Element, item => Release(item, list.Element));
                 }
@@ -324,6 +561,21 @@ public sealed partial class Emitter
                 fn.Emit($"call void {StdFunction("ListFree")}(ptr %a0, i64 {ItemSize(list.Element)})");
                 fn.Return(null);
                 fn.Block(held);
+                fn.Return(null);
+                return;
+            }
+
+            if (Holds(type, Walk.Listed))
+            {
+                // R1: the parts that end at once in their order, then, in the reverse order, the parts that put a value on a work list,
+                // then the split containers, freed
+                Hold(() =>
+                {
+                    foreach (var walk in Walks.Where(w => Holds(type, w)))
+                    {
+                        ReleasePart("%a0", type, walk);
+                    }
+                });
                 fn.Return(null);
                 return;
             }
@@ -365,17 +617,23 @@ public sealed partial class Emitter
         fn.Return(null);
     });
 
-    /// <summary>In a helper over a plain data value or a union: <paramref name="each"/> for each counted field, or for the case value when its case is counted; then the return.</summary>
-    private void EachHeld(string value, KurzType type, Action<string, KurzType> each)
+    /// <summary>
+    /// In a helper over a plain data value or a union: <paramref name="each"/> for each field <paramref name="which"/> takes, by default
+    /// each counted one, in their order or <paramref name="backward"/>, or for the case value when <paramref name="which"/> takes its
+    /// case; then the return.
+    /// </summary>
+    private void EachHeld(string value, KurzType type, Action<string, KurzType> each, Func<KurzType, bool>? which = null, bool backward = false)
     {
+        which ??= Counted;
         switch (type)
         {
             case DataType d:
                 {
                     var fields = Layout.Fields(d);
-                    for (var i = 0; i < fields.Count; i++)
+                    for (var n = 0; n < fields.Count; n++)
                     {
-                        if (Counted(fields[i]))
+                        var i = backward ? fields.Count - 1 - n : n;
+                        if (which(fields[i]))
                         {
                             each(fn.Value($"extractvalue {Ir(d)} {value}, {Number(i)}"), fields[i]);
                         }
@@ -388,7 +646,7 @@ public sealed partial class Emitter
             case UnionType u:
                 ByCase(Tag(value, u), u, u.Cases, c =>
                 {
-                    if (c is not VoidType && Counted(c))
+                    if (c is not VoidType && which(c))
                     {
                         each(Payload(value, u, c), c);
                     }
@@ -439,23 +697,23 @@ public sealed partial class Emitter
     /// <summary>The count of a list's items, an <c>int</c>.</summary>
     private string ListCount(string list) => fn.Value($"call i32 {StdFunction("ListCount")}(ptr {list})");
 
-    /// <summary><paramref name="each"/> for every item of the list, in order, read as the type of its items.</summary>
-    private void EachItem(string list, KurzType element, Action<string> each)
+    /// <summary><paramref name="each"/> for every item of the list, in order or <paramref name="backward"/>, read as the type of its items.</summary>
+    private void EachItem(string list, KurzType element, Action<string> each, bool backward = false)
     {
         var count = ListCount(list);
         var items = fn.Value($"call ptr {StdFunction("ListItems")}(ptr {list})");
         var counter = fn.Alloca("i32", "item");
-        fn.Emit($"store i32 0, ptr {counter}");
+        fn.Emit($"store i32 {(backward ? fn.Value($"sub i32 {count}, 1") : "0")}, ptr {counter}");
         var check = fn.Label("items");
         var body = fn.Label("item");
         var done = fn.Label("items.done");
         fn.Block(check);
         var i = fn.Value($"load i32, ptr {counter}");
-        fn.CondBranch(fn.Value($"icmp slt i32 {i}, {count}"), body, done);
+        fn.CondBranch(fn.Value(backward ? $"icmp sge i32 {i}, 0" : $"icmp slt i32 {i}, {count}"), body, done);
         fn.Block(body);
         var wide = fn.Value($"sext i32 {i} to i64");
         each(fn.Value($"load {Ir(element)}, ptr {fn.Value($"getelementptr {Ir(element)}, ptr {items}, i64 {wide}")}"));
-        fn.Emit($"store i32 {fn.Value($"add i32 {i}, 1")}, ptr {counter}");
+        fn.Emit($"store i32 {fn.Value($"{(backward ? "sub" : "add")} i32 {i}, 1")}, ptr {counter}");
         fn.Branch(check);
         fn.Block(done);
     }

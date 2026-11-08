@@ -3537,7 +3537,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// every block back to the system; and the target's `Resize` grows none, since a block grown in place would reach past the page
     /// after its end.
     /// </summary>
-    private static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
+    internal static (string Path, string Old, string New)[] Fence => FenceOf(Builder.HostTarget!.Value);
 
     /// <summary>The edits of <see cref="Fence"/> for the runtime of <paramref name="target"/>.</summary>
     private static (string Path, string Old, string New)[] FenceOf(Target target)
