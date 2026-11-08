@@ -775,7 +775,7 @@ public sealed class CheckerTests
     [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
-        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in parentheses or not, is reached only through a
+        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in any number of parentheses, is reached only through a
         // `break` of that loop that can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after
         // it; a `break` of the loop makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end
         // cannot be reached; only the literal is read so, as the record narrows C#'s constant `true` (assumed), so `!false` and `true && true`
@@ -785,6 +785,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
         Clean(Search.Replace("    while true {", "    while (true) {"));
+        Clean(Search.Replace("    while true {", "    while ((true)) {"));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
         Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached
@@ -799,6 +800,11 @@ public sealed class CheckerTests
         Clean(Size);
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
         Clean(Size.Replace("            return 0\n", "            return 0\n            break\n")); // a `break` never reached leaves `e` as it was
+        // N3: a `continue` after a statement whose end cannot be reached adds nothing to what holds at the loop's head, as a `break` adds
+        // nothing to what holds after the loop; one that is reached brings back the `null` it saw
+        const string Len = "int Len() {\n    mut string? s = \"abc\"\n    mut n = 0\n    while n < 3 {\n        n = n + 1\n        if n == 2 {\n            s = null\n            return 0\n            continue\n        }\n    }\n\n    return s.Bytes.Count\n}\n\nprint(Len())";
+        Clean(Len);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Len.Replace("            return 0\n", "")));
     }
 
     [Fact]

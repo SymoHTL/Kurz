@@ -11,7 +11,7 @@ internal readonly record struct NullPath(VariableSymbol Root, string Fields)
         ReferenceEquals(Root, other.Root) && (other.Fields.Length == 0 || Fields == other.Fields || Fields.StartsWith(other.Fields + ".", StringComparison.Ordinal));
 }
 
-/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop.</summary>
+/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop that can be reached.</summary>
 internal sealed class LoopExits
 {
     public List<ImmutableHashSet<NullPath>> Breaks { get; } = [];
@@ -293,8 +293,9 @@ public sealed partial class Checker
     /// what a round leaves nullable at the end of its body or at a <c>continue</c>, the join C# makes where the paths around a loop meet
     /// (section 4, an assumption there). Where a reading ends with less known than it began with, it is read again from that, its
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
-    /// what the condition leaves where it is false, joined with what held at each <c>break</c>, and a <c>while true</c> what held at its
-    /// <c>break</c>s alone; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
+    /// what the condition leaves where it is false, joined with what held at each <c>break</c> that can be reached, and a <c>while true</c>
+    /// what held at those <c>break</c>s alone; a <c>break</c> or a <c>continue</c> after a statement whose end cannot be reached adds
+    /// nothing; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
     /// Returns whether the loop can end: a <c>while true</c> ends only through a <c>break</c> of its own that can be reached, as the end
     /// point of C#'s <c>while (true)</c> is reached only through one (F3), and the same test of its condition decides both.
     /// </summary>

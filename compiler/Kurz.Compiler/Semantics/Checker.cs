@@ -202,7 +202,7 @@ public sealed partial class Checker
         /// <summary>N3, N7: the variables and paths of fields that the flow of the code shows are not null where the checker reads; a lambda starts with what held where it was made (F15).</summary>
         public ImmutableHashSet<NullPath> Known { get; set; } = [];
 
-        /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs.</summary>
+        /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs that can be reached.</summary>
         public List<LoopExits> Loops { get; } = [];
 
         /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, so that a <c>break</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
@@ -1979,9 +1979,9 @@ public sealed partial class Checker
                 {
                     NotSupported(c.Line, "`continue` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
-                else
+                else if (!frame.Unreached)
                 {
-                    frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head
+                    frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head, from a `continue` that is reached
                 }
 
                 return Flow.Ends;

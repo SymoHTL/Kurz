@@ -237,9 +237,9 @@ read it):
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
 `throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
 arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
-`while (true)`, the literal `true`, in parentheses or not, and nothing else; a `break` after a
-statement whose end cannot be reached is never reached, as in C#. The record marks that
-definition as *(assumed)*. Where the analysis proves
+`while (true)`, the literal `true`, in any number of parentheses, and nothing else; a `break` or a
+`continue` after a statement whose end cannot be reached is never reached, as in C#. The record
+marks that definition as *(assumed)*. Where the analysis proves
 nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
