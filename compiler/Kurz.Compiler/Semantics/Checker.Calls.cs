@@ -2025,9 +2025,9 @@ public sealed partial class Checker
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
-        if (there.Count == 0 && argument is ConstantTypeArgument)
+        if (there.Count == 0 || there.Any(p => p.Constant is { } c && Types.IsError(c)))
         {
-            return Types.Error; // T19: a literal past every candidate's type parameters carries the call's count, and no error of its own (E1)
+            return Types.Error; // T19: an argument past every candidate's type parameters carries the call's count, and one for a constant whose type was not read that type's error, and no error of its own (E1)
         }
 
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();

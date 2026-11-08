@@ -1335,21 +1335,18 @@ public sealed partial class Checker
     /// <summary>
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
-    /// error of its own (the owner, 2026-11-03), and a function whose constant has no type of the list, or one that is no name, is not read (E1).
+    /// error of its own (the owner, 2026-11-03), and a function whose constant has no type of the list is not read (E1); one whose constant's
+    /// type is no name it can read is read, with the constant of no type, whose uses report nothing more (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
         var type = Resolve(p.Constant!);
-        if (HoldsConstant(type))
+        if (Types.IsError(type) || HoldsConstant(type))
         {
-            return type;
+            return type; // a type that was not read has its diagnostic, and the function is read, the uses of its constant reporting nothing more (E1)
         }
 
-        if (!Types.IsError(type))
-        {
-            Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
-        }
-
+        Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
         modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
         return Types.Error;
     }
