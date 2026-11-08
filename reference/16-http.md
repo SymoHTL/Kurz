@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpResponseMessage`, `HttpBody` and
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpDate`, `HttpResponseMessage`, `HttpBody` and
 `HttpWriter`, with `UriError`, `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -34,8 +34,8 @@ of the streamed response §12 gives, "A response can be streamed"; the two of `U
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
 `HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a); and
 `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
-issue 110, comment 6657251329, C2), and so is `Url` (W17; the owner, 2026-11-06, issue 110, comment
-6680237968, G1 (a))).
+issue 110, comment 6657251329, C2), and so are `Url` (W17) and `HttpDate` (W18; the owner, 2026-11-06,
+issue 110, comment 6680237968, G1 (a) and G3 (a))).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -4386,4 +4386,81 @@ match Url.Decode(Url.Encode(text)) {
     string s => print(s == text)
     InvalidUtf8 e => print("InvalidUtf8 {e.At}")
 }
+```
+
+### W18 (decided, §12) `HttpDate`
+
+`HttpDate.Format(t)` writes the IMF-fixdate of RFC 9110, section 5.6.7, of a `timestamp`,
+`Sun, 06 Nov 1994 08:49:37 GMT`, and `HttpDate.Parse(text)` gives `timestamp | ParseError` and reads
+it, together with the two obsolete forms the RFC has a recipient read, RFC 850's
+`Sunday, 06-Nov-94 08:49:37 GMT` and asctime's `Sun Nov  6 08:49:37 1994`: static functions of the
+class `HttpDate` of `std/`, which every file sees (W1), as Rust's `httpdate` crate, which hyper uses,
+writes and reads them, and the server writes its own `Date` (W9) by the same function (§12, the
+owner, 2026-11-06, issue 110, comment 6680237968, G3 (a), asked in comment 6673104097).
+*(assumed, §12, the readings of the product pass of 2026-11-08, issue 110, comment 6715835046, not
+put to the owner, each the crate's where it has one: `Format` takes the second towards the past, as
+the crate drops the fraction, and writes every instant a `timestamp` holds, 1677 to 2262, one before
+1970 among them, where the crate stops the program; `Parse` takes ASCII's whitespace from both ends
+first (X4's `TrimAscii`), as the crate trims the text, compares the names of the days and the months
+with their case, reads the two digits of RFC 850's year as 1970 to 2069, as the crate does, where the
+RFC reads them by the clock, reads asctime's day as two digits or a space and one digit, and checks
+each separator; and it refuses, by X7's kinds, a text of whitespace alone as `Empty`, a year before
+1970, which the crate refuses, as `TooSmall`, an instant past the last second a `timestamp` holds,
+2262-04-11 23:47:16, as `TooLarge`, and every other text as `InvalidDigit`, a text of no form, an hour
+past 23, a minute or a second past 59, a second of 60 among them, a day the month does not have and a
+weekday that is not the date's, which the crate checks, among them)*
+
+Case: [http/http-date-format.kz](../corpus/http/http-date-format.kz)
+```kurz
+// `HttpDate.Format` writes the IMF-fixdate of a `timestamp`, its second taken towards the past, so that a fraction is dropped and
+// the last nanosecond before 1970 is in 1969, for every instant a `timestamp` holds, the first and the last among them
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(HttpDate.Format(*Ptr<timestamp>(&bits)))
+    }
+}
+
+Show(0)
+Show(784111777000000000)
+Show(784111777999999999)
+Show(-1)
+Show(9223372036854775807)
+Show(-9223372036854775808)
+```
+
+Case: [http/http-date-parse.kz](../corpus/http/http-date-parse.kz)
+```kurz
+// `HttpDate.Parse` reads the IMF-fixdate, RFC 850's form, whose two digits of the year name 1970 to 2069, and asctime's form,
+// whose day is two digits or a space and one, after ASCII's whitespace is taken from both ends; it refuses an empty text, a
+// name in another case, a weekday that is not the date's, a zone other than GMT, a second of 60, a day the month does not have
+// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds
+void Show(string text) {
+    match HttpDate.Parse(text) {
+        timestamp t => print(t)
+        ParseError e => print(e.Kind)
+    }
+}
+
+Show("Sun, 06 Nov 1994 08:49:37 GMT")
+Show("Sunday, 06-Nov-94 08:49:37 GMT")
+Show("Sun Nov  6 08:49:37 1994")
+Show("Sun Nov 06 08:49:37 1994")
+Show(" \tSun, 06 Nov 1994 08:49:37 GMT\r\n")
+Show("Thursday, 01-Jan-70 00:00:00 GMT")
+Show("Tuesday, 31-Dec-69 23:59:59 GMT")
+Show("Tue, 29 Feb 2000 00:00:00 GMT")
+Show("Fri, 11 Apr 2262 23:47:16 GMT")
+Show("")
+Show("   ")
+Show("sun, 06 Nov 1994 08:49:37 GMT")
+Show("Mon, 06 Nov 1994 08:49:37 GMT")
+Show("Sun, 06 Nov 1994 08:49:37 UTC")
+Show("Sun, 06 Nov 1994 08:49:60 GMT")
+Show("Thu, 29 Feb 2001 00:00:00 GMT")
+Show("Sun, 6 Nov 1994 08:49:37 GMT")
+Show("1994-11-06T08:49:37Z")
+Show("Wed, 31 Dec 1969 23:59:59 GMT")
+Show("Fri, 11 Apr 2262 23:47:17 GMT")
+Show("Sat, 12 Apr 2262 00:00:00 GMT")
 ```
