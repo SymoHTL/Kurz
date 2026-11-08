@@ -1631,9 +1631,8 @@ ask about it.
   calls the method directly, one call more, which nothing measured *(assumed)*; `==` on two values of an
   interface, and a map's key of an
   interface's type, read the classes that implement it as K13 reads a base's derived classes, false where
-  the two classes differ *(assumed: K13 names a base and its derived classes, and no rule names an
-  interface)*; a field of an interface's type reaches every class of the program that implements it,
-  as R8 says of a `mut` one, and one without `mut` too, as R2 and R4 read a base's type *(assumed)*; and an
+  the two classes differ (K13, *assumed*); a field of an interface's type reaches every class of the
+  program that implements it, `mut` or not (R8, *assumed* for one without `mut`); and an
   arm of a class over a value of an interface or of a base class (C4) tests the class of the instance
   through the link each table holds, its base's in a class's table and the class's own in its table for an
   interface, as the CLR's method table holds its parent's and C#'s `is` walks them, and not through a list
@@ -1895,8 +1894,8 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: a `flags` type and a value of one (D13, D17, D19, and the A-rules of
 their text); of an interface, type parameters (T19, K6), and of a method of one a modifier, type
 parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
-of which leaves the interface and every value of it unread; `weak` before an interface, which R3 and R5
-do not name, and the name of an interface where a value, a member or a call stands (K6); of a class,
+of which leaves the interface and every value of it unread; `weak` before an interface (R3), and the
+name of an interface where a value, a member or a call stands (K6); of a class,
 type parameters (T19), a constructor or a type declared in its body (K7, K14), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
 other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type

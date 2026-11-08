@@ -260,6 +260,10 @@ target as a temporary does, to the end of its statement or its condition, and lo
 is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
 `?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
 
+`weak` may stand before an interface as before a class: a `weak I?` is the two words of a value of
+the interface and holds the weak count of the instance's block, as Rust's `Weak<dyn Trait>` (§3,
+the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
+
 A `weak T?` type stands wherever a type stands: a field, a list's item, a variable, a parameter, a
 return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
 stands", against a field and a list's item alone). What a nullable type written as a case of a
@@ -1489,7 +1493,10 @@ if Arm.AdvSimd.IsSupported {
 ### R8 (decided, §3) Fields of interface type
 
 A `mut` field of interface type can hold any implementer, so R2 is judged with the whole program
-in view.
+in view. A field of interface type without `mut` reaches every implementer as well, so a ring
+through it is refused where another field on the ring is `mut`, as R2 and R4 read a field of a
+base's type *(assumed, §3: proposed on #110, comment 6567439435, and not objected to in the
+answer, comment 6573113786)*.
 
 Case: [memory/cycle-through-interface.kz](../corpus/memory/cycle-through-interface.kz)
 ```kurz

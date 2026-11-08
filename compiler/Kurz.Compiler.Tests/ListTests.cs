@@ -2950,6 +2950,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
         }
 
+        interface Greeter {
+            string Greet(int times)
+        }
+
+        class Hello(string N) : Greeter {
+            pub string Greet(int times) => "{N} {times}"
+        }
+
+        class Keep(mut Greeter Item) {
+            pub int Reset() {
+                Item = Hello("other")
+                return 1
+            }
+        }
+
         data Holder(Shape S, int K)
 
         int Total(List<Shape> all) {
@@ -3029,6 +3044,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(count)
         Shape shown = Shown()
         print("{shown.Area()} {Shown().Use()}")
+        mut j = 7
+        keep = Keep(Hello("first {j}"))
+        print(keep.Item.Greet(keep.Reset()))
         """;
 
     private static readonly string[] InterfacesPrint =
@@ -3055,6 +3073,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "9",
         "11", // a `mut` parameter through the second interface a base names, a leaf's method and a derived class's override among them
         "5 100", // K7: the class's own `pub` method implements the interface where its base has a private one of that signature
+        "first 7 1", // the receiver of a call through an interface, read from a field the argument assigns: its own count keeps it
     ];
 
     // arms of a class over a value of an interface, of a base class, of a `T?`, of a union and of a call's other cases (C4, O5, K6;

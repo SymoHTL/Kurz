@@ -1280,7 +1280,9 @@ A generic function or type lists its type parameters between `<` and `>` after i
 parameter is limited to the types that implement an interface by naming the interface after a
 colon: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the constraint on a value
 (record, section 13). A use names the type arguments, or leaves them to be inferred (T27). An
-argument whose type does not meet the limit is the compile error `type-mismatch`.
+argument whose type does not meet the limit is the compile error `type-mismatch`. An interface
+may take type parameters too, and each list of type arguments gives each class that implements it
+a table of its own (§4, the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
 
 Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
 ```kurz

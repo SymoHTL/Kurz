@@ -452,6 +452,8 @@ public sealed partial class Emitter
         var f = info.Function!;
         if (c.Callee is MemberAccess { Target: var target } && TypeOf(target) is InterfaceType face)
         {
+            // the receiver is borrowed past the arguments, as a class's is below: one read from a field holds a count of its own to the end
+            // of the statement (InstanceField), and one in a variable cannot change while they run (M7, F15, F16)
             var value = EmitExpression(target);
             var passed = Arguments(
                 c,
