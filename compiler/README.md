@@ -1115,11 +1115,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
   lines dropped and the flag of a line cut short are plain `static mut`s, Kurz having no atomic form,
-  and the runtime runs one thread. The corpus's runner
+  and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
+  them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
   and its time against the test's, a string's quotes and the escapes, the category of a method, of a
   function, of a lambda, of a field's default, of a property and of the top level, a method named
-  `Log`, a member named `Log` beside a log call, the levels and
+  `Log`, a member named `Log` beside a log call in a method, in a property and in a field's default, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
   the lines dropped while standard error refused its writes, a line it took in part, the crash line

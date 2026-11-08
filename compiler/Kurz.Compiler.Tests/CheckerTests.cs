@@ -3616,6 +3616,18 @@ public sealed class CheckerTests
         Clean("class A {\n    pub void Log() {\n        print(1)\n    }\n}\n\ndata P(int Log)\n\nA().Log()\nprint(P(2).Log)");
 
     [Theory]
+    [InlineData("        Log.Foo(\"a\")")] // a name that is no level, though the member's type has a method `Foo`
+    [InlineData("        f = Log.Information\n        print(f)")] // a log function used as a value
+    public void Inside_a_type_with_a_member_named_log_a_member_of_log_that_is_no_level_or_a_log_function_as_a_value_is_unknown_name(string body)
+    {
+        // P1: `Log.<name>` stays the log functions' where the type has a member `Log` whose type has a function of that name
+        const string sink = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n\n    pub void Foo(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    pub void Pay() {\n";
+        const string end = "\n    }\n}\n\no = Orders(Sink())\no.Pay()";
+        Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(sink + body + end));
+        Clean(sink + "        s = Log\n        s.Foo(\"a\")" + end); // the positive control: the member by its name alone
+    }
+
+    [Theory]
     [InlineData("f = Log.Information\nprint(f)", ErrorIds.UnknownName)]
     [InlineData("y = Log\nprint(y)", ErrorIds.UnknownName)]
     [InlineData("x = Log.Information(\"a\")\nprint(x)", ErrorIds.Syntax)]
