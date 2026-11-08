@@ -4541,8 +4541,10 @@ answers run out.
 ### W17 (decided, §12) `Url`
 
 `Url.Decode(text)` gives `string | InvalidUtf8` and `Url.Encode(text)` gives a `string`: static
-functions of the class `Url` of `std/`, which every file sees (W1), as C#'s `Uri.UnescapeDataString`
-and `Uri.EscapeDataString`, made as Rust's `percent-encoding` crate decodes and encodes, while
+functions of the class `Url` of `std/`, which every file sees (W1), shaped as C#'s
+`Uri.UnescapeDataString` and `Uri.EscapeDataString`, made as Rust's `percent-encoding` crate decodes
+and encodes, so that `Decode` refuses decoded bytes that are no UTF-8, as the crate's `decode_utf8`
+does, where C# leaves their escapes as they are, while
 `r.Path` stays as the request gave it (W5). `Decode` reads each `%` with two hex digits after it
 as the byte they name, leaves a `%` without them as it is, and leaves a `+` a `+`, since RFC 3986
 gives it no meaning in a path (§12, the owner, 2026-11-06, issue 110, comment 6680237968, G1 (a),
@@ -4553,8 +4555,8 @@ hex digits of either case and gives the decoded bytes as `string.FromUtf8` gives
 with the count of the decoded bytes in front of the first sequence that is no UTF-8 (T15); no path
 is checked, so that a key holds `/`, `..` or a NUL decoded as any
 other byte; `Encode` leaves
-RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, as `EscapeDataString`
-leaves them, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
+RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, the set .NET Framework 4.5
+and later and .NET Core leave in `EscapeDataString`, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
 upper-case hex digits, as RFC 3986, section 2.1, writes them; `Decode(Encode(s))` is `s` for every
 string; and both run in a build for Windows, as the parse of a `Uri` does)*
 
@@ -4624,7 +4626,16 @@ each separator; and it refuses, by X7's kinds, a text of whitespace alone as `Em
 1970, which the crate refuses, as `TooSmall`, an instant past the last second a `timestamp` holds,
 2262-04-11 23:47:16, as `TooLarge`, and every other text as `InvalidDigit`, a text of no form, an hour
 past 23, a minute or a second past 59, a second of 60 among them, a day the month does not have and a
-weekday that is not the date's, which the crate checks, among them.
+weekday that is not the date's, which the crate checks, among them. *(assumed, §12: the checks run in
+one order, and the first that fails names the kind, since the crate reports every one of them as one
+error and gives no order: the trim, after which an empty text, the empty text among them, is `Empty`;
+then the three forms; then the year before 1970; then the hour, the minute, the second and the day of
+the month; then the weekday; then the last second a `timestamp` holds. So
+`Thu, 29 Feb 1969 00:00:00 GMT` is `TooSmall`, and `Mon, 12 Apr 2262 00:00:00 GMT`, whose weekday is
+wrong and whose instant is too large, is `InvalidDigit`.)* `Parse(Format(t))` is `t` with its
+fraction dropped for every `t` from 1970 on, and `TooSmall` for every `t` before 1970: the cost of
+`Format` writing what the crate would stop on, beside `Parse` refusing it as the crate does, is that a
+program that writes a `Last-Modified` before 1970 cannot read it back with `Parse`.
 
 Case: [http/http-date-format.kz](../corpus/http/http-date-format.kz)
 ```kurz
@@ -4650,7 +4661,8 @@ Case: [http/http-date-parse.kz](../corpus/http/http-date-parse.kz)
 // `HttpDate.Parse` reads the IMF-fixdate, RFC 850's form, whose two digits of the year name 1970 to 2069, and asctime's form,
 // whose day is two digits or a space and one, after ASCII's whitespace is taken from both ends; it refuses an empty text, a
 // name in another case, a weekday that is not the date's, a zone other than GMT, a second of 60, a day the month does not have
-// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds
+// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds; a text that breaks two
+// checks takes the kind of the first in W18's order, the year before the day of the month, and the weekday before the range
 void Show(string text) {
     match HttpDate.Parse(text) {
         timestamp t => print(t)
@@ -4679,6 +4691,8 @@ Show("1994-11-06T08:49:37Z")
 Show("Wed, 31 Dec 1969 23:59:59 GMT")
 Show("Fri, 11 Apr 2262 23:47:17 GMT")
 Show("Sat, 12 Apr 2262 00:00:00 GMT")
+Show("Thu, 29 Feb 1969 00:00:00 GMT")
+Show("Mon, 12 Apr 2262 00:00:00 GMT")
 ```
 
 ### W19 (decided, §12) `HttpQuery`
@@ -4686,9 +4700,11 @@ Show("Sat, 12 Apr 2262 00:00:00 GMT")
 `r.QueryValues()` gives the parameters of `r.Query` as an `HttpQuery`, its names and values in
 their order, while `r.Query` stays the raw text (W5): a class of `std/`, which every file sees (W1),
 with `Get(name)`, the first value of the name, a `string?`, `GetAll(name)`, every value of it,
-`Count`, `NameAt(i)` and `ValueAt(i)`, as `HttpHeaders` has them (W4), but comparing a name exactly,
-and reading a `+` as a space, as a form's query writes one, as ASP.NET Core's
-`QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read a query (§12, the owner,
+`Count`, `NameAt(i)` and `ValueAt(i)`, as `HttpHeaders` has them (W4), but comparing a name exactly
+and keeping the pairs in their order, as Rust's `url::form_urlencoded::parse` reads a query, and
+reading a `+` as a space, as a form's query writes one, as that crate and ASP.NET Core's
+`QueryHelpers.ParseQuery` read it, where `ParseQuery` gathers the pairs into a dictionary that
+compares names without regard to case and folds a repeated name into one value (§12, the owner,
 2026-11-06, issue 110, comment 6680237968, G2 (a), asked in comment 6673104097, with the option's
 `HttpQuery.Parse(r.Query)` made a method of the request, whose name says what it reads).
 The name is `QueryValues`, and the readings are the crate's where it has one (§12, the owner,
@@ -4703,8 +4719,7 @@ them (T15), where `Url.Decode` refuses them, since `QueryValues()` cannot fail; 
 keeping each of its values apart, in their order; `GetAll` giving a new list; `NameAt(i)` and
 `ValueAt(i)` outside 0 to `Count - 1` stopping the program with `index-out-of-range`, as W4's do; and
 the walk `for name, value in q` of C6 and W4, which any class with `Count`, `NameAt(i)` and
-`ValueAt(i)` meets. *(assumed, §12: `HttpQuery.FromQuery(r.Query)`, the form shown beside
-`r.QueryValues()`, the reading taken of the answer of 2026-11-06)*.
+`ValueAt(i)` meets.
 The compiler does not build this walk, as W4 says of every class, so the case walks the query by
 index; the stop of `NameAt(i)` and `ValueAt(i)` outside the pairs is held by `HttpTests`, as W4's.
 
