@@ -688,8 +688,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   that reads its type is read a second time for those calls alone where it reads `T.Fields`, and the
   chain of copies stops at a call so refused, the copies before it reporting what else their bodies
   hold; on the text, `f.Type` of such a loop is a type of its own, no type parameter of the function,
-  so that a type argument that holds it beside a type parameter of the function grows by that
-  parameter, `Map<f.Type, T>` for `T`, and one that holds it with none takes no part (T34);
+  and `f.Get(value)` a value of that type, so that a type argument that holds it beside a type
+  parameter of the function, written or inferred, grows by that parameter, `Map<f.Type, T>` and
+  `Pair(f.Get(x), x)` for `T`, and one that holds it with none takes no part (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which

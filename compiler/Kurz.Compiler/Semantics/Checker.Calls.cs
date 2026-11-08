@@ -114,6 +114,11 @@ public sealed partial class Checker
             return made; // T33: `T.Make(f => ...)` in a copy
         }
 
+        if (FieldGetOfText(c) is { } got)
+        {
+            return got; // T34: `f.Get(value)` of a loop over `T.Fields` on a function's text
+        }
+
         switch (c.Callee)
         {
             case NameExpression n:
