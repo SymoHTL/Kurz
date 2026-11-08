@@ -1,0 +1,4 @@
+// expect: error argument-mismatch at 4
+// rules: P2
+
+Log.Information("paid", "now")
