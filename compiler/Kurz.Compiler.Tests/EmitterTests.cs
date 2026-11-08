@@ -377,7 +377,40 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.True(from.Success && of.Success, copy);
         var offset = Regex.Match(copy, $@"(%\S+) = sub i64 {Regex.Escape(from.Groups[1].Value)}, {Regex.Escape(of.Groups[1].Value)}$", RegexOptions.Multiline);
         Assert.True(offset.Success, copy);
-        Assert.Matches(new Regex($@"= getelementptr i8, ptr {Regex.Escape(current)}, i64 {Regex.Escape(offset.Groups[1].Value)}$", RegexOptions.Multiline), copy);
+        var stepped = Regex.Match(copy, $@"^\s*(%\S+) = getelementptr i8, ptr {Regex.Escape(current)}, i64 {Regex.Escape(offset.Groups[1].Value)}$", RegexOptions.Multiline);
+        Assert.True(stepped.Success, copy);
+
+        // the slot `take` erases: the found slot is kept in one place, the copy's slot is the one store there in the copy, and `take`
+        // loads that place and gives what it loads to `MapErase` with the block the map holds
+        var kept = Regex.Match(string.Join("\n", body), $@"^\s*store ptr {Regex.Escape(slot)}, ptr (%\S+)$", RegexOptions.Multiline);
+        Assert.True(kept.Success, "the found slot is kept nowhere");
+        var place = kept.Groups[1].Value;
+        var stored = $"store ptr {stepped.Groups[1].Value}, ptr {place}";
+        bool TakesTheCopy(string[] lines)
+        {
+            var inCopy = lines[(start + 1)..end].Select(l => l.Trim()).Where(l => l.Contains($"ptr {place}", StringComparison.Ordinal)).ToArray();
+            var takeStart = Array.FindIndex(lines, l => l.StartsWith("take.", StringComparison.Ordinal));
+            if (inCopy is not [var only] || only != stored || takeStart < 0)
+            {
+                return false;
+            }
+
+            var takeEnd = Array.FindIndex(lines, takeStart + 1, l => l.EndsWith(':') && !l.StartsWith(' '));
+            var taken = lines[(takeStart + 1)..(takeEnd < 0 ? lines.Length : takeEnd)];
+            var loaded = Regex.Match(string.Join("\n", taken), $@"^\s*(%\S+) = load ptr, ptr {Regex.Escape(place)}$", RegexOptions.Multiline);
+            return loaded.Success && taken.Any(l => l.Contains("MapErase", StringComparison.Ordinal) && l.Contains($"(ptr {current}, ptr {loaded.Groups[1].Value}, i64 ", StringComparison.Ordinal));
+        }
+
+        Assert.True(TakesTheCopy(body), string.Join("\n", body));
+
+        // the positive controls: the found slot stored again in the copy, which leaves the copy's slot unused, and a `take` that gives
+        // `MapErase` the found slot, not what it loaded, each fail the check
+        var unused = body.Select(l => l.Trim() == stored ? l.Replace($"store ptr {stepped.Groups[1].Value},", $"store ptr {slot},", StringComparison.Ordinal) : l).ToArray();
+        Assert.NotEqual(body, unused);
+        Assert.False(TakesTheCopy(unused));
+        var erasedFound = body.Select(l => l.Contains("MapErase", StringComparison.Ordinal) ? Regex.Replace(l, $@"\(ptr {Regex.Escape(current)}, ptr %[^,\s]+, i64 ", m => $"(ptr {current}, ptr {slot}, i64 ") : l).ToArray();
+        Assert.NotEqual(body, erasedFound);
+        Assert.False(TakesTheCopy(erasedFound));
     }
 
     [Fact]

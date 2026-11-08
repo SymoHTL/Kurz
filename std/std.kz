@@ -4536,12 +4536,15 @@ pub bool MapTripped(byte* block) {
 }
 
 // One loop over a map more (`change` 1) or less (-1) holds the block, nothing for a map that holds none:
-// a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
-// (`MapLongLookup`). A loop counts itself where it starts and lets go where it ends: at its end, a `break`,
-// a `return` or a case propagated out of its body. A write inside it finds the block shared, since the
-// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`). The
-// text of a map counts itself so while it walks the block, since a class's `Text()` it calls for a key or
-// a value can look a key up in a map that holds the block.
+// a loop walks the block's slots by their index, so a lookup inside it must rehash no block it holds
+// (`MapLongLookup`; section 4, the owner, 2026-11-03). A loop counts itself where it starts and lets go
+// where it ends: at its end, a `break`, a `return` or a case propagated out of its body. The text of a map
+// counts itself so while it walks the block, since a class's `Text()` it calls for a key or a value can
+// look a key up in a map that holds the block (section 4, assumed there: the reading of the answer of
+// 2026-11-03 for the text, #39, comment 6688570158). A write inside either finds the block shared and
+// copies it first, the copy counting no loop (`MapCopy`): the loop holds the block with a count of its
+// own, and the text walks a value that holds one besides the map the write reaches, as a read of a field
+// takes a count of its own (K2).
 pub void MapWalk(byte* block, int change) {
     raw {
         if block != null {
@@ -4552,7 +4555,9 @@ pub void MapWalk(byte* block, int change) {
 
 // For a lookup whose probe passed more than 512 slots, 65 groups of 8 without a slot of 255: whether the
 // block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
-// over a map and no text of a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the
+// over a map and no text of a map holds it (section 4: a read's lookup, the owner, 2026-11-02, "lookups
+// count too"; the bound and the lookups of `m[k] = v` and `Remove` assumed there; the loop's hold the
+// owner's answer of 2026-11-03, and the text's assumed there); the
 // block is then marked as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code
 // moves the entries under their new hashes (`MapRehashMark`, `MapRehashPlace`).
 pub bool MapLongLookup(byte* block) {
@@ -4579,7 +4584,7 @@ pub bool MapFastHash(byte* block) {
 
 // The first step of the rehash in place onto SipHash-1-3, as hashbrown's `prepare_rehash_in_place` takes
 // it: every entry's control byte made 128 and every removed entry's 255, so that 128 marks an entry not
-// yet in the slot its new hash probes first, and the slots entries can still take made the block's
+// yet placed under its new hash, and the slots entries can still take made the block's
 // capacity less its count, which gives the removed entries' slots to new entries. The emitted code then
 // calls `MapRehashPlace` for each slot marked 128 with the new hash of the key in it, until the slot holds
 // no entry marked 128, as hashbrown's `rehash_in_place` calls its hasher for the slot.
@@ -4604,8 +4609,9 @@ pub void MapRehashMark(byte* block) {
 
 // One step of the rehash in place, as hashbrown's `rehash_in_place` takes it, with nothing allocated: the
 // entry marked 128 in the slot `i`, of `entry` bytes, whose key's new hash is `hash`, put in the first
-// slot of its probe whose control byte is 255 or 128. It stays in its slot where that slot is in its own
-// group, takes the slot of 255 and leaves its own 255, or changes places with the entry marked 128 there,
+// slot of its probe whose control byte is 255 or 128. It stays in the slot `i` where `i` is in the group
+// of 8 of that first slot, takes the slot of 255 and leaves its own 255, or changes places with the entry
+// marked 128 there,
 // which the slot `i` then holds. An entry changes places word by word where its bytes are a multiple of 8,
 // and byte by byte where they are not, as an entry of a key of one word and a value of 12 bytes is.
 pub void MapRehashPlace(byte* block, long entry, long i, ulong hash) {
