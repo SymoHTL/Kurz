@@ -1,0 +1,10 @@
+// expect: error type-mismatch at 6
+// rules: T35
+
+enum Mode { Plain, Loud }
+
+void Keep<const Mode M>(List<M> values) {
+    print(values)
+}
+
+Keep<Mode.Plain>([Mode.Plain])
