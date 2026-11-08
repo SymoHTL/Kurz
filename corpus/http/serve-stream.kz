@@ -1,0 +1,161 @@
+// expect: output
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|a|2|/a|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|a|3|/bc|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Date: <29>|Connection: close||a/a]
+// | called /n
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|b|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | void
+// | [HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|x|3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | io: not found: serve-stream-missing.txt
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|f]
+// | io: invalid input
+// | []
+// | http: malformed request: bad chunk size
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// rules: W11
+
+// the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
+// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function; the function may read the
+// request's body while it writes, a read before its first write sending `100 Continue` and none after it, and what it left unread is
+// drained after it, the connection closing where that is past `MaxDrainSize` or the request still awaits `100 Continue`, and a body
+// malformed there closing it with that error; a function's `IoError` closes the connection, which gives it; and a `Content-Length`
+// the handler set is `InvalidInput` with nothing written, to HTTP/1.0 too
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+
+// the body of `r` whole, the failures of HTTP as `InvalidData`
+Bytes | IoError Whole(HttpRequest r) {
+    return r.Body.ReadAll(100) else {
+        HttpError e => return IoError(IoKind.InvalidData, 0, e.Detail)
+    }
+}
+
+paths = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("a")
+    w.Write(r.Path)
+})
+called = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    print("called {r.Path}")
+    w.Write("b")
+})
+echo = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    if r.Path == "/late" {
+        w.Write("x")
+    }
+
+    w.Write(Whole(r))
+})
+unread = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => w.Write("u"))
+failing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("f")
+    size = File.Size("serve-stream-missing.txt")
+    w.Write("{size}")
+})
+sized = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("s"))
+    response.Headers.Set("Content-Length", "1") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
+Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
+Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", called, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits(MaxDrainSize: 2))
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", unread, HttpLimits())
+Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
+Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
