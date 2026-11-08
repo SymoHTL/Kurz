@@ -5403,6 +5403,29 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void An_inference_where_the_field_s_type_meets_another_type_gives_the_walk_no_type_argument_and_reports_in_each_copy_at_its_line()
+    {
+        // T34 (assumed, the record's section 4): an inference on the text where the field's type meets another type reports no error
+        // there, and each copy infers the call with the field's real type and reports as any call does, at the call's own line (the walk
+        // at the cap of pull request 370, comment 6698323204 on issue 39); the walk reads no type argument where such an inference gives
+        // none, so the call takes no part (the walk at the cap of pull request 387, comment 6721393631 on issue 39, stated so, assumed, by
+        // the owner's answer of 2026-11-08, comment 6722257772 there)
+        const string Show = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Show<T>(T x) {{\n    for f in T.Fields {{\n"
+            + "        print({0})\n    }}\n}}\n\nShow(Point(1, 2))";
+        // the field is an `int` in the copy `Show<Point>`: an `int` beside it runs, a `string` is `type-mismatch` at the call's line, 7
+        Clean(string.Format(Show, "Choose(f.Get(x), 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(string.Format(Show, "Choose(f.Get(x), \"s\")")));
+        const string Deep = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n"
+            + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        // the field's type beside `T` gives no type on the text, so a function no call reaches is not refused for its cycle, where the same
+        // call with `x` in place of the field's value is; called, the copy `Deep<Point>` infers it, where `int` meets `Point`, and is
+        // `cannot-infer` at the call's line, 8, not at the outer call
+        Clean(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "print(1)"));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(Deep, "Deep([Choose(x, x)], n - 1)", "print(1)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep(Choose(f.Get(x), x), n - 1)", "Deep(Point(1, 2), 3)")));
+    }
+
+    [Fact]
     public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
     {
         // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,

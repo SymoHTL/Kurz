@@ -1543,19 +1543,23 @@ for are made after its body is checked, in the order of those calls in its text,
 copies before the copy of the call after it, and the copies that calls outside every copy ask for
 are made after the code outside the copies is checked, the calls in the bodies of functions first,
 then those in the bodies of methods, then those of the top-level code, each body's calls in the
-order of its text, each call with its whole chain before the call after it makes a copy, so that which copies a
-build stopped at the bound made, and so which errors it shows, depends on the order of those calls,
-and a swap of two calls of a copy changes them; a later call that reads a copy already made (the
-assumed reading before this one) makes no chain of its own, so that the copy is in the chain of the
-outer call that made it first; the outer call of a
-chain of copies is the call outside every copy that made its first copy, and for a copy made inside
-another copy the call that made the copy, where the build stops, is that outer call; the bound
-stops the chains of one outer call alone: another outer call still makes its copies, and each outer
-call whose chain reaches the bound reports its own `not supported`, so that one build can report
-more than one; a build stopped at the bound of 64 copies on a
-chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
-of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
-for after the bound is not made, so that its errors show only in a build where the chain is ended)*
+order of its text (the texts give no order among the bodies of two functions), each call with its
+whole chain before the call after it makes a copy, so that which copies a build stopped at the
+bound made, and so which errors it shows, depends on the order of those calls, and a swap of two
+of those calls changes them; a later call that reads a copy already made (the assumed reading
+before this one) makes no chain of its own, so that the copy is in the chain of the outer call
+that made it first; the outer call of a chain of copies is the call outside every copy that made
+its first copy, and for a copy made inside another copy the call that made the copy, where the
+build stops, is the outer call of its chain, and so is the first call of the assumed reading before
+this one, where an error reported at the call shows; the bound stops the chains of one outer call
+alone: another outer call still makes its copies, and each outer call whose chain reaches the bound
+reports its own `not supported`, so that one build can report more than one; a build in which a
+chain of copies stopped at the bound of 64 copies (the record, section 14) reports the errors
+outside the copies, those of the copies that other outer calls make, before that chain or after
+it, the `not supported` of that bound and the errors of the copies made before it, while a copy of
+the same outer call that the chain asks for after the bound is not made, so that, where no other
+outer call asks for that copy, its errors show only in a build where the chain is ended, and
+another outer call that asks for it makes it and reports its errors in the same build)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1818,9 +1822,14 @@ own, no type parameter of the function, and each copy reads the field's real typ
 not refuse such a call, and each copy checks it as any call, `Deep(f.Get(x), n - 1)` for a `Point`
 being `kind-not-read` at the outer call, where the copy `Deep<int>` walks the fields of an `int`;
 an inference on the text where the field's type meets another type reports no error there, and
-each copy infers the call with the field's real type and reports as any call does,
-`Choose(f.Get(x), "s")` for `A Choose<A>(A a, A b)` being `type-mismatch` (T1) where the field is
-an `int`; a call in a loop over `T.Fields` opened inside the
+each copy infers the call with the field's real type and reports as any call does, at the call's
+own line, `Choose(f.Get(x), "s")` for `A Choose<A>(A a, A b)` being `type-mismatch` (T1) where the
+field is an `int`; the walk reads no type argument where such an inference gives none on the text,
+as where the field's type meets a type parameter of the function, `Choose(f.Get(x), x)`, so that
+the call takes no part, and each copy infers it, `Deep(Choose(f.Get(x), x), n - 1)` for a `Point`
+being `cannot-infer` (T27), where the field's `int` meets `Point`, and a function no call reaches
+is not refused for its cycle where it holds such a call, as one that holds
+`Deep([Choose(f.Get(x), x)], n - 1)`; a call in a loop over `T.Fields` opened inside the
 nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
 every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
