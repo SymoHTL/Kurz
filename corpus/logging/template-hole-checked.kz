@@ -1,0 +1,4 @@
+// expect: error unknown-name at 4
+// rules: P2
+
+Log.Information("Paid {total}")

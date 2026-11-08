@@ -18,6 +18,10 @@ public sealed class CaptureTests
     // the limit of a control, a program whose streams end with it: a cold start of `cmd.exe` on a CI runner took all of `Limit`
     private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(60);
 
+    // the time a process the run ended has to end in: the run sends the kill and does not wait, and in a run of the `gates` job the
+    // child of `sh` still ran when the test read its state at once
+    private static readonly TimeSpan EndBound = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit()
     {
@@ -49,7 +53,14 @@ public sealed class CaptureTests
         Assert.True(code == -1, $"the run ended with {code}, not -1: {seen}");
         Assert.True(child.Length > 0 && child.All(char.IsAsciiDigit), $"the output holds no pid: {seen}");
         Assert.True(error.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", StringComparison.Ordinal), $"the error does not say that the child {child} was ended: {seen}");
-        Assert.False(Lives(child), $"the child {child} still runs: {seen}");
+        // the child must have ended within `EndBound` of the run's end
+        var since = Stopwatch.StartNew();
+        while (Lives(child) && since.Elapsed < EndBound)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.False(Lives(child), $"the child {child} still runs {since.Elapsed} after the run ended it: {seen}");
     }
 
     [Fact]
@@ -187,10 +198,12 @@ public sealed class CaptureTests
         // a positive control first: a program that ends inside its limit says nothing of where it stood
         Assert.Equal((0, "done\n", ""), Processes.Capture("/bin/sh", ["-c", "echo done"], null, TimeSpan.FromSeconds(60)));
 
-        // `sleep` waits in a call of the system the whole time, so its state is S and its syscall a number and six arguments
+        // `sleep` waits in a call of the system the whole time, so its state is S and its syscall a number and six arguments, none
+        // printed as a value of 0x10000 or more; the call takes the address of its time, so one of them at least is `addr`
         var (code, output, error) = Processes.Capture("/bin/sleep", ["30"], null, Limit);
         Assert.Equal((-1, ""), (code, output));
-        Assert.Matches("^\n`/bin/sleep` gave no answer within 3 s and was ended; where it stood, as /proc gave it: state S, wchan \\S+, syscall [0-9]+( 0x[0-9a-f]+){6}$", error);
+        Assert.Matches("^\n`/bin/sleep` gave no answer within 3 s and was ended; where it stood, as /proc gave it: state S, wchan \\S+, syscall [0-9]+( (0x[0-9a-f]{1,4}|addr)){6}$", error);
+        Assert.Contains(" addr", error);
     }
 
     [Fact]
@@ -213,9 +226,14 @@ public sealed class CaptureTests
                 File.WriteAllText(Path.Combine(entry, "syscall"), syscall);
             }
 
-            // a name with a space and a bracket, a call with its six arguments and the two pointers after them, which are left out
-            Lay(200, "200 (a b) c) S 1 200 200 0", "wait_woken", "0 0x4 0x7f00 0x2000 0x0 0x8 0x0 0x7ffe0000 0x7f000001\n");
-            Assert.Equal("; where it stood, as /proc gave it: state S, wchan wait_woken, syscall 0 0x4 0x7f00 0x2000 0x0 0x8 0x0", Processes.Stood(proc, 200));
+            // a name with a space and a bracket, a call with its six arguments and the two pointers after them, which are left out,
+            // and the address of the call's buffer, which is given as addr
+            Lay(200, "200 (a b) c) S 1 200 200 0", "wait_woken", "0 0x4 0x55d0c2a01000 0x2000 0x0 0x8 0x0 0x7ffe0000 0x7f000001\n");
+            Assert.Equal("; where it stood, as /proc gave it: state S, wchan wait_woken, syscall 0 0x4 addr 0x2000 0x0 0x8 0x0", Processes.Stood(proc, 200));
+
+            // the edge: 0xffff is a value, 0x10000 can be an address
+            Lay(205, "205 (p) S 1 205 205 0", "pipe_read", "0 0xffff 0x10000 0x0 0x0 0x0 0x0 0x7ffe0000 0x7f000001\n");
+            Assert.Equal("; where it stood, as /proc gave it: state S, wchan pipe_read, syscall 0 0xffff addr 0x0 0x0 0x0 0x0", Processes.Stood(proc, 205));
 
             // a process that waits outside a call: -1 alone, its pointers left out; and one that runs, which waits in nothing
             Lay(201, "201 (p) D 1 201 201 0", "folio_wait_bit", "-1 0x7ffe0000 0x7f000001\n");

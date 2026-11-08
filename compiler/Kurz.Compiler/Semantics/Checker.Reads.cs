@@ -269,7 +269,9 @@ public sealed partial class Checker
     /// <summary>
     /// Whether a value of the type can hold a function value: a function type, a type parameter, which may stand for one, a list or
     /// a union that holds one, a <c>data</c> type when one of its type arguments holds one, or a field of it or of a type derived
-    /// from it does, and a class when a field of it does (M7). A type the checker could not tell holds none (E1).
+    /// from it does, and a class when a field of it or of a class derived from it does, a class of the file, of a folder it uses or of
+    /// <c>std/</c> (M7, K6). A type the checker could
+    /// not tell holds none (E1).
     /// </summary>
     private bool HoldsFunction(KurzType type, HashSet<DataSymbol> path) => type switch
     {
@@ -285,8 +287,12 @@ public sealed partial class Checker
     /// <summary>The classes on the way to this one, as <c>path</c> holds the data types: a class met again has its fields read at the first meeting.</summary>
     private readonly HashSet<ClassSymbol> classesOnTheWay = [];
 
+    /// <summary>The classes of the folders the file uses and of <c>std/</c>, whose checkers ended before the file's began: read once.</summary>
+    private List<ClassSymbol>? classesOfTheFolders;
+
     // M7, R9: an instance holds what its fields hold, a field of a function type among them (section 4 assumes a class can hold
-    // one where a field of it can); a class that reaches itself through its fields ends the walk
+    // one where a field of it can), and a value of its type what an instance of a class derived from it holds too, as K6 lets one
+    // stand where its base does; a class that reaches itself through its fields ends the walk
     private bool ClassHoldsFunction(ClassSymbol c, HashSet<DataSymbol> path)
     {
         if (!classesOnTheWay.Add(c))
@@ -294,7 +300,11 @@ public sealed partial class Checker
             return false;
         }
 
-        var holds = c.Fields.Any(f => HoldsFunction(f.Type, path));
+        // a class of std/ or of a folder is in no table of the file's classes (W1): the classes derived from it are read from the file's
+        // table and from the models of the folders it uses and of std/, every class that has it as its base (the owner, 2026-11-05)
+        classesOfTheFolders ??= [.. used.Values.SelectMany(u => u.model.Classes), .. std?.model.Classes ?? []];
+        var holds = classDeclared.Concat(classesOfTheFolders).Where(x => x.HasBaseOrIs(c)).Append(c).Distinct()
+            .Any(x => x.Fields.Any(f => HoldsFunction(f.Type, path)));
         classesOnTheWay.Remove(c);
         return holds;
     }

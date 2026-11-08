@@ -255,6 +255,35 @@ public sealed class RuntimeTests
     }
 
     [Fact]
+    public void A_ring_that_a_lambda_of_the_folder_closes_through_a_type_argument_of_the_file_is_reported_at_the_file_s_call()
+    {
+        // R9b with F10: the folder's checker does not see the file's calls, so a ring of the folder's classes alone, which a lambda of
+        // the folder's generic function closes through the type argument a call of the file gives, is the file's, at that call (the
+        // owner, 2026-11-05); a generic caller of the folder passes its own type parameter on, and the file's call gives that one
+        const string sys = "pub class Button(mut () => int OnClick)\n\npub Button Make() => Button(() => 1)\n\npub int Count(Button b) => 1\n\npub T Hold<T>(T x) {\n    f = () => x\n    return f()\n}\n\npub U Wrap<U>(U y) => Hold(y)\n";
+        var (_, _, ring) = WithSys(sys, "use sys\n\nb = sys.Make()\nprint(sys.Count(sys.Hold(b)))\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 4)], ring.Select(d => (d.Id, d.Line)));
+        var (_, _, wrapped) = WithSys(sys, "use sys\n\nb = sys.Make()\nprint(sys.Count(sys.Wrap(b)))\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 4)], wrapped.Select(d => (d.Id, d.Line)));
+        // the positive control: a type argument that holds no class
+        Assert.Empty(WithSys(sys, "use sys\n\nprint(sys.Hold(1))\n").Diagnostics);
+    }
+
+    [Fact]
+    public void A_borrow_through_a_class_of_the_folder_derived_from_the_held_class_is_changed_while_held()
+    {
+        // M7 with K6 and F10: a value of the folder's `Shape` can be the folder's `Timed`, whose field holds the lambda that reads
+        // `ss` while `Add` changes it; the classes derived from a class are read from the folders the file uses too, every class
+        // that has it as its base (the owner, 2026-11-05)
+        const string shape = "pub class Shape {\n    pub virtual int Area() => 0\n}\n\npub Shape Plain() => Shape()\n\n";
+        const string file = "use sys\n\nmut ss = [sys.Plain()]\nss.Add(sys.Keep(() => ss.Count))\nprint(ss.Count)\n";
+        var (_, _, held) = WithSys(shape + "pub class Timed(() => int Run) : Shape()\n\npub Shape Keep(() => int g) => Timed(g)\n", file);
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 4)], held.Select(d => (d.Id, d.Line)));
+        // the positive control: the folder's derived class holds no function value, and its lambda is called, not kept
+        Assert.Empty(WithSys(shape + "pub class Square(int Side) : Shape()\n\npub Shape Keep(() => int g) => Square(g())\n", file).Diagnostics);
+    }
+
+    [Fact]
     public void A_use_of_a_folder_the_checker_is_not_given_is_not_supported()
     {
         var (_, _, diagnostics) = WithSys("pub long Write(int fd) => 0\n", "use other\n\nprint(1)\n");

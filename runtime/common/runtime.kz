@@ -373,8 +373,8 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18), on the runtime's own path, where Rust's `==` of two `str` calls the C library's
-// `bcmp` after the test of the lengths, reading no byte past the end of either: the counts, then the first bytes, where two
+// Whether two strings hold the same bytes (T18), on the runtime's own path (Rust's `==` of two `str` calls the C library's `bcmp`
+// after the test of the lengths), reading no byte past the end of either: the counts, then the first bytes, where two
 // different strings of one count most often differ; 1 to 3 bytes as their middle and last byte; 4 to 16 as four words of 4, the
 // first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end, so that every
 // count from 4 to 16 takes one path, and their differences joined by `|` and tested once: `==` of 200k words of 3 to 10 letters and
@@ -435,8 +435,8 @@ bool SameBytes(byte* x, byte* y, long a) {
 // first, and where they differ the order is their difference, a value, as a compare a byte at a time gives it. A `-1` or a `1` chosen
 // by a test of which byte is the lower became, where `Order` went into the loop of its one caller, a branch on that test, which
 // mispredicted on every second pair of random words: `<` of 200k such words and the next took 35.2 ms so, 12.2 ms with the difference
-// and 15.8 ms a byte at a time (Rust 18.1 ms). Where the first bytes agree, the shared bytes are compared on the runtime's own path,
-// where Rust's `Ord` calls the C library's `memcmp`, reading no byte past the end of either, as words read with their first byte
+// and 15.8 ms a byte at a time (Rust 18.1 ms). Where the first bytes agree, the shared bytes are compared on the runtime's own path
+// (Rust's `Ord` calls the C library's `memcmp` here), reading no byte past the end of either, as words read with their first byte
 // highest, so that the order of two words is the order of their bytes: 1 to 3 as their first, middle and last byte; 4 to 16 as four
 // words of 4, the first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end;
 // more than 16 as 16 bytes at a time, then as four words of 8, the 16 bytes where that stopped and the 16 that end the shared bytes.
@@ -2679,4 +2679,500 @@ void Subtract128(mut ulong w0, mut ulong w1, ulong k) {
     if borrow {
         w1 = w1 -% 1
     }
+}
+
+// ---- logging (chapter 17) -------------------------------------------------------------------------
+
+// The text of `KURZ_LOG` that `LogFilter` kept (P4), whose string the start holds to the end of the process, and the count of its
+// bytes; none where the variable is not set.
+static mut byte* logFilter = null
+static mut long logFilterCount = 0
+
+// The lines dropped since the last line written: a line whose write the system refused, or took in part (P9).
+static mut long logDropped = 0
+
+// A line the system took in part before a write that took nothing (P9): the stream stands inside it, and a line feed ends it before
+// the next line written.
+static mut bool logCut = false
+
+// The buffer of each thread in which `LogLine` puts a line together before its write, and its size.
+thread static mut byte* logBuffer = null
+thread static mut long logRoom = 0
+
+// The filter of a program with a log call (P4, P5), `found` as the target's `Variable` gave it for `KURZ_LOG`: kept, and the lowest
+// level a call site can be on at, from 0 for `Trace` to 6 for `None`, `Information`'s where the variable is not set. An entry that is
+// neither a level nor `prefix=level` ends the process before the program's first statement with `error: log-filter (<the entry>)` on
+// standard error and the exit code 1, and a value that is not UTF-8 with `error: log-filter (not unicode)`.
+pub int LogFilter(int found, string text) {
+    if found == 2 {
+        raw {
+            LogRefused("not unicode".Pointer, 11)
+        }
+    }
+
+    if found != 0 {
+        return 2
+    }
+
+    long count = long(text.Bytes.Count)
+    raw {
+        logFilter = text.Pointer
+        logFilterCount = count
+    }
+
+    mut int bare = 2
+    mut int lowest = 6
+    mut long at = 0
+    while at < count {
+        mut long first = 0
+        mut long last = 0
+        mut long equals = -1
+        long next = LogEntry(at, mut first, mut last, mut equals)
+        if first < last {
+            if equals < 0 {
+                bare = LogLevelOf(first, last)
+                if bare < 0 {
+                    raw {
+                        LogRefused(logFilter + first, last - first)
+                    }
+                }
+            } else {
+                int level = LogLevelOf(equals + 1, last)
+                if equals == first || level < 0 {
+                    raw {
+                        LogRefused(logFilter + first, last - first)
+                    }
+                }
+
+                if level < lowest {
+                    lowest = level
+                }
+            }
+        }
+
+        at = next
+    }
+
+    if bare < lowest {
+        lowest = bare
+    }
+
+    return lowest
+}
+
+// Whether a call site of the category and the level is on (P4, P5): the level of the entry `prefix=level` whose prefix the category
+// starts with, the longest such prefix, the last of two alike, as .NET's rule selector picks a rule; else the level of the last bare
+// entry, else `Information`'s. Letters are compared with no regard to case, as .NET compares a category.
+pub bool LogEnabled(string category, int level) {
+    mut int bare = 2
+    mut int matched = 2
+    mut long longest = -1
+    mut long count = 0
+    raw {
+        count = logFilterCount
+    }
+
+    mut long at = 0
+    while at < count {
+        mut long first = 0
+        mut long last = 0
+        mut long equals = -1
+        long next = LogEntry(at, mut first, mut last, mut equals)
+        if first < last {
+            if equals < 0 {
+                bare = LogLevelOf(first, last)
+            } else if equals - first >= longest && LogStartsWith(category, first, equals) {
+                longest = equals - first
+                matched = LogLevelOf(equals + 1, last)
+            }
+        }
+
+        at = next
+    }
+
+    if longest >= 0 {
+        return level >= matched
+    }
+
+    return level >= bare
+}
+
+// The entry of the filter that starts at `at` and ends at the next comma or at the end: its first byte and the byte after its last,
+// the spaces around it left out, in `first` and `last`, and the place of its first `=`, or -1, in `equals`; the place after the comma.
+long LogEntry(long at, mut long first, mut long last, mut long equals) {
+    mut long end = at
+    raw {
+        while end < logFilterCount && logFilter[end] != 44 {
+            end = end + 1
+        }
+
+        first = at
+        while first < end && logFilter[first] == 32 {
+            first = first + 1
+        }
+
+        last = end
+        while last > first && logFilter[last - 1] == 32 {
+            last = last - 1
+        }
+
+        equals = -1
+        mut long i = first
+        while i < last && equals < 0 {
+            if logFilter[i] == 61 {
+                equals = i
+            }
+
+            i = i + 1
+        }
+    }
+
+    return end + 1
+}
+
+// The level the bytes of the filter from `first` to `last` name, with no regard to case, from 0 for `Trace` to 6 for `None`; -1 where
+// they name none.
+int LogLevelOf(long first, long last) {
+    if LogNamed(first, last, "trace") {
+        return 0
+    }
+
+    if LogNamed(first, last, "debug") {
+        return 1
+    }
+
+    if LogNamed(first, last, "information") {
+        return 2
+    }
+
+    if LogNamed(first, last, "warning") {
+        return 3
+    }
+
+    if LogNamed(first, last, "error") {
+        return 4
+    }
+
+    if LogNamed(first, last, "critical") {
+        return 5
+    }
+
+    if LogNamed(first, last, "none") {
+        return 6
+    }
+
+    return -1
+}
+
+// Whether the bytes of the filter from `first` to `last` are `name`, a word in lower case, with no regard to the case of a letter.
+bool LogNamed(long first, long last, string name) {
+    if last - first != long(name.Bytes.Count) {
+        return false
+    }
+
+    raw {
+        byte* p = name.Pointer
+        mut long i = 0
+        while i < last - first {
+            if LogLower(logFilter[first + i]) != p[i] {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// Whether the category starts with the bytes of the filter from `first` to `end`, with no regard to the case of a letter.
+bool LogStartsWith(string category, long first, long end) {
+    if long(category.Bytes.Count) < end - first {
+        return false
+    }
+
+    raw {
+        byte* p = category.Pointer
+        mut long i = 0
+        while i < end - first {
+            if LogLower(logFilter[first + i]) != LogLower(p[i]) {
+                return false
+            }
+
+            i = i + 1
+        }
+    }
+
+    return true
+}
+
+// A letter of ASCII in lower case, every other byte as it is.
+byte LogLower(byte b) {
+    if b >= 65 && b <= 90 {
+        return byte(b | 32)
+    }
+
+    return b
+}
+
+// The end of a start whose filter is refused (P4): `error: log-filter (<the entry>)` on standard error and the exit code 1.
+void LogRefused(byte* entry, long count) {
+    WriteError("error: log-filter (")
+    mut long done = 0
+    while done < count {
+        mut long written = -1
+        raw {
+            written = sys.Write(2, entry + done, count - done)
+        }
+
+        if written <= 0 {
+            sys.Exit(1)
+        }
+
+        done = done + written
+    }
+
+    WriteError(")\n")
+    sys.Exit(1)
+}
+
+// A `string` field's value (P7): the text in double quotes, each `"` and `\` in it after a `\`; `LogLine` writes a line break as `\n`.
+pub string LogQuoted(string text) {
+    long count = long(text.Bytes.Count)
+    mut string quoted = ""
+    raw {
+        byte* from = text.Pointer
+        byte* p = string.Allocate(2 * count + 2)
+        p[0] = 34
+        mut long n = 1
+        mut long i = 0
+        while i < count {
+            if from[i] == 34 || from[i] == 92 {
+                p[n] = 92
+                n = n + 1
+            }
+
+            p[n] = from[i]
+            n = n + 1
+            i = i + 1
+        }
+
+        p[n] = 34
+        quoted = string.FromRaw(p, n + 1)
+    }
+
+    return quoted
+}
+
+// The line of a call site that is on (P6, P7, P9), `<time> <level> <category>: <message><fields>` and a line feed, a line feed in the
+// message or a field written as `\n`, a carriage return as `\r` and a `\` in the message as `\\`, handed to the system's write call in
+// one piece, which is called again for what a call did not take. Where lines were dropped, the line
+// `<time> Warning Kurz.Log: dropped <n> lines` stands before it, in the same write, and where a line was cut short, a line feed before
+// both. A write the system refuses, or one that takes no byte, raises nothing: the line is counted as dropped, and the stream stands
+// inside a line where the bytes taken end inside one; a line of the dropped lines taken whole is not counted again.
+pub void LogLine(int level, string category, string message, string fields, long nanoseconds) {
+    long size = 128 + long(category.Bytes.Count) + 2 * long(message.Bytes.Count) + 2 * long(fields.Bytes.Count)
+    mut long n = 0
+    mut long feed = 0
+    mut long notice = 0
+    raw {
+        if size > logRoom {
+            if logBuffer != null {
+                std.Free(logBuffer, logRoom)
+            }
+
+            logRoom = size
+            if logRoom < 4096 {
+                logRoom = 4096
+            }
+
+            logBuffer = Allocate(logRoom)
+        }
+
+        if logCut {
+            logBuffer[0] = 10
+            n = 1
+        }
+
+        feed = n
+        if logDropped > 0 {
+            n = LogStamp(logBuffer, n, nanoseconds)
+            n = LogPut(logBuffer, n, " Warning Kurz.Log: dropped ")
+            long digits = DigitCount(ulong(logDropped))
+            WriteDigits(logBuffer + n, ulong(logDropped), int(digits))
+            n = n + digits
+            if logDropped == 1 {
+                n = LogPut(logBuffer, n, " line\n")
+            } else {
+                n = LogPut(logBuffer, n, " lines\n")
+            }
+        }
+
+        notice = n
+        n = LogStamp(logBuffer, n, nanoseconds)
+        logBuffer[n] = 32
+        n = LogPut(logBuffer, n + 1, LogLevelName(level))
+        logBuffer[n] = 32
+        n = LogPut(logBuffer, n + 1, category)
+        logBuffer[n] = 58
+        logBuffer[n + 1] = 32
+        n = LogEscaped(logBuffer, n + 2, message, true)
+        n = LogEscaped(logBuffer, n, fields, false)
+        logBuffer[n] = 10
+        n = n + 1
+    }
+
+    mut long done = 0
+    while done < n {
+        mut long written = -1
+        raw {
+            written = sys.Write(2, logBuffer + done, n - done)
+        }
+
+        if written <= 0 {
+            raw {
+                if done >= notice {
+                    logDropped = 1
+                } else {
+                    logDropped = logDropped + 1
+                }
+
+                logCut = done != feed && done != notice
+            }
+
+            return
+        }
+
+        done = done + written
+    }
+
+    raw {
+        logDropped = 0
+        logCut = false
+    }
+}
+
+// The name of a level as C#'s `LogLevel` writes it (P7).
+string LogLevelName(int level) {
+    if level == 0 {
+        return "Trace"
+    }
+
+    if level == 1 {
+        return "Debug"
+    }
+
+    if level == 2 {
+        return "Information"
+    }
+
+    if level == 3 {
+        return "Warning"
+    }
+
+    if level == 4 {
+        return "Error"
+    }
+
+    return "Critical"
+}
+
+// The bytes of the text at `p + n`; the place after them.
+long LogPut(byte* p, long n, string text) {
+    long count = long(text.Bytes.Count)
+    raw {
+        byte* from = text.Pointer
+        mut long i = 0
+        while i < count {
+            p[n + i] = from[i]
+            i = i + 1
+        }
+    }
+
+    return n + count
+}
+
+// The bytes of the text at `p + n`, a line feed as `\n` and a carriage return as `\r`, so that no value makes a second line, and where
+// `backslash` holds, a `\` as `\\`, so that a `\n` in the message is a line feed (P7); the place after them.
+long LogEscaped(byte* p, long n, string text, bool backslash) {
+    long count = long(text.Bytes.Count)
+    mut long at = n
+    raw {
+        byte* from = text.Pointer
+        mut long i = 0
+        while i < count {
+            if from[i] == 10 {
+                p[at] = 92
+                p[at + 1] = 110
+                at = at + 2
+            } else if from[i] == 13 {
+                p[at] = 92
+                p[at + 1] = 114
+                at = at + 2
+            } else if backslash && from[i] == 92 {
+                p[at] = 92
+                p[at + 1] = 92
+                at = at + 2
+            } else {
+                p[at] = from[i]
+                at = at + 1
+            }
+
+            i = i + 1
+        }
+    }
+
+    return at
+}
+
+// The time of a line at `p + at` (P6, P7): the instant in UTC as RFC 3339 writes it, with three digits of milliseconds,
+// `2026-11-05T01:23:45.678Z`, the date by Howard Hinnant's `civil_from_days`, as `TextOfTimestamp` counts it, for the years a time of
+// 64 bits in nanoseconds holds, 1677 to 2262; the place after it.
+long LogStamp(byte* p, long at, long nanoseconds) {
+    mut long seconds = nanoseconds / 1000000000
+    mut long fraction = nanoseconds % 1000000000
+    if fraction < 0 {
+        fraction = fraction + 1000000000
+        seconds = seconds - 1
+    }
+
+    mut long days = seconds / 86400
+    mut long second = seconds % 86400
+    if second < 0 {
+        second = second + 86400
+        days = days - 1
+    }
+
+    long shifted = days + 719468
+    long era = shifted / 146097
+    long dayOfEra = shifted - era * 146097
+    long yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365
+    long dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+    long monthShifted = (5 * dayOfYear + 2) / 153
+    long day = dayOfYear - (153 * monthShifted + 2) / 5 + 1
+    mut long month = monthShifted + 3
+    mut long year = era * 400 + yearOfEra
+    if monthShifted >= 10 {
+        month = monthShifted - 9
+        year = year + 1
+    }
+
+    raw {
+        WriteDigits(p + at, ulong(year), 4)
+        p[at + 4] = 45
+        WriteDigits(p + at + 5, ulong(month), 2)
+        p[at + 7] = 45
+        WriteDigits(p + at + 8, ulong(day), 2)
+        p[at + 10] = 84
+        WriteDigits(p + at + 11, ulong(second / 3600), 2)
+        p[at + 13] = 58
+        WriteDigits(p + at + 14, ulong(second / 60 % 60), 2)
+        p[at + 16] = 58
+        WriteDigits(p + at + 17, ulong(second % 60), 2)
+        p[at + 19] = 46
+        WriteDigits(p + at + 20, ulong(fraction / 1000000), 3)
+        p[at + 23] = 90
+    }
+
+    return at + 24
 }

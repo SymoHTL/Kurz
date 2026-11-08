@@ -3755,7 +3755,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         """;
 
     private const string HandleTarget = """
-        class Log(mut File Out) {
+        class Journal(mut File Out) {
             pub int Swap(File next) {
                 Out = next
                 return 2
@@ -3771,13 +3771,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         void | IoError Run() {
             File.WriteAll("held-read.txt", "abc".Bytes)
-            log = Log(File.Open("held-read.txt"))
+            log = Journal(File.Open("held-read.txt"))
             mut buffer = Bytes()
             print(log.Out.Read(mut buffer, log.Swap(File.Open("held-read.txt"))))
             print(log.Out.Read(mut buffer, 5))
             print(log.ReadOwn(mut buffer, File.Open("held-read.txt")))
             print(log.Out.Read(mut buffer, 5))
-            out = Log(File.Create("held-write.txt"))
+            out = Journal(File.Create("held-write.txt"))
             out.Out.Write(out.Again(File.Create("held-other.txt")))
             print(File.ReadAll("held-write.txt").Count)
             print(File.ReadAll("held-other.txt").Count)
@@ -3840,7 +3840,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
-            class Log(mut List<int> Items, mut List<int> Seen) {
+            class Journal(mut List<int> Items, mut List<int> Seen) {
                 pub int Read(int x) {
                     Seen.Add(Items.Count)
                     if x == 3 {
@@ -3886,7 +3886,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             r = Bag([3, 1, 2])
             r.Items.SortBy(x => r.Items.Count - x)
             print(r.Items[1])
-            l = Log([3, 1, 2], [9])
+            l = Journal([3, 1, 2], [9])
             l.Items.SortBy(x => l.Read(x))
             print(l.Seen)
             print(l.Items[0])
@@ -5225,8 +5225,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
         }
 
-        // the positive control: the same 1521 keys under a bound no probe passes stay on the fast hash, one order in two runs, every entry
-        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound), "map-switch-none");
+        // the positive control: the same 1521 keys under a bound no insert passes, with no lookup that rehashes, stay on the fast hash, one
+        // order in two runs, every entry
+        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound, NoLookupRehash), "map-switch-none");
         Assert.Equal(held.First, held.Second);
         Assert.Equal("1521 1521 -1", string.Join(" ", held.First.Take(3)));
 
@@ -5275,6 +5276,192 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("600 600 -1", string.Join(" ", fenced.First.Take(3)));
         Assert.NotEqual(fenced.First, fenced.Second);
     }
+
+    [Fact]
+    public void A_map_whose_read_passes_more_than_512_slots_rehashes_in_place_onto_SipHash_1_3_and_keeps_every_entry()
+    {
+        // section 4 (the owner, 2026-11-02, "lookups count too"; the bound assumed there): 520 keys whose fast hash starts their probe
+        // at the first group fill 65 groups of a block of 1024 slots, and the 520th insert passes 64, 512 slots, so the map stays on
+        // the fast hash and two runs print one order. A read of a 521st such key, which the map does not hold, passes all 65 groups,
+        // 520 slots, and rehashes the block in place onto SipHash-1-3 under the keys the system gives each process, so that two runs
+        // print two orders after it; the map gives every entry after the read, and 1000 keys more grow it, the slots entries can take
+        // counted again from its capacity
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the cases take
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var (first, second) = RunTwice(ReadPast(held, absent, []), toolchain.Runtime, "map-read-past");
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal("-1", first[1]);
+        Assert.NotEqual(first[2], second[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[2].Trim('[', ']').Split(", ").Order());
+        Assert.Equal(["520", "520", "1000", "1520", "0"], first.Skip(3));
+
+        // removed entries first: their slots, of 128 in groups with no slot of 255, do not end the read's probe, which passes the 65
+        // groups as before; after the rehash the map gives every entry left, and 1000 keys more grow it
+        var removed = Enumerable.Range(100, 10).ToList();
+        var (gone, goneAgain) = RunTwice(ReadPast(held, absent, removed), toolchain.Runtime, "map-read-past-removed");
+        Assert.Equal("-1", gone[1]);
+        Assert.NotEqual(gone[2], goneAgain[2]);
+        Assert.Equal(held.Select((k, i) => (k, i)).Where(e => !removed.Contains(e.i)).Select(e => $"{e.k}: {e.i}").Order(), gone[2].Trim('[', ']').Split(", ").Order());
+        Assert.Equal(["510", "510", "1000", "1510", "1045"], gone.Skip(3));
+
+        // the slots entries can take after the rehash, counted again from the capacity: 896 of the block's 1024 slots less its 510
+        // entries, 386, the removed entries' 10 among them. Under an allocator that refuses a block of more than 16384 bytes, which
+        // the block of 2048 slots a growth takes is, 386 keys more fill the block of 1024 and the 387th grows it
+        var room = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "pub byte* Allocate(long size) {\n    if size > 16384 {\n        return null\n    }\n\n    mut byte* p = null\n"));
+        Ran(BuildAndRun(Refilled(held, absent, removed, 386), room, "map-read-past-room"), 0, ["-1", "896", "1045"], "");
+        var over = BuildAndRun(Refilled(held, absent, removed, 387), room, "map-read-past-room-over");
+        Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
+
+        // the positive control: the same program with no lookup that rehashes stays on the fast hash, one order in two runs
+        var still = RunTwice(ReadPast(held, absent, []), Edited(NoLookupRehash), "map-read-past-none");
+        Assert.Equal(still.First, still.Second);
+        Assert.Equal(["520", "520", "1000", "1520", "0"], still.First.Skip(3));
+
+        // the rehash moves the entries within the block with nothing allocated, as hashbrown's `rehash_in_place` moves them: under an
+        // allocator that refuses every block of 8192 bytes or more after the first, which the block of 1024 slots is, the read rehashes
+        // the block and the map gives every entry. The positive control: under the same allocator, 400 keys more grow the block, and the
+        // block of 2048 slots the growth asks for is refused
+        var oneBlock = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "thread static mut long largeAsked = 0\n\npub byte* Allocate(long size) {\n    if size >= 8192 {\n        mut long seen = 0\n        raw {\n            largeAsked = largeAsked + 1\n            seen = largeAsked\n        }\n\n        if seen > 1 {\n            return null\n        }\n    }\n\n    mut byte* p = null\n"));
+        Ran(BuildAndRun(InPlace(held, absent, 0), oneBlock, "map-read-past-in-place"), 0, ["-1", "520", "520"], "");
+        var grownPast = BuildAndRun(InPlace(held, absent, 400), oneBlock, "map-read-past-in-place-grown");
+        Assert.StartsWith("error: allocation-failed (", grownPast.Error, StringComparison.Ordinal);
+
+        // `ContainsKey` looks its key up as a read does (section 4, the owner, 2026-11-02, "lookups count too"): its lookup of the 521st
+        // key passes the 65 groups and rehashes the block, so that two runs print one order before it and two after it, and the map
+        // gives every entry. The positive control: with no lookup that rehashes, two runs print one order after it as well
+        var contains = $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nprint(m)\n" + $"print(m.ContainsKey({absent}))\n" + "print(m)\n";
+        var (asked, askedAgain) = RunTwice(contains, toolchain.Runtime, "map-contains-past");
+        Assert.Equal(asked[0], askedAgain[0]);
+        Assert.Equal("false", asked[1]);
+        Assert.NotEqual(asked[2], askedAgain[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), asked[2].Trim('[', ']').Split(", ").Order());
+        var unasked = RunTwice(contains, Edited(NoLookupRehash), "map-contains-past-none");
+        Assert.Equal(unasked.First, unasked.Second);
+        Assert.Equal("false", unasked.First[1]);
+
+        // keys of 8 bytes hash as the word of their bytes: strings, whose blocks the rehash moves within the block without a count
+        // more or less, under the allocator that makes every freed block inaccessible
+        var strings = SameGroupKeys(521, k => $"k{k:D7}");
+        Assert.Equal(521, strings.Count); // the floor: the keys the case takes
+        var text = $"List<string> keys = [{string.Join(", ", strings.Take(520).Select(k => $"\"{k}\""))}]\nmut m = Map<string, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\n" + $"print(m)\nprint(m[\"{strings[520]}\"] ?? -1)\nprint(m)\n" +
+            "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\n";
+        var fenced = RunTwice(text, Fenced, "map-read-past-strings-fenced");
+        Assert.Equal(fenced.First[0], fenced.Second[0]);
+        Assert.Equal("-1", fenced.First[1]);
+        Assert.NotEqual(fenced.First[2], fenced.Second[2]);
+        Assert.Equal("520", fenced.First[3]);
+
+        // a key of one word keeps no hash in its slot, so that the rehash takes each entry's hash from its key: an entry of an `int` and
+        // a `data` value of two `int`s takes 12 bytes, which change places byte by byte; after the read every key is found with its
+        // value, the walk sums them, and two runs walk the map in two orders
+        var wide = $"data D(int A, int B)\n\nList<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\n" +
+            "mut m = Map<int, D>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = D(i, i * 2)\n}\n" + $"gone = m[{absent}] ?? D(-1, -1)\nprint(gone.A)\n" +
+            "mut found = 0\nfor i in 0..<keys.Count {\n    d = m[keys[i]] ?? D(-1, -1)\n    if d.A == i && d.B == i * 2 {\n        found = found + 1\n    }\n}\nprint(found)\n" +
+            "mut sum = 0\nmut long order = 0\nfor k, v in m {\n    sum = sum + v.B - v.A\n    order = (order * 31 + k) % 1000000007\n}\nprint(sum)\nprint(order)\n";
+        var (one, two) = RunTwice(wide, toolchain.Runtime, "map-read-past-wide");
+        Assert.Equal(["-1", "520", "134940"], one.Take(3));
+        Assert.NotEqual(one[3], two[3]);
+    }
+
+    [Fact]
+    public void A_read_inside_a_loop_over_the_map_rehashes_no_block_the_loop_holds()
+    {
+        // section 4 (the owner, 2026-11-03): a loop over a map walks its block's slots by their index, so a read past the bound inside
+        // it leaves the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The loop's end, a
+        // `return` inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside every loop,
+        // rehashes the block: two runs print one order before it and two after it. A write inside the loop to a map value that shares
+        // the block copies it (M3), and no loop holds the copy, which a read past the bound rehashes. A loop over a map with no block
+        // yet counts nothing. The program runs under the allocator that makes every freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = $"List<int> keys = [{string.Join(", ", keys.Take(520).Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut seen = 0\nmut sum = 0\nfor k, v in m {\n" +
+            $"    x = m[{absent}] ?? -1\n    seen = seen + 1\n    sum = sum + v + x + 1\n}}\nprint(seen)\nprint(sum)\nprint(m)\n" +
+            "print(First(m))\nmut broke = 0\nfor k, v in m {\n    broke = broke + 1\n    break\n}\nprint(broke)\n" +
+            $"mut twin = m\nfor k, v in m {{\n    twin[-7] = -7\n}}\nprint(twin[{absent}] ?? -1)\nprint(twin)\nprint(twin.Count)\n" +
+            $"print(m[{absent}] ?? -1)\nprint(m)\nmut none = Map<int, int>()\nfor k, v in none {{\n    print(k)\n}}\nprint(none.Count)\n\nint First(Map<int, int> fm) {{\n    for k, v in fm {{\n        return v\n    }}\n\n    return -1\n}}\n";
+        var (first, second) = RunTwice(text, Fenced, "map-read-in-loop-fenced");
+        Assert.Equal(["520", "134940"], first.Take(2));
+        Assert.Equal(first.Take(4), second.Take(4));
+        Assert.Equal(11, first.Count);
+        Assert.Equal("1", first[4]);
+        Assert.Equal(["-1", "521", "-1"], new[] { first[5], first[7], first[8] });
+        Assert.NotEqual(first[6], second[6]);
+        Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Append("-7: -7").Order(), first[6].Trim('[', ']').Split(", ").Order());
+        Assert.NotEqual(first[9], second[9]);
+        Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Order(), first[9].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("0", first[10]); // the loop over the map with no block
+    }
+
+    [Fact]
+    public void A_read_inside_the_text_of_a_map_rehashes_no_block_the_text_walks()
+    {
+        // section 4 (the answer of 2026-11-03 read for the text of a map, assumed there): the text of a map walks its block's slots by
+        // their index, as a loop over it does, and a class's `Text()` runs inside the walk for each value, so a read past the bound that
+        // the `Text()` makes, through a weak reference to the holder of the map, leaves the block on the fast hash, and the text gives
+        // every entry one time: 520 entries. The text lets go of its hold at its end, so that the read after it, outside every walk,
+        // rehashes the block: two runs print one text before it and two after it. The program runs under the allocator that makes every
+        // freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = "class Holder(mut Map<int, Node> M)\n\nclass Node(int I, int Far, weak Holder? Back) {\n    pub string Text() {\n" +
+            "        back = Back\n        if back == null {\n            return \"{I}\"\n        }\n\n        x = back.M[Far]\n        if x == null {\n" +
+            "            return \"{I}\"\n        }\n\n        return \"{I}!\"\n    }\n}\n\n" +
+            $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\n" +
+            "h = Holder(Map<int, Node>())\nfor i in 0..<keys.Count {\n" + $"    h.M[keys[i]] = Node(i, {absent}, h)\n" + "}\n\nprint(h.M)\n" +
+            $"gone = h.M[{absent}]\n" + "print(gone == null)\nprint(h.M)\n";
+        var (first, second) = RunTwice(text, Fenced, "map-read-in-text-fenced");
+        Assert.Equal(3, first.Count);
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[0].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("true", first[1]);
+        Assert.NotEqual(first[2], second[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[2].Trim('[', ']').Split(", ").Order());
+    }
+
+    /// <summary>The lookup's rehash turned off, which leaves every map that no insert moved on the fast hash.</summary>
+    private static readonly (string Path, string Old, string New) NoLookupRehash = ("std/std.kz", "        if *Ptr<int>(block + 36) == 0 && ", "        if false && ");
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, removes the keys at the indexes
+    /// <paramref name="removed"/>, prints the map, reads the key <paramref name="absent"/>, which it does not hold, prints what the read
+    /// gave and the map, then how many of the keys the map gives back with their index and its count, then puts 1000 keys more in and
+    /// prints how many of those it gives back, its count and the sum of the values the removals gave.
+    /// </summary>
+    private static string ReadPast(IEnumerable<long> keys, string absent, IEnumerable<int> removed) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nList<int> removed = [{string.Join(", ", removed)}]\n" +
+        "mut m = Map<int, int>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut taken = 0\nfor i in 0..<removed.Count {\n    t = m.Remove(keys[removed[i]]) ?? -1\n    taken = taken + t\n}\n" +
+        $"print(m)\nprint(m[{absent}] ?? -1)\nprint(m)\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\nprint(m.Count)\n" +
+        "for i in 1000000..<1001000 {\n    m[i] = i\n}\nmut more = 0\nfor i in 1000000..<1001000 {\n    w = m[i] ?? -1\n    if w == i {\n        more = more + 1\n    }\n}\nprint(more)\nprint(m.Count)\nprint(taken)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, removes the keys at the indexes
+    /// <paramref name="removed"/>, prints what a read of the key <paramref name="absent"/>, which it does not hold, gave, puts
+    /// <paramref name="more"/> keys more in and prints its count and the sum of the values the removals gave.
+    /// </summary>
+    private static string Refilled(IEnumerable<long> keys, string absent, IEnumerable<int> removed, int more) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nList<int> removed = [{string.Join(", ", removed)}]\n" +
+        "mut m = Map<int, int>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut taken = 0\nfor i in 0..<removed.Count {\n    t = m.Remove(keys[removed[i]]) ?? -1\n    taken = taken + t\n}\n" +
+        $"print(m[{absent}] ?? -1)\nfor i in 0..<{more} {{\n    m[2000000 + i] = i\n}}\nprint(m.Count)\nprint(taken)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, prints what a read of the key
+    /// <paramref name="absent"/>, which it does not hold, gave, then how many of the keys the map gives back with their index, puts
+    /// <paramref name="more"/> keys more in and prints its count.
+    /// </summary>
+    private static string InPlace(IEnumerable<long> keys, string absent, int more) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+        "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\n" + $"print(m[{absent}] ?? -1)\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\n" +
+        $"for i in 0..<{more} {{\n    m[2000000 + i] = i\n}}\nprint(m.Count)\n";
 
     [Fact]
     public void The_map_programs_print_the_same_with_every_map_moved_onto_SipHash_1_3_at_its_first_insert()

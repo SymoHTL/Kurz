@@ -461,16 +461,31 @@ Gate: review rule "rules for sessions".
   `main` after that round need the owner's approval for that head as for any other, but for the second
   case. The second: a head that took `main` after the round at the cap carries the owner's approval of
   2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
-  6680237539, and for the floor on 2026-11-06, comment 6680659012), to merge over red for the check
-  `review` at that head, when all of these hold:
+  6680237539, for the floor comment 6680659012, and for an append at one end comment 6694541027) and on
+  2026-11-07 (for lines, comment 6710283110, and for the floor's bound comment 6711916489), to merge
+  over red for the check `review` at that head, when all of these hold:
   - its round at the cap completed, as in the first case;
-  - the merge of `main` had no conflict, or its only conflicts are text in which the two sides changed
-    different words and the merge keeps every word of both, or the floor of `RunTests` (`RunFloor`),
-    set to the count measured on the merged tree: on Linux in the image the `gates` job runs in, with
-    the floor at 999, and on Windows the side that changed it, held by the `compiler-windows` run; the
-    merge is made with rerere off (comment 6680237539), since a conflict that rerere resolves is still a
-    conflict
-    ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md));
+  - the merge of `main` was made with rerere off (comment 6680237539), since a conflict that rerere
+    resolves is still a conflict
+    ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md)),
+    and it had no conflict, or its only conflicts are of these kinds:
+    - text in which the two sides changed different words, and the merge keeps every word of both;
+    - text in which both sides only appended, at the same end of an id list or of a table row, and
+      the merge keeps every word of both; two appends of prose at the end of a line that is neither
+      an id list nor a table row are no such append (comments 6694541027 and 6710283110);
+    - a block whose sides have different line counts, read line by line (comment 6710283110), in
+      which the two sides changed different lines, one side's whole lines standing between lines the
+      other side changed, or only added items or table rows, both at the end of one list, in either
+      order, and the merge keeps every line of both;
+    - the floor of `RunTests` (`RunFloor`), held on each system to a bound: `main`'s floor plus the
+      pull request's own change to it, its floor less the merge base's, so that a merge that lost the
+      cases either side added is caught. On Linux the floor is the count of cases measured on the
+      merged tree in the image the `gates` job runs in (the floor set to 999 for that one run only,
+      so that the test fails and names the count), and a Linux count below its bound needs the
+      owner. On Windows, where nothing here measures a count, the floor is its bound, which the
+      `compiler-windows` run holds. The bound is this rule's reading of the owner's approval of the
+      floor (comment 6680659012), not the owner's own words, and the owner chose it on 2026-11-07
+      (comment 6711916489): for a pull request that removes run cases, it lies below `main`'s floor;
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
     the lines a conflict block joined and for the floor;
   - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
@@ -487,10 +502,16 @@ Gate: review rule "rules for sessions".
   and a red gate need the owner's approval for that head. Whether the conditions of either case hold
   is read by the caller, a `judgment step`: the merge tool takes `--over-red` as the caller's
   statement (HAZARD #3). Retired on 2026-10-21 by the cap of the first case: "An approval is never
-  standing" with no case. Retired on 2026-11-06 by issue 39, comment 6680237539: "a head that took
-  `main` after that round" needing the owner's approval as any other. The tool switches the whole
-  ruleset off for the one merge and restores it; while it is off nothing on the server holds any
-  pull request or any push to `main`, so the tool reads the checks and the threads again once it
+  standing" with no case. Narrowed on 2026-11-06 by pull request 358, which wrote down the owner's
+  approval of 2026-11-02 (issue 39, comments 6577407245 and 6577439799) and its widening of
+  2026-11-06 to text in which the two sides changed different words (comment 6680237539): "a head
+  that took `main` after that round" needs the owner's approval as any other, but for the second
+  case. The conflicts the second case names were widened since, each by the owner's answer: on
+  2026-11-06 to the floor of `RunTests` (comment 6680659012), by pull request 359, whose measured
+  count pull request 362 bounded; and on 2026-11-07 by pull request 377, to the same-end append
+  (comment 6694541027, of 2026-11-06) and the line verdicts (comment 6710283110), with the floor's
+  bound that the owner chose that day (comment 6711916489). The tool switches the whole ruleset off for the one merge and restores it; while it is off
+  nothing on the server holds any pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
   moment the tool restores the ruleset is caught by nobody, and nothing stops another merge or

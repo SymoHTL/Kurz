@@ -235,8 +235,11 @@ read it):
 
 `!` turns a test around, and a test of `a?.b != null` shows that `a` is not null either. A block
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
-`throw`, in `break` or `continue` inside a loop, or in an `if` with `else` or a `match` whose
-every arm leaves; the record marks that definition as *(assumed)*. Where the analysis proves
+`throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
+arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
+`while (true)`, the literal `true`, in parentheses or not, and nothing else; a `break` after a
+statement whose end cannot be reached is never reached, as in C#. The record marks that
+definition as *(assumed)*. Where the analysis proves
 nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
@@ -710,8 +713,9 @@ variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k]
 narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
 path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
 write, since that count can be the target's last; a write into what a field of an instance holds,
-`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). Within
-this exception, a write into an item of a list a variable holds keeps it whatever the item's type. The write into a map's entry that this exception keeps,
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). On a
+path with no `weak` reference in it, a write into an item of a list a variable holds keeps it whatever
+the item's type. The write into a map's entry that this exception keeps,
 `m[k] = 2` into a map a variable holds, keeps it only where the key's `==` runs no clause: a key that
 compares as a value, by its content (K4) or by identity, and holds no instance of a class that names its
 fields. A key whose type compares by an `equal by` clause, or that holds an instance of such a class,
@@ -755,14 +759,14 @@ Case: [null/narrowed-field-after-unrelated-call.kz](../corpus/null/narrowed-fiel
 ```kurz
 class Account(mut string? Email)
 
-void Log() {
+void Note() {
     print("log")
 }
 
 acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
-    Log()
+    Note()
     m = acc.Email.Bytes.Count
     print(n + m)
 }
