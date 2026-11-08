@@ -14,12 +14,13 @@ its level: `Log.Trace`, `Log.Debug`, `Log.Information`, `Log.Warning`, `Log.Erro
 2026-11-04, Q1 (a)). *(assumed, §12: C#'s six levels with a function named after each)* A file's own
 function, variable or parameter `Log` at any level is `redeclared` too, as of `Environment` (S14),
 while a member named `Log` of a type, a method or a field, a parameter of a primary constructor
-among them, is not, and in that type's code, its methods, its constructor, its properties and its
-fields' defaults, `Log.Information("a")` stays a log call, though the member's type has a method
-`Information`; there `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a member's name.
-A member of `Log` that names no level is `unknown-name` (V10), there too, `Log.Foo("a")` though the
-member's type has a method `Foo`, and so are `Log`, where no member takes its name, and a log function
-used as a value, `f = Log.Information`, there too. A log call gives
+among them, is not, and in that type's methods, its properties and its fields' defaults (a
+constructor declared in a class's body is `not supported`, K14), `Log.Information("a")` stays a log
+call, though the member's type has a method `Information`; there `Log` alone, `Log()` and `this.Log`
+reach the member, as K7 reads a member's name. A member of `Log` that names no level is
+`unknown-name` (V10), there too, `Log.Foo("a")` though the member's type has a method `Foo`, and so
+are `Log`, where no member takes its name, and a log function used as a value, `f = Log.Information`,
+there too. A log call gives
 nothing: it is a statement, as a call of `print` is, and `x = Log.Information("a")` is `syntax`, a
 call with a `void` success used as a value (O10). *(proposed)*
 

@@ -3616,15 +3616,20 @@ public sealed class CheckerTests
         Clean("class A {\n    pub void Log() {\n        print(1)\n    }\n}\n\ndata P(int Log)\n\nA().Log()\nprint(P(2).Log)");
 
     [Theory]
-    [InlineData("        Log.Foo(\"a\")")] // a name that is no level, though the member's type has a method `Foo`
-    [InlineData("        f = Log.Information\n        print(f)")] // a log function used as a value
-    public void Inside_a_type_with_a_member_named_log_a_member_of_log_that_is_no_level_or_a_log_function_as_a_value_is_unknown_name(string body)
+    [InlineData("    pub void Run() {\n        Log.Foo(\"a\")\n    }", 13)] // in a method: a name that is no level, though the member's type has `Foo`
+    [InlineData("    pub void Run() {\n        f = Log.Information\n        print(f)\n    }", 13)] // in a method: a log function used as a value
+    [InlineData("    pub () => void Notice => () => Log.Foo(\"a\")", 12)] // in a property's lambda
+    [InlineData("    () => void report = () => Log.Foo(\"a\")", 12)] // in a field's default's lambda
+    [InlineData("    pub (string) => void Notice => Log.Information", 12)] // a property that gives a log function as a value
+    [InlineData("    (string) => void report = Log.Information", 12)] // a field's default that is a log function as a value
+    public void Inside_a_type_with_a_member_named_log_a_member_of_log_that_is_no_level_or_a_log_function_as_a_value_is_unknown_name(string member, int line)
     {
-        // P1: `Log.<name>` stays the log functions' where the type has a member `Log` whose type has a function of that name
-        const string sink = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n\n    pub void Foo(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    pub void Pay() {\n";
-        const string end = "\n    }\n}\n\no = Orders(Sink())\no.Pay()";
-        Assert.Equal([(ErrorIds.UnknownName, 13)], Errors(sink + body + end));
-        Clean(sink + "        s = Log\n        s.Foo(\"a\")" + end); // the positive control: the member by its name alone
+        // P1: `Log.<name>` stays the log functions' in the methods, the properties and the fields' defaults of a type with a member `Log`
+        // whose type has a function of that name
+        const string sink = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n\n    pub void Foo(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n";
+        const string end = "\n\n    pub void Pay() {\n        print(1)\n    }\n}\n\no = Orders(Sink())\no.Pay()";
+        Assert.Equal([(ErrorIds.UnknownName, line)], Errors(sink + member + end));
+        Clean(sink + "    pub void Run() {\n        s = Log\n        s.Foo(\"a\")\n    }" + end); // the positive control: the member by its name alone
     }
 
     [Theory]
