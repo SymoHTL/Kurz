@@ -688,8 +688,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   that reads its type is read a second time for those calls alone where it reads `T.Fields`, and the
   chain of copies stops at a call so refused, the copies before it reporting what else their bodies
   hold; on the text, `f.Type` of such a loop is a type of its own, no type parameter of the function,
-  so that a type argument that holds it beside a type parameter of the function grows by that
-  parameter, `Map<f.Type, T>` for `T`, and one that holds it with none takes no part (T34);
+  and `f.Get(value)` a value of that type, so that a type argument that holds it beside a type
+  parameter of the function, written or inferred, grows by that parameter, `Map<f.Type, T>` and
+  `Pair(f.Get(x), x)` for `T`, and one that holds it with none takes no part (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -1092,12 +1093,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its own, each once, and makes the message as an interpolation makes it (L6) and the fields,
   ` name=value` each, a `string` through `LogQuoted`, then reads `Now` and calls `LogLine`, which puts
   the line together in a buffer of its thread and hands it to one write call on standard error, the
-  line of the lines dropped before it in the same write; a refused write counts the line as dropped.
-  `LogTests` pins what no case can: the layout of a line and its time against the test's, a string's
-  quotes and the escapes, the category of a method, of a function and of the top level, the levels and
+  line of the lines dropped before it in the same write; a refused write counts the line as dropped,
+  and after a line the system took in part, the next write starts with a line feed. The corpus's runner
+  takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
+  and its time against the test's, a string's quotes and the escapes, the category of a method, of a
+  function, of a lambda and of the top level, a method named `Log`, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
-  the lines dropped while standard error refused its writes, the crash line after a line, and the refusal for Windows;
+  the lines dropped while standard error refused its writes, a line it took in part, the crash line
+  after a line, the refusal for Windows, and a case run with no `KURZ_LOG`;
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
@@ -1841,14 +1845,16 @@ class it reads, a field in its body or a `static` member where the class has a b
 (K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
 (K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
-field's, or with a default, where the base's default is the field's (K11, K16), an `equal by` on a class whose
+field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
+parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
 `override` on one method, `virtual` on a private method, and either on a `static` method, which has no
 instance to dispatch on (K7, F9), a `prot` method called through a value
 of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
 of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
-over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods of one
-`int` with a result, each of the instance and visible at the loop (F9), the walk of a class that section 12 decides and section 4
+over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods that the
+call with one `int` fits, weighed as a call is, with a result, each of the instance and visible at the loop (F9), the walk of a class
+that section 12 decides and section 4
 reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
@@ -1912,8 +1918,9 @@ such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
 `match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34): when the first such chain reaches the
-bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy it
-would have made is not made, and its errors show only in a build where the chain is ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
+the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
+ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two
@@ -2063,14 +2070,20 @@ round can ask about it by the rule's id.
   argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
   comment 6620467625); the type parameter that failed is the one at which the inference ended (the
   owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
-  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564), and where none
+  differs so, because the position contradicts itself or an earlier type at an occurrence after its
+  first, the first in the order of declaration whose occurrences there fail with every other type
+  parameter left open: `Q(Pair<int, string>(1, "s"), 5)` for `int Q<T>(Pair<T, T> a, List<T> c)` names
+  argument 2 and `T` (the owner, 2026-11-06, #156, comment 6692304530; the owner chose the fix, #39,
+  comment 6691280436). Where every argument
   gives that type parameter a type and they differ, or no argument stands in a position, it names none
   (the owner, 2026-11-04, #156, comment 6643376941). The id stays
   T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument fails to give that
-  type parameter a type (below). Its reason, that a call whose own argument
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument with no error of its
+  own gives that type parameter nothing, or a lambda fits no function type its parameter could be
+  (below). Its reason, that a call whose own argument
   does not fit reports that misfit alone, is a convention of the messages the pipeline took, not the
   owner (#156, comment 6566609960). The call's result is read as a direct position reads it: one that
   does not name the type parameter stays, so `Count(nothing)` is an `int`, and one that does reports
