@@ -3078,9 +3078,10 @@ public sealed class CheckerTests
         // C6: two names over an instance of a class walk it as the index loop `for i in 0..<p.Count { name = p.NameAt(i); value = p.ValueAt(i) }`
         // (section 4, the owner, 2026-11-04; section 12, the owner, 2026-11-02), which the build does not make: `not supported` at the
         // collection, and nothing more of the two names (E1), where that loop, read at the loop's place, finds a `Count` field or property
-        // and methods `NameAt` and `ValueAt` of one `int`, each of the instance and visible there (F9; proposed, C6: a `Count` of an `int`
-        // and a result of each method); one name over such a class, and two names over a class of another shape, stay `type-mismatch`
-        // (C6, proposed)
+        // and methods `NameAt` and `ValueAt` that the call with one `int` fits, weighed as a call is, a default for a second parameter and
+        // a widening of the `int` among them (section 4, the owner, 2026-11-06, #39, comment 6681669642), each of the instance and visible
+        // there (F9; proposed, C6: a `Count` of an `int` and a result of each method); one name over such a class, and two names over a
+        // class of another shape, stay `type-mismatch` (C6, proposed)
         const string Members = "    pub string NameAt(int i) => \"n\"\n\n    pub string ValueAt(int i) => \"v\"\n}\n\n";
         const string Walk = "p = Pairs()\nfor name, value in p {\n    int n = name\n    print(\"{n}={value}\")\n}";
         const string Text = "two names over a `Pairs`, the walk of a class by its `Count`, `NameAt` and `ValueAt` (C6)";
@@ -3110,6 +3111,12 @@ public sealed class CheckerTests
             + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `void` `NameAt`
         Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub static int Count = 2\n\n" + Members + Walk)); // a `static` field named `Count`
         Assert.Equal([$"12: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(string s) => s\n\n" + Members + Walk)); // one `NameAt` of two fits
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(int i, int pad = 0) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a default for a second parameter, as the call `p.NameAt(i)` takes it
+        Assert.Equal([(ErrorIds.TypeMismatch, 10)], Errors("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(int i, int pad) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // its control: a second parameter with no default, which the call leaves without an argument
+        Assert.Equal([$"10: {Text}"], NotSupported("class Pairs {\n    pub int Count => 2\n\n    pub string NameAt(long i) => \"n\"\n\n"
+            + "    pub string ValueAt(int i) => \"v\"\n}\n\n" + Walk)); // a `long`, to which the `int` of the index widens (T8)
     }
 
     [Fact]
