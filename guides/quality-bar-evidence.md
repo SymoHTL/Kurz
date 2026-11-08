@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-11-07
-digest: 8807b678f56b52d4b4d53192205f778cedcac381c9fd1049ffcc10caf84e7e39
+generated: 2026-11-08
+digest: a9fd71d56e08e8f07d63ffe9c5156853e691c8a315d5959424832a9f4bba91c6
 ttl_days: 60
 metadata:
   type: reference
@@ -105,15 +105,16 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 410 |
+| Occurrences of the marker *(assumed)* | 413 |
 | Bullets of the Open section | 61 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
 
 In the reference a `proposed` rule is what a case needed and the record does not say, and an
-`open` rule is a fork nobody chose: neither is a decision. The cases are counted here, not run:
-nothing in this repository executes Kurz.
+`open` rule is a fork nobody chose: neither is a decision. The cases are counted here; the
+compiler's suite (`RunTests`) runs the cases that expect a run and that the compiler emits, and
+lists each one it does not run with why.
 
 <!-- generated:reference -->
 | Reference and corpus | Count |
@@ -123,7 +124,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 1 |
-| Corpus cases, none of them run | 976 |
+| Corpus cases | 977 |
 | Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
@@ -144,11 +145,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 331 |
-| Pull requests merged | 307 |
-| Merged over red, with a recorded waiver | 156 |
-| Review findings posted: high | 301 |
-| Review findings posted: medium | 4313 |
-| Review findings posted: low | 4448 |
+| Pull requests opened by a writer, or merged | 350 |
+| Pull requests merged | 326 |
+| Merged over red, with a recorded waiver | 172 |
+| Review findings posted: high | 312 |
+| Review findings posted: medium | 4450 |
+| Review findings posted: low | 4549 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->

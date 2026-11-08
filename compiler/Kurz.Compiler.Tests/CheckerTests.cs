@@ -4188,7 +4188,7 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_field_of_a_function_type_reaches_every_class_an_instance_of_which_a_lambda_of_the_program_captures()
+    public void A_field_of_a_function_type_reaches_every_class_an_instance_of_which_a_lambda_it_counts_captures()
     {
         // R9: a field whose type can hold a function value, `mut` or not, reaches every class an instance of which a lambda of the
         // program captures, of a lambda whose type it can hold (below), so the ring is judged after every body; the text names R9 beside
@@ -4227,13 +4227,14 @@ public sealed class CheckerTests
         const string deep = "int Deep<T>(T x, int n) {\n    f = () => x\n    if n > 0 {\n        return Deep(f(), n - 1)\n    }\n\n    return 0\n}\n\n";
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + deep + made + "print(Deep(b, 2))"));
         Clean(button + deep + made + "print(Deep(1, 2))");
-        // the field counts only the lambdas whose type it can hold (the owner, 2026-11-04, #110, comment 6643368937), through a nullable
-        // type too: a `(int) => void` lambda reaches a nullable `(int) => void` field, a `() => void` one does not
+        // the field counts the lambdas whose type it can hold (the owner, 2026-11-04, #110, comment 6643368937), through a nullable type
+        // too: a `(int) => void` lambda reaches a nullable `(int) => void` field, a `() => void` one does not; the count below, which
+        // takes a lambda of any type, is R9's assumed reading
         const string keyed = "class Pad(string Name, mut ((int) => void)? OnKey)\n\np = Pad(\"k\", null)\n";
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(keyed + "p.OnKey = (int k) => print(\"{p.Name}{k}\")\nprint(p.OnKey == null)"));
         Clean(keyed + "g = () => print(p.Name)\ng()");
-        // a lambda that captures a value of a nullable type parameter can be or hold a lambda of any type, so every lambda counts; a
-        // nullable `int` names none
+        // a lambda that captures a value of a nullable type parameter can be or hold a lambda of any type, so every lambda counts (R9,
+        // assumed); a nullable `int` names none
         const string wire = "void Wire<T>(Button t, T? x) {\n    t.OnClick = () => print(x == null)\n}\n\n" + made + "k = (int n) => print(\"{b.Name}{n}\")\nk(1)\n";
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + wire + "Wire<int>(b, null)"));
         Clean(button + wire.Replace("<T>", "", StringComparison.Ordinal).Replace("T? x", "int? x", StringComparison.Ordinal) + "Wire(b, null)");
@@ -4251,6 +4252,12 @@ public sealed class CheckerTests
         // the line is that of the first lambda the field counts: an `(int) => int` lambda before it captures the class and closes nothing
         var (later, _) = CheckSeeingStd("h = HttpHeaders()\ng = (int k) => h.OnChange() + k\nf = () => h.OnChange()\nprint(f() + g(1))\n", runtime);
         Assert.Equal([(ErrorIds.ReferenceCycle, 3)], later.Items.Select(d => (d.Id, d.Line)));
+        // a lambda of std/ that the field counts only through a function value a lambda of the file captures, at the line of that
+        // lambda of the file, which captures no class of the ring itself; std/'s checker does not count it, so the file reports it
+        var watched = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n\n    pub (int) => int Watch() => (int k) => OnChange() + k\n"));
+        var (via, _) = CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nf = () => w(1)\nprint(f())\n", watched);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 3)], via.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nprint(w(1))\n", watched).Diagnostics.Items);
         var (through, _) = CheckSeeingStd("class App(mut HttpHeaders? H)\n\nint Zero(App app) => 0\n\na = App(null)\nh = HttpHeaders()\nh.OnChange = () => Zero(a)\na.H = h\n", runtime);
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
         // the positive control: no lambda of the file captures an instance
