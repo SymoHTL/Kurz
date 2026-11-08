@@ -1541,8 +1541,18 @@ each kind, once for each copy)*
 does not read that arm; the copies are made depth first: the copies that the calls of a copy ask
 for are made after its body is checked, in the order of those calls in its text, each with its own
 copies before the copy of the call after it, and the copies that calls outside every copy ask for
-are made after the code outside the copies is checked; the outer call of a chain of copies is the
-call outside every copy that made its first copy; a build stopped at the bound of 64 copies on a
+are made after the code outside the copies is checked, the calls in the bodies of functions first,
+then those in the bodies of methods, then those of the top-level code, each body's calls in the
+order of its text, each call with its whole chain before the call after it makes a copy, so that which copies a
+build stopped at the bound made, and so which errors it shows, depends on the order of those calls,
+and a swap of two calls of a copy changes them; a later call that reads a copy already made (the
+assumed reading before this one) makes no chain of its own, so that the copy is in the chain of the
+outer call that made it first; the outer call of a
+chain of copies is the call outside every copy that made its first copy, and for a copy made inside
+another copy the call that made the copy, where the build stops, is that outer call; the bound
+stops the chains of one outer call alone: another outer call still makes its copies, and each outer
+call whose chain reaches the bound reports its own `not supported`, so that one build can report
+more than one; a build stopped at the bound of 64 copies on a
 chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
 of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
 for after the bound is not made, so that its errors show only in a build where the chain is ended)*
@@ -1784,8 +1794,7 @@ in an arm of a `match` on `T.Kind` takes no part where no loop over `T.Fields` i
 call and the nearest such arm around it, in an arm inside such a loop as in one outside it, since
 each copy takes the one arm of its kind; a call in a loop opened inside the nearest such arm is the
 case of the assumed reading below. A type argument of a call in a loop over `T.Fields` that is the
-field's type takes no part either, since on the text that type is a type of its own, no type
-parameter of the function, and each copy reads the field's real type. One that holds the
+field's type takes no part either. One that holds the
 field's type beside a type parameter of the calling function inside a form of a type, as
 `Map<f.Type, T>` for `T`, grows by that parameter, and the call is refused at its line: the walk
 types `f.Type` on the text as a type of its own, which is no type parameter of the function. A
@@ -1803,7 +1812,15 @@ the loop's variable writes it, `List<Pair<f.Type, T>>` for `Deep([Pair(f.Get(x),
 type argument inferred from `f.Get(value)`, a value of the field's type, holds that type as a
 written one does, `Pair(f.Get(x), x)` as `Pair<f.Type, T>`; the field's type stands on the text
 where a type must meet a condition, as a map's key, and each copy checks the field's real type
-with its own error (T33); a call in a loop over `T.Fields` opened inside the
+with the error that the condition's own rule gives (T33), `type-mismatch` for a map's key whose
+type takes no `==` (M9); the field's type alone takes no part since on the text it is a type of its
+own, no type parameter of the function, and each copy reads the field's real type: the walk does
+not refuse such a call, and each copy checks it as any call, `Deep(f.Get(x), n - 1)` for a `Point`
+being `kind-not-read` at the outer call, where the copy `Deep<int>` walks the fields of an `int`;
+an inference on the text where the field's type meets another type reports no error there, and
+each copy infers the call with the field's real type and reports as any call does,
+`Choose(f.Get(x), "s")` for `A Choose<A>(A a, A b)` being `type-mismatch` (T1) where the field is
+an `int`; a call in a loop over `T.Fields` opened inside the
 nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
 every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
