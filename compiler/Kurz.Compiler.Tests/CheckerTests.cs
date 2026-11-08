@@ -4661,6 +4661,31 @@ public sealed class CheckerTests
         Assert.Equal(Said(Program + "class D(int Y) {\n" + body), said);
     }
 
+    [Theory]
+    [InlineData("    int Count => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count() => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
+    [InlineData("    int Count() => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
+    [InlineData("    int Count(int y) => y + X\n", "    pub long Run() => Count(3)\n", "D(1, 2).Run()", null, 0, 6)]
+    public void A_member_of_a_base_the_class_does_not_see_is_no_candidate_of_a_call_from_it(string member, string use, string call, string? id, int line, int hiddenLine)
+    {
+        // F13, F9 (the owner, 2026-11-06): a property or a method of a base the class does not see is no candidate of a call beside the
+        // class's own method of its name, by the name alone and through an instance: a call that fits only the base's member is the
+        // error of the class's own method, which takes a `long`, and in the last row, where the base's method fits exactly and the
+        // class's own with a widening, the call is the class's own and the program is clean
+        const string Own = "    pub long Count(long y) => y + Y\n";
+        var program = "class B(int X) {\n" + member + "}\n\nclass D(int Y) : B {\n" + Own + use + "}\n\nprint(" + call + ")\n";
+        (string, int)[] expected = id is null ? [] : [(id, line)];
+        Assert.Equal(expected, Errors(program));
+
+        // as the same class with no base says, four lines up
+        var noBase = program[program.IndexOf("class D", StringComparison.Ordinal)..].Replace(" : B {", " {").Replace("D(1, 2)", "D(2)");
+        Assert.Equal(expected.Select(e => (e.Item1, e.Item2 - 4)), Errors(noBase));
+
+        // the positive control: the same class without its own method, where the call is the base's member's, which the class does not see
+        Assert.Equal([(ErrorIds.NotVisible, hiddenLine)], Errors(program.Replace(Own, "")));
+    }
+
     [Fact]
     public void A_property_of_a_base_named_Text_gives_an_instance_no_text()
     {
@@ -5220,14 +5245,36 @@ public sealed class CheckerTests
     {
         // T33: once a chain reaches the bound, no copy under the same outermost copy is made, so a reader whose copy makes two larger
         // copies ends with the one `not supported`, not after a copy for each of about 2^64 chains; the check runs in a process of its
-        // own, `kurz exec`, whose limit of 20 seconds ends that process where the check does not end
+        // own, `kurz exec` started as the command's tests start it, whose limit of two minutes holds the start of the process and the
+        // load of the compiler beside the check, and ends that process where the check does not end
         const string Branching = "data Box<T>(T A)\n\nvoid Deep<T>() {\n    match T.Kind {\n        else => {\n            Deep<List<T>>()\n"
             + "            Deep<Box<T>>()\n        }\n    }\n}\n\nDeep<int>()";
-        var (code, output, error) = Processes.Capture(CommandTests.Host, [CommandTests.Dll, "exec", Branching], null, TimeSpan.FromSeconds(20));
-        Assert.True(code == 1 && output.Length == 0, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of 20 seconds: {output}{error}");
+        var (code, output, error) = CommandTests.Kurz("exec", Branching);
+        var streams = $"the output stream: \"{output}\"; the error stream: \"{error}\"";
+        Assert.True(code == 1, $"`kurz exec` gave the code {code}, where 1 was expected within the limit of the command's tests; {streams}");
+        Assert.True(output.Length == 0, $"`kurz exec` wrote to its output stream, where nothing was expected; {streams}");
         var bound = Assert.Single(error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
         Assert.StartsWith("exec:12: not supported: ", bound);
         Assert.EndsWith("(T33)", bound);
+    }
+
+    [Fact]
+    public void A_build_stopped_at_the_bound_reports_the_copies_made_before_it_and_the_code_outside_the_copies()
+    {
+        // T33 (assumed, §4): the copies are made depth first, in the order of the calls in a copy's text, so the copy that a call
+        // before the chain's call asks for is made and reports its error, while the one a call after it asks for is not made; the
+        // code outside the copies is checked before any copy is made, so its error shows in both orders
+        const string Program = "void Other<T>() {\n    match T.Kind {\n        TypeKind.Int => print(1)\n    }\n}\n\nvoid Deep<T>() {\n"
+            + "    match T.Kind {\n        else => {\n            FIRST\n            SECOND\n        }\n    }\n}\n\nDeep<int>()\nprint(1 + \"two\")";
+        static List<string> Reported(string first, string second) =>
+            Check(Program.Replace("FIRST", first).Replace("SECOND", second)).Diagnostics.Sorted
+                .Select(d => $"{d.Line}: {(d.IsNotSupported ? "not supported" : d.Id)}").Distinct().ToList();
+
+        var before = Reported("Other<T>()", "Deep<List<T>>()"); // the control: the copies of `Other` for `List<int>` and larger are made
+        Assert.Contains($"16: {ErrorIds.KindNotRead}", before);
+        Assert.Contains("16: not supported", before);
+        Assert.Contains($"17: {ErrorIds.TypeMismatch}", before);
+        Assert.Equal(["16: not supported", $"17: {ErrorIds.TypeMismatch}"], Reported("Deep<List<T>>()", "Other<T>()"));
     }
 
     [Fact]

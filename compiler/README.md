@@ -1951,8 +1951,9 @@ such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
 `match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34): when the first such chain reaches the
-bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy it
-would have made is not made, and its errors show only in a build where the chain is ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
+the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
+ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two

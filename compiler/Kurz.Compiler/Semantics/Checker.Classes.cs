@@ -1573,11 +1573,14 @@ public sealed partial class Checker
     /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
     /// <c>not-visible</c> where it is private and the call stands outside its class, or <c>prot</c> and outside the classes derived from
     /// its class (F9). A <c>prot</c> method called in a derived class through a reference whose type is not that class or one derived
-    /// from it, which C# refuses (CS1540), is <c>not supported</c>.
+    /// from it, which C# refuses (CS1540), is <c>not supported</c>. A method the place of the call does not see is no candidate where
+    /// it sees one (F13), so that a call that fits only a base's method or property the class does not see gets the error of the methods it sees,
+    /// as C# leaves an inaccessible member out of overload resolution; where it sees none, the pick is among all, and the call is
+    /// <c>not-visible</c>.
     /// </summary>
     private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked, ClassType? receiver = null)
     {
-        var typed = ResolveCall(methods, c, expected, out picked, CallKind.Method);
+        var typed = ResolveCall(methods.Where(Visible).ToList() is { Count: > 0 } seen ? seen : methods, c, expected, out picked, CallKind.Method);
         if (picked is not null && !Visible(picked))
         {
             Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
