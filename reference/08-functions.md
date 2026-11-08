@@ -761,16 +761,31 @@ long big = 5
 Show(big)
 ```
 
-A method that the place of the call does not see (F9) is no candidate of the call where the place
-sees one of its name: a call from a class that fits only a method or a property of a base the class
-does not see gets the error of the class's own methods of that name, as C# leaves an inaccessible
-member out of overload resolution (CS7036, CS1501). The owner chose this on 2026-11-06 (#39,
-comment 6680927192), against keeping such a member a candidate and refusing the call with
-`not-visible`, as Rust reports a private method its lookup found (E0624); the cost is a filter of
-the candidates by what the class sees, and an error that does not name the base's method. A call
-outside every class, through an instance, picks among the methods its place sees too, and where the
-place sees no method of the name, the call is `not-visible` (F9), as C# reports a member it cannot
-reach (CS0122) *(assumed: a reading of the answer, which named a call from the class)*.
+A method or a property that the place of the call does not see (F9) is no candidate of the call
+where the place sees one of its name: a call from a class that fits only a method or a property of a
+base the class does not see gets the error of the methods of that name the place sees, a base's it
+sees among them *(assumed: a reading of the answer, which named the error of the class's own method:
+a base's method the place sees stays a candidate)*, as C# leaves an inaccessible member out of
+overload resolution (CS7036, CS1501).
+The owner chose this on 2026-11-06 (#39, comment 6680927192), against keeping such a member a
+candidate and refusing the call with `not-visible`, as Rust reports a private method its lookup
+found (E0624); the cost is a filter of the candidates by what the class sees, and an error that does
+not name the base's method. The candidates are counted after the filter: where the place sees one
+method of the name, a call that does not fit it is that method's own error, as a call of a name
+with one function is (below), `type-mismatch` (T1) for an argument of a type its parameter does not
+take; where it sees more than one, the call is `argument-mismatch`, whose message names each method
+the place sees and no other *(assumed: a reading of the answer, which named the error of the class's
+own methods)*. A call outside every class, through an instance, picks among the methods its place
+sees too *(assumed: a reading of the answer, which named a call from the class)*.
+
+Where the place sees no method of the name, the call is `not-visible` (F9) whatever its arguments,
+as C#'s CS0122 and Rust's E0624 report a hidden method before its arguments. The owner chose this on
+2026-11-06 (#39, comment 6693534129), against `not-visible` only where the call fits a member the
+place does not see, under which a call that fits none got the error of a call that fits none. The
+cost is an error that does not say what the arguments lack while the method is hidden *(assumed: the
+answer named no cost)*. The arguments are checked for their own errors beside it *(assumed: the
+reading of E1 for such a call)*. The error names the nearest of those methods, the first along the
+chain of the class whose method is called *(assumed: the answer did not say which)*.
 
 Case: [classes/call-hidden-base-method.kz](../corpus/classes/call-hidden-base-method.kz)
 ```kurz
@@ -783,6 +798,33 @@ class Ticket(int Seat) : Counter {
 
     // `Next()` fits only the `Next` of `Counter`, which `Ticket` does not see: it is no candidate, and the call is `Next(int)`'s
     pub int Take() => Next()
+}
+
+print(Ticket(1, 2).Take())
+```
+
+Case: [classes/call-hidden-base-method-instance.kz](../corpus/classes/call-hidden-base-method-instance.kz)
+```kurz
+class Counter(int Start) {
+    int Next() => Start + 1
+}
+
+class Ticket(int Seat) : Counter {
+    pub int Next(int step) => Seat + step
+}
+
+print(Ticket(1, 2).Next()) // `Next()` fits only the `Next` of `Counter`, which the top level does not see: the call is `Next(int)`'s
+```
+
+Case: [classes/call-hidden-base-method-unseen.kz](../corpus/classes/call-hidden-base-method-unseen.kz)
+```kurz
+class Counter(int Start) {
+    int Next(int step) => Start + step
+}
+
+class Ticket(int Seat) : Counter {
+    // `Ticket` sees no `Next`: the call is `not-visible`, though its argument fits no `Next` of the chain
+    pub int Take() => Next("one")
 }
 
 print(Ticket(1, 2).Take())

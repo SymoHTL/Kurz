@@ -4630,12 +4630,16 @@ public sealed class CheckerTests
     [InlineData("    int Count() => X\n", "    pub long Run() => Count()\n", "D(1, 2).Run()", ErrorIds.ArgumentMismatch, 7, 6)]
     [InlineData("    int Count() => X\n", "", "D(1, 2).Count()", ErrorIds.ArgumentMismatch, 9, 8)]
     [InlineData("    int Count(int y) => y + X\n", "    pub long Run() => Count(3)\n", "D(1, 2).Run()", null, 0, 6)]
+    [InlineData("    int Count(string s) => X\n", "    pub long Run() => Count(\"x\")\n", "D(1, 2).Run()", ErrorIds.TypeMismatch, 7, 6)]
+    [InlineData("    int Count(string s) => X\n", "", "D(1, 2).Count(\"x\")", ErrorIds.TypeMismatch, 9, 8)]
     public void A_member_of_a_base_the_class_does_not_see_is_no_candidate_of_a_call_from_it(string member, string use, string call, string? id, int line, int hiddenLine)
     {
         // F13, F9 (the owner, 2026-11-06): a property or a method of a base the class does not see is no candidate of a call beside the
         // class's own method of its name, by the name alone and through an instance: a call that fits only the base's member is the
-        // error of the class's own method, which takes a `long`, and in the last row, where the base's method fits exactly and the
-        // class's own with a widening, the call is the class's own and the program is clean
+        // error of the class's own method, which takes a `long`; in the fifth row, where the base's method fits exactly and the class's
+        // own with a widening, the call is the class's own and the program is clean; and in the last two, where the call fits only the
+        // base's `Count(string s)`, the candidates are counted after the filter, so that the call is the misfit of the one method the
+        // place sees, `type-mismatch` (T1), not the `argument-mismatch` of a name with more than one
         const string Own = "    pub long Count(long y) => y + Y\n";
         var program = "class B(int X) {\n" + member + "}\n\nclass D(int Y) : B {\n" + Own + use + "}\n\nprint(" + call + ")\n";
         (string, int)[] expected = id is null ? [] : [(id, line)];
@@ -4647,6 +4651,67 @@ public sealed class CheckerTests
 
         // the positive control: the same class without its own method, where the call is the base's member's, which the class does not see
         Assert.Equal([(ErrorIds.NotVisible, hiddenLine)], Errors(program.Replace(Own, "")));
+    }
+
+    [Theory]
+    [InlineData("    int Count(int y) => X + y\n", "    pub long Run() => Count(\"x\")\n", "D(1, 2).Run()", 6, ErrorIds.TypeMismatch)]
+    [InlineData("    int Count(int y) => X + y\n", "    pub long Run() => Count(1, 2)\n", "D(1, 2).Run()", 6, ErrorIds.ArgumentMismatch)]
+    [InlineData("    int Count(int y) => X + y\n", "", "D(1, 2).Count(\"x\")", 8, ErrorIds.TypeMismatch)]
+    public void A_call_whose_place_sees_no_method_of_its_name_is_not_visible_whatever_its_arguments(string member, string use, string call, int line, string misfit)
+    {
+        // F13, F9 (the owner, 2026-11-06, (A)): where the place of a call sees no method of its name, the call is `not-visible` whatever
+        // its arguments, as C#'s CS0122 reports a hidden method before its arguments: by the name alone in a derived class and through
+        // an instance, with arguments that fit no method of the name
+        var program = "class B(int X) {\n" + member + "}\n\nclass D(int Y) : B {\n" + use + "}\n\nprint(" + call + ")\n";
+        (string, int)[] hidden = [(ErrorIds.NotVisible, line)];
+        Assert.Equal(hidden, Errors(program));
+
+        // the positive control: the same method with `pub`, which the place sees, is the misfit of the call's arguments
+        (string, int)[] seen = [(misfit, line)];
+        Assert.Equal(seen, Errors(program.Replace(member, "    pub " + member.TrimStart())));
+    }
+
+    [Fact]
+    public void A_static_method_the_place_does_not_see_is_not_visible_whatever_its_arguments()
+    {
+        // F13, F9 (the owner, 2026-11-06, (A)): `T.M(...)` of a `static` method without `pub`, from outside its class, with an argument
+        // that fits it not, is `not-visible` (a class with a `static` member has no derived class, K18)
+        const string Program = "class B(int X) {\n    static int Count(int y) => y\n}\n\nprint(B.Count(\"x\"))\n";
+        (string, int)[] hidden = [(ErrorIds.NotVisible, 5)];
+        Assert.Equal(hidden, Errors(Program));
+
+        // the positive control: with `pub` the call is the misfit of its argument
+        (string, int)[] seen = [(ErrorIds.TypeMismatch, 5)];
+        Assert.Equal(seen, Errors(Program.Replace("    static int", "    pub static int")));
+    }
+
+    [Fact]
+    public void A_call_whose_place_sees_no_method_of_its_name_still_checks_its_arguments()
+    {
+        // F13 (the owner, 2026-11-06, (A)): the call is `not-visible`, and an argument's own defect is its own error beside it (E1)
+        const string Program = "class B(int X) {\n    int Count(int y) => X + y\n}\n\nclass D(int Y) : B {\n    pub long Run() => Count(nope)\n}\n\nprint(D(1, 2).Run())\n";
+        (string, int)[] expected = [(ErrorIds.NotVisible, 6), (ErrorIds.UnknownName, 6)];
+        Assert.Equal(expected.Order(), Errors(Program).Order());
+
+        // the positive control: an argument with no defect gives the one error
+        (string, int)[] alone = [(ErrorIds.NotVisible, 6)];
+        Assert.Equal(alone, Errors(Program.Replace("Count(nope)", "Count(1)")));
+    }
+
+    [Fact]
+    public void A_call_whose_place_sees_no_method_of_its_name_names_the_nearest_of_them()
+    {
+        // F13, F9 (the owner, 2026-11-06, (A)): where the place sees no method of the name at two levels of the chain, the call is
+        // `not-visible` at the nearest of them, the method of the base nearest the class
+        const string Program = "class A(int X) {\n    int Count(int y) => X + y\n}\n\nclass B(int Z) : A {\n    int Count(int y, int z) => y + z\n}\n\nclass D(int Y) : B {\n    pub long Run() => Count(\"x\")\n}\n\nprint(D(1, 2, 3).Run())\n";
+        var (diagnostics, _) = Check(Program);
+        var error = Assert.Single(diagnostics.Items);
+        Assert.Equal((ErrorIds.NotVisible, 10), (error.Id, error.Line));
+        Assert.StartsWith("`Count` of `B` is private to its class", error.Message, StringComparison.Ordinal);
+
+        // the positive control: without `B`'s method the nearest is `A`'s, which the error names
+        var (farther, _) = Check(Program.Replace("    int Count(int y, int z) => y + z\n", ""));
+        Assert.StartsWith("`Count` of `A` is private to its class", Assert.Single(farther.Items).Message, StringComparison.Ordinal);
     }
 
     [Fact]
