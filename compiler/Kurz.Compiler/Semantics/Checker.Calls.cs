@@ -2025,9 +2025,9 @@ public sealed partial class Checker
     private KurzType TypeArgument(List<FunctionSymbol> candidates, TypeSyntax argument, int place, int line)
     {
         var there = candidates.Select(f => f.TypeParameters.ElementAtOrDefault(place)).OfType<TypeParameterSymbol>().ToList();
-        if (there.Count == 0 && argument is ConstantTypeArgument)
+        if (there.Count == 0 || there.Any(p => p.Constant is { } c && Types.IsError(c)))
         {
-            return Types.Error; // T19: a literal past every candidate's type parameters carries the call's count, and no error of its own (E1)
+            return Types.Error; // T19: an argument past every candidate's type parameters carries the call's count, and one for a constant whose type was not read that type's error, and no error of its own (E1)
         }
 
         var kinds = there.Select(p => p.Constant is { } c && !Types.IsError(c) ? $"a constant of `{c.Text}`" : "a type").Distinct().ToList();
@@ -2488,7 +2488,12 @@ public sealed partial class Checker
                 candidate.CannotInfer = true;
                 var own = new Dictionary<TypeParameterSymbol, KurzType>();
                 Unify(slot, read, own);
-                candidate.Uninferred = candidate.TypeParameters.FirstOrDefault(p => own.TryGetValue(p, out var mine) && map.TryGetValue(p, out var bound) && !Types.Same(mine, bound));
+                // where none differs so, the position contradicts itself, a `Pair<T, T>` that a `Pair<int, string>` meets, or an earlier
+                // binding at an occurrence after its first: the one named is the first in the order of declaration whose occurrences there
+                // still fail with every other type parameter left open (the owner, 2026-11-06, #156, comment 6692304530; the fix the owner
+                // chose, #39, comment 6691280436)
+                candidate.Uninferred = candidate.TypeParameters.FirstOrDefault(p => own.TryGetValue(p, out var mine) && map.TryGetValue(p, out var bound) && !Types.Same(mine, bound))
+                    ?? candidate.TypeParameters.FirstOrDefault(p => !Unify(slot, read, Alone(candidate, p)));
                 return;
             }
         }
@@ -2688,6 +2693,15 @@ public sealed partial class Checker
 
         return Types.Same(pa, pb) ? pa : null;
     }
+
+    /// <summary>The map under which a position is read for <paramref name="p"/> alone: every other type parameter of the candidate is
+    /// bound to the error type, which <see cref="Unify"/> lets meet any part, and <paramref name="p"/> is left open. So
+    /// <see cref="Unify"/> reaches every occurrence of <paramref name="p"/>, and the position fails under it only where those occurrences
+    /// disagree. <see cref="Infer"/> asks only where no first occurrence differs from the type an argument before bound, so a failure
+    /// there is where the position contradicts itself; <see cref="GivingNothing"/> asks whether an argument gives <paramref name="p"/> a
+    /// type.</summary>
+    private static Dictionary<TypeParameterSymbol, KurzType> Alone(Candidate candidate, TypeParameterSymbol p) =>
+        candidate.TypeParameters.Where(q => !ReferenceEquals(q, p)).ToDictionary(q => q, _ => (KurzType)Types.Error);
 
     /// <summary>Binds the type parameters inside a list, data or function type to the parts of the argument's type; a part bound already has to be the same (T27).</summary>
     private static bool Unify(KurzType parameter, KurzType argument, Dictionary<TypeParameterSymbol, KurzType> map)
@@ -3012,7 +3026,9 @@ public sealed partial class Checker
             }
 
             var slot = candidate.Slots[candidate.Binding[i]].Type;
-            var found = new Dictionary<TypeParameterSymbol, KurzType>();
+            // read for `p` alone: another type parameter whose parts disagree would end `Unify` before it reaches `p`, and such an argument
+            // still gives `p` its type, the `T` of a `Quad<U, U, T, T>` that a `Quad<int, string, int, string>` meets
+            var found = Alone(candidate, p);
             Unify(slot, ArgumentType(candidate, pres, i), found);
             if (Types.Mentions(slot, p) && !found.ContainsKey(p))
             {

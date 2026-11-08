@@ -295,8 +295,10 @@ public sealed partial class Checker
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
     /// what the condition leaves where it is false, joined with what held at each <c>break</c>, and a <c>while true</c> what held at its
     /// <c>break</c>s alone; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
+    /// Returns whether the loop can end: a <c>while true</c> ends only through a <c>break</c> of its own that can be reached, as the end
+    /// point of C#'s <c>while (true)</c> is reached only through one (F3), and the same test of its condition decides both.
     /// </summary>
-    private void CheckLoop(Expression? condition, Block body)
+    private bool CheckLoop(Expression? condition, Block body)
     {
         var head = frame.Known;
         while (true)
@@ -331,9 +333,10 @@ public sealed partial class Checker
             if (next.Count == head.Count)
             {
                 Pop(commit: true);
-                var leaves = condition is not null && Unwrap(condition) is BoolLiteral { Value: true } ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
+                var forever = condition is not null && Unwrap(condition) is BoolLiteral { Value: true };
+                var leaves = forever ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
                 frame.Known = Join(leaves, tested);
-                return;
+                return !forever || exits.Breaks.Count > 0;
             }
 
             Pop(commit: false);
