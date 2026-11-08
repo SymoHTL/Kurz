@@ -1,0 +1,9 @@
+// expect: throws overflow at 5
+// | 11574days 1h 46min 40s
+// rules: T38
+
+duration Seconds(double count) => duration.FromSeconds(count)
+
+double z = 0.0
+print(Seconds(1000000000.0))
+print(Seconds(z / z))

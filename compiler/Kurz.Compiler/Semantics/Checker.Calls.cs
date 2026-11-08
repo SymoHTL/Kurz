@@ -740,6 +740,114 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// T38: the constructors of a time of a count, with the nanoseconds of one unit of each: one for each unit of a duration literal (L14),
+    /// as C#'s <c>TimeSpan.FromSeconds</c> and its siblings, and on a <c>timestamp</c> the seconds and the milliseconds since 1970, as C#'s
+    /// <c>DateTimeOffset.FromUnixTimeSeconds</c> and <c>FromUnixTimeMilliseconds</c> (section 4, the owner, 2026-11-08, G4 (b), "Seconds +
+    /// milliseconds, as C#").
+    /// </summary>
+    private static readonly Dictionary<(string Type, string Member), long> TimeFrom = new()
+    {
+        [("duration", "FromNanoseconds")] = 1,
+        [("duration", "FromMicroseconds")] = 1_000,
+        [("duration", "FromMilliseconds")] = 1_000_000,
+        [("duration", "FromSeconds")] = 1_000_000_000,
+        [("duration", "FromMinutes")] = 60_000_000_000,
+        [("duration", "FromHours")] = 3_600_000_000_000,
+        [("duration", "FromDays")] = 86_400_000_000_000,
+        [("timestamp", "FromUnixSeconds")] = 1_000_000_000,
+        [("timestamp", "FromUnixMilliseconds")] = 1_000_000,
+    };
+
+    /// <summary>
+    /// T38: <c>duration.FromSeconds(n)</c> and the other constructors of <see cref="TimeFrom"/>, the time of a count, a <c>long</c> or a
+    /// <c>double</c> (section 4, the owner, 2026-11-08, "Also a double, as C#"). A count of an integer type that widens to <c>long</c> (T8)
+    /// takes the <c>long</c> form and any other number the <c>double</c> form, as C# picks <c>TimeSpan.FromSeconds(long)</c> for an integer
+    /// by its better conversion; a constant count whose time does not fit is <c>constant-overflow</c> (T6).
+    /// </summary>
+    private Typed CheckTimeFrom(CallExpression c, KurzType result, long scale, string form)
+    {
+        if (RefusesTypeArguments(c, form))
+        {
+            return Typed.Error;
+        }
+
+        var own = Typed.Error;
+        if (c.Arguments is [{ Mut: false } only])
+        {
+            Push(); // the count's own type picks the form; the call types it again with the form's parameter
+            own = CheckExpression(only.Value, null);
+            Pop(commit: false);
+        }
+
+        var real = !own.IsError && own.Type is PrimitiveType { Kind: var kind } && Types.IsNumber(own.Type) && !(Types.IsInteger(own.Type) && Types.Widens(kind, Primitive.Long));
+        KurzType count = real ? Types.Double : Types.Long;
+        var candidate = new Candidate { Slots = [new Slot("count", count, false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is null || typed.IsError)
+        {
+            return typed;
+        }
+
+        var fits = own.Constant switch
+        {
+            IntegerConstant k => Types.Fits(k.Value * scale, Types.Long),
+            RealConstant r => NanosecondsOf(r.Value, scale) is not null,
+            _ => true,
+        };
+        if (!fits)
+        {
+            Report(ErrorIds.ConstantOverflow, c.Arguments[0].Line, $"{form} of the constant does not fit {Types.A(result)} (T6, T38)");
+            return Typed.Error;
+        }
+
+        model.RecordCall(c, new CallInfo(CallKind.TimeFrom, null, null, count, NoMap, picked.Binding, 1, result) { TimeScale = scale });
+        return typed;
+    }
+
+    /// <summary>
+    /// T38: the nanoseconds of <paramref name="count"/> units of <paramref name="scale"/> nanoseconds each, the double's exact value rounded
+    /// to the nearest nanosecond, ties to even, as Rust's <c>Duration::from_secs_f64</c> rounds; null for NaN, an infinity and a time that
+    /// does not fit 64 bits. The emitter computes the same at run time (<c>Emitter.EmitTimeFrom</c>).
+    /// </summary>
+    internal static long? NanosecondsOf(double count, long scale)
+    {
+        if (!double.IsFinite(count))
+        {
+            return null;
+        }
+
+        var bits = BitConverter.DoubleToInt64Bits(count);
+        var exponent = (int)((bits >> 52) & 0x7FF);
+        var mantissa = bits & 0xFFFFFFFFFFFFFL;
+        if (exponent == 0)
+        {
+            exponent = 1; // a subnormal: no hidden bit
+        }
+        else
+        {
+            mantissa |= 1L << 52;
+        }
+
+        var product = new BigInteger(mantissa) * scale; // the count is the mantissa times 2 to the power exponent - 1075
+        var shift = exponent - 1075;
+        BigInteger nanoseconds;
+        if (shift >= 0)
+        {
+            nanoseconds = product << shift;
+        }
+        else
+        {
+            var whole = product >> -shift;
+            var rest = product - (whole << -shift);
+            var half = BigInteger.One << (-shift - 1);
+            nanoseconds = rest > half || (rest == half && !whole.IsEven) ? whole + 1 : whole;
+        }
+
+        nanoseconds = bits < 0 ? -nanoseconds : nanoseconds;
+        return Types.Fits(nanoseconds, Types.Long) ? (long)nanoseconds : null;
+    }
+
+    /// <summary>
     /// D18: <c>Plan.From(n)</c>, the value whose number is <c>n</c>, an <c>int</c>, or the case <c>Invalid</c>, an outcome (O1); on an enum that
     /// numbers none it is <c>enum-number</c> (D20).
     /// </summary>
@@ -1259,6 +1367,11 @@ public sealed partial class Checker
                 NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
+            }
+
+            if (TimeFrom.TryGetValue((n.Name, m.Member), out var scale))
+            {
+                return CheckTimeFrom(c, n.Name == "duration" ? Types.Duration : Types.Timestamp, scale, $"`{n.Name}.{m.Member}`"); // T38
             }
 
             if (n.Name == "string" && m.Member == "FromRaw")
