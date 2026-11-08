@@ -155,7 +155,7 @@ public sealed partial class Checker
         /// <summary>The statement can end and the next one run.</summary>
         Completes,
 
-        /// <summary>Every path leaves the block: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, or branches that all do.</summary>
+        /// <summary>Every path leaves the block: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all do, or a <c>while true</c> with no <c>break</c> of its own.</summary>
         Ends,
     }
 
@@ -1921,8 +1921,7 @@ public sealed partial class Checker
                 }
 
             case WhileStatement w:
-                CheckLoop(w.Condition, w.Body);
-                return Flow.Completes;
+                return CheckLoop(w.Condition, w.Body) ? Flow.Completes : Flow.Ends;
             case ForInStatement f:
                 CheckForIn(f);
                 return Flow.Completes;

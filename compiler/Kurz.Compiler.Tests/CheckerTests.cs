@@ -756,6 +756,22 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
+    {
+        // F3, as in C#: the end point of a `while` whose condition is the literal `true` is reached only through a `break` of that loop, so
+        // a function, a method or a lambda with a result that ends in one needs no `return` after it; a `break` of the loop makes its end
+        // reachable again, a `break` of a loop inside it does not, and a condition that is not the literal `true` can be false
+        const string Search = "int First(List<int> xs) {\n    mut i = 0\n    while true {\n        if xs[i] > 2 {\n            return xs[i]\n        }\n\n        i = i + 1\n    }\n}\n\nprint(First([1, 2, 3, 4]))";
+        Clean(Search);
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
+        Clean(Search.Replace("        i = i + 1\n", "        mut j = 0\n        while j < 3 {\n            if j == i {\n                break\n            }\n\n            j = j + 1\n        }\n\n        i = i + 1\n"));
+        Clean("int Pick(bool b) {\n    if b {\n        while true {\n            return 1\n        }\n    } else {\n        return 2\n    }\n}\n\nprint(Pick(true))");
+        Clean("class C(int N) {\n    pub int Get() {\n        while true {\n            return N\n        }\n    }\n}\n\nprint(C(1).Get())");
+        Clean("f = (int n) => {\n    while true {\n        return n + 1\n    }\n}\n\nprint(f(1))");
+    }
+
+    [Fact]
     public void A_function_is_visible_in_the_whole_file_and_one_declared_inside_a_block_is_not_read()
     {
         // F6 makes a declaration of the file visible in the whole file and says nothing of one inside a block (the reading in the README):
