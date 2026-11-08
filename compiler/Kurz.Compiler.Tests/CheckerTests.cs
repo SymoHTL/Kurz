@@ -5419,9 +5419,10 @@ public sealed class CheckerTests
             + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
         // the field's type beside `T` gives no type on the text, so a function no call reaches is not refused for its cycle, where the same
         // call with `x` in place of the field's value is; called, the copy `Deep<Point>` infers it, where `int` meets `Point`, and is
-        // `cannot-infer` at the call's line, 8, not at the outer call
+        // `cannot-infer` at the call's line, 8, not at the outer call, in the list as without it
         Clean(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "print(1)"));
         Assert.Equal([(ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(Deep, "Deep([Choose(x, x)], n - 1)", "print(1)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "Deep(Point(1, 2), 3)")));
         Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep(Choose(f.Get(x), x), n - 1)", "Deep(Point(1, 2), 3)")));
     }
 
