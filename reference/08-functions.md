@@ -118,7 +118,8 @@ of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-0
 parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
 can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
 no value to pass (E4). A lambda that writes `void` on its parameter, `(void v) => 2`, is read against
-the function type it is passed for (F11).
+the function type it is passed for (F11): it is a value of `(void) => int`, as `(v) => 1` is, and
+`type-mismatch` where the function type's parameter is no `void`, `(int) => int`.
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -510,7 +511,7 @@ sight, as C# reads it: a field, a `static` field or a method of the class named 
 constant, so it is `default-not-constant`, as C# gives CS1736 for a `static readonly` field (§8, the owner,
 2026-11-04). *(assumed, §8: `this` in the default of an instance method is no constant either, and
 `this` or a member of an instance, a field or a method, in the default of a `static` method is K19's
-`static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+`static-mismatch`, as in its body, in place of `default-not-constant`)* A call of a `virtual` method or of its override
 takes the default of the method its receiver's static type names, and runs the body the object's
 type gives, as C# does, so one object's call passes different values by the type of the variable it
 is read through; an override without a default has none of its own, and a call on the derived type
