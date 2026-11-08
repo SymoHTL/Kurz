@@ -64,7 +64,9 @@ and every other run that waited for the machine waited with it.
 The gate is `compiler-tests`, in five tests of `CaptureTests`:
 - `A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit`: `/bin/sh` starts
   `sleep 60` in the background and ends at once. The run must end after its limit of 3 seconds and
-  within 20, with -1, the child's pid in the text and the child no longer running. With the wait on
+  within 20, with -1, the child's pid in the text and the child no longer running within 10 seconds of
+  the run's end: the run sends the kill and does not wait for the child to end, and on 2026-11-08 a
+  run of the `gates` job still showed the child running when the test read its state at once. With the wait on
   the streams unbounded, the test fails at its 20 seconds. On Windows, `cmd` leaves `ping` running with
   its output, and the run must end so with `no process that holds it was found`.
 - `Only_a_process_that_holds_the_write_end_of_a_pipe_of_the_run_is_its_holder`: a tree laid out as
