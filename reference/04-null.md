@@ -756,14 +756,14 @@ Case: [null/narrowed-field-after-unrelated-call.kz](../corpus/null/narrowed-fiel
 ```kurz
 class Account(mut string? Email)
 
-void Log() {
+void Note() {
     print("log")
 }
 
 acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
-    Log()
+    Note()
     m = acc.Email.Bytes.Count
     print(n + m)
 }

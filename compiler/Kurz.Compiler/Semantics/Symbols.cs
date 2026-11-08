@@ -53,6 +53,9 @@ public sealed class TypeParameterSymbol(string name, int line)
 
     /// <summary>T35: the constant a call that leaves the parameter out gives it, <c>= Mode.Plain</c>; null where none is written or it is wrong.</summary>
     public ConstantArgument? Default { get; set; }
+
+    /// <summary>T35: a default is written, read or not, so that a call may leave the parameter out; one that was not read binds the error type.</summary>
+    public bool HasDefault { get; init; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
