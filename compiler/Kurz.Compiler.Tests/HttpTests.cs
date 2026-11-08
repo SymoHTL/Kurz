@@ -37,4 +37,46 @@ public sealed class HttpTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal([last], run.Output);
         Assert.Equal((1, $"error: index-out-of-range at std/std.kz:{line}\n"), (run.Code, run.Error));
     }
+
+    [Theory]
+    [InlineData("NameAt", "2", "b")]
+    [InlineData("NameAt", "-1", "b")]
+    [InlineData("ValueAt", "2", "2")]
+    [InlineData("ValueAt", "-1", "2")]
+    public void An_index_of_HttpQuery_outside_its_pairs_is_index_out_of_range(string member, string index, string last)
+    {
+        // W19 *(assumed: the product pass of 2026-11-08, #110, comment 6716242509, as W4's)*: with `i` outside 0 to `Count - 1`,
+        // `NameAt(i)` and `ValueAt(i)` of an `HttpQuery` stop the program with index-out-of-range, the error line naming the line of
+        // std/ that raised, as W4's do; the read of the last pair before it is the positive control
+        var program = $$"""
+            HttpQuery | IoError Query() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                client.Write("GET /p?a=1&b=2 HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+                match HttpRequest.Read(server) {
+                    HttpRequest r => return r.QueryValues()
+                    IoError e => return e
+                    HttpError e => return HttpQuery()
+                }
+            }
+
+            match Query() {
+                HttpQuery q => {
+                    print(q.{{member}}(1))
+                    print(q.{{member}}({{index}}))
+                }
+                IoError e => print(e)
+            }
+
+            """;
+        var lines = File.ReadAllLines(Path.Combine(CorpusTests.Root, "std", "std.kz"));
+        var start = Array.FindIndex(lines, l => l.StartsWith("pub class HttpQuery {", StringComparison.Ordinal));
+        Assert.True(start >= 0, "std/std.kz holds no `HttpQuery`");
+        var line = Array.FindIndex(lines, start, l => l.Contains($"pub string {member}(int i) =>", StringComparison.Ordinal)) + 1;
+        Assert.True(line > start, $"`HttpQuery` holds no `{member}`");
+        var run = BuildAndRun(program, $"query-{member}-{index.Replace("-", "minus", StringComparison.Ordinal)}");
+        Assert.Equal([last], run.Output);
+        Assert.Equal((1, $"error: index-out-of-range at std/std.kz:{line}\n"), (run.Code, run.Error));
+    }
 }
