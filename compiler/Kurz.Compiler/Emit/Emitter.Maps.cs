@@ -22,6 +22,9 @@ public sealed partial class Emitter
     // the IR types of the entries defined in the module
     private readonly HashSet<string> entries = new(StringComparer.Ordinal);
 
+    /// <summary>The map values a loop over a map holds, by the function they are values of: the end of their region ends the loop's hold of the block (<c>MapWalk</c>).</summary>
+    private readonly HashSet<(IrFunction Function, string Value)> walkedMaps = [];
+
     /// <summary>
     /// The IR type of an entry in a slot of the map's block: the hash of its key, the key and the value where the map keeps the hash
     /// (<see cref="KeepsHash"/>), else the key and the value.
@@ -235,10 +238,38 @@ public sealed partial class Emitter
     /// the slot's address, or null where the map has no entry of the key. It reads a group's 8 control bytes as one word and marks
     /// the bytes equal to the hash's control byte as hashbrown's generic group does (a byte after a match can be marked too, which
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
-    /// 128, whose entry was removed, does not.
+    /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 65 groups without a slot of 255, in a block on
+    /// the fast hash that no loop over a map and no text of a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
+    /// new hash (section 4, the owner, 2026-11-02, "lookups count too"): past the bound the lookup gives what
+    /// <see cref="FarEntry"/> gives.
     /// </summary>
-    private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () =>
+    private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: false));
+
+    /// <summary>
+    /// The helper a lookup past the bound hands its probe to, with the map's block, <c>%a0</c>, the key, <c>%a1</c>, and its hash,
+    /// <c>%a2</c>, alone: where <c>MapLongLookup</c> says the block rehashes, it rehashes it and finds the key again under its new hash;
+    /// where it does not, it probes again from the hash's first group with no bound, passing again the groups the lookup passed. It is
+    /// out of line and cold, and the lookup returns what it gives, so that the lookup does not call itself, keeps neither the test nor a
+    /// second hash in its body, and hands the call none of its loop's values: the lookup stays small enough for its callers to take it
+    /// in.
+    /// </summary>
+    private string FarEntry(MapType type) =>
+        Helper($"far.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: true), "noinline", "cold");
+
+    /// <summary>The body of <see cref="FindEntry"/> or, where <paramref name="far"/> is set, of <see cref="FarEntry"/>.</summary>
+    private void ProbeBody(MapType type, bool far)
     {
+        if (far)
+        {
+            var rehash = fn.Label("rehash");
+            var kept = fn.Label("kept");
+            fn.CondBranch(fn.Value($"call i1 {StdFunction("MapLongLookup")}(ptr %a0)"), rehash, kept);
+            fn.Block(rehash);
+            fn.Emit($"call void {Helper($"rehash.{Lower.Mangle(type)}", "void", ["ptr"], () => RehashBody(type))}(ptr %a0)");
+            fn.Return($"ptr {fn.Value($"call ptr {FindEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 {KeyHash("%a0", "%a1", type.Key)})")}");
+            fn.Block(kept);
+        }
+
         const string ones = "72340172838076673"; // 0x0101010101010101
         const string highs = "-9187201950435737472"; // 0x8080808080808080
         module.Declare("declare i64 @llvm.cttz.i64(i64, i1)");
@@ -296,11 +327,71 @@ public sealed partial class Emitter
         fn.Block(next);
         var stepped = fn.Value($"add i64 {fn.Value($"load i64, ptr {step}")}, 8");
         fn.Emit($"store i64 {stepped}, ptr {step}");
-        fn.Emit($"store i64 {fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}")}, ptr {at}"); // the last group followed by the first
+        var onward = fn.Value($"and i64 {fn.Value($"add i64 {position}, {stepped}")}, {mask}"); // the last group followed by the first
+        if (!far)
+        {
+            var bound = fn.Label("bound");
+            var on = fn.Label("onward");
+            fn.CondBranch(fn.Value($"icmp eq i64 {stepped}, 520"), bound, on); // 65 groups without a slot of 255: past 512 slots (section 4)
+            fn.Block(bound);
+            fn.Return($"ptr {fn.Value($"call ptr {FarEntry(type)}(ptr %a0, {Ir(type.Key)} %a1, i64 %a2)")}");
+            fn.Block(on);
+        }
+
+        fn.Emit($"store i64 {onward}, ptr {at}");
         fn.Branch(group);
         fn.Block(none);
         fn.Return("ptr null");
-    });
+    }
+
+    /// <summary>
+    /// The helper that rehashes the map's block, <c>%a0</c>, in place onto SipHash-1-3, which <c>MapLongLookup</c> marked it as on,
+    /// as hashbrown's <c>rehash_in_place</c> does, so that every value that holds the block finds its entries: every entry marked as not
+    /// yet placed (<c>MapRehashMark</c>), then, for each slot that holds such an entry, its key's hash under the block's keys, as
+    /// hashbrown's <c>rehash_in_place</c> calls its hasher for the slot, written into the entry where the map keeps the hash
+    /// (<see cref="KeepsHash"/>), and the entry put in the first slot of its probe whose control byte is 255 or 128, or left in its
+    /// own slot where that one is in the same group of 8 (<c>MapRehashPlace</c>), until the slot holds no entry marked so: the one it
+    /// changed places with is the next. A key of one word, whose slot keeps no hash, is so placed by the hash of its key, and every
+    /// key is hashed once.
+    /// </summary>
+    private void RehashBody(MapType type)
+    {
+        var entry = EntryType(type);
+        var size = EntrySize(type);
+        fn.Emit($"call void {StdFunction("MapRehashMark")}(ptr %a0)");
+        var room = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("MapRoom")}(ptr %a0)")} to i64");
+        var control = fn.Value($"call ptr {StdFunction("MapControl")}(ptr %a0)");
+        var slots = fn.Value($"call ptr {StdFunction("MapSlots")}(ptr %a0)");
+        var counter = fn.Alloca("i64", "slot");
+        fn.Emit($"store i64 0, ptr {counter}");
+        var check = fn.Label("slots");
+        var body = fn.Label("slot");
+        var held = fn.Label("entry");
+        var next = fn.Label("slot.next");
+        var done = fn.Label("slots.done");
+        fn.Branch(check);
+        fn.Block(check);
+        var i = fn.Value($"load i64, ptr {counter}");
+        fn.CondBranch(fn.Value($"icmp slt i64 {i}, {room}"), body, done);
+        fn.Block(body);
+        var mark = fn.Value($"load i8, ptr {fn.Value($"getelementptr i8, ptr {control}, i64 {i}")}");
+        fn.CondBranch(fn.Value($"icmp eq i8 {mark}, -128"), held, next); // 128: an entry not yet placed under its new hash (MapRehashPlace)
+        fn.Block(held);
+        var slot = fn.Value($"getelementptr {entry}, ptr {slots}, i64 {i}");
+        var hash = KeyHash("%a0", fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}"), type.Key);
+        if (KeepsHash(type.Key))
+        {
+            fn.Emit($"store i64 {hash}, ptr {slot}");
+        }
+
+        fn.Emit($"call void {StdFunction("MapRehashPlace")}(ptr %a0, i64 {size}, i64 {i}, i64 {hash})");
+        fn.Branch(body); // the slot holds the entry placed, none, or the one it changed places with, marked 128
+        fn.Block(next);
+        fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {counter}");
+        fn.Branch(check);
+        fn.Block(done);
+        fn.Return(null);
+    }
 
     /// <summary><paramref name="each"/> for the key and the value of every entry of the map's block, in the order of its slots (M10).</summary>
     private void EachEntry(string block, MapType type, Action<string, string> each)
@@ -473,6 +564,7 @@ public sealed partial class Emitter
         fn.Block(ready);
         var current = fn.Value("load ptr, ptr %a0");
         var hash = KeyHash(current, "%a1", type.Key);
+        var fast = fn.Value($"call i1 {StdFunction("MapFastHash")}(ptr {current})");
         var slot = fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})");
         var found = fn.Label("found");
         var absent = fn.Label("absent");
@@ -486,6 +578,17 @@ public sealed partial class Emitter
 
         fn.Return(null);
         fn.Block(absent);
+        var hashed = fn.Alloca("i64", "hash");
+        fn.Emit($"store i64 {hash}, ptr {hashed}");
+        var rehashed = fn.Label("rehashed");
+        var hashKept = fn.Label("hash.kept");
+        var moved = fn.Value($"and i1 {fast}, {fn.Value($"xor i1 {fn.Value($"call i1 {StdFunction("MapFastHash")}(ptr {current})")}, true")}");
+        fn.CondBranch(moved, rehashed, hashKept); // the lookup rehashed the block onto SipHash-1-3 (section 4): the key's hash under it
+        fn.Block(rehashed);
+        fn.Emit($"store i64 {KeyHash(current, "%a1", type.Key)}, ptr {hashed}");
+        fn.Branch(hashKept);
+        fn.Block(hashKept);
+        hash = fn.Value($"load i64, ptr {hashed}");
         var grow = fn.Label("grow");
         var add = fn.Label("add");
         var at = fn.Alloca("ptr", "slot");
@@ -645,9 +748,10 @@ public sealed partial class Emitter
     /// with the count the map held of it, or <c>null</c>
     /// where the map has no entry of the key, as Rust's <c>HashMap::remove</c> gives <c>Option&lt;V&gt;</c> (section 4, the owner,
     /// 2026-10-30, "C# names, Rust's Remove"). Only a map with the key's entry is written: a block other values hold is copied first
-    /// (M3), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as hashbrown's
-    /// <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an item: what it
-    /// was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
+    /// (M3), the entry taken from the copy's slot at the offset the lookup found it at in the block, since the copy holds the block's
+    /// bytes (<c>MapCopy</c>), the entry lets go of its own key, and its slot's control byte becomes 255 or 128 (<c>MapErase</c>, as
+    /// hashbrown's <c>erase</c>). The key is made before the place and takes no count where it is read from a variable, a field or an
+    /// item: what it was read from keeps it while the helper runs, since <c>CollectionPlace</c> copies a block on the path only where other values
     /// hold it (M3), and those keep the block the key was read from; <c>ListTests</c> holds <c>n.Counts.Remove(n.Name)</c>, the copy of a
     /// shared map block with a key read from a field, whose literal holds no block of its own, and <c>built.Counts.Remove(built.Name)</c>,
     /// the same with a key made while the program runs, which holds one.
@@ -680,7 +784,8 @@ public sealed partial class Emitter
             fn.Emit($"store ptr {slot}, ptr {at}");
             fn.CondBranch(fn.Value($"icmp eq ptr {current}, {block}"), take, copied); // the block found in, where no other value held it
             fn.Block(copied);
-            fn.Emit($"store ptr {fn.Value($"call ptr {FindEntry(type)}(ptr {current}, {Ir(type.Key)} %a1, i64 {hash})")}, ptr {at}"); // the same slot of the copy
+            var offset = fn.Value($"sub i64 {fn.Value($"ptrtoint ptr {slot} to i64")}, {fn.Value($"ptrtoint ptr {block} to i64")}");
+            fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {current}, i64 {offset}")}, ptr {at}"); // the same slot of the copy, at its offset in the block
             fn.Block(take);
             var own = fn.Value($"load ptr, ptr {at}");
             var value = fn.Value($"load {Ir(type.Value)}, ptr {ValueAt(type, own)}");
@@ -809,6 +914,8 @@ public sealed partial class Emitter
         var exit = fn.Label("endfor");
         fn.CondBranch(fn.Value($"icmp eq ptr {map}, null"), exit, walk);
         fn.Block(walk);
+        fn.Emit($"call void {StdFunction("MapWalk")}(ptr {map}, i32 1)"); // a lookup inside the loop rehashes no block it holds (section 4)
+        walkedMaps.Add((fn, map));
         EachSlot(map, entry, onward, exit, slot =>
         {
             var k = fn.Value($"load {Ir(type.Key)}, ptr {KeyAt(type, slot)}");
@@ -864,7 +971,10 @@ public sealed partial class Emitter
 
     /// <summary>
     /// A6: the text of a map, each entry as <c>key: value</c> between <c>[</c> and <c>]</c> with <c>, </c> between them, in the order
-    /// of its slots (M10), joined by the runtime's <c>ListText</c> from a buffer of the entries' texts; <c>[]</c> without entries.
+    /// of its slots (M10), joined by the runtime's <c>ListText</c> from a buffer of the entries' texts; <c>[]</c> without entries. The
+    /// walk counts itself on the block as a loop over a map does (<c>MapWalk</c>), since a class's <c>Text()</c> it calls for a key or a
+    /// value can look a key up in a map that holds the block, and a rehash under the walk would skip an entry or give one twice
+    /// (section 4, assumed there).
     /// </summary>
     private string MapText(string value, MapType type, int line)
     {
@@ -882,6 +992,7 @@ public sealed partial class Emitter
             var buffer = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {bytes})");
             var at = fn.Alloca("i64", "at");
             fn.Emit($"store i64 0, ptr {at}");
+            fn.Emit($"call void {StdFunction("MapWalk")}(ptr %a0, i32 1)"); // a lookup a `Text()` makes rehashes no block the text walks (section 4)
             EachEntry("%a0", type, (k, v) =>
             {
                 var text = Joined([PieceOf(k, type.Key, line), LiteralPiece(": "), PieceOf(v, type.Value, line)]);
@@ -889,6 +1000,7 @@ public sealed partial class Emitter
                 fn.Emit($"store %kz.str {text}, ptr {fn.Value($"getelementptr %kz.str, ptr {buffer}, i64 {i}")}");
                 fn.Emit($"store i64 {fn.Value($"add i64 {i}, 1")}, ptr {at}");
             });
+            fn.Emit($"call void {StdFunction("MapWalk")}(ptr %a0, i32 -1)");
             var joined = fn.Value($"call %kz.str {RuntimeFunction("ListText")}(ptr {buffer}, i64 {wide})");
 
             // the entries' texts, which the joined text holds no count of

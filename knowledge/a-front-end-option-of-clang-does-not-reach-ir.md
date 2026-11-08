@@ -1,6 +1,6 @@
 ---
 name: a-front-end-option-of-clang-does-not-reach-ir
-description: an option of clang that its C front end reads and sets on each function it writes, `-falign-functions=64` the one probed, does nothing to a module of LLVM IR that clang compiles, since IR does not pass through that front end, while `-falign-loops` does change its assembly; seen on 2026-11-02 on Linux x86-64, when `-falign-functions=64` left every function of the IR at LLVM's `.prefalign 4` and `-mllvm -align-all-functions=6` put `.p2align 6` on all of them, so the compiler hands LLVM's own option through `-mllvm` and a test reads the assembly, not the argument.
+description: clang's `-falign-functions=64`, which its C front end reads and sets on each function it writes, does nothing to a module of LLVM IR that clang compiles, since IR does not pass through that front end, while `-falign-loops` does change its assembly; seen on 2026-11-02 on Linux x86-64, when `-falign-functions=64` left every function of the IR at LLVM's `.prefalign 4` and `-mllvm -align-all-functions=6` put `.p2align 6` on all of them, with no other option that the front end sets on each function probed, so the compiler hands LLVM's own option through `-mllvm` and a test reads the assembly, not the argument.
 metadata:
   type: reference
 ---
@@ -22,14 +22,20 @@ option (the alignment directives above the functions):
   `.p2align 4` became `.p2align 5`;
 - `-falign-loops=64`: `.prefalign 4` on all 40, while 218 of the 219 became `.p2align 6`.
 
-LLVM's own alignment of a function depends on the target: clang 23.1.4 at `-O0`, with no option,
-wrote `.prefalign 4` above each function of the test's module on Linux x86-64, `.p2align 4` on
-Windows x86-64 and `.p2align 2` on Linux Arm64.
+The 219th directive stayed `.p2align 4` with each option: it aligns a constant of 16 bytes in the
+section `.rodata.cst16`, which no option of loops reaches (read again on 2026-11-03 from the same
+module with clang 23.1.4).
+
+LLVM's own alignment of a function depends on the target: on 2026-11-02, clang 23.1.4 at `-O0`,
+with no option, wrote `.prefalign 4` above each function of the test's module on Linux x86-64,
+`.p2align 4` on Windows x86-64 and `.p2align 2` on Linux Arm64. Those readings are at `-O0`; the
+alignment `-O2` gives on Windows x86-64 and Linux Arm64 was not read.
 
 `-mllvm` hands an option to LLVM's code generator, which compiles the IR, so it reaches every
-function. An option that the front end sets on each function is therefore named through `-mllvm`,
-under LLVM's name for it, or set in the IR itself. Whether any other option of clang reaches IR is
-read in the assembly, option by option: its effect on C says nothing about its effect here.
+function. The alignment of functions is therefore named through `-mllvm`, under LLVM's name for
+it, `-align-all-functions`, or set in the IR itself. No other option that the front end sets on each
+function was probed: whether any other option of clang reaches IR is read in the assembly, option
+by option, since its effect on C says nothing about its effect here.
 
 A test that only pins the argument string cannot tell the two options apart: it passes with either
 in the list, and only one aligns anything. The test of the release build reads what LLVM wrote instead.
