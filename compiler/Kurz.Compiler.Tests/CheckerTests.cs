@@ -599,6 +599,23 @@ public sealed class CheckerTests
             Assert.Single(Check(pair + "int i = 1\nstring s = \"a\"\nprint(K(6, [i], [s], 5))").Diagnostics.Items).Message);
         Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", // `U` agrees, `T` is contradicted
             Assert.Single(Check("data Pair<A, B>(A First, B Second)\n\nint R<U, T>(Pair<U, T> a, Pair<U, T> b, List<T> c) => 1\n\np = Pair(\"k\", 1)\nq = Pair(\"k\", \"s\")\nprint(R(p, q, 5))").Diagnostics.Items).Message);
+        // where none differs so, the position contradicts itself or an earlier binding at an occurrence after its first: the first in the
+        // order of declaration whose occurrences there fail with every other type parameter left open (the owner, 2026-11-06, #156, comment
+        // 6692304530; the fix the owner chose, #39, comment 6691280436)
+        var contradicts = "data Pair<A, B>(A First, B Second)\n\ndata Quad<A, B, C, D>(A P, B Q, C R, D S)\n\nint Q<T>(Pair<T, T> a, List<T> c) => 1\n\n"
+            + "int Q2<T>(List<T> z, Pair<T, T> a, List<T> c) => 1\n\nint S<T, U>(Pair<T, T> a, List<U> b) => 1\n\n"
+            + "int W<T, U>(Quad<U, U, T, T> a, List<U> b, List<T> c) => 1\n\n";
+        Assert.Equal(notInferable + ": argument 2 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)",
+            Assert.Single(Check(contradicts + "print(Q(Pair<int, string>(1, \"s\"), 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", Assert.Single(Check(contradicts + "print(Q(Pair<int, string>(1, \"s\"), [1]))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", // `T` agrees at its first occurrence
+            Assert.Single(Check(contradicts + "print(Q2([1], Pair<int, string>(1, \"s\"), 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + " (T27)", // argument 2 gives `U` nothing, not `T`
+            Assert.Single(Check(contradicts + "print(S(Pair<int, string>(1, \"s\"), 5))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)", // `T` before `U`, as declared
+            Assert.Single(Check(contradicts + "print(W(Quad<int, string, int, string>(1, \"s\", 2, \"t\"), 5, 6))").Diagnostics.Items).Message);
+        Assert.Equal(notInferable + ": argument 2 is an `int` where a `List<U>` is required, and gives `U` nothing (T27)", // `T` agrees with itself
+            Assert.Single(Check(contradicts + "print(W(Quad<int, string, int, int>(1, \"s\", 2, 3), 5, 6))").Diagnostics.Items).Message);
         Assert.Equal(
             "the call fits none of the functions named `M` (F13):\n"
                 + "  `int M<T, U>(List<U> a, U d, List<T> c, int e)` at line 1: its type arguments are neither written nor inferable from the arguments: argument 3 is an `int` where a `List<T>` is required, and gives `T` nothing (T27)\n"
