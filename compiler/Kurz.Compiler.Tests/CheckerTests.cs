@@ -786,6 +786,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
         Clean(Search.Replace("    while true {", "    while (true) {"));
         Clean(Search.Replace("    while true {", "    while ((true)) {"));
+        // no other condition is read as a constant (N3, assumed), where C# reads the `then` of `if (false)` and the end of `if (true)` as
+        // never reached: a `break` under `if false` lets the loop end, and an `if true` without `else` can be passed by
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if false {\n            break\n        }\n\n        i = i + 1\n")));
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int One() {\n    if true {\n        return 1\n    }\n}\n\nprint(One())"));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
         Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached

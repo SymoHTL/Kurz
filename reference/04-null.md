@@ -238,8 +238,10 @@ always leaves when its end cannot be reached, as C# decides reachability: it end
 `throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
 arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
 `while (true)`, the literal `true`, in any number of parentheses, and nothing else; a `break` or a
-`continue` after a statement whose end cannot be reached is never reached, as in C#. The record
-marks that definition as *(assumed)*. Where the analysis proves
+`continue` after a statement whose end cannot be reached is never reached, as in C#. No other
+condition is read as a constant: C# reads every constant condition, so that the `then` of
+`if (false)` and the end of `if (true) return 1;` without `else` are never reached, and Kurz reads
+both as reached. The record marks that definition as *(assumed)*. Where the analysis proves
 nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
