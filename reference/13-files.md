@@ -100,7 +100,9 @@ buffer holds go first, at most `max` of them, with no system call; where it hold
 one read of the system and takes at most `max` of what that read gave (§12, the owner, 2026-11-03,
 issue 39, comment 6605104107). A `max` of 0 takes none of the bytes the buffer holds and keeps them;
 where the buffer holds none, a `max` of 0 goes straight, so that it reads nothing and waits for no
-byte, as it did before the buffer. `Read`, a `File`'s `Lines()` (S16), and `Fill` and
+byte of the system, as it did before the buffer. A `max` of 0 enters the call as every `Read` does,
+so that through a holder of a closed handle it gets S5's error, and otherwise takes the handle's lock
+to look at the buffer, as every `Read` does (below). `Read`, a `File`'s `Lines()` (S16), and `Fill` and
 `Consume` (S24) are the ways to the buffered bytes. The buffer is
 made at the handle's first read that fills it, and every holder shares it (S5), under the handle's
 lock: a fill holds the lock while its read waits, so that a read or a pull through another holder
@@ -355,6 +357,32 @@ Show() else {
 }
 ```
 
+Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
+```kurz
+// a `Close` through one holder after a read of one byte filled the buffer with the file's 3 bytes: through the other holder, a `max`
+// of 0 enters the call as every `Read` does, and gets the closed handle's error, not the 0 of a read that looks at no buffer; the list
+// keeps the one byte read before
+void | IoError Show() {
+    File.WriteAll("read-buffer-zero-closed.txt", "abc".Bytes)
+    f = File.Open("read-buffer-zero-closed.txt")
+    File.Delete("read-buffer-zero-closed.txt")
+    g = f
+    mut read = Bytes()
+    print(f.Read(mut read, 1))
+    f.Close()
+    match g.Read(mut read, 0) {
+        int n => print(n)
+        IoError e => print(e)
+    }
+
+    print(read.Count)
+}
+
+Show() else {
+    IoError e => print(e)
+}
+```
+
 Case: [system/read-buffer-failed.kz](../corpus/system/read-buffer-failed.kz)
 ```kurz
 void | IoError Show() {
@@ -432,7 +460,9 @@ the owner, 2026-11-03, issue 110, comment 6615355264, against such an `n` clampe
 0 raises before the call enters the handle, as a `Read`'s `max` below 0 does, so that it raises
 through a holder of a closed handle too, and an `n` past the bytes held is found under the handle's
 lock, after the call entered, so that through a holder of a closed handle it gets the closed handle's
-error, as C#'s `FileStream.Read` checks its arguments before it finds the stream closed.
+error, as C#'s `FileStream.Read` checks its arguments before it finds the stream closed (§12, the
+owner, 2026-11-04, issue 39, comment 6643376941, Q2 of issue 156, comment 6621376360, against the
+closed handle first and against the order left unwritten).
 
 `Fill` returns the count it appended, `int | IoError`, 0 at the end of a file or of a connection its
 peer closed, as a `Read` does, and `into` grows as `Add` grows a list (M9). A pull of a line (S16)
@@ -440,10 +470,12 @@ starts after the bytes a `Consume` dropped, as the next `Read` does. A `Fill` is
 flight too, and one that fills is a read as a `Read`'s fill is: it holds the handle's lock while its
 read waits, its time runs out as a read's does (S9), a read that fails stores nothing, and one that
 finds the handle marked by a `Close` when its read returns gives `into` all it read and keeps none of
-it. *(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
+it, having no `max`, where a `Read`'s fill gives at most `max` of it; a stream's `Fill` whose read
+returned with no byte after the mark gets the closed handle's error, as a stream's `Read` does (S5).
+*(assumed, §12: `Fill`'s count and its 0 at the end, `into` growing as `Add` grows a list, a pull
 of a line starting after the bytes consumed, `Fill` as a call in flight whose fill
-holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does, and the order of
-`Consume`'s failures on a closed handle)*
+holds the lock, runs out of time, fails and finds the mark as a `Read`'s fill does, giving all it read
+where a `Read`'s fill gives at most `max`)*
 
 Case: [system/fill-consume.kz](../corpus/system/fill-consume.kz)
 ```kurz
@@ -662,8 +694,7 @@ Negative() else {
 Case: [system/consume-closed.kz](../corpus/system/consume-closed.kz)
 ```kurz
 // a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 5, past the bytes
-// held, gets the closed handle's error, which the call finds as it enters, before it reads what the buffer holds; a `Consume` of -1
-// raises `index-out-of-range` before the call enters, closed handle or not
+// held, gets the closed handle's error, which the call finds as it enters, before it reads what the buffer holds
 void | IoError Closed() {
     File.WriteAll("consume-closed.txt", "abc".Bytes)
     f = File.Open("consume-closed.txt")
@@ -677,6 +708,29 @@ void | IoError Closed() {
     }
 
     print(seen.Count)
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negative.kz)
+```kurz
+// a `Close` through one holder while the buffer holds the file's 3 bytes: through the other holder, a `Consume` of 0 gets the closed
+// handle's error, as it enters the call, and a `Consume` of -1 raises `index-out-of-range` before the call enters, closed handle or not
+void | IoError Closed() {
+    File.WriteAll("consume-closed-negative.txt", "abc".Bytes)
+    f = File.Open("consume-closed-negative.txt")
+    File.Delete("consume-closed-negative.txt")
+    g = f
+    mut seen = Bytes()
+    f.Fill(mut seen)
+    f.Close()
+    g.Consume(0) else {
+        IoError e => print(e)
+    }
+
     g.Consume(-1) else {
         IoError e => print(e)
     }
@@ -786,10 +840,12 @@ the file's buffer holds that no read took (S3) are dropped at the close, as drop
 `BufReader` gives them up (§12, the owner, 2026-11-02): a read that fills the buffer is a call in
 flight, and one that finds the mark when its read returns gives what it took, at most `max` of what
 that read gave, as S3's fill takes it, and keeps none of the rest in the buffer, a stream's fill whose
-read the `Close`'s shutdown ended with no byte getting the closed handle's error, as every read the
-shutdown wakes gets it (S9), while every later call through any holder finds the mark before it
-reaches the buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
-last count that ignores its error, and no text)*
+read returned with no byte after the mark getting the closed handle's error, as every read the
+`Close`'s shutdown wakes gets it (S9), while every later call through any holder finds the mark before
+it reaches the buffer (§12, the owner, 2026-11-03). A `File` has no text: `print(f)` is `no-text`. *(assumed, §12: the close at the
+last count that ignores its error, no text, and the bound between the two halves of the answer of
+2026-11-03: a stream's fill whose read returned with no byte after the mark gets the closed handle's
+error, not a 0, and one whose read gave bytes gives what it took)*
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two.
 
@@ -853,6 +909,10 @@ Closed() else {
 Case: [system/fill-closed.kz](../corpus/system/fill-closed.kz)
 
 Case: [system/consume-closed.kz](../corpus/system/consume-closed.kz)
+
+Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negative.kz)
+
+Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
 
 ### S6 (decided, §12) A whole file
 
@@ -1048,7 +1108,12 @@ against 0 for a read and a write too). The bound of a read and a write holds for
 system, so that a `Write` of many bytes to a peer that takes them slowly can take longer than the
 bound in all, as Rust's `write_all` does, and a peer that stops reading gives `TimedOut` after the
 bound (§12, the owner, 2026-11-02, "per system call", against one deadline for the whole `Write`, as
-Go's `SetWriteDeadline`). The socket options `SO_RCVTIMEO` and
+Go's `SetWriteDeadline`). The bound of a read holds for the read of the system alone: a call that
+waits for the handle's lock behind another holder's fill (S3, S24) waits with no bound, as Rust's
+`Mutex::lock` waits while `set_read_timeout` bounds the `recv` (§12, the owner, 2026-11-04, issue 39,
+comment 6643376941, Q1 of issue 156, comment 6621376360, against a bound counted from the call's
+start with the wait included, and against a second call in flight refused; the cost is that a holder
+whose fill waits with no bound keeps every other holder waiting as long). The socket options `SO_RCVTIMEO` and
 `SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
 the bound holds for an actor's socket, which runs without blocking, stands open (§14). The bound of
 `TcpStream.Connect` starts once the lookup of the name has given its addresses, the lookup waiting
@@ -1398,7 +1463,7 @@ In a build for Windows, a call of this chapter is `not supported`, and the runti
 none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
 and `File.Modified` (S13 to S15; §12, assumed), `instant.Now` and `t.Elapsed` (S25; §12, the owner,
 2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls, `Stdin` and `Environment.Exit`
-(S17 to S23; §12, assumed). A build for any other target whose runtime lacks them says `not supported` at the
+(S17 to S23; §12, assumed), and a log call (P6; §12, the owner, 2026-11-05, L2). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 

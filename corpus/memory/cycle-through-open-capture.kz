@@ -1,0 +1,20 @@
+// expect: error reference-cycle at 6
+// rules: R9
+
+// a lambda the field can hold that captures a value of a type parameter holds whatever function a use gives that parameter, so a
+// lambda of another type that reads the button closes the ring through the field (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+class Panel(Button B)
+
+void Keep<T>(T x) {
+}
+
+void Wire<T>(Button button, T x) {
+    button.OnClick = () => Keep(x)
+}
+
+b = Button("ok", () => print("x"))
+p = Panel(b)
+f = (int n) => print(p.B.Name)
+Wire(b, f)
+b.OnClick()

@@ -1,5 +1,5 @@
+using System.Diagnostics;
 using System.Globalization;
-using System.Net;
 using System.Net.Sockets;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
@@ -13,11 +13,11 @@ namespace Kurz.Compiler.Tests;
 /// which a case cannot hold since it is the time of the run, read through a function an edited std/ adds and held to .NET's
 /// <c>"r"</c> form of the same second; a handler that throws, which ends the program at the throw, where a corpus case would name
 /// the rules of the throw and not the server's; and a build for Windows, whose runtime gives no socket, says <c>not supported</c> at
-/// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; the time a write of a response is given (W10), which
-/// needs a client that reads beside the server's loop, a second thread no corpus case has; and the end of a chunked file's body,
-/// which goes out in the write of its last piece, where the bytes are the same either way and only the time of a client that sends
-/// each request after the whole response tells them apart; and the reads of a request that wait more than 5 seconds where its bounds
-/// allow it, which a case could only show by a run of that length; and what needs a client beside the loop for its time or its
+/// the line of the program that calls <c>Serve</c> or <c>ServeConnection</c>; and the time a write of a response is given (W10), and
+/// each write of a streamed response, a write over 64 KiB given its own length at the rate, and the time its end takes (W11), which need a client beside the server's loop, a second thread
+/// no corpus case has; and the end of a chunked file's body, which goes out in the write of its last piece, where the bytes are the
+/// same either way and only the time of a client that sends each request after the whole response tells them apart; and the reads of
+/// a request that wait more than 5 seconds where its bounds allow it, which a case could only show by a run of that length; and what needs a client beside the loop for its time or its
 /// socket: the bound of a write held across the calls of the system it makes, the close in stages after the server's answer, the
 /// time of a body's read set before each refill, and a file whose write fails closed, with the refusal of the bounded write to a
 /// program, which only std/ is given; and how long a bound of time waits at most, a bound of the wall's time that a corpus case,
@@ -134,6 +134,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 mut piece = Bytes()
                 while piece.Count < 65536 {
@@ -167,12 +168,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-pace");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
         var paused = false;
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
@@ -197,6 +197,223 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     [Fact]
+    public async Task Each_write_of_a_streamed_response_is_held_to_the_rate()
+    {
+        // W11 (assumed, section 12): each `w.Write` is a write of the response, given the longer of the grace and its length at the
+        // `MinResponseDataRate` (W10); a client that reads nothing fills the buffers of the connection, the next write of 512 KiB at
+        // 10 MB a second times out after 100 ms, and the function passes the `IoError` on to the loop, which gives it; a write held
+        // to no time waits until the client closes, 10 seconds later, and gives the error of that close
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 524288 {
+                    piece.Add(122)
+                }
+
+                streamed = HttpResponse.Stream(200, (HttpWriter w) => {
+                    for i in 0..<64 {
+                        w.Write(piece)
+                    }
+                })
+                HttpServer.ServeConnection(server, (HttpRequest r) => streamed, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-pace");
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        bool ended;
+        using (var client = Connect(executable, run))
+        {
+            client.GetStream().Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n"u8);
+            ended = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10))) == run;
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((true, 0, "", "TimedOut\nserved\n"), (ended, code, error, output));
+    }
+
+    [Fact]
+    public async Task A_write_of_a_streamed_response_over_64_KiB_is_given_its_length_at_the_rate()
+    {
+        // W11 (assumed, section 12): a write over 64 KiB goes out on its own after its chunk's size line, and it is given the longer of
+        // the grace and its own length at the `MinResponseDataRate` (W10), not the time of the size line before it, which is the grace
+        // alone; a client that reads at 4 MB a second, above the rate of 500 KB a second, holds each write of 512 KiB about 130 ms
+        // once the buffers of the connection are full, within the 1 second its length gives and past the 20 ms of the grace
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 524288 {
+                    piece.Add(122)
+                }
+
+                streamed = HttpResponse.Stream(200, (HttpWriter w) => {
+                    for i in 0..<32 {
+                        w.Write(piece)
+                    }
+                })
+                HttpServer.ServeConnection(server, (HttpRequest r) => streamed, HttpLimits(MinResponseDataRate: HttpRate(500_000, 20ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-big-write");
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        long read = 0;
+        using (var client = Connect(executable, run, receiveBuffer: 65536))
+        {
+            var stream = client.GetStream();
+            stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
+            var buffer = new byte[65536];
+            var clock = Stopwatch.StartNew();
+            while (true)
+            {
+                int n;
+                try
+                {
+                    n = stream.Read(buffer);
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+
+                if (n == 0)
+                {
+                    break;
+                }
+
+                read += n;
+                var due = TimeSpan.FromSeconds(read / 4_000_000.0) - clock.Elapsed;
+                if (due > TimeSpan.Zero)
+                {
+                    Thread.Sleep(due);
+                }
+            }
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n", true), (code, error, output, read > 32 * 524288));
+    }
+
+    [Fact]
+    public async Task A_streamed_response_ends_without_waiting_for_the_acknowledgement_of_its_last_chunk()
+    {
+        // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream, as Kestrel sets it on every connection, so that the
+        // chunk that ends a body goes out at once after the chunk before it; under Nagle's algorithm it waits for the client's
+        // acknowledgement, which a client that sends its next request only after the whole response gives at its delayed-ACK timer,
+        // about 40 ms on Linux, so that 100 requests one after the other take 4 seconds and not a few milliseconds
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
+                server = listener.Accept()
+                streamed = HttpResponse.Stream(200, (HttpWriter w) => w.Write("hello"))
+                HttpServer.ServeConnection(server, (HttpRequest r) => streamed) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-nodelay");
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var whole = 0;
+        var failed = "";
+        var watch = new System.Diagnostics.Stopwatch();
+        using (var client = Connect(executable, run))
+        {
+            client.NoDelay = true;
+            var stream = client.GetStream();
+            var buffer = new byte[65536];
+            watch.Start();
+            try
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    stream.Write(i == 99 ? "GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8 : "GET / HTTP/1.1\r\nHost: h\r\n\r\n"u8);
+                    var got = new MemoryStream();
+                    while (!got.ToArray().AsSpan().EndsWith("\r\n0\r\n\r\n"u8))
+                    {
+                        var n = stream.Read(buffer);
+                        if (n == 0)
+                        {
+                            break;
+                        }
+
+                        got.Write(buffer, 0, n);
+                    }
+
+                    whole += got.ToArray().AsSpan().EndsWith("5\r\nhello\r\n0\r\n\r\n"u8) ? 1 : 0;
+                }
+            }
+            catch (IOException e)
+            {
+                // the server's exit code and what it printed say why the connection broke, so the client's error does not end the test
+                failed = $"after {whole} responses: {e.Message}";
+            }
+
+            watch.Stop();
+        }
+
+        var (code, output, error) = await run;
+        Assert.Equal((0, "", "served\n", 100, ""), (code, error, output, whole, failed));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"100 streamed responses took {watch.Elapsed.TotalMilliseconds:F0} ms");
+    }
+
+    [Fact]
     public async Task A_chunked_file_ends_its_body_in_the_write_of_its_last_piece()
     {
         // W8: the chunk of no bytes that ends a chunked file goes out in the one write of the file's last piece, as hyper flushes the
@@ -207,6 +424,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             void | IoError Main(string address) {
                 File.WriteAll("http-server-coded-file.txt", "hello".Bytes)
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 coded = HttpResponse.File(200, "http-server-coded-file.txt")
                 coded.Headers.Set("Transfer-Encoding", "gzip") else {
@@ -235,14 +453,13 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-coded-file");
-        var port = FreePort();
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var whole = 0;
         var failed = "";
         var watch = new System.Diagnostics.Stopwatch();
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             client.NoDelay = true;
             var stream = client.GetStream();
@@ -293,6 +510,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 echo = (HttpRequest r) => {
                     body = r.Body.ReadAllText(100) else {
@@ -325,13 +543,12 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-long-reads");
-        var port = FreePort();
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
         var failed = "";
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             try
@@ -374,6 +591,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 mut piece = Bytes()
                 while piece.Count < 65536 {
                     piece.Add(122)
@@ -415,12 +633,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, $"http-server-bound-{name}");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         TimeSpan ended;
         (int Code, string Output, string Error) result;
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
             client.GetStream().Write(System.Text.Encoding.ASCII.GetBytes(sent));
@@ -442,6 +659,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 mut piece = Bytes()
                 while piece.Count < 65536 {
@@ -475,12 +693,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-write-bound");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
@@ -516,6 +733,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "ok"), HttpLimits(MaxRequestBodySize: 50000)) else {
                     IoError e => print(e.Kind)
@@ -538,12 +756,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, $"http-server-staged-close-{sent}");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
         string? reset = null;
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             var request = new MemoryStream();
@@ -581,6 +798,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 echo = (HttpRequest r) => {
                     body = r.Body.ReadAllText(100) else {
@@ -613,12 +831,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-refill-time");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
         TimeSpan answered;
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -676,6 +893,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
                 File.WriteAll("served.bin", bytes)
                 listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.File(200, "served.bin"), HttpLimits(MinResponseDataRate: HttpRate(1_000_000, 100ms))) else {
                     IoError e => print(e.Kind)
@@ -699,10 +917,9 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, "http-server-file-closed");
-        var port = FreePort();
-        var run = Task.Run(() => Processes.Capture(executable, [$"127.0.0.1:{port}"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
-        using (var client = Connect(port, run))
+        using (var client = Connect(executable, run))
         {
             client.GetStream().Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n"u8);
             await run;
@@ -793,32 +1010,6 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         Assert.Equal(["/a 5 0", "/b 5 0"], output);
     }
 
-    /// <summary>A client of the program's listener on <paramref name="port"/>, tried until it listens or the program has ended.</summary>
-    // the next port a test gives its program, below the ranges a system hands out for port 0 (32768 to 60999 on Linux, 49152 to 65535
-    // on Windows), in a block of this process's own: a port taken with port 0 and freed for the program could be given to a socket of
-    // a test that runs beside it, a program of the corpus binding port 0 among them, before the program binds it, and the client would
-    // then talk to that socket while the program waits in its accept until the test's time ends
-    private static int nextPort = 20000 + Environment.ProcessId % 400 * 25;
-
-    /// <summary>A port of the loopback that no socket holds now and that this process gives out once.</summary>
-    private static int FreePort()
-    {
-        while (true)
-        {
-            var port = Interlocked.Increment(ref nextPort);
-            try
-            {
-                var probe = new TcpListener(IPAddress.Loopback, port);
-                probe.Start();
-                probe.Stop();
-                return port;
-            }
-            catch (SocketException)
-            {
-            }
-        }
-    }
-
     /// <summary>
     /// The exit code, the error and the output of a server program's run held to what is expected, each text whole in the message: a
     /// comparison of tuples cuts a long text, and what an error says last is cut first.
@@ -826,29 +1017,47 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     private static void Ran((int Code, string Error, string Output) expected, (int Code, string Error, string Output) actual) =>
         Assert.True(expected == actual, $"exit {actual.Code}, not {expected.Code}; error [{actual.Error}]; output [{actual.Output}]; expected output [{expected.Output}]");
 
-    private static TcpClient Connect(int port, Task program)
+    /// <summary>A client of the program's listener, on the port the program wrote into the file <c>port</c> beside
+    /// <paramref name="executable"/> once it listens, waited for until the file holds it or the program has ended.</summary>
+    // the program binds port 0 and writes the port the system gave it, so that from the moment the client learns the port no socket
+    // but the program's listener holds it: a port the test chose and freed for the program could be held by another socket before
+    // the program bound it, and a client that reached that socket was reset while the program waited in its accept until the
+    // test's time ended (`A_chunked_file_ends_its_body_in_the_write_of_its_last_piece`, twice on 2026-11-06, with the port
+    // chosen below the system's range for port 0); the newline that ends the number says that the write is whole
+    private static TcpClient Connect(string executable, Task program, int receiveBuffer = 0)
     {
+        var file = Path.Combine(Path.GetDirectoryName(executable)!, "port");
         while (true)
         {
-            try
+            var text = File.Exists(file) ? File.ReadAllText(file) : string.Empty;
+            if (text.EndsWith('\n') && int.TryParse(text.AsSpan(0, text.Length - 1), out var port))
             {
-                var client = new TcpClient("127.0.0.1", port);
-                if (client.Client.LocalEndPoint is IPEndPoint local && local.Port == port)
+                var client = new TcpClient();
+                if (receiveBuffer > 0)
                 {
-                    // a connect to a port of the ephemeral range that nothing listens on yet may take that port as its own and
-                    // connect the socket to itself, TCP's simultaneous open; such a client talks to itself and never to the program,
-                    // which waits in its accept until the test's time ends
+                    // set before the connect, so that the window the client offers is no larger from its first segment on
+                    client.ReceiveBufferSize = receiveBuffer;
+                }
+
+                try
+                {
+                    client.Connect("127.0.0.1", port);
+                }
+                catch
+                {
                     client.Dispose();
-                    Thread.Sleep(20);
-                    continue;
+                    throw;
                 }
 
                 return client;
             }
-            catch (SocketException) when (!program.IsCompleted)
+
+            if (program.IsCompleted)
             {
-                Thread.Sleep(20);
+                throw new InvalidOperationException($"the program ended before it wrote its port into {file}");
             }
+
+            Thread.Sleep(20);
         }
     }
 }

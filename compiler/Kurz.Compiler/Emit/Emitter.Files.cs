@@ -87,7 +87,7 @@ public sealed partial class Emitter
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
         if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
-            or CallKind.TcpShutdownWrite or CallKind.TcpWriteWithin)
+            or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
             var socket = TypeOf(target) is HandleType { Kind: Handle.TcpStream or Handle.TcpListener };
@@ -122,6 +122,17 @@ public sealed partial class Emitter
                         // flight on the handle (S5), so that through a holder of a closed stream it gets the closed handle's error
                         var o = Enter(outcome, handle, "ErrorKind");
                         FailBelowZero(o, SysCall("ShutdownWrite", $"i32 {HandleDescriptor(handle)}"), HandlePath(handle));
+                        Succeed(o, null);
+                        Leave(o, outcome, handle);
+                        break;
+                    }
+                case CallKind.TcpSetNoDelay:
+                    {
+                        // W11: the system's `TCP_NODELAY` on the stream, which std/'s writer of a streamed response sets, so that each
+                        // chunk goes out at once; a call in flight on the handle (S5)
+                        var on = Arguments(c, info, _ => Types.Bool, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(Types.Bool).Length + 1)..];
+                        var o = Enter(outcome, handle, "ErrorKind");
+                        FailBelowZero(o, SysCall("SetNoDelay", $"i32 {HandleDescriptor(handle)}, i1 {on}"), HandlePath(handle));
                         Succeed(o, null);
                         Leave(o, outcome, handle);
                         break;
@@ -360,8 +371,8 @@ public sealed partial class Emitter
     /// first, as a <c>Read</c> below 8 KiB fills it (<see cref="FillBuffer"/>), and all that read gave is appended and kept from the
     /// buffer's start. The room in the list is made for the bytes appended, as <c>Add</c> grows a list. The count appended is the result,
     /// 0 at the end of the file or the stream (assumed, as a <c>Read</c>'s). A call in flight on the handle (S5), whose fill, where a
-    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it (assumed, as a <c>Read</c>'s fill
-    /// gives what it took).
+    /// <c>Close</c> marked the handle while its read waited, gives all it read and keeps none of it, having no <c>max</c>, where a
+    /// <c>Read</c>'s fill gives at most <c>max</c> of it (assumed).
     /// </summary>
     private void EmitFileFill(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {

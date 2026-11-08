@@ -58,8 +58,8 @@ public abstract record StringSegment;
 
 public sealed record TextSegment(string Text) : StringSegment;
 
-/// <summary>An interpolation (L6).</summary>
-public sealed record HoleSegment(Expression Expression) : StringSegment;
+/// <summary>An interpolation (L6), with the text between its braces, which names the field of a log call's template (P2).</summary>
+public sealed record HoleSegment(Expression Expression, string Source = "") : StringSegment;
 
 /// <summary>A string literal, one line or a <c>"""</c> block, as text and holes (L6, L7, L13).</summary>
 public sealed record StringLiteral(int Line, IReadOnlyList<StringSegment> Segments) : Expression(Line)

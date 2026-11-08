@@ -1,0 +1,12 @@
+// expect: output
+// | done
+// rules: P3
+
+int Counted() {
+    print("counted")
+    return 1
+}
+
+Log.Debug("off {Counted()}")
+Log.Trace("off {Counted()}")
+print("done")

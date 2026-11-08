@@ -358,7 +358,7 @@ code is in `std/`: the allocator of section 3 and the blocks of a list and of a 
 and the hashes of chapter 14, SHA-256, MD5, CRC-32, HMAC-SHA256, the hexadecimal of bytes and the comparison in fixed time (record,
 section 12: the owner, 2026-10-30, "In Kurz, as RustCrypto"), which make no call of the system and build for every target, and
 `HttpError` with its `HttpKind` (W2), the class `HttpHeaders` (W4), and `HttpRequest` with its `HttpBody`, `HttpLimits` with its `HttpRate`, and
-the reader of a request from a `TcpStream` (W5 to W7), `HttpResponse`, the writer of a response to one (W8), and `HttpServer`, the loop that serves a connection's requests with a handler (W9) and holds each to its bounds of time (W10), types every program sees (W1: the checker of a program is given
+the reader of a request from a `TcpStream` (W5 to W7), `HttpResponse`, the writer of a response to one (W8), with `HttpWriter`, the writer of a streamed body (W11), and `HttpServer`, the loop that serves a connection's requests with a handler (W9) and holds each to its bounds of time (W10), and `Uri` with its `UriError` and `UriKind` (W12) and `HttpClient`, the client with its `HttpClientOptions` and its pool of connections, which gives an `HttpResponseMessage` and bounds each call by its time (W13 to W16), types every program sees (W1: the checker of a program is given
 `std/`'s checker and takes the symbols it made of each `pub` type that `Checker.Prelude` names, a `data` type, an enum or a class, whose
 members without `pub` stay private to it and whose members marked `internal` stay inside `std/`, another folder (F9), and whose methods belong to `std/`, emitted when called as a function of `std/` is, and the built-in types every file sees, `IoError` among them, are
 the symbols `std/`'s checker made of them, so that the `IoError` a function of `std/` gives is the program's), at
@@ -481,6 +481,9 @@ system call, as Rust's `SO_RCVTIMEO` and `SO_SNDTIMEO` do: a `Write` of many byt
 each piece the system takes, as Rust's `write_all` does, and can take longer in all. `ShutdownWrite` calls `shutdown` with
 `SHUT_WR` (1) and keeps the descriptor, so that the stream still reads, and gives the system's answer as it is: a second
 call passes, and one on a stream whose peer reset the connection fails with `ENOTCONN`, 107, `NotConnected`.
+`SetNoDelay` sets `TCP_NODELAY` (1) at the level `IPPROTO_TCP` (6), the stream's member that only `std/`'s checker
+resolves, for the writer of a streamed response (W11), as Kestrel sets it on every connection: a small write then goes
+out at once, and not after the peer's acknowledgement of the one before.
 `LockWait` puts the thread to sleep on a file's lock word while it holds
 the value given, and `LockWake` wakes one thread that sleeps on it, each by the `futex` call through `syscall`,
 as Rust's `futex_wait` and `futex_wake` do (S16). `std/` gives the room a read makes in a list of bytes before it,
@@ -710,7 +713,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   with its default, `const Mode M = Mode.Plain`: a call writes the constant among its type arguments, a literal,
   `Buffer<64>()` and `Shift<-1>()`, or an `enum`'s value by name, `Say<Mode.Loud>`, or leaves out one with a default, and
   the function is read as one that reads its type, a copy for each list of type arguments and constants, `Say<Mode.Loud>`,
-  in which the parameter's name is a constant of its type and a call passes it on by that name (T35);
+  in which the parameter's name is a constant of its type and a call passes it on by that name, to a parameter of its type
+  or of an integer type it widens to (T35, T8);
 - `const assert(condition, text)`, checked while the program compiles and emitting nothing: its condition and the holes of its
   text read literals, constants and the operators on them, `T.Kind`, `f.Name` and constant type arguments; a generic function that
   holds one is read as one that reads its type, and each copy checks it, a false one stopping the build at the call that made the
@@ -1003,7 +1007,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
   and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
-  not `null`, each of a stream's `ShutdownWrite`, and each of a listener's
+  not `null`, each of a stream's `ShutdownWrite` and `SetNoDelay`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
   case `IoError`, its kind and number from `ErrorKind` (`SocketErrorKind` for a stream's read and write and a listener's `Accept`) and `ErrorCode` and its path the call's first,
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
@@ -1076,6 +1080,24 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
+- logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
+  `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
+  `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
+  which keeps it, or ends the process with `error: log-filter (<entry>)`, and gives the lowest level
+  a call site can be on at, which the global `@kz.log.lowest` holds. A call site has a global `i8` of its
+  own, declared at its first emission and kept by its node, so that every copy of its function reads
+  the one global: 0 before its first reading, 1 off and 2 on. A level below the lowest is a load and a
+  branch; past it, a load of the site's global and a switch, and the first reading calls `LogEnabled`
+  with the category and the level and stores what it said. A site that is on runs its holes in a region
+  of its own, each once, and makes the message as an interpolation makes it (L6) and the fields,
+  ` name=value` each, a `string` through `LogQuoted`, then reads `Now` and calls `LogLine`, which puts
+  the line together in a buffer of its thread and hands it to one write call on standard error, the
+  line of the lines dropped before it in the same write; a refused write counts the line as dropped.
+  `LogTests` pins what no case can: the layout of a line and its time against the test's, a string's
+  quotes and the escapes, the category of a method, of a function and of the top level, the levels and
+  the default, a site that is off and one that is on, reached twice, a generic function emitted for two
+  types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
+  the lines dropped while standard error refused its writes, the crash line after a line, and the refusal for Windows;
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
@@ -1451,8 +1473,8 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket and a read of the
-command line, the environment or the clock in a build for Windows (S11), a vector held in a list, a
+(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
+command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
 built (R18), and a construct of the other chapters the checker does not read. The line
@@ -1534,6 +1556,13 @@ ask about it.
 
 - A `print` hands its line to one write call, called again for what a call did not take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
+- P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
+  in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
+  record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
+  refused writes are counted in the next line.
+- P8: the compiler builds no actor, so every line is written outside an actor, and a line holds no
+  chain ID and none of the actor's parts, nothing standing in their place: P7's layout as it reads.
+  Pinned by `LogTests`, whose lines are held whole.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
@@ -1749,9 +1778,10 @@ functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
-`HttpBody`, `HttpResponse` and `HttpServer`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
-`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, and W10, its bounds of time; the other names of W1 are no types of `std/`, and a
-file's own declaration of one is the file's own, where W1 makes it `redeclared`), and the rules of `print` and of a value's text that
+`HttpBody`, `HttpResponse`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
+`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, and W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time; the other names of W1 are no types of `std/`, and a
+file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
+of P3 and its category of P6), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -1885,8 +1915,8 @@ larger type each time makes without end, by a call T34's walk does not read: out
 bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy it
 would have made is not made, and its errors show only in a build where the chain is ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
-`redeclared` (G1 to G5); a type parameter that holds a constant of a type the record does not list, `double` or `string`, which
-leaves the function unread, one of a `data` type, and overloads that hold a type and a constant, or constants of two
+`redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
+with no error of its own, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
 which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the
 program compiles, and in its condition or a hole any other value that the checker does not fold, a `float`'s and a `decimal`'s
@@ -2026,14 +2056,21 @@ round can ask about it by the rule's id.
   has are `cannot-infer`; a type a nested position fixes (`List<T>` of a `List<User>`) is the one
   the direct arguments meet, each of them that type or one derived from it. T27 names the base for
   classes; the checker reads it for data types.
-- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where its
-  parameter's type parameter stands, so that it gives that type parameter nothing (`Count(5)` for a
-  `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T` nothing"); where the
-  arguments give their type parameters types that differ, or no argument stands in a position, it names
-  none. The id stays T27's: no argument stands in the type parameter's position. An argument with an
+- T27 with T1: the text of a `cannot-infer` names the first argument whose type has no part where the
+  type parameter that failed stands in its parameter, so that it gives that type parameter nothing
+  (`Count(5)` for a `List<T>`: "argument 1 is an `int` where a `List<T>` is required, and gives `T`
+  nothing"). With two type parameters, `G(5, 1, 6)` for `int G<T, U>(List<U> a, U d, List<T> c)` names
+  argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
+  comment 6620467625); the type parameter that failed is the one at which the inference ended (the
+  owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  gives that type parameter a type and they differ, or no argument stands in a position, it names none
+  (the owner, 2026-11-04, #156, comment 6643376941). The id stays
+  T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) (the owner, 2026-11-03, #156, comment 6600034940). Its reason, that a call whose own argument
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument fails to give that
+  type parameter a type (below). Its reason, that a call whose own argument
   does not fit reports that misfit alone, is a convention of the messages the pipeline took, not the
   owner (#156, comment 6566609960). The call's result is read as a direct position reads it: one that
   does not name the type parameter stays, so `Count(nothing)` is an `int`, and one that does reports
@@ -2041,9 +2078,16 @@ round can ask about it by the rule's id.
   is unknown, and this reading was taken since a direct position already gives it). A type parameter
   that an argument with no error of its own fails to give a type is still `cannot-infer`, and the
   text names that argument, also where an argument with an error of its own stands in another of its
-  positions, nested, direct or a `[]` (`Two(5, nothing)` for `int Two<T>(List<T> a, List<T> b)`: the
-  `cannot-infer` naming argument 1, and the `unknown-name`) (the owner, 2026-11-03, #156, comment
-  6603205575).
+  positions, nested, direct, a `[]` or a literal's own error (`Two(5, nothing)` for
+  `int Two<T>(List<T> a, List<T> b)`: the `cannot-infer` naming argument 1, and the `unknown-name`)
+  (the owner, 2026-11-03, #156, comment 6603205575). A lambda keeps the `cannot-infer` when it fits no
+  function type its parameter could be, one where a `List<T>` is required or one with another count of
+  parameters, and the text names no argument, since a lambda has no type of its own before the pick
+  (F11): `Two(nothing, x => x)` is the `unknown-name` and that `cannot-infer`. A lambda that fits its
+  parameter's function type is no such argument, so `Apply(nothing, x => print(x))` for
+  `void Apply<T>(List<T> xs, (T) => void f)` reports the `unknown-name` alone (the owner, 2026-11-05,
+  #156, comment 6659026667), and nor is one where a bare `T` is required, since `T` can be a function
+  type (assumed, #156, comment 6659124253).
 - C9 with O8: the arms `true` and `false` together cover a `bool`, bare or as a case of a union,
   so a `match` with both is exhaustive and an `else` after them is `unreachable-arm` (C4).
 - E1 with D20: an enum whose declaration was reported, a name written twice or a
@@ -2153,7 +2197,8 @@ round can ask about it by the rule's id.
   `data Q<T>(int X, List<Q<() => int>> N)` read at `Q<int>`, answers by its type arguments
   alone, since its fields were read at the first meeting, which ends the walk for a type that holds
   itself with other arguments, `P<List<T>>` in a `P<T>`. A map can when its value can, a class when a field of it can, as section 4
-  assumes, a field of a function type among them (R9), and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
+  assumes, a field of a function type among them (R9), or a field of a class derived from it, of the file, of a folder it uses or of
+  `std/`, which K6 lets stand where its base does, and a nullable type is the union of N1. A function value is copied (the owner, 2026-10-25, "Copied"), and
   so is a `data` value or a union made of function values and copied types ("Copied too"): the
   checker marks a read of one that a change meets while the expression holds it, and the emitter
   counts it once more for the expression (above), the cost the design record names.
@@ -2396,11 +2441,19 @@ round can ask about it by the rule's id.
   folders the file uses, each captured variable read through its type as a field is, and a type
   parameter through every type argument a call of the program gives it. A list, a map, a union, a
   nullable type and a `data` value that hold a function value count as a function type does
-  *(assumed)*. The rule is judged after every body, when the lambdas are known, and the text of a ring
+  *(assumed)*. Of those lambdas the field counts the ones whose type it can hold, `Types.Assignable`
+  to one of the function types its type holds, and the ones a function value such a lambda captures
+  can be, until none is added; a type on the way that names a type parameter counts every lambda
+  (the owner, 2026-11-04, #110, comment 6643368937), so that a lambda that captures an
+  `HttpResponse`, whose streamed body is such a field, closes no ring unless it can be that body.
+  The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
-  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*, and
-  one no lambda of the file closes is `std/`'s own. A stored lambda is counted as a function value
+  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*. A ring
+  of classes of `std/` or of a folder alone, which a lambda of `std/` or of a folder closes through a
+  type argument that only a call of the file gives, is reported at the file's first such call (the
+  owner, 2026-11-05), since the checker of `std/` or of the folder does not see that call. One that
+  neither a lambda nor a call of the file closes is `std/`'s own, or the folder's. A stored lambda is counted as a function value
   is, a read of the field for a call takes a count of its own (K2), so a lambda that replaces the
   field it is called through runs on, and the instance's release lets go of the environment. Pinned
   by the function fields' programs of `ListTests`.

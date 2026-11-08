@@ -454,14 +454,14 @@ that leaves the argument out is `argument-mismatch` (D11) (§8, the owner, 2026-
 
 Case: [functions/named-argument-order.kz](../corpus/functions/named-argument-order.kz)
 ```kurz
-int Log(string s, int v) {
+int Show(string s, int v) {
     print(s)
     return v
 }
 
 int Add(int a, int b) => a + b
 
-print(Add(b: Log("b", 2), a: Log("a", 1)))
+print(Add(b: Show("b", 2), a: Show("a", 1)))
 ```
 
 Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
@@ -671,6 +671,33 @@ void Show(string s) {
 
 long big = 5
 Show(big)
+```
+
+A method that the place of the call does not see (F9) is no candidate of the call where the place
+sees one of its name: a call from a class that fits only a method or a property of a base the class
+does not see gets the error of the class's own methods of that name, as C# leaves an inaccessible
+member out of overload resolution (CS7036, CS1501). The owner chose this on 2026-11-06 (#39,
+comment 6680927192), against keeping such a member a candidate and refusing the call with
+`not-visible`, as Rust reports a private method its lookup found (E0624); the cost is a filter of
+the candidates by what the class sees, and an error that does not name the base's method. A call
+outside every class, through an instance, picks among the methods its place sees too, and where the
+place sees no method of the name, the call is `not-visible` (F9), as C# reports a member it cannot
+reach (CS0122) *(assumed: a reading of the answer, which named a call from the class)*.
+
+Case: [classes/call-hidden-base-method.kz](../corpus/classes/call-hidden-base-method.kz)
+```kurz
+class Counter(int Start) {
+    int Next() => Start + 1
+}
+
+class Ticket(int Seat) : Counter {
+    pub int Next(int step) => Seat + step
+
+    // `Next()` fits only the `Next` of `Counter`, which `Ticket` does not see: it is no candidate, and the call is `Next(int)`'s
+    pub int Take() => Next()
+}
+
+print(Ticket(1, 2).Take())
 ```
 
 A call of a name that has one function, with an argument of a type its parameter does not take, is
@@ -883,7 +910,11 @@ arm of a `match` of the top-level code binds reserves nothing either, as a varia
 *(assumed: the answer named a loop variable, a variable inside a block and a lambda's parameter)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
-read first, whose message points at the read while the fix is the whole line). The owner chose the
+read first, whose message points at the read while the fix is the whole line). A type parameter of the function, one that holds a
+constant among them (T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes
+a copy of the function (T33), so that a body never has to choose which of the two it reads (§4, the owner, 2026-11-05,
+"redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its function, as C#
+and Rust let it; the cost is that a generic function cannot reuse a top-level name). The owner chose the
 rule on 2026-10-03, against reading the variable at the call as a C# local function does, which
 would have given two kinds of function two views of a captured variable (F15), and against taking
 the value at the function's declaration as a lambda does, which a function declared above the
@@ -920,6 +951,15 @@ int Next(int count) => count + 1
 
 count = Next(count)
 print(count)
+```
+
+Case: [functions/top-level-name-as-type-parameter.kz](../corpus/functions/top-level-name-as-type-parameter.kz)
+```kurz
+int N = 3
+
+int Thrice<const int N>() => N * 3
+
+print(N)
 ```
 
 Case: [functions/top-level-name-assigned-and-read.kz](../corpus/functions/top-level-name-assigned-and-read.kz)

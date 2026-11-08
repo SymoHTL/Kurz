@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-10-31
-digest: 72345fccbbef52eadaa73b6b1e516bbcbdc4bc789d88666c24cced18e8f5558e
+generated: 2026-11-07
+digest: 3d6fc6009582fdf280e15a148ea9650da2d64af09d4fe78990b5f3d5c861b2e1
 ttl_days: 60
 metadata:
   type: reference
@@ -58,20 +58,21 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:self-tests -->
 | Tool | Self-test cases | Red proofs replayed |
 |---|---|---|
-| `tools/compiler_gate.py` | 31 | 32 |
-| `tools/gates.py` | 33 | 23 |
+| `tools/calls.py` | 11 | 12 |
+| `tools/compiler_gate.py` | 32 | 33 |
+| `tools/gates.py` | 34 | 25 |
 | `tools/kit.py` | 26 | 24 |
-| `tools/lint_ci.py` | 158 | 153 |
-| `tools/lint_knowledge.py` | 120 | 104 |
-| `tools/lint_reference.py` | 86 | 90 |
-| `tools/merge_pr.py` | 154 | 142 |
-| `tools/pr_gates.py` | 145 | 158 |
-| `tools/quality_evidence.py` | 40 | 45 |
-| `tools/red_proof.py` | 35 | 34 |
-| `tools/review/review.py` | 294 | 274 |
-| `tools/tree_gate.py` | 133 | 109 |
-| `tools/unicode_tables.py` | 26 | 12 |
-| **total** | 1281 | 1200 |
+| `tools/lint_ci.py` | 159 | 154 |
+| `tools/lint_knowledge.py` | 121 | 105 |
+| `tools/lint_reference.py` | 87 | 91 |
+| `tools/merge_pr.py` | 182 | 180 |
+| `tools/pr_gates.py` | 146 | 159 |
+| `tools/quality_evidence.py` | 46 | 52 |
+| `tools/red_proof.py` | 42 | 41 |
+| `tools/review/review.py` | 314 | 296 |
+| `tools/tree_gate.py` | 137 | 116 |
+| `tools/unicode_tables.py` | 35 | 23 |
+| **total** | 1372 | 1311 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -79,13 +80,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 54 |
+| Entries in INDEX.md | 88 |
 | tagged (untagged) | 2 |
-| tagged HARD | 17 |
+| tagged HARD | 33 |
 | tagged LIVING | 4 |
-| tagged POSTMORTEM | 7 |
-| tagged RECIPE | 6 |
-| tagged TRAP | 25 |
+| tagged POSTMORTEM | 16 |
+| tagged RECIPE | 9 |
+| tagged TRAP | 40 |
 | Review rule sections | 12 |
 | Review rules | 71 |
 <!-- /generated:store -->
@@ -104,8 +105,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 240 |
-| Bullets of the Open section | 49 |
+| Occurrences of the marker *(assumed)* | 405 |
+| Bullets of the Open section | 60 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -117,14 +118,14 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 230 |
-| of them decided | 192 |
-| of them assumed | 38 |
+| Rules in the reference | 283 |
+| of them decided | 242 |
+| of them assumed | 40 |
 | of them proposed | 0 |
-| of them open | 0 |
-| Corpus cases, none of them run | 623 |
-| Compile-error ids | 63 |
-| Run-time error ids | 10 |
+| of them open | 1 |
+| Corpus cases, none of them run | 959 |
+| Compile-error ids | 75 |
+| Run-time error ids | 11 |
 <!-- /generated:reference -->
 
 ## The forge
@@ -143,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 104 |
-| Pull requests merged | 100 |
-| Merged over red, with a recorded waiver | 24 |
-| Review findings posted: high | 167 |
-| Review findings posted: medium | 2423 |
-| Review findings posted: low | 2712 |
-| Open HAZARD issues | 17 |
+| Pull requests opened by a writer, or merged | 324 |
+| Pull requests merged | 297 |
+| Merged over red, with a recorded waiver | 147 |
+| Review findings posted: high | 296 |
+| Review findings posted: medium | 4240 |
+| Review findings posted: low | 4389 |
+| Open HAZARD issues | 19 |
 <!-- /generated:forge -->
