@@ -6142,6 +6142,107 @@ pub class HttpHeaders {
     }
 }
 
+// The parameters of a request's query, its names and values in their order, as `r.QueryValues()` reads them from `r.Query`, a type
+// every file sees (design record, section 12: the owner, 2026-11-06, G2 (a); W1, W19), read as ASP.NET Core's
+// `QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read them: a name compares exactly, byte for byte, where a
+// header's name compares without regard to ASCII case (W4), and a repeated name keeps each of its values apart, in their order.
+pub class HttpQuery {
+    mut List<string> names = List<string>()
+    mut List<string> values = List<string>()
+
+    // The first value of the name, or null where the query does not hold it.
+    pub string? Get(string name) {
+        for i in 0..<names.Count {
+            if names[i] == name {
+                return values[i]
+            }
+        }
+
+        return null
+    }
+
+    // Every value of the name, in their order, in a new list; empty where the query does not hold it.
+    pub List<string> GetAll(string name) {
+        mut all = List<string>()
+        for i in 0..<names.Count {
+            if names[i] == name {
+                all.Add(values[i])
+            }
+        }
+
+        return all
+    }
+
+    // How many names and values the query holds, each value of a repeated name counted: a read-only property (K7).
+    pub int Count => names.Count
+
+    // The name at the index, in their order: an index outside 0 to `Count - 1` stops the program with index-out-of-range, as a
+    // list's index does (W4).
+    pub string NameAt(int i) => names[i]
+
+    // The value at the index, the value of the name `NameAt(i)` gives, and outside them the same stop.
+    pub string ValueAt(int i) => values[i]
+
+    // The pairs of a query's text, as the crate reads them: split at each `&`, an empty piece skipped, each piece split at its first
+    // `=`, and a piece without one the name with the empty value (W19).
+    internal void ReadText(string query) {
+        b = query.Bytes
+        mut start = 0
+        mut i = 0
+        while i <= b.Count {
+            if i == b.Count || b[i] == 38 {
+                if i > start {
+                    mut equals = start
+                    while equals < i && b[equals] != 61 {
+                        equals = equals + 1
+                    }
+
+                    names.Add(HttpQueryText(b, start, equals))
+                    if equals < i {
+                        values.Add(HttpQueryText(b, equals + 1, i))
+                    } else {
+                        values.Add("")
+                    }
+                }
+
+                start = i + 1
+            }
+
+            i = i + 1
+        }
+    }
+}
+
+// A name or a value of a query, the bytes of `b` from `from` up to `to`: a `+` read as a space before the escapes, each `%` with two
+// hex digits after it within them the byte they name, a `%` without them kept, and the bytes read as UTF-8 with each maximal part
+// of a sequence that is no UTF-8 read as U+FFFD, as the crate decodes them lossily (`string.FromUtf8Lossy`, T15; W19).
+string HttpQueryText(Bytes b, int from, int to) {
+    mut out = Bytes()
+    mut i = from
+    while i < to {
+        if b[i] == 43 {
+            out.Add(byte(32))
+            i = i + 1
+            continue
+        }
+
+        if b[i] == 37 && i + 2 < to {
+            high = UrlHexValue(b[i + 1])
+            low = UrlHexValue(b[i + 2])
+            if high >= 0 && low >= 0 {
+                out.Add(byte(high * 16 + low))
+                i = i + 3
+                continue
+            }
+        }
+
+        out.Add(b[i])
+        i = i + 1
+    }
+
+    return string.FromUtf8Lossy(out)
+}
+
 // A lowest rate of data, in bytes a second after a grace, as Kestrel's `MinDataRate` holds both (design record, section 12: the
 // owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
 pub data HttpRate(int BytesPerSecond, duration Grace)
@@ -6172,6 +6273,14 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
     // Whether the request has no body and the head of the next request stood whole in the stream's buffer after its own, so
     // that the loop reads the next one without a wait and may hold this one's response until it writes the next (F9).
     internal mut bool next = false
+
+    // The parameters of `Query`, read anew at each call, as `HttpQuery` reads them, while `Query` stays the raw text (design record,
+    // section 12: the owner, 2026-11-06, G2 (a); W5, W19).
+    pub HttpQuery QueryValues() {
+        q = HttpQuery()
+        q.ReadText(Query)
+        return q
+    }
 
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
     // failure of the network, or the request the server refuses (W5), read under the limits of `HttpLimits()`: the limits a server

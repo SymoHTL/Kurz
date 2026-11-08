@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpDate`, `HttpResponseMessage`, `HttpBody` and
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpDate`, `HttpQuery`, `HttpResponseMessage`, `HttpBody` and
 `HttpWriter`, with `UriError`, `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -34,8 +34,8 @@ of the streamed response §12 gives, "A response can be streamed"; the two of `U
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
 `HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a); and
 `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
-issue 110, comment 6657251329, C2), and so are `Url` (W17) and `HttpDate` (W18; the owner, 2026-11-06,
-issue 110, comment 6680237968, G1 (a) and G3 (a))).
+issue 110, comment 6657251329, C2), and so are `Url` (W17), `HttpDate` (W18) and `HttpQuery` (W19; the owner,
+2026-11-06, issue 110, comment 6680237968, G1 (a), G3 (a) and G2 (a))).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -4463,4 +4463,87 @@ Show("1994-11-06T08:49:37Z")
 Show("Wed, 31 Dec 1969 23:59:59 GMT")
 Show("Fri, 11 Apr 2262 23:47:17 GMT")
 Show("Sat, 12 Apr 2262 00:00:00 GMT")
+```
+
+### W19 (decided, §12) `HttpQuery`
+
+`r.QueryValues()` gives the parameters of `r.Query` as an `HttpQuery`, its names and values in
+their order, while `r.Query` stays the raw text (W5): a class of `std/`, which every file sees (W1),
+with `Get(name)`, the first value of the name, a `string?`, `GetAll(name)`, every value of it,
+`Count`, `NameAt(i)` and `ValueAt(i)`, as `HttpHeaders` has them (W4), but comparing a name exactly,
+and reading a `+` as a space, as a form's query writes one, as ASP.NET Core's
+`QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read a query (§12, the owner,
+2026-11-06, issue 110, comment 6680237968, G2 (a), asked in comment 6673104097, with the option's
+`HttpQuery.Parse(r.Query)` made a method of the request, whose name says what it reads).
+*(assumed, §12: the name `QueryValues`, the reading taken of the owner's answer, and the readings of
+the product pass of 2026-11-08, issue 110, comment 6716242509, not put to the owner, each the crate's
+where it has one: `HttpQuery()` holding no pair, and no member changing one; the query read anew at
+each call; the text split at each `&`, an empty piece skipped, and a `;` no separator; each piece
+split at its first `=`, and a piece without one the name with the empty value; a `+` read as a space
+before the escapes, so that `%2B` gives a `+`; each `%` with two hex digits after it the byte they
+name, and a `%` without them kept, as `Url.Decode` keeps it (W17); the decoded bytes read as UTF-8,
+each maximal part of a sequence that is no UTF-8 read as U+FFFD, as `string.FromUtf8Lossy` reads
+them (T15), where `Url.Decode` refuses them, since `QueryValues()` cannot fail; a repeated name
+keeping each of its values apart, in their order; `GetAll` giving a new list; `NameAt(i)` and
+`ValueAt(i)` outside 0 to `Count - 1` stopping the program with `index-out-of-range`, as W4's do; and
+the walk `for name, value in q` of C6 and W4, which any class with `Count`, `NameAt(i)` and
+`ValueAt(i)` meets and which the compiler does not build for any class, so that the case walks the
+query by index)*
+
+Case: [http/http-query.kz](../corpus/http/http-query.kz)
+```kurz
+// the parameters of a request's query, as `r.QueryValues()` reads them from `r.Query`, which stays the raw text: split at each `&`,
+// an empty piece skipped, each piece split at its first `=`, a piece without one the name with the empty value, a `+` a space before
+// the escapes, so that `%2B` is a `+`, a `%` without two hex digits kept, bytes that are no UTF-8 read as U+FFFD, and a name compared
+// exactly, a repeated one keeping each of its values in their order
+void | IoError Show(string query) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET /p?{query} HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    match HttpRequest.Read(server) {
+        HttpRequest r => {
+            q = r.QueryValues()
+            mut line = "{q.Count}"
+            for i in 0..<q.Count {
+                line = "{line} [{q.NameAt(i)}={q.ValueAt(i)}]"
+            }
+
+            print(line)
+        }
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError Find(string query) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET /p?{query} HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    match HttpRequest.Read(server) {
+        HttpRequest r => {
+            q = r.QueryValues()
+            all = q.GetAll("a")
+            print("{q.Get("a") ?? "none"} {q.Get("A") ?? "none"} {all.Count} {all[0]} {all[1]} [{q.Get("b") ?? "none"}] {q.GetAll("c").Count} {r.Query}")
+        }
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError All() {
+    Show("a=1&b=2&a=3")
+    Show("a=1&&b=2&")
+    Show("flag&=x&k=v=w")
+    Show("q=a+b%2Bc&n%20m=%41%e2%82%ac")
+    Show("p=100%&r=%4&s=%zz")
+    Show("x=%FF%41&y=%E2%82")
+    Show("")
+    Find("a=1&b=&a=3")
+}
+
+All() else {
+    IoError e => print(e)
+}
 ```
