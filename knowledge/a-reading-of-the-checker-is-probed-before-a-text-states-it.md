@@ -31,9 +31,9 @@ its line, since the walk types `f.Type` on the text. What the probe showed is a 
 checker of fcc948e: with a type of its own for `f.Type` on the text, the walk of 1e7b262 (pull
 request 352, 2026-11-06) refuses such a call at its line, and its chain of copies stops there. A
 chain that branches with no such call was the defect of the bound that comment 6623885460 records,
-and pull request 307 ends it at the outer call with the bound's `not supported`. The text of pull
-request 352 read an inferred type argument as a written one, and a probe after its walk at the cap
-found that `Deep(Pair(f.Get(x), x), n - 1)` took no part: `f.Get(x)` had no type on the text, so
+and pull request 307, merged on 2026-11-05 as 3c870b9, ends it at the outer call with the bound's
+`not supported`. The text of pull request 352 read an inferred type argument as a written one, and
+a probe after its walk at the cap, on 1e7b262 on 2026-11-06, found that `Deep(Pair(f.Get(x), x), n - 1)` took no part: `f.Get(x)` had no type on the text, so
 the inferred `Pair` held no field's type (pull request 352, comment 6681585779).
 
 **Why:** a reading of code follows the function it looks at, and what comes before that function

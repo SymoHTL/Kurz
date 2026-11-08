@@ -690,7 +690,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   hold; on the text, `f.Type` of such a loop is a type of its own, no type parameter of the function,
   and `f.Get(value)` a value of that type, so that a type argument that holds it beside a type
   parameter of the function, written or inferred, grows by that parameter, `Map<f.Type, T>` and
-  `Pair(f.Get(x), x)` for `T`, and one that holds it with none takes no part (T34);
+  `Pair<f.Type, T>` for `T`, the second as `Pair(f.Get(x), x)` gives it, and one that holds it with none takes no part (T34);
 - a generic function that reads its type with `T.Kind` and `T.Fields`, and one that passes its type parameter to
   such a function, as a copy for each list of type arguments a call gives it, checked and emitted as
   a function of its own, `ShowKind<int>`: the copy's body is a copy of the function's syntax in which
@@ -952,9 +952,28 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   its slots under SipHash-1-3 with the block's keys, the hash Rust's `HashMap` takes by default (`MapSwitched`
   and the emitted `switch` helper, which hashes each key again and frees the old block), and the map stays on
   SipHash-1-3, as .NET's `Dictionary` switches to its randomized comparer one time (section 4, the owner,
-  2026-11-01, "Switch, as .NET"). A key that is an instance is hashed by its address where `==`
-  compares the addresses, and else, laid out as a `data` value is, by the hashes of the fields `==` compares (K4,
-  K5, K12).
+  2026-11-01, "Switch, as .NET"). A lookup of a key, a read's, `ContainsKey`'s or a write's (`FindEntry`), that passes
+  65 groups without a slot of 255, more than 512 slots, in a block on the fast hash that no loop over a map and no
+  text of a map holds (`MapWalk` counts those loops in the block's bytes 44 to 47, one more where a loop starts and
+  one less where it ends, at its end, a `break`, a `return` or a case propagated out of its body, and the text of a
+  map so while it walks the block, since a class's `Text()` it calls can look a key up in a map that holds the
+  block), marks the block as on SipHash-1-3 (`MapLongLookup`), moves the entries within the
+  block as hashbrown's `rehash_in_place` moves them, each by its key's hash under the block's keys, which the emitted
+  `rehash` helper takes from the key for each entry it places, as hashbrown calls its hasher for a slot, and writes
+  into the entry where the map keeps the hash (`MapRehashMark`, `MapRehashPlace`, an entry whose bytes are no
+  multiple of 8 changed byte by byte), then looks the key up again (section 4, the owner, 2026-11-02, "lookups
+  count too"; the bound and the lookups of `m[k] = v` and `Remove` assumed there; the loop the owner's answer of
+  2026-11-03, and the text of a map assumed there). Past the bound the lookup hands its probe to a helper out of line (`far`, `noinline` and `cold`) with the
+  block, the key and its hash alone, and gives what it gives: the test, the rehash and the second lookup, or, where the
+  block does not rehash, the probe again from the hash's first group with no bound, which passes again the groups the
+  lookup passed. The lookup so does not call itself, hands the call none of its loop's values and stays small enough for
+  the optimiser to inline where it is called. An insert's own lookup so passes the bound before its search of a free
+  slot can, which leaves the move into a new block to the search of a free slot in a block that grew, or in the copy
+  of a block a loop over a map holds: the loop's own count of the block makes it shared, so that an insert inside the
+  loop copies it first (M3) and moves the copy, which counts no loop (`MapCopy`), while the block the loop walks stays
+  as it was. A key that is an
+  instance is hashed by its address where `==` compares the addresses, and else, laid out as a `data` value is, by the
+  hashes of the fields `==` compares (K4, K5, K12).
   The control bytes are those of Rust's `HashMap` (`hashbrown`'s SwissTable): 255 for a slot that held
   no entry since the block was made or cleared, 128 for one whose entry was removed, else 7 bits of its
   entry's hash, bits 56 to 62; a lookup reads the control bytes of a group of 8 slots as one word and
@@ -962,8 +981,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   hash's low bits give, then each group one group further on than the stride before, and ends at a group
   with a slot of 255; a key added takes the first slot of 255 or 128 in its probe. `Remove` marks its
   slot 255 where the slot's group of 8 still holds a 255, which ends every probe that reaches the group,
-  else 128, which a probe passes, as `hashbrown`'s `erase` does, and finds the slot a second time only in
-  the copy, where the block was shared; `Clear` marks every slot 255. The search of a slot for a key
+  else 128, which a probe passes, as `hashbrown`'s `erase` does, and takes the slot at its offset in the
+  copy, where the block was shared, since the copy holds the block's bytes (`MapCopy`); `Clear` marks every slot 255. The search of a slot for a key
   added, the test of a group for a slot of 255, the walk of a loop, of a map's text and of a block that
   grows read a group's 8 control bytes as one word too, the walks taking the slots with an entry lowest
   first by a mask of the bytes whose high bit is clear, as `hashbrown`'s `RawIterRange` does. A map
@@ -1145,7 +1164,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
-  as the order, then words on the runtime's own path, where Rust's `<` of `str` calls the C library's `memcmp`,
+  as the order, then words on the runtime's own path (Rust's `<` of `str` calls the C library's `memcmp`),
   reading no byte past the end of either string, 4 to 16 bytes as four words of 4 on one path; `Same` holds the
   counts, the first bytes and up to 16 bytes, which LLVM inlines into each caller, and calls `SameBytes` for more,
   which the emitter marks `noinline`, as Rust's `==` of `str` calls the C library's `bcmp`;
@@ -1920,10 +1939,11 @@ in its call, in the copy that a call makes, a block as the body of the lambda `T
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of
 generic functions that read their type, each made by a call in the copy before, which a function that calls itself for a
 larger type each time makes without end, by a call T34's walk does not read: outside a loop over `T.Fields`, in an arm of a
-`match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34): when the first such chain reaches the
-bound, the same outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
+`match` on `T.Kind`, or with a type argument that is the field's type or holds it with no type parameter of the function (T33, T34): when such a chain reaches the
+bound, its outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
 the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
-ended (T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
+ended; another outer call still makes its copies, and each one whose chain reaches the bound reports its own `not supported`
+(T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
 under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
 `redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two
@@ -2073,14 +2093,20 @@ round can ask about it by the rule's id.
   argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
   comment 6620467625); the type parameter that failed is the one at which the inference ended (the
   owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
-  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564), and where none
+  differs so, because the position contradicts itself or an earlier type at an occurrence after its
+  first, the first in the order of declaration whose occurrences there fail with every other type
+  parameter left open: `Q(Pair<int, string>(1, "s"), 5)` for `int Q<T>(Pair<T, T> a, List<T> c)` names
+  argument 2 and `T` (the owner, 2026-11-06, #156, comment 6692304530; the owner chose the fix, #39,
+  comment 6691280436). Where every argument
   gives that type parameter a type and they differ, or no argument stands in a position, it names none
   (the owner, 2026-11-04, #156, comment 6643376941). The id stays
   T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument fails to give that
-  type parameter a type (below). Its reason, that a call whose own argument
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument with no error of its
+  own gives that type parameter nothing, or a lambda fits no function type its parameter could be
+  (below). Its reason, that a call whose own argument
   does not fit reports that misfit alone, is a convention of the messages the pipeline took, not the
   owner (#156, comment 6566609960). The call's result is read as a direct position reads it: one that
   does not name the type parameter stays, so `Count(nothing)` is an `int`, and one that does reports
