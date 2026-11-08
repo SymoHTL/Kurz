@@ -1,0 +1,16 @@
+// expect: error nullable-unchecked at 15
+// rules: N3
+
+// the `then` of `if false` is never reached, and it is checked as any other code, with what held before the `if`, so the use
+// of the nullable `email` there is `nullable-unchecked`
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(2)
+if false {
+    print(email.Bytes.Count)
+}
