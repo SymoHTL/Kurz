@@ -4613,7 +4613,8 @@ match Url.Decode(Url.Encode(text)) {
 it, together with the two obsolete forms the RFC has a recipient read, RFC 850's
 `Sunday, 06-Nov-94 08:49:37 GMT` and asctime's `Sun Nov  6 08:49:37 1994`: static functions of the
 class `HttpDate` of `std/`, which every file sees (W1), as Rust's `httpdate` crate, which hyper uses,
-writes and reads them, and the server writes its own `Date` (W9) by the same function (§12, the
+writes and reads them, and the server writes its own `Date` (W9) by the same function, the one of
+`std/` that `Format` writes by (§12, the
 owner, 2026-11-06, issue 110, comment 6680237968, G3 (a), asked in comment 6673104097).
 The readings are the crate's where it has one (§12, the owner, 2026-11-08, issue 110, comment 6721051459,
 "httpdate's readings", asked in comment 6715835046 as one question): `Format` takes the second towards the past, as
