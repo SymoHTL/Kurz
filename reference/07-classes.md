@@ -350,7 +350,9 @@ and the class is `missing-member` (§4, the owner, 2026-11-02, #110, comment 657
 ignored, under which a call through the interface passes a value where the method takes a place, M7). One
 inherited without `pub` does not count, and the class is `missing-member` (the owner, 2026-10-10); it
 implements the interface with a `pub` method of its own, which hides nothing, since a base method the
-class cannot see is hidden by nothing (below).
+class cannot see is hidden by nothing (below). A property, the class's own or inherited, is no method and
+implements none, since a call of its name calls the value it gives (below), and the class is
+`missing-member` *(assumed, §4: as C# refuses a property for a method of an interface, CS0535)*.
 Between the braces of a class, a field is written `Type name`, with `mut` in front when it can be
 assigned and its first value after `=`, which may be any expression (the owner, 2026-10-10, against a constant, which F12 keeps for a
 parameter's default): it may read the parameters of the primary constructor, the fields declared above
