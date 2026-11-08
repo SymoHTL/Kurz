@@ -1093,12 +1093,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its own, each once, and makes the message as an interpolation makes it (L6) and the fields,
   ` name=value` each, a `string` through `LogQuoted`, then reads `Now` and calls `LogLine`, which puts
   the line together in a buffer of its thread and hands it to one write call on standard error, the
-  line of the lines dropped before it in the same write; a refused write counts the line as dropped.
-  `LogTests` pins what no case can: the layout of a line and its time against the test's, a string's
-  quotes and the escapes, the category of a method, of a function and of the top level, the levels and
+  line of the lines dropped before it in the same write; a refused write counts the line as dropped,
+  and after a line the system took in part, the next write starts with a line feed. The corpus's runner
+  takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
+  and its time against the test's, a string's quotes and the escapes, the category of a method, of a
+  function, of a lambda and of the top level, a method named `Log`, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
-  the lines dropped while standard error refused its writes, the crash line after a line, and the refusal for Windows;
+  the lines dropped while standard error refused its writes, a line it took in part, the crash line
+  after a line, the refusal for Windows, and a case run with no `KURZ_LOG`;
 - the hashes (H1 to H6), in a build for every target: each is a call of a `pub` function of `std/`, which takes the
   blocks of the lists of bytes it is given and gives a new block, null where the system refused one, which ends the
   process with `allocation-failed` as a list's refused block does (M9). A hasher is the block of a list of bytes that
