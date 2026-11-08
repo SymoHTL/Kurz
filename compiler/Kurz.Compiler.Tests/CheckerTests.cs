@@ -3980,6 +3980,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MissingMember, 8)], Errors("interface Bump {\n    void Go(mut int n)\n}\nclass B {\n    pub void Go(int n) {\n    }\n}\nclass C : B, Bump\n\nprint(1)"));
         var (bump, _) = Check("interface Bump {\n    void Go(mut int n)\n}\nclass C : Bump {\n    pub void Go(int n) {\n    }\n}\n\nprint(1)");
         Assert.Contains("`void Go(mut int)`", Assert.Single(bump.Items).Message, StringComparison.Ordinal);
+        // K6 with K7: a property is no method, so a `pub` property of the class or of its base implements no method of an interface, as
+        // `d.Area()` on a property calls the value it gives: the class is `missing-member`
+        Assert.Equal([(ErrorIds.MissingMember, 5)], Errors(shape + "class Dot : Shape {\n    pub int Area => 1\n    pub string Text() => \"dot\"\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.MissingMember, 8)], Errors(shape + "class Base {\n    pub int Area => 1\n}\nclass Dot : Base, Shape {\n    pub string Text() => \"dot\"\n}\n\nprint(1)"));
         // K7: a body of a method of an interface is `syntax` at its line, and the signature stands (the owner, 2026-11-02, #110, I1;
         // the id *(assumed)*): nothing else is reported, and the class implements the method as the signature gives it
         const string bodied = "interface Shape {\n    int Area()\n    string Text() => \"area\"\n}\n";
@@ -4566,7 +4570,7 @@ public sealed class CheckerTests
     [InlineData("class C {\n    pub override int Count => 1\n}\n\nprint(1)\n", "2: the modifier `override` of a property, which section 14 leaves open (K7)")]
     [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property, which section 14 leaves open (K7)")]
     [InlineData("class C {\n    pub extern \"C\" int Count => 1\n}\n\nprint(1)\n", "2: the modifier `extern` of a property (K7, R16)")]
-    [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "1: an interface (K6, K10)")]
+    [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "2: a property of an interface, which section 14 leaves open (K7)")]
     [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: the body of a data type (D16)")]
     [InlineData("class C {\n    pub void Say => print(1)\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
     [InlineData("class C {\n    pub int | IoError Count => 1\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
@@ -4577,7 +4581,7 @@ public sealed class CheckerTests
         // K7: a `static`, `virtual`, `override` or `prot` property, one in an interface or in the body of a `data` type, and one of `void`
         // or of a type that lists cases are open (section 14, the product pass's questions 6 and 7 and #39's readings, at their defaults),
         // and `extern` is not supported on a property as on a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
-        // this checker does not take for a property; an interface and a `data` type's body are not supported whatever they hold
+        // this checker does not take for a property; a `data` type's body is not supported whatever it holds
         Assert.Equal([expected], NotSupported(program));
     }
 

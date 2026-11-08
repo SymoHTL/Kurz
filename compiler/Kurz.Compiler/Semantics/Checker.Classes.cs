@@ -71,7 +71,7 @@ public sealed partial class Checker
     private void DeclareInterface(TypeDeclaration d)
     {
         unsupportedBases[d.Name] = "an interface a data type names (K10)"; // D6: a data type's base is a data type
-        foreach (var f in (d.Members ?? []).OfType<FunctionDeclaration>().Where(f => f.ExpressionBody is not null || f.BlockBody is not null))
+        foreach (var f in (d.Members ?? []).OfType<FunctionDeclaration>().Where(f => !f.Property && (f.ExpressionBody is not null || f.BlockBody is not null)))
         {
             Report(ErrorIds.Syntax, f.Line, $"a body of the method `{f.Name}` of an interface, which lists the signatures of its methods alone (K7)");
         }
@@ -97,7 +97,7 @@ public sealed partial class Checker
     /// <summary>
     /// The first part of an interface's declaration that the checker does not read, with its line; null where it reads all of it. K7
     /// gives an interface the signatures of its methods: type parameters of the interface or of a method (T19, section 4), a
-    /// modifier, a default of a parameter and any member that is no method are parts no rule gives an interface or the checker does not
+    /// modifier, a default of a parameter and any member that is no method, a property among them (section 14), are parts no rule gives an interface or the checker does not
     /// read; a body is <c>syntax</c> (<see cref="DeclareInterface"/>).
     /// </summary>
     private static (int Line, string Construct)? UnreadInterfacePart(TypeDeclaration d)
@@ -111,6 +111,8 @@ public sealed partial class Checker
         {
             switch (member)
             {
+                case FunctionDeclaration { Property: true } f:
+                    return (f.Line, "a property of an interface, which section 14 leaves open (K7)"); // K7: no signature, and its body is no syntax error
                 case FunctionDeclaration f when f.Modifiers != Modifiers.None:
                     return (f.Line, "a modifier of a method of an interface (K7)");
                 case FunctionDeclaration f when f.TypeParameters.Count > 0:
@@ -742,7 +744,8 @@ public sealed partial class Checker
     /// the method, and none, an inherited one without <c>pub</c> not counting, is <c>missing-member</c> at the class. <c>mut</c> is part
     /// of the signature: a method whose <c>mut</c> parameters are not the interface method's implements nothing, and the class is
     /// <c>missing-member</c> (the owner, 2026-11-02, #110, against <c>mut</c> ignored, under which a call through the interface passes a
-    /// value where the method takes a place, M7).
+    /// value where the method takes a place, M7). A property is no method and implements none, its own or inherited, as a call of its
+    /// name calls the value it gives (K7).
     /// </summary>
     private void CheckImplementations(ClassSymbol symbol)
     {
@@ -756,7 +759,7 @@ public sealed partial class Checker
                 }
 
                 var candidates = symbol.Chain.SelectMany(c => c.Methods.TryGetValue(m.Name, out var list) ? list : [])
-                    .Where(x => SameParameters(x, m) && SameMut(x, m) && x.TypeParameters.Count == 0 && Types.Same(x.ReturnType, m.ReturnType)).ToList();
+                    .Where(x => !x.IsProperty && SameParameters(x, m) && SameMut(x, m) && x.TypeParameters.Count == 0 && Types.Same(x.ReturnType, m.ReturnType)).ToList();
                 var own = candidates.FirstOrDefault(x => ReferenceEquals(x.Owner, symbol));
                 var found = own ?? candidates.FirstOrDefault(x => (x.Declaration!.Modifiers & Modifiers.Pub) != 0);
                 if (own is not null && (own.Declaration!.Modifiers & Modifiers.Pub) == 0)

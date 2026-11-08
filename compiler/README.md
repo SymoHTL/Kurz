@@ -936,7 +936,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
   key and the value, laid out as a `data` value of the three, for a key of a kind whose hash can read
   more than one word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that
-  does not compare by identity: by its content, K4, or by the fields it names, K5), as .NET's
+  does not compare by identity: by its content, K4, or by the fields it names, K5, a value of an
+  interface, K6, hashed as its instance's class hashes), as .NET's
   `Dictionary` keeps each entry's hash code, and the key and the value alone for a key of one word (an
   integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`, an instance
   that compares by identity, hashed by its address), whose growth hashes every key again, as

@@ -42,7 +42,7 @@ public sealed partial class Emitter
     /// and every move of an entry follows. A key of a kind whose hash can read more than one word keeps it, as .NET's
     /// <c>Dictionary</c> keeps each entry's hash code, so that a growth does not hash the key again: a string's bytes, a time of 128
     /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that does not compare by
-    /// identity, by its content (K4) or by the fields it names (K5); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
+    /// identity, by its content (K4) or by the fields it names (K5), a value of an interface (K6); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
     /// word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an instance
     /// that compares by identity, whose hash is the fast hash of the one word, its address for the instance, or SipHash-1-3 under the
     /// block's keys after the map switched (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it
@@ -56,6 +56,7 @@ public sealed partial class Emitter
     {
         PrimitiveType { Kind: Primitive.String } => true,
         ClassType c => !c.Symbol.ComparesByIdentity, // K4: an instance that compares by identity is hashed by its address
+        InterfaceType => true, // K6 with K13: hashed through its class's table, by the content of an instance whose class compares by it
         DataType or ListType or UnionType => true,
         _ => Lower.IrType(key) == "i128",
     };
