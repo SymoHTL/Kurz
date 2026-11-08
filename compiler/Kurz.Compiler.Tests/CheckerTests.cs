@@ -4063,6 +4063,9 @@ public sealed class CheckerTests
         // `d.Area()` on a property calls the value it gives: the class is `missing-member`
         Assert.Equal([(ErrorIds.MissingMember, 5)], Errors(shape + "class Dot : Shape {\n    pub int Area => 1\n    pub string Text() => \"dot\"\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.MissingMember, 8)], Errors(shape + "class Base {\n    pub int Area => 1\n}\nclass Dot : Base, Shape {\n    pub string Text() => \"dot\"\n}\n\nprint(1)"));
+        // K7: a `static` method takes no instance, so it implements no method of an interface, as C# refuses it (CS0736): the class is
+        // `missing-member`
+        Assert.Equal([(ErrorIds.MissingMember, 5)], Errors("interface Named {\n    string Greet(int n)\n}\n\nclass S(int V) : Named {\n    pub static string Greet(int n) => \"static {n}\"\n}\n\nNamed x = S(1)\nprint(x.Greet(5))"));
         // K7: a body of a method of an interface is `syntax` at its line, and the signature stands (the owner, 2026-11-02, #110, I1;
         // the id *(assumed)*): nothing else is reported, and the class implements the method as the signature gives it
         const string bodied = "interface Shape {\n    int Area()\n    string Text() => \"area\"\n}\n";

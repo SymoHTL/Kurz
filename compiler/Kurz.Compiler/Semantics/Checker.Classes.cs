@@ -759,7 +759,7 @@ public sealed partial class Checker
                 }
 
                 var candidates = symbol.Chain.SelectMany(c => c.Methods.TryGetValue(m.Name, out var list) ? list : [])
-                    .Where(x => !x.IsProperty && SameParameters(x, m) && SameMut(x, m) && x.TypeParameters.Count == 0 && Types.Same(x.ReturnType, m.ReturnType)).ToList();
+                    .Where(x => !x.IsProperty && !x.IsStatic && SameParameters(x, m) && SameMut(x, m) && x.TypeParameters.Count == 0 && Types.Same(x.ReturnType, m.ReturnType)).ToList();
                 var own = candidates.FirstOrDefault(x => ReferenceEquals(x.Owner, symbol));
                 var found = own ?? candidates.FirstOrDefault(x => (x.Declaration!.Modifiers & Modifiers.Pub) != 0);
                 if (own is not null && (own.Declaration!.Modifiers & Modifiers.Pub) == 0)
