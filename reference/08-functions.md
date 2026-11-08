@@ -24,10 +24,10 @@ A body between braces holds statements. `return expression` ends the function wi
 as in C#. As there, a function with a result whose end can be reached without a `return`, and a
 bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
-Whether the end can be reached is read as N3 reads a block that always leaves, so a body that
-ends in a `while true` with no `break` of its own needs no `return` after it; only the literal
-`true` is read so, where C# takes any constant that is `true`.
-*(proposed: C#'s rules with Kurz's ids)*
+Whether the end can be reached is read as N3 reads a block that always leaves, its `while true`
+form included.
+*(proposed: C#'s rules with Kurz's ids; the reading of the end is N3's, which the record marks as
+assumed)*
 
 Case: [functions/block-body.kz](../corpus/functions/block-body.kz)
 ```kurz
@@ -50,6 +50,62 @@ int Sign(int n) {
 }
 
 print(Sign(3))
+```
+
+Case: [functions/while-true-end.kz](../corpus/functions/while-true-end.kz)
+```kurz
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+class C(int N) {
+    pub int Get() {
+        mut k = 0
+        while true {
+            k = k + 1
+            if k == N {
+                return k * 10
+            }
+        }
+    }
+}
+
+f = (int n) => {
+    while true {
+        return n + 1
+    }
+}
+
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+string Pick(bool b) {
+    if b {
+        while true {
+            return "loop"
+        }
+    } else {
+        return "else"
+    }
+}
+
+print(First([1, 2, 3, 4]))
+print(C(4).Get())
+print(f(1))
+print(Once())
+print(Pick(true))
+print(Pick(false))
 ```
 
 ### F4 (assumed, §8) `void`

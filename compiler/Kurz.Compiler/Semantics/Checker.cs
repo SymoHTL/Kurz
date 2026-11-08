@@ -155,7 +155,7 @@ public sealed partial class Checker
         /// <summary>The statement can end and the next one run.</summary>
         Completes,
 
-        /// <summary>Every path leaves the block: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all do, or a <c>while true</c> with no <c>break</c> of its own.</summary>
+        /// <summary>The end of the statement cannot be reached: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all leave, or a <c>while true</c> with no <c>break</c> of its own that can be reached.</summary>
         Ends,
     }
 
@@ -204,6 +204,9 @@ public sealed partial class Checker
 
         /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs.</summary>
         public List<LoopExits> Loops { get; } = [];
+
+        /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, so that a <c>break</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
+        public bool Unreached { get; set; }
     }
 
     private sealed class Scope
@@ -1869,14 +1872,17 @@ public sealed partial class Checker
         PushNested(block.Statements);
         blockDepth++;
         var flow = Flow.Completes;
+        var unreached = frame.Unreached;
         foreach (var s in block.Statements)
         {
             if (CheckStatement(s) == Flow.Ends)
             {
                 flow = Flow.Ends;
+                frame.Unreached = true; // F3, N3: the statements after it are never reached
             }
         }
 
+        frame.Unreached = unreached;
         blockDepth--;
         PopNested();
         PopScope();
@@ -1958,9 +1964,9 @@ public sealed partial class Checker
                 {
                     NotSupported(b.Line, "`break` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
-                else
+                else if (!frame.Unreached)
                 {
-                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
+                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop; F3: a `break` that is reached lets the loop end
                 }
 
                 return Flow.Ends;
