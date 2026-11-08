@@ -132,11 +132,11 @@ int First(List<int> xs) {
 print(First([1, 2, 3, 4]))
 ```
 
-Case: [functions/while-not-false-missing-return.kz](../corpus/functions/while-not-false-missing-return.kz)
+Case: [functions/while-not-constant-missing-return.kz](../corpus/functions/while-not-constant-missing-return.kz)
 ```kurz
-int First(List<int> xs) {
+int First(List<int> xs, bool go) {
     mut i = 0
-    while !false {
+    while go {
         if xs[i] > 2 {
             return xs[i]
         }
@@ -145,7 +145,41 @@ int First(List<int> xs) {
     }
 }
 
-print(First([1, 2, 3, 4]))
+print(First([1, 2, 3, 4], true))
+```
+
+Case: [functions/constant-condition-end.kz](../corpus/functions/constant-condition-end.kz)
+```kurz
+int One() {
+    if true {
+        return 1
+    }
+}
+
+int Two() {
+    while !false {
+        return 2
+    }
+}
+
+int Three(List<int> xs) {
+    mut i = 0
+    while true {
+        if false {
+            break
+        }
+
+        if xs[i] == 3 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(One())
+print(Two())
+print(Three([1, 2, 3]))
 ```
 
 ### F4 (assumed, §8) `void`

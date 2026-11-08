@@ -155,7 +155,7 @@ public sealed partial class Checker
         /// <summary>The statement can end and the next one run.</summary>
         Completes,
 
-        /// <summary>The end of the statement cannot be reached: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all leave, or a <c>while true</c> with no <c>break</c> of its own that can be reached.</summary>
+        /// <summary>The end of the statement cannot be reached: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all leave, the branch a constant condition takes where it leaves, or a <c>while</c> whose condition is the constant <c>true</c> with no <c>break</c> of its own that can be reached.</summary>
         Ends,
     }
 
@@ -205,7 +205,7 @@ public sealed partial class Checker
         /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs that can be reached.</summary>
         public List<LoopExits> Loops { get; } = [];
 
-        /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, so that a <c>break</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
+        /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, or stands in a branch that a constant condition never takes, so that a <c>break</c> or a <c>continue</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
         public bool Unreached { get; set; }
     }
 
@@ -1920,28 +1920,39 @@ public sealed partial class Checker
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
+                    // F3, N3: a condition whose value is a constant takes one branch alone, as C# reads it; the other is never reached
                     var calls = callsRun;
                     CheckCondition(i.Condition);
+                    var constant = ConstantCondition(i.Condition);
                     var start = frame.Known;
+                    var unreached = frame.Unreached;
                     var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
+                    frame.Unreached = unreached || constant == false;
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
                     frame.Known = start.Union(whenFalse);
+                    frame.Unreached = unreached || constant == true;
                     var other = i.Else is null ? Flow.Completes : CheckStatement(i.Else);
+                    frame.Unreached = unreached;
                     var reaching = new List<ImmutableHashSet<NullPath>>();
-                    if (then == Flow.Completes)
+                    if (then == Flow.Completes && constant != false)
                     {
                         reaching.Add(afterThen);
                     }
 
-                    if (other == Flow.Completes)
+                    if (other == Flow.Completes && constant != true)
                     {
                         reaching.Add(frame.Known);
                     }
 
                     frame.Known = Join(reaching, start);
-                    return then == Flow.Ends && i.Else is not null && other == Flow.Ends ? Flow.Ends : Flow.Completes;
+                    return constant switch
+                    {
+                        true => then,
+                        false => other,
+                        null => then == Flow.Ends && i.Else is not null && other == Flow.Ends ? Flow.Ends : Flow.Completes,
+                    };
                 }
 
             case WhileStatement w:
@@ -2155,6 +2166,14 @@ public sealed partial class Checker
             Report(ErrorIds.TypeMismatch, condition.Line, $"a condition is a `bool`, not {Types.A(t.Type)} (C3)");
         }
     }
+
+    /// <summary>
+    /// F3, N3: the value of a condition that is a constant, as a default's constant folds (literals under the operators of T18, T22 and
+    /// T12), which decides the branch of an <c>if</c> that is reached and whether the body and the end of a <c>while</c> are, as C# reads a
+    /// constant condition (section 4, the owner, 2026-11-08, "C#'s rule"); null for any other condition.
+    /// </summary>
+    private bool? ConstantCondition(Expression condition) =>
+        model.HasType(condition) && model.TypeOf(condition).Constant is BoolConstant b ? b.Value : null;
 
     private void CheckVariableDeclaration(VariableDeclaration v)
     {

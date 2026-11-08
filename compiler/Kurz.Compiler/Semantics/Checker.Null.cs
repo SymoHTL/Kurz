@@ -296,8 +296,9 @@ public sealed partial class Checker
     /// what the condition leaves where it is false, joined with what held at each <c>break</c> that can be reached, and a <c>while true</c>
     /// what held at those <c>break</c>s alone; a <c>break</c> or a <c>continue</c> after a statement whose end cannot be reached adds
     /// nothing; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
-    /// Returns whether the loop can end: a <c>while true</c> ends only through a <c>break</c> of its own that can be reached, as the end
-    /// point of C#'s <c>while (true)</c> is reached only through one (F3), and the same test of its condition decides both.
+    /// Returns whether the loop can end: a <c>while</c> whose condition is the constant <c>true</c> ends only through a <c>break</c> of its
+    /// own that can be reached, as the end point of C#'s <c>while (true)</c> is reached only through one (F3), and the same constant decides
+    /// both; the body of one whose condition is the constant <c>false</c> is never reached, as in C#.
     /// </summary>
     private bool CheckLoop(Expression? condition, Block body)
     {
@@ -309,10 +310,12 @@ public sealed partial class Checker
             Push();
             var tested = head;
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
+            bool? constant = null;
             if (condition is not null)
             {
                 var calls = callsRun;
                 CheckCondition(condition);
+                constant = ConstantCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
                 (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
@@ -321,11 +324,14 @@ public sealed partial class Checker
             frame.Loops.Add(exits);
             frame.Known = tested.Union(whenTrue);
             frame.LoopDepth++;
+            var unreached = frame.Unreached;
+            frame.Unreached = unreached || constant == false;
             var flow = CheckBlock(body);
+            frame.Unreached = unreached;
             frame.LoopDepth--;
             frame.Loops.RemoveAt(frame.Loops.Count - 1);
             var rounds = exits.Continues.ToList();
-            if (flow == Flow.Completes)
+            if (flow == Flow.Completes && constant != false)
             {
                 rounds.Add(frame.Known);
             }
@@ -334,7 +340,7 @@ public sealed partial class Checker
             if (next.Count == head.Count)
             {
                 Pop(commit: true);
-                var forever = condition is not null && Unwrap(condition) is BoolLiteral { Value: true };
+                var forever = constant == true;
                 var leaves = forever ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
                 frame.Known = Join(leaves, tested);
                 return !forever || exits.Breaks.Count > 0;
