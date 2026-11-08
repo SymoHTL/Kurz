@@ -1,0 +1,8 @@
+// expect: error default-not-constant at 5
+// rules: K7, F12
+
+class Counter(int Start) {
+    pub int Next(int from = Start) => from + 1
+}
+
+print(Counter(1).Next(2))

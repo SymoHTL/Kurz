@@ -1,0 +1,12 @@
+// expect: error type-mismatch at 9
+// rules: T35, T8
+
+void Narrow<const int N>() {
+    print(N)
+}
+
+void Pass<const long L>() {
+    Narrow<L>()
+}
+
+Pass<7>()

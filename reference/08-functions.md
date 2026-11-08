@@ -24,7 +24,10 @@ A body between braces holds statements. `return expression` ends the function wi
 as in C#. As there, a function with a result whose end can be reached without a `return`, and a
 bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
-*(proposed: C#'s rules with Kurz's ids)*
+Whether the end can be reached is read as N3 reads a block that always leaves, its `while true`
+form included.
+*(proposed: C#'s rules with Kurz's ids; the reading of the end is N3's, which the record marks as
+assumed)*
 
 Case: [functions/block-body.kz](../corpus/functions/block-body.kz)
 ```kurz
@@ -49,13 +52,73 @@ int Sign(int n) {
 print(Sign(3))
 ```
 
+Case: [functions/while-true-end.kz](../corpus/functions/while-true-end.kz)
+```kurz
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+class C(int N) {
+    pub int Get() {
+        mut k = 0
+        while true {
+            k = k + 1
+            if k == N {
+                return k * 10
+            }
+        }
+    }
+}
+
+f = (int n) => {
+    while true {
+        return n + 1
+    }
+}
+
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+string Pick(bool b) {
+    if b {
+        while true {
+            return "loop"
+        }
+    } else {
+        return "else"
+    }
+}
+
+print(First([1, 2, 3, 4]))
+print(C(4).Get())
+print(f(1))
+print(Once())
+print(Pick(true))
+print(Pick(false))
+```
+
 ### F4 (assumed, §8) `void`
 
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
-is no type of a value: a parameter a function declares, a field or a variable of type `void` is
-`syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
+is no type of a value: a parameter a function or a method declares, `static` or not, a field or a
+variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
 `void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
-of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04): the type has one
+parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
+can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
+no value to pass (E4). A lambda that writes `void` on its parameter, `(void v) => 2`, is read against
+the function type it is passed for (F11).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -84,7 +147,7 @@ print("boxed")
 
 Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
 ```kurz
-// `void` is no type of a variable
+// `void` is no type of a variable: the case pins that refusal, and the value `1` is not checked against `void`
 void done = 1
 ```
 
@@ -444,9 +507,10 @@ does not name); one that is not is the compile error `default-not-constant`, at 
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 The default of a parameter of a method, `static` or not, is read with the members of its class in
 sight, as C# reads it: a field, a `static` field or a method of the class named there is no
-constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
-§8: `this` there is no constant either, and a field of an instance in the default of a `static`
-method is K19's `static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+constant, so it is `default-not-constant`, as C# gives CS1736 for a `static readonly` field (§8, the owner,
+2026-11-04). *(assumed, §8: `this` in the default of an instance method is no constant either, and
+`this` or a member of an instance, a field or a method, in the default of a `static` method is K19's
+`static-mismatch`, as in its body)* A call of a `virtual` method or of its override
 takes the default of the method its receiver's static type names, and runs the body the object's
 type gives, as C# does, so one object's call passes different values by the type of the variable it
 is read through; an override without a default has none of its own, and a call on the derived type
@@ -597,6 +661,30 @@ class A {
 
 class B : A {
     pub override int F(int x = 2) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
+```
+
+Case: [classes/method-default-field.kz](../corpus/classes/method-default-field.kz)
+```kurz
+class Counter(int Start) {
+    pub int Next(int from = Start) => from + 1
+}
+
+print(Counter(1).Next(2))
+```
+
+Case: [classes/method-default-override-missing.kz](../corpus/classes/method-default-override-missing.kz)
+```kurz
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x) => x * 10
 }
 
 A a = B()
@@ -910,16 +998,19 @@ arm of a `match` of the top-level code binds reserves nothing either, as a varia
 *(assumed: the answer named a loop variable, a variable inside a block and a lambda's parameter)*. In `count = count + 1` inside such a function the one error is `redeclared`, for the
 declaration on the left, which the compiler reads first to learn whether the line declares; the read
 on the right reports nothing more (the owner, 2026-10-09, against reporting `unknown-name` for the
-read first, whose message points at the read while the fix is the whole line). A type parameter of the function, one that holds a
-constant among them (T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes
-a copy of the function (T33), so that a body never has to choose which of the two it reads (§4, the owner, 2026-11-05,
-"redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its function, as C#
-and Rust let it; the cost is that a generic function cannot reuse a top-level name). The owner chose the
+read first, whose message points at the read while the fix is the whole line). The owner chose the
 rule on 2026-10-03, against reading the variable at the call as a C# local function does, which
 would have given two kinds of function two views of a captured variable (F15), and against taking
 the value at the function's declaration as a lambda does, which a function declared above the
 variable (F6) could never see; the cost is that a counter or a table of the program is passed into
-every function, or made a field of a class.
+every function, or made a field of a class. A type parameter of the function, one that holds a constant among them
+(T35), takes no such name either: it is `redeclared` at the parameter, whether or not a call makes a copy of the
+function, since a function's signature is checked from its text in every case (T33; §4, the owner, 2026-11-06,
+"Signature always, body per copy"), so that a body never has to choose which of the two it reads (§4, the owner,
+2026-11-05, "redeclared: N is a top-level variable (S13)", against the parameter hiding the variable inside its
+function, as C# and Rust let it; the cost is that a generic function cannot reuse a top-level name). The parameter
+stands for the rest of the function, so a read of its name in the body reports nothing more, and `redeclared` at the
+parameter is the one error (E1).
 
 Case: [functions/top-level-function-reads-no-variable.kz](../corpus/functions/top-level-function-reads-no-variable.kz)
 ```kurz

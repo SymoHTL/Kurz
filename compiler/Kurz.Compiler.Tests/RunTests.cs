@@ -64,10 +64,13 @@ public sealed class Toolchain : IDisposable
     /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable) => Run(executable, "0");
 
-    /// <summary>Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null.</summary>
+    /// <summary>
+    /// Runs a built program as <see cref="Run(string)"/> does, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where
+    /// it is null, and <c>KURZ_LOG</c> taken away, so that a case with a log call runs at the default level (P3) wherever the suite runs.
+    /// </summary>
     public static (int Code, IReadOnlyList<string> Output, string Error) Run(string executable, string? trace)
     {
-        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace });
+        var (code, output, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = trace, ["KURZ_LOG"] = null });
         return (code, Lines(output), error);
     }
 
@@ -110,7 +113,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows was not measured: the Windows job prints no count, and it passed with 411, so at least 411 cases build and run there. The count there may be higher, so the Windows number can have a margin, and a case that stops being built there may leave it green: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 414 : 525;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 415 : 527;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
