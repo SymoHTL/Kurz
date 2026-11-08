@@ -758,13 +758,20 @@ public sealed class CheckerTests
     [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
-        // F3, as in C#: the end point of a `while` whose condition is the literal `true` is reached only through a `break` of that loop, so
-        // a function, a method or a lambda with a result that ends in one needs no `return` after it; a `break` of the loop makes its end
-        // reachable again, a `break` of a loop inside it does not, and a condition that is not the literal `true` can be false
+        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in parentheses or not, is reached only through a
+        // `break` of that loop that can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after
+        // it; a `break` of the loop makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end
+        // cannot be reached; only the literal is read so, as the record narrows C#'s constant `true` (assumed), so `!false` and `true && true`
+        // are read as conditions that can be false
         const string Search = "int First(List<int> xs) {\n    mut i = 0\n    while true {\n        if xs[i] > 2 {\n            return xs[i]\n        }\n\n        i = i + 1\n    }\n}\n\nprint(First([1, 2, 3, 4]))";
         Clean(Search);
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
+        Clean(Search.Replace("    while true {", "    while (true) {"));
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
+        Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached
+        Clean("int Spin() {\n    while true {\n        while true {\n            return 1\n        }\n\n        break\n    }\n}\n\nprint(Spin())"); // after an endless loop
         Clean(Search.Replace("        i = i + 1\n", "        mut j = 0\n        while j < 3 {\n            if j == i {\n                break\n            }\n\n            j = j + 1\n        }\n\n        i = i + 1\n"));
         Clean("int Pick(bool b) {\n    if b {\n        while true {\n            return 1\n        }\n    } else {\n        return 2\n    }\n}\n\nprint(Pick(true))");
         Clean("class C(int N) {\n    pub int Get() {\n        while true {\n            return N\n        }\n    }\n}\n\nprint(C(1).Get())");
@@ -774,6 +781,7 @@ public sealed class CheckerTests
         const string Size = "int Size(string? e) {\n    if e == null {\n        while true {\n            return 0\n        }\n    }\n\n    return e.Bytes.Count\n}\n\nprint(Size(\"ab\"))";
         Clean(Size);
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
+        Clean(Size.Replace("            return 0\n", "            return 0\n            break\n")); // a `break` never reached leaves `e` as it was
     }
 
     [Fact]
