@@ -743,7 +743,7 @@ public sealed class ParserTests
     public void A_use_path_holds_its_names_with_a_slash_between_them(string program, string tree)
     {
         // F10: a folder's path from the folder of `project.kz`, its names with `/` between them (section 8, the owner, 2026-11-01,
-        // "Root path, last name"), and a space beside a `/` read as between any two tokens, as Rust reads `a :: b`
+        // "Root path, last name"), and a space beside a `/` read as between any two tokens (F10, assumed), as Rust reads `a :: b`
         Assert.Equal(tree, Tree(program));
     }
 
