@@ -24,6 +24,9 @@ A body between braces holds statements. `return expression` ends the function wi
 as in C#. As there, a function with a result whose end can be reached without a `return`, and a
 bare `return` in such a function, are the compile error `missing-return`; `return` with a value in
 a `void` function (F4), and a value of another type than the result, are `type-mismatch`.
+Whether the end can be reached is read as N3 reads a block that always leaves, so a body that
+ends in a `while true` with no `break` of its own needs no `return` after it; only the literal
+`true` is read so, where C# takes any constant that is `true`.
 *(proposed: C#'s rules with Kurz's ids)*
 
 Case: [functions/block-body.kz](../corpus/functions/block-body.kz)

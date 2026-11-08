@@ -769,6 +769,11 @@ public sealed class CheckerTests
         Clean("int Pick(bool b) {\n    if b {\n        while true {\n            return 1\n        }\n    } else {\n        return 2\n    }\n}\n\nprint(Pick(true))");
         Clean("class C(int N) {\n    pub int Get() {\n        while true {\n            return N\n        }\n    }\n}\n\nprint(C(1).Get())");
         Clean("f = (int n) => {\n    while true {\n        return n + 1\n    }\n}\n\nprint(f(1))");
+        Clean(Search.Replace("    }\n}\n\nprint(First", "    }\n\n    return 0\n}\n\nprint(First")); // code after the loop stays accepted, as in C#
+        // N3 reads the same flow: after an `if e == null` whose block ends in such a loop `e` is not null, and a `break` of the loop undoes it
+        const string Size = "int Size(string? e) {\n    if e == null {\n        while true {\n            return 0\n        }\n    }\n\n    return e.Bytes.Count\n}\n\nprint(Size(\"ab\"))";
+        Clean(Size);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
     }
 
     [Fact]
