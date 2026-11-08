@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpServer", "Uri", "UriError", "UriKind", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -2626,9 +2626,10 @@ public sealed partial class Checker
     /// (section 4, the owner, 2026-11-04, "Index loop, Count once"; section 12, the owner, 2026-11-02, "any class with <c>Count</c>,
     /// <c>NameAt(i)</c> and <c>ValueAt(i)</c>"), each member found and visible at the loop's place as a member access there finds it
     /// (K6, K7, F9): <c>h.Count</c>, read with no call, a field or a property of the instance, and <c>h.NameAt(i)</c> and
-    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance of one <c>int</c> (proposed, C6: a <c>Count</c> of an
-    /// <c>int</c>, the <c>int</c> of the index and a result of each method, which the two names take); a class of <c>std/</c> is read
-    /// through its symbol, as one of the file.
+    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance that the call with one <c>int</c> fits, weighed as a call
+    /// is, so that a default for a second parameter, a widening of the <c>int</c> and one overload among others count (section 4, the
+    /// owner, 2026-11-06, #39, comment 6681669642), each with a result (proposed, C6: a <c>Count</c> of an <c>int</c> and a result of
+    /// each method, which the two names take); a class of <c>std/</c> is read through its symbol, as one of the file.
     /// </summary>
     private bool WalkedByIndex(ClassSymbol c)
     {
@@ -2639,8 +2640,7 @@ public sealed partial class Checker
 
         bool TakesAnIndex(string name) =>
             MethodsOf(c, name) is { } methods
-            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1
-                && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int } && !Types.IsVoid(m.ReturnType) && Visible(m));
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && !Types.IsVoid(m.ReturnType) && Visible(m) && FitsAnIndex(m));
     }
 
     private void CheckReturn(ReturnStatement r)

@@ -52,10 +52,14 @@ print(Sign(3))
 ### F4 (assumed, §8) `void`
 
 A function that has no result is declared with `void`, as in C# and in the record's samples. `void`
-is no type of a value: a parameter a function declares, a field or a variable of type `void` is
-`syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
+is no type of a value: a parameter a function or a method declares, `static` or not, a field or a
+variable of type `void` is `syntax`, as C# refuses each (CS1536, CS0670, CS1547), while the success case of a union may be
 `void` (§5) and so may the result of a function type (F11) (§8, the owner, 2026-11-04). A parameter
-of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04).
+of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-04): the type has one
+parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
+can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
+no value to pass (E4). A lambda that writes `void` on its parameter, `(void v) => 2`, is read against
+the function type it is passed for (F11).
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -84,7 +88,7 @@ print("boxed")
 
 Case: [functions/void-variable.kz](../corpus/functions/void-variable.kz)
 ```kurz
-// `void` is no type of a variable
+// `void` is no type of a variable: the case pins that refusal, and the value `1` is not checked against `void`
 void done = 1
 ```
 
@@ -444,9 +448,10 @@ does not name); one that is not is the compile error `default-not-constant`, at 
 2026-10-10, after the owner's choice)*). The default of a field of a class body may be any expression (K7).
 The default of a parameter of a method, `static` or not, is read with the members of its class in
 sight, as C# reads it: a field, a `static` field or a method of the class named there is no
-constant, so it is `default-not-constant`, as C# gives CS1736 (§8, the owner, 2026-11-04). *(assumed,
-§8: `this` there is no constant either, and a field of an instance in the default of a `static`
-method is K19's `static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+constant, so it is `default-not-constant`, as C# gives CS1736 for a `static readonly` field (§8, the owner,
+2026-11-04). *(assumed, §8: `this` in the default of an instance method is no constant either, and
+`this` or a member of an instance, a field or a method, in the default of a `static` method is K19's
+`static-mismatch`, as in its body)* A call of a `virtual` method or of its override
 takes the default of the method its receiver's static type names, and runs the body the object's
 type gives, as C# does, so one object's call passes different values by the type of the variable it
 is read through; an override without a default has none of its own, and a call on the derived type
@@ -604,6 +609,30 @@ print(a.F())
 print(B().F())
 ```
 
+Case: [classes/method-default-field.kz](../corpus/classes/method-default-field.kz)
+```kurz
+class Counter(int Start) {
+    pub int Next(int from = Start) => from + 1
+}
+
+print(Counter(1).Next(2))
+```
+
+Case: [classes/method-default-override-missing.kz](../corpus/classes/method-default-override-missing.kz)
+```kurz
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
+```
+
 ### F13 (decided, §8) Which overload a call picks
 
 A call can fit more than one function of its name: through widening (T8), when `Show(int)` and
@@ -671,6 +700,33 @@ void Show(string s) {
 
 long big = 5
 Show(big)
+```
+
+A method that the place of the call does not see (F9) is no candidate of the call where the place
+sees one of its name: a call from a class that fits only a method or a property of a base the class
+does not see gets the error of the class's own methods of that name, as C# leaves an inaccessible
+member out of overload resolution (CS7036, CS1501). The owner chose this on 2026-11-06 (#39,
+comment 6680927192), against keeping such a member a candidate and refusing the call with
+`not-visible`, as Rust reports a private method its lookup found (E0624); the cost is a filter of
+the candidates by what the class sees, and an error that does not name the base's method. A call
+outside every class, through an instance, picks among the methods its place sees too, and where the
+place sees no method of the name, the call is `not-visible` (F9), as C# reports a member it cannot
+reach (CS0122) *(assumed: a reading of the answer, which named a call from the class)*.
+
+Case: [classes/call-hidden-base-method.kz](../corpus/classes/call-hidden-base-method.kz)
+```kurz
+class Counter(int Start) {
+    int Next() => Start + 1
+}
+
+class Ticket(int Seat) : Counter {
+    pub int Next(int step) => Seat + step
+
+    // `Next()` fits only the `Next` of `Counter`, which `Ticket` does not see: it is no candidate, and the call is `Next(int)`'s
+    pub int Take() => Next()
+}
+
+print(Ticket(1, 2).Take())
 ```
 
 A call of a name that has one function, with an argument of a type its parameter does not take, is

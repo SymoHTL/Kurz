@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Kurz.Compiler.Build;
-using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -74,18 +73,19 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             Assert.Equal(0, run.Code);
             Assert.Equal(["done"], run.Output);
-            Assert.Equal(["Information program: Paid 17 by a \"b\" \\ c id=17 who=\"a \\\"b\\\" \\\\ c\""], run.Lines);
+            Assert.Equal(["Information program: Paid 17 by a \"b\" \\\\ c id=17 who=\"a \\\"b\\\" \\\\ c\""], run.Lines); // a `\` in the message as `\\`
         }
     }
 
     [Fact]
-    public void A_line_feed_and_a_carriage_return_in_the_message_or_a_field_are_written_as_escapes_on_one_line()
+    public void A_line_feed_and_a_carriage_return_in_the_message_or_a_field_are_written_as_escapes_on_one_line_a_backslash_in_the_message_as_two()
     {
-        const string text = "note = \"one\\ntwo\\rthree\"\nLog.Warning(\"note {note} {7}\\n\")\n";
+        // the message ends with a line feed, then `\` and `n`: written `\n` and `\\n`, so that the escape reads back
+        const string text = "note = \"one\\ntwo\\rthree\"\nLog.Warning(\"note {note} {7}\\n\\\\n\")\n";
         if (Logged(text, "log-breaks") is { } run)
         {
             Assert.Equal(0, run.Code);
-            Assert.Equal(["Warning program: note one\\ntwo\\rthree 7\\n note=\"one\\ntwo\\rthree\" 7=7"], run.Lines);
+            Assert.Equal(["Warning program: note one\\ntwo\\rthree 7\\n\\\\n note=\"one\\ntwo\\rthree\" 7=7"], run.Lines);
         }
     }
 
@@ -97,6 +97,19 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         {
             Assert.Equal(0, run.Code);
             Assert.Equal(["Information Orders: in a method", "Information program: in a function", "Information program: at the top"], run.Lines);
+        }
+    }
+
+    [Fact]
+    public void A_call_in_a_lambda_takes_the_category_of_the_code_that_holds_it_and_a_member_named_Log_leaves_the_log_call()
+    {
+        // P6 for a lambda in a method and at the top, and P1 for a method named `Log` of the type whose method logs
+        const string text = "class Orders {\n    pub void Log() {\n        print(\"own\")\n    }\n\n    pub void Pay() {\n        f = () => Log.Information(\"in a lambda\")\n        f()\n        Log.Information(\"in a method\")\n    }\n}\n\no = Orders()\no.Log()\no.Pay()\ng = () => Log.Information(\"at the top\")\ng()\n";
+        if (Logged(text, "log-lambda") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["own"], run.Output);
+            Assert.Equal(["Information Orders: in a lambda", "Information Orders: in a method", "Information program: at the top"], run.Lines);
         }
     }
 
@@ -160,6 +173,7 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     [InlineData(" wArNiNg , shop=Error,SHOPORDERS=Debug,,", "orders debug|orders information|items error|top warning")] // the longest prefix, no regard to case, spaces and empty entries
     [InlineData("ShopOrders=Debug,ShopOrders=Critical", "items warning|items error|top information|top warning")] // the last of two alike
     [InlineData("Shop=Debug,ShopOrders=Warning", "items warning|items error|top information|top warning")] // the longer prefix, written after the shorter
+    [InlineData("ShopOrders=Warning,Shop=Debug", "items warning|items error|top information|top warning")] // the longer prefix, written before the shorter
     [InlineData("None,ShopItems=Error", "items error")] // `None` above every level
     [InlineData("Debug,Error", "items error")] // the last bare level
     public void KURZ_LOG_sets_the_level_of_a_category_by_its_longest_prefix_else_by_its_bare_level(string filter, string expected)
@@ -176,8 +190,18 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     [InlineData("export KURZ_LOG='Warning, Shop=Loud ,Debug'; ", "error: log-filter (Shop=Loud)\n")]
     [InlineData("export KURZ_LOG='=Debug'; ", "error: log-filter (=Debug)\n")]
     [InlineData("export KURZ_LOG='Shop = Debug'; ", "error: log-filter (Shop = Debug)\n")]
-    [InlineData("export KURZ_LOG=\"$(printf 'Debug\\377')\"; ", "error: log-filter (not unicode)\n")]
-    public void A_KURZ_LOG_with_an_entry_that_is_no_level_ends_the_start_with_log_filter_naming_the_entry(string setup, string error)
+    public void A_KURZ_LOG_with_an_entry_that_is_no_level_ends_the_start_with_log_filter_naming_the_entry(string setup, string error) =>
+        Refused(setup, error);
+
+    [Fact]
+    public void A_KURZ_LOG_that_is_not_UTF_8_ends_the_start_with_log_filter_not_unicode() =>
+        Refused("export KURZ_LOG=\"$(printf 'Debug\\377')\"; ", "error: log-filter (not unicode)\n");
+
+    /// <summary>
+    /// A program with a log call, started after <paramref name="setup"/>, ends with the exit code 1 and <paramref name="error"/> alone, while
+    /// the same program under a filter of levels and a program with no log call under <paramref name="setup"/> run.
+    /// </summary>
+    private void Refused(string setup, string error)
     {
         const string text = "print(\"start\")\nLog.Information(\"x\")\n";
         if (Ran(text, $"log-refused-{Math.Abs(setup.GetHashCode(StringComparison.Ordinal))}", setup) is { } run)
@@ -223,27 +247,86 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         var refused = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Windows), testBuild: true);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((2, Emitter.LogNotOnWindows), (diagnostic.Line, diagnostic.Message));
-        Assert.StartsWith("program.kz:2: not supported: a log call", diagnostic.At("program.kz"), StringComparison.Ordinal);
+        Assert.Equal("program.kz:2: not supported: a log call, whose line holds the time of the clock, which the runtime of Windows does not give (S11, P6)", diagnostic.At("program.kz"));
         Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program); // the positive control
     }
 
     [Theory]
-    [InlineData("Log.Information(\"a\")\n", "Warning Kurz.Log: dropped 1 line")]
-    [InlineData("Log.Information(\"a\")\nLog.Error(\"b\")\n", "Warning Kurz.Log: dropped 2 lines")]
-    public void A_write_the_system_refuses_raises_nothing_and_the_next_line_written_says_how_many_were_dropped(string dropped, string line)
+    [InlineData("Log.Information(\"a\")\n", "", "Warning Kurz.Log: dropped 1 line")]
+    [InlineData("Log.Information(\"a\")\nLog.Error(\"b\")\n", "", "Warning Kurz.Log: dropped 2 lines")]
+    [InlineData("Log.Information(\"a\")\n", "Kurz.Log=None", "Warning Kurz.Log: dropped 1 line")] // whatever level the filter gives `Kurz.Log`
+    public void A_write_the_system_refuses_raises_nothing_and_the_next_line_written_says_how_many_were_dropped(string dropped, string filter, string line)
     {
         // standard error appends to a file already past the limit of a file's size, so that a write fails with EFBIG and no signal;
         // the program empties the file, and the next line is written
         var text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\n" + dropped + "Empty() else {\n    IoError e => print(e)\n}\n\nLog.Information(\"c\")\nLog.Information(\"d\")\nprint(\"done\")\n";
-        var name = $"log-dropped-{dropped.Length}";
+        var name = $"log-dropped-{dropped.Length}-{filter.Length}";
         var before = DateTime.UtcNow;
-        if (Ran(text, name, $"printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        if (Ran(text, name, $"export KURZ_LOG='{filter}'; printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
         {
             Assert.Equal((0, ""), (run.Code, run.Error));
             Assert.Equal(["done"], run.Output);
             var log = File.ReadAllText(Path.Combine(toolchain.Directory, name, "log.txt"));
             Assert.Equal([line, "Information program: c", "Information program: d"], Unstamped(log, before, DateTime.UtcNow));
+        }
+    }
+
+    [Fact]
+    public void Lines_dropped_after_the_last_line_written_are_named_by_no_line()
+    {
+        // as in the theory above, `a` is refused and the program empties the file, where a line after it would be written; the program
+        // ends with no line after it, and nothing is written at its exit
+        const string text = "void | IoError Empty() {\n    File.WriteAll(\"log.txt\", \"\".Bytes)\n}\n\nLog.Information(\"a\")\nEmpty() else {\n    IoError e => print(e)\n}\n\nprint(\"done\")\n";
+        if (Ran(text, "log-dropped-last", "printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["done"], run.Output);
+            Assert.Equal("", File.ReadAllText(Path.Combine(toolchain.Directory, "log-dropped-last", "log.txt")));
+        }
+    }
+
+    [Fact]
+    public void A_line_the_system_takes_in_part_is_dropped_once_and_a_line_feed_ends_it_before_the_next_line()
+    {
+        // standard error appends to a file under a limit of 512 bytes: `a` is refused at 600 bytes; at 430, the 58 bytes of the line of
+        // the dropped lines fit and `b`, 48 bytes, is cut after 24; the program empties the file, and `c` follows a line feed and the
+        // line of the one dropped line, `b`, since the line before it was taken whole
+        var text = "void | IoError Put(string text) {\n    File.WriteAll(\"log.txt\", text.Bytes)\n}\n\n" +
+            "Log.Information(\"a\")\nPut(\"" + new string('0', 430) + "\") else {\n    IoError e => print(e)\n}\n\n" +
+            "Log.Information(\"b\")\nPut(\"\") else {\n    IoError e => print(e)\n}\n\nLog.Information(\"c\")\nprint(\"done\")\n";
+        var before = DateTime.UtcNow;
+        if (Ran(text, "log-cut", "printf '%0600d' 0 > log.txt; trap '' XFSZ; ulimit -f 1; exec 2>>log.txt; ") is { } run)
+        {
+            Assert.Equal((0, ""), (run.Code, run.Error));
+            Assert.Equal(["done"], run.Output);
+            var log = File.ReadAllText(Path.Combine(toolchain.Directory, "log-cut", "log.txt"));
+            Assert.StartsWith("\n", log, StringComparison.Ordinal);
+            Assert.Equal(["Warning Kurz.Log: dropped 1 line", "Information program: c"], Unstamped(log[1..], before, DateTime.UtcNow));
+        }
+    }
+
+    [Fact]
+    public void A_case_runs_with_no_KURZ_LOG_of_the_environment_the_suite_runs_in()
+    {
+        // the corpus's runner takes the variable away (`Toolchain.Run`), so that a case with a log call runs at P3's default level; a
+        // program another suite starts meanwhile inherits the variable, which only a program with a log call reads, and this suite's take
+        // it away; on Windows no program with a log call builds
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(Builder.Compile(SourceText.FromString("program.kz", "Log.Information(\"x\")\n"), [], toolchain.Runtime, testBuild: true).Program);
+            return;
+        }
+
+        var was = Environment.GetEnvironmentVariable("KURZ_LOG");
+        Environment.SetEnvironmentVariable("KURZ_LOG", "Trace");
+        try
+        {
+            Assert.Contains("KURZ_LOG=Trace", Processes.Capture("/usr/bin/env", [], null, TimeSpan.FromSeconds(30)).Output.Split('\n')); // the positive control
+            Assert.DoesNotContain(Toolchain.Run("/usr/bin/env", null).Output, line => line.StartsWith("KURZ_LOG=", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("KURZ_LOG", was);
         }
     }
 }

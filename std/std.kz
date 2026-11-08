@@ -6188,8 +6188,8 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 // The body of a request, read from its stream as the client sends it, or of a response a client reads (W14): `Read` appends at most
 // `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
-// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it. A failure of HTTP stays: every read after it
-// gives it again.
+// expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
+// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
 pub class HttpBody {
     mut TcpStream? stream = null
     mut long remaining = 0
@@ -6206,6 +6206,7 @@ pub class HttpBody {
     mut long waited = 0
     mut long arrived = 0
     mut bool timedOut = false
+    mut bool begun = false
     mut string side = "request"
     mut bool toEnd = false
     mut int trailerBytes = 0
@@ -6213,6 +6214,7 @@ pub class HttpBody {
 
     // The connection of a client's response, told once when the body ends or fails, so that the pool takes it back (W13).
     internal mut HttpConnection? home = null
+    internal mut HttpCall? call = null
 
     // The body a head declares, read from `s`: a declared length, chunks, or none, a trailer of chunks held to what the head left of
     // its limits, `headBytes` and `headLines` (section 12, the owner, 2026-11-05, Q8) (F9: `internal`, the maker std/'s reader calls).
@@ -6255,6 +6257,11 @@ pub class HttpBody {
 
     // Whether a read of the body ran out of its time, which the server answers `408` (F9).
     internal bool TimedOut => timedOut
+
+    // The response's head on its way to the client, after which no read sends `100 Continue` (F9).
+    internal void Begin() {
+        begun = true
+    }
 
     // Whether a read of the body failed, so that what the stream holds after it is not known (F9).
     internal bool Failed => failed != null
@@ -6366,11 +6373,17 @@ pub class HttpBody {
 
         if expects {
             expects = false
-            s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+            if !begun {
+                s.Write("HTTP/1.1 100 Continue\r\n\r\n".Bytes)
+            }
         }
 
         if toEnd {
-            n = s.Read(mut into, max)
+            HttpCallReads(s, call)
+            n = s.Read(mut into, max) else {
+                IoError e => return HttpCallFailed(e, call)
+            }
+
             if n == 0 {
                 ended = true
             }
@@ -6400,7 +6413,11 @@ pub class HttpBody {
             HttpWaitUntil(s, deadline)
         }
 
-        n = s.Read(mut into, want)
+        HttpCallReads(s, call)
+        n = s.Read(mut into, want) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
             e = HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
             failed = e
@@ -6458,7 +6475,7 @@ pub class HttpBody {
     bool | IoError | HttpError NextChunk(TcpStream s, instant? deadline) {
         bad = HttpError(HttpKind.Protocol, "malformed {side}: bad chunk")
         if atChunkEnd {
-            end = HttpLine(s, 2, bad, deadline, side)
+            end = HttpLine(s, 2, bad, deadline, side, call)
             if end.Count != 0 {
                 return bad
             }
@@ -6466,7 +6483,7 @@ pub class HttpBody {
             atChunkEnd = false
         }
 
-        line = HttpLine(s, sizeLine, bad, deadline, side) else {
+        line = HttpLine(s, sizeLine, bad, deadline, side, call) else {
             HttpError e => return HttpError(HttpKind.Protocol, "malformed {side}: bad chunk size")
         }
 
@@ -6504,7 +6521,7 @@ pub class HttpBody {
         if size == 0 && side == "response" {
             // a response's trailer: its lines read and dropped, each held to the size line, as a chunk's (W14)
             while true {
-                trailer = HttpLine(s, sizeLine, bad, deadline, side)
+                trailer = HttpLine(s, sizeLine, bad, deadline, side, call)
                 if trailer.Count == 0 {
                     ended = true
                     return true
@@ -6522,7 +6539,7 @@ pub class HttpBody {
                     fits = 2
                 }
 
-                trailer = HttpLine(s, fits, large, deadline, side)
+                trailer = HttpLine(s, fits, large, deadline, side, call)
                 if trailer.Count == 0 {
                     ended = true
                     return true
@@ -6540,8 +6557,8 @@ pub class HttpBody {
     }
 }
 
-// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, or none (design
-// record, section 12; W8). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
+// A response: its status, its headers and its body, a text or bytes held whole, a file read as it is written, chunks a function
+// writes, or none (design record, section 12; W8, W11). The functions that make one hold the status to 200 to 599, stopping the program otherwise, as an index
 // out of range does, since a status is a literal in code, and set the `Content-Type` ASP.NET Core's `Results` sets, which the
 // headers can replace. `Write` writes the response, and `WriteHead` its head alone, for a `HEAD`; neither adds `Date` or
 // `Connection`, which the server's loop adds where the handler set none.
@@ -6551,6 +6568,7 @@ pub class HttpResponse {
     mut bool isFile = false
     mut Bytes held = HttpNoBytes()
     mut string filePath = ""
+    mut ((HttpWriter) => void | IoError)? streamer = null
 
     // The status, from 200 to 599.
     pub int Status => code
@@ -6586,23 +6604,41 @@ pub class HttpResponse {
     // A response with no body and no `Content-Type`.
     pub static HttpResponse Empty(int status) => Of(status, "")
 
+    // A response whose body `body` writes, as `application/octet-stream`: the writer sends the head, then calls `body` with an
+    // `HttpWriter`, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
+    pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
+        if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
+            throw "status {status} has no body to stream"
+        }
+
+        r = Of(status, "application/octet-stream")
+        r.streamer = body
+        return r
+    }
+
     // Writes the status line, the headers and the body to `stream` (W8).
     pub void | IoError Write(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, true, "", false, false, null, mut none, false)
+        Send(stream, true, "", false, false, null, mut none, false, null)
     }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
     pub void | IoError WriteHead(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, false, "", false, false, null, mut none, false)
+        Send(stream, false, "", false, false, null, mut none, false, null)
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
     // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
-    // write, and where `hold` a response of 64 KiB or less, with them, is held there in place of a write (F9).
-    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold) => Send(stream, withBody, date, close, plain, pace, mut pending, hold)
+    // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
+    // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
+    // writes has gone out (F9).
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold, HttpBody request) => Send(stream, withBody, date, close, plain, pace, mut pending, hold, request)
+
+    // Whether a function writes the body, which the loop calls before it drains the request's body, since the function may read it (F9).
+    internal bool Streams => streamer != null
 
     // A response of `status` with its `Content-Type`, none where `type` is empty.
     static HttpResponse Of(int status, string type) {
@@ -6632,9 +6668,11 @@ pub class HttpResponse {
 
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` whose file holds
     // bytes or a `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
-    // `Content-Length` is answered with nothing, `InvalidInput`, as hyper ends such a response.
-    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold) {
+    // `Content-Length`, and a `Content-Length` beside a body a function writes, are answered with nothing, `InvalidInput`, as hyper
+    // ends such a response.
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold, HttpBody? request) {
         bodiless = code == 204 || code == 304
+        body = streamer
         mut length = 0L
         if !bodiless && isFile {
             length = HttpFileSize(filePath) else {
@@ -6649,8 +6687,8 @@ pub class HttpResponse {
 
         codings = headers.GetAll("Transfer-Encoding")
         lengths = headers.GetAll("Content-Length")
-        chunked = !bodiless && !plain && codings.Count > 0
-        if chunked && lengths.Count > 0 {
+        chunked = !bodiless && !plain && (codings.Count > 0 || body != null)
+        if (chunked || body != null) && lengths.Count > 0 {
             HttpFlush(s, mut pending, pace)
             return IoError(IoKind.InvalidInput, 0, "")
         }
@@ -6689,7 +6727,11 @@ pub class HttpResponse {
             out.AddRange("{name}: {value}\r\n".Bytes)
         }
 
-        if !bodiless && !chunked && lengths.Count == 0 {
+        if chunked && codings.Count == 0 {
+            out.AddRange("Transfer-Encoding: chunked\r\n".Bytes)
+        }
+
+        if !bodiless && !chunked && lengths.Count == 0 && body == null {
             out.AddRange("Content-Length: {length}\r\n".Bytes)
         }
 
@@ -6712,6 +6754,21 @@ pub class HttpResponse {
             }
 
             HttpWrite(s, pace, out)
+            return true
+        }
+
+        if body != null {
+            // the head goes out with the first chunk, in one write, so that the chunk does not wait for the acknowledgement of
+            // the head, and the last chunk after the function's return, held as a response is where `hold`
+            w = HttpWriter.Make(s, out, chunked, pace, request)
+            body(w) else {
+                IoError e => {
+                    w.Abort()
+                    return e
+                }
+            }
+
+            w.End(mut pending, hold)
             return true
         }
 
@@ -6750,6 +6807,130 @@ pub class HttpResponse {
         }
 
         return true
+    }
+}
+
+// The writer of a streamed response, which `HttpResponse.Stream` gives its function (design record, section 12; W11): `Write` sends
+// a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
+// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
+// write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
+// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing.
+pub class HttpWriter {
+    mut TcpStream? stream = null
+    mut Bytes ahead = Bytes()
+    mut bool chunked = true
+    mut bool ended = false
+    mut bool sent = false
+    mut HttpRate? pace = null
+    mut HttpBody? request = null
+
+    // The writer of a body on `s`, the head `head` going out with its first write, before which a read of the body `answered` may
+    // still send `100 Continue` (F9: `internal`, the maker std/'s writer calls). The stream is set to `TCP_NODELAY`, as Kestrel sets
+    // every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
+    // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
+    // A stream the option cannot be set on is written as it is, the option only a matter of time.
+    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered) {
+        s.SetNoDelay(true) else {
+            IoError e => {
+            }
+        }
+
+        w = HttpWriter()
+        w.stream = s
+        w.ahead = head
+        w.chunked = isChunked
+        w.pace = rate
+        w.request = answered
+        return w
+    }
+
+    // The head on its way: no read of the request's body sends `100 Continue` after it.
+    void Started() {
+        sent = true
+        b = request
+        if b != null {
+            b.Begin()
+        }
+    }
+
+    // Writes `bytes` as one chunk of the body.
+    pub void | IoError Write(Bytes bytes) {
+        s = stream
+        if ended || s == null {
+            return IoError(IoKind.InvalidInput, 0, "writer used after its response ended")
+        }
+
+        if bytes.Count == 0 {
+            return
+        }
+
+        mut out = ahead
+        ahead = Bytes()
+        Started()
+        if chunked {
+            out.AddRange("{HttpHex(bytes.Count)}\r\n".Bytes)
+        }
+
+        if bytes.Count <= 65536 {
+            out.AddRange(bytes)
+        } else {
+            HttpWrite(s, pace, out)
+            out = Bytes()
+            HttpWrite(s, pace, bytes)
+        }
+
+        if out.Count > 0 {
+            HttpWrite(s, pace, out)
+        }
+
+        if chunked {
+            ahead.AddRange("\r\n".Bytes)
+        }
+    }
+
+    // Writes `text` in UTF-8 as one chunk of the body.
+    pub void | IoError Write(string text) => Write(text.Bytes)
+
+    // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
+    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response (F9).
+    internal void | IoError End(mut Bytes pending, bool hold) {
+        ended = true
+        s = stream
+        if s == null {
+            return
+        }
+
+        mut out = ahead
+        ahead = Bytes()
+        Started()
+        if chunked {
+            out.AddRange("0\r\n\r\n".Bytes)
+        }
+
+        if hold && out.Count <= 65536 {
+            pending = out
+            return
+        }
+
+        if out.Count > 0 {
+            HttpWrite(s, pace, out)
+        }
+    }
+
+    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that the client sees it cut (F9).
+    internal void Abort() {
+        ended = true
+        s = stream
+        if s == null || sent {
+            return
+        }
+
+        Started()
+        out = ahead
+        ahead = Bytes()
+        HttpWrite(s, pace, out) else {
+            IoError e => return
+        }
     }
 }
 
@@ -7197,16 +7378,18 @@ pub class Uri {
     }
 }
 
-// The options of a client, with .NET's names and defaults (design record, section 12; W13): the connections to one host, which no
-// number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the life of a connection, which no time
-// bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects followed, 5, and 0 for none; and the
-// limits of a response's head, a request's (W7).
+// The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
+// connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
+// life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects
+// followed, 20, as browsers allow, where .NET follows 50 (W15), and 0 for none; the
+// limits of a response's head, a request's (W7); and the time of a call, 100 seconds, as .NET's `HttpClient.Timeout` (W16).
 pub data HttpClientOptions(
     int MaxConnectionsPerServer = 2147483647,
     duration PooledConnectionIdleTimeout = 1min,
     duration PooledConnectionLifetime = 9223372036854775807ns,
-    int MaxAutomaticRedirections = 5,
-    HttpLimits Limits = HttpLimits())
+    int MaxAutomaticRedirections = 20,
+    HttpLimits Limits = HttpLimits(),
+    duration Timeout = 100s)
 
 // A response a client got: its status, its headers, and its body, read as a stream as a request's is, which holds its connection
 // until it ends (design record, section 12; W14).
@@ -7252,10 +7435,11 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
     // The response to a `GET` of `uri`, with its redirects followed up to `MaxAutomaticRedirections` (W15), or the failure of the
     // network or of HTTP.
     pub HttpResponseMessage | IoError | HttpError Get(Uri uri) {
+        call = HttpCall(instant.Now, Options.Timeout)
         mut target = uri
         mut followed = 0
         while true {
-            response = Exchange(target)
+            response = Exchange(target, call)
             next = HttpRedirect(target, response)
             if next == null || Options.MaxAutomaticRedirections <= 0 {
                 return response
@@ -7275,8 +7459,8 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
 
     // One request and its response, on the connection the pool holds for the host and port that went idle last, or on a new one: a
     // connection of the pool that ends before the first byte of a response carries the request again on a new one, once, as .NET
-    // sends a request again on a connection the server shut down (W13).
-    HttpResponseMessage | IoError | HttpError Exchange(Uri uri) {
+    // sends a request again on a connection the server shut down (W13); all of it within what remains of the `call` (W16).
+    HttpResponseMessage | IoError | HttpError Exchange(Uri uri, HttpCall call) {
         scheme = uri.Scheme.ToLowerAscii()
         if scheme == "https" {
             return HttpError(HttpKind.Unsupported, "https is not supported: no TLS")
@@ -7290,7 +7474,7 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
         request = HttpGetHead(uri).Bytes
         pooled = Checkout(key)
         if pooled != null {
-            match Carry(pooled, request) {
+            match Carry(pooled, request, call) {
                 HttpResponseMessage r => return r
                 IoError e => return e
                 HttpError e => return e
@@ -7299,8 +7483,8 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             }
         }
 
-        c = Open(uri, key)
-        match Carry(c, request) {
+        c = Open(uri, key, call)
+        match Carry(c, request, call) {
             HttpResponseMessage r => return r
             IoError e => return e
             HttpError e => return e
@@ -7315,20 +7499,33 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
         }
     }
 
-    // The request written on the connection and the head of its response read: the connection is busy while the response's body is
-    // open, `HttpSilent` where it ended before the first byte of a head, and closed then, as on every failure.
-    HttpResponseMessage | IoError | HttpError | HttpSilent Carry(HttpConnection c, Bytes request) {
+    // The request written on the connection and the head of its response read, each under what remains of the `call`, whose time
+    // the body's reads keep (W16): the connection is busy while the response's body is open, `HttpSilent` where it ended before the
+    // first byte of a head, and closed then, as on every failure; the call's time running out is no such end.
+    HttpResponseMessage | IoError | HttpError | HttpSilent Carry(HttpConnection c, Bytes request, HttpCall call) {
         s = c.Stream
+        HttpCallWrites(s, call) else {
+            IoError e => {
+                HttpShut(s)
+                return e
+            }
+        }
+
         s.Write(request) else {
             IoError e => {
                 HttpShut(s)
+                if e.Kind == IoKind.TimedOut {
+                    return HttpCallTimedOut()
+                }
+
                 return HttpSilent(e)
             }
         }
 
-        match HttpReadResponse(s, Options.Limits) {
+        match HttpReadResponse(s, Options.Limits, call) {
             HttpResponseHead h => {
                 body = HttpBody.MakeResponse(s, h.Length, h.Chunked, h.ToEnd, Options.Limits.MaxChunkSizeLine)
+                body.call = call
                 c.body = body
                 c.keep = h.Keep
                 if body.Ended {
@@ -7390,25 +7587,31 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             }
         }
 
-        mut k = idle.Count - 1
-        while k >= 0 {
+        mut pick = -1
+        mut k = 0
+        while k < idle.Count {
             c = idle[k]
-            if c.Key == key {
-                idle.RemoveAt(k)
-                c.ended = false
-                c.clean = false
-                return c
+            if c.Key == key && (pick < 0 || c.idleSince - idle[pick].idleSince >= 0s) {
+                pick = k
             }
 
-            k = k - 1
+            k = k + 1
         }
 
-        return null
+        if pick < 0 {
+            return null
+        }
+
+        chosen = idle[pick]
+        idle.RemoveAt(pick)
+        chosen.ended = false
+        chosen.clean = false
+        return chosen
     }
 
-    // A new connection to the host and port of `uri`, its reads and writes bounded by no time (section 12), or the `HttpError` of a
-    // host whose connections reach `MaxConnectionsPerServer`, since in a program of one actor no other actor gives one back (W13).
-    HttpConnection | IoError | HttpError Open(Uri uri, string key) {
+    // A new connection to the host and port of `uri`, its connect bounded by what remains of the `call` (W16), or the `HttpError` of
+    // a host whose connections reach `MaxConnectionsPerServer`, since in a program of one actor no other actor gives one back (W13).
+    HttpConnection | IoError | HttpError Open(Uri uri, string key, HttpCall call) {
         mut count = 0
         for c in busy {
             if c.Key == key {
@@ -7420,9 +7623,11 @@ pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
             return HttpError(HttpKind.TooLarge, "too many connections to the host")
         }
 
-        s = TcpStream.Connect("{uri.Host}:{uri.Port}")
-        s.SetReadTimeout(null)
-        s.SetWriteTimeout(null)
+        remains = HttpCallLeft(call)
+        s = TcpStream.Connect("{uri.Host}:{uri.Port}", remains) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         return HttpConnection(s, key, instant.Now)
     }
 
@@ -7586,9 +7791,10 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                     return HttpTimedOut()
                 }
 
-                if body.Failed || body.AwaitsContinue {
+                streams = response.Streams
+                if body.Failed || (body.AwaitsContinue && !streams) {
                     keep = false
-                } else if keep {
+                } else if keep && !streams {
                     drained = body.Drain(limits.MaxDrainSize) else {
                         IoError e => return e
                         HttpError e => {
@@ -7619,10 +7825,33 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 // the server's own `Connection: close` before a close, beside a handler's `Connection` that does not say it (section
                 // 12, the owner, 2026-11-05, Q6)
                 close = !keep && !HttpCloses(headers)
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, pace, mut pending, keep && r.next)
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, pace, mut pending, keep && r.next, body)
                 if !keep || !written {
                     HttpLinger(s, limits)
                     return
+                }
+
+                if streams {
+                    // the function may read the request's body while it writes, as hyper reads one while its response goes out,
+                    // so that what it left is drained after it
+                    if body.TimedOut {
+                        return HttpTimedOut()
+                    }
+
+                    if body.Failed || body.AwaitsContinue {
+                        return
+                    }
+
+                    // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), with no `408`, since the
+                    // head has gone out
+                    drained = body.Drain(limits.MaxDrainSize) else {
+                        IoError e => return e
+                        HttpError e => return e
+                    }
+
+                    if !drained {
+                        return
+                    }
                 }
 
                 ahead = r.next
@@ -7822,8 +8051,9 @@ data HttpRefused(int Status, HttpError Error)
 
 // The next line of the stream without its CR LF, of at most `most` bytes with them, `tooLong` past them, taken through the stream's
 // buffer (S24), what remains until `deadline` set before each refill where one is given (section 12, the owner, 2026-11-04, Q9 (a)),
-// its other failures in the words of the `side`, `request` or `response`, whose body it reads.
-Bytes | IoError | HttpError HttpLine(TcpStream s, int most, HttpError tooLong, instant? deadline, string side) {
+// its other failures in the words of the `side`, `request` or `response`, whose body it reads, each read under what remains of a
+// client's `call` where one is given (W16).
+Bytes | IoError | HttpError HttpLine(TcpStream s, int most, HttpError tooLong, instant? deadline, string side, HttpCall? call) {
     mut line = Bytes()
     while true {
         if deadline != null {
@@ -7831,7 +8061,11 @@ Bytes | IoError | HttpError HttpLine(TcpStream s, int most, HttpError tooLong, i
         }
 
         start = line.Count
-        n = s.Fill(mut line)
+        HttpCallReads(s, call)
+        n = s.Fill(mut line) else {
+            IoError e => return HttpCallFailed(e, call)
+        }
+
         if n == 0 {
             return HttpError(HttpKind.Protocol, "malformed {side}: unexpected end of body")
         }
@@ -8439,8 +8673,9 @@ HttpError HttpHeadTooLarge() => HttpError(HttpKind.TooLarge, "response header to
 // The head of the next response of `s` that is no `1xx`, the `1xx` before it read past, as hyper reads past it (W14): taken through
 // the stream's buffer line by line, each line ended by CR LF, and held to the limits of a request's head, the status line to
 // `MaxRequestLineSize` bytes with its CR LF, the header lines to `MaxRequestHeadersTotalSize` bytes with theirs and the empty line's,
-// at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body.
-HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s, HttpLimits limits) {
+// at most `MaxRequestHeaderCount` of them; what follows the head stays in the stream's buffer for the body. Each read waits what
+// remains of the `call`, and its time running out is the call's `TimedOut` (W16).
+HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s, HttpLimits limits, HttpCall call) {
     mut any = false
     while true {
         mut head = Bytes()
@@ -8450,8 +8685,13 @@ HttpResponseHead | IoError | HttpError | HttpSilent HttpReadResponse(TcpStream s
         mut count = 0
         while end < 0 {
             start = head.Count
+            HttpCallReads(s, call)
             n = s.Fill(mut head) else {
                 IoError e => {
+                    if e.Kind == IoKind.TimedOut {
+                        return HttpCallTimedOut()
+                    }
+
                     if start == 0 && !any {
                         return HttpSilent(e)
                     }
@@ -8618,4 +8858,48 @@ HttpResponseHead | HttpError HttpParseResponseHead(Bytes head, int lineEnd, int 
     }
 
     return HttpResponseHead(status, headers, length, false, false, keep)
+}
+
+// The time of one call of a client (W16): when it began, read from the monotonic clock, and its bound, the options' `Timeout`.
+data HttpCall(instant Start, duration Limit)
+
+// The failure of a call whose time ran out, `TimedOut` with the number 0, as the bound of `Connect` and the server's own timeout
+// give it (S9, W10).
+IoError HttpCallTimedOut() => IoError(IoKind.TimedOut, 0, "")
+
+// What remains of the call's time, or the call's `TimedOut` where nothing does: what has passed is held against the bound, and
+// never the start and the bound added, which can pass the clock's range (T36).
+duration | IoError HttpCallLeft(HttpCall call) {
+    passed = instant.Now - call.Start
+    if passed >= call.Limit {
+        return HttpCallTimedOut()
+    }
+
+    return call.Limit - passed
+}
+
+// The stream's next read set to wait what remains of the `call`, where one is given, or the call's `TimedOut`, with no call of the
+// system, where nothing remains (W16).
+void | IoError HttpCallReads(TcpStream s, HttpCall? call) {
+    if call == null {
+        return
+    }
+
+    remains = HttpCallLeft(call)
+    s.SetReadTimeout(remains)
+}
+
+// The stream's next write set the same way (W16).
+void | IoError HttpCallWrites(TcpStream s, HttpCall call) {
+    remains = HttpCallLeft(call)
+    s.SetWriteTimeout(remains)
+}
+
+// A failure of a read or a connect under a `call`: the call's own `TimedOut` where the time the client set ran out (W16).
+IoError HttpCallFailed(IoError e, HttpCall? call) {
+    if call != null && e.Kind == IoKind.TimedOut {
+        return HttpCallTimedOut()
+    }
+
+    return e
 }
