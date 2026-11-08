@@ -70,6 +70,13 @@ public sealed class HttpTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             """;
+        if (Builder.HostTarget == Target.Windows)
+        {
+            // S11: the program reads its request from a socket, which the runtime of Windows does not give
+            Assert.Null(Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true).Program);
+            return;
+        }
+
         var lines = File.ReadAllLines(Path.Combine(CorpusTests.Root, "std", "std.kz"));
         var start = Array.FindIndex(lines, l => l.StartsWith("pub class HttpQuery {", StringComparison.Ordinal));
         Assert.True(start >= 0, "std/std.kz holds no `HttpQuery`");
