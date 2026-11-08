@@ -667,7 +667,7 @@ public sealed partial class Checker
             return;
         }
 
-        var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot);
+        var visibility = d.Modifiers & (Modifiers.Pub | Modifiers.Prot | Modifiers.Internal);
         if (marks == (Modifiers.Virtual | Modifiers.Override) || (marks == Modifiers.Virtual && visibility == 0))
         {
             NotSupported(d.Line, marks == (Modifiers.Virtual | Modifiers.Override) ? "`virtual` and `override` on one method (K7)" : "`virtual` on a private method, which no derived class sees (K7, F9)");
@@ -1381,11 +1381,14 @@ public sealed partial class Checker
     /// The method of the candidates a call picks (F13), recorded as a call of a method, or of a function where it is <c>static</c>;
     /// <c>not-visible</c> where it is private and the call stands outside its class, or <c>prot</c> and outside the classes derived from
     /// its class (F9). A <c>prot</c> method called in a derived class through a reference whose type is not that class or one derived
-    /// from it, which C# refuses (CS1540), is <c>not supported</c>.
+    /// from it, which C# refuses (CS1540), is <c>not supported</c>. A method the place of the call does not see is no candidate where
+    /// it sees one (F13), so that a call that fits only a base's method or property the class does not see gets the error of the methods it sees,
+    /// as C# leaves an inaccessible member out of overload resolution; where it sees none, the pick is among all, and the call is
+    /// <c>not-visible</c>.
     /// </summary>
     private Typed PickMethod(List<FunctionSymbol> methods, CallExpression c, KurzType? expected, int line, out FunctionSymbol? picked, ClassType? receiver = null)
     {
-        var typed = ResolveCall(methods, c, expected, out picked, CallKind.Method);
+        var typed = ResolveCall(methods.Where(Visible).ToList() is { Count: > 0 } seen ? seen : methods, c, expected, out picked, CallKind.Method);
         if (picked is not null && !Visible(picked))
         {
             Report(ErrorIds.NotVisible, line, (picked.Declaration!.Modifiers & Modifiers.Prot) != 0
@@ -1726,7 +1729,9 @@ public sealed partial class Checker
     /// R2, R4, R9: judged by types, over the file: a class that reaches itself through strong fields, one of them <c>mut</c>, is
     /// <c>reference-cycle</c>. A field reaches every class its type holds, through lists, maps, unions, nullable types and the fields of
     /// data values, and a field whose type can hold a function value reaches every class an instance of which a lambda of the program
-    /// captures besides (R9), so the rule runs after every body, when the lambdas are known. Each ring is reported once, at the class of
+    /// captures besides (R9), of a lambda whose type the field's can hold, and of the lambdas a function value such a lambda captures
+    /// can be, every lambda where a type on the way names a type parameter (R9, assumed), so the rule runs after every body, when the
+    /// lambdas are known. Each ring is reported once, at the class of
     /// the ring declared first, the first class on the path (R9's case); a ring of classes of <c>std/</c> or of a folder alone, which a
     /// lambda of the file closes through a field of a function type, at the first lambda of the file that captures a class of the ring,
     /// and one that a lambda of <c>std/</c> or of a folder closes through a type argument only a call of the file gives, at the first
@@ -1735,7 +1740,8 @@ public sealed partial class Checker
     private void CheckReferenceCycles()
     {
         var firstUse = new Dictionary<ClassSymbol, int>();
-        var captured = CapturedClasses(firstUse);
+        var byLambda = new List<CapturingLambda>();
+        var captured = CapturedClasses(firstUse, byLambda);
         var edges = new Dictionary<ClassSymbol, List<(ClassSymbol To, FieldSymbol Field)>>();
         List<(ClassSymbol To, FieldSymbol Field)> EdgesOf(ClassSymbol c)
         {
@@ -1750,7 +1756,31 @@ public sealed partial class Checker
                     ClassesHeld(field.Type, reached, []);
                     if (HoldsFunctionValue(field.Type, []))
                     {
-                        reached.UnionWith(captured);
+                        // R9 (assumed): a field holds only the functions its type can hold, so it reaches what a lambda of such a type
+                        // captures, and what the lambdas capture that a function value it captures can be, until no lambda is added; a
+                        // lambda whose type, or a value it captures, names a type parameter can be or hold a lambda of any type a use gives
+                        // that parameter, and no field's type names one, since a class takes none
+                        var held = new List<FunctionType>();
+                        FunctionTypesHeld(field.Type, held, []);
+                        var any = false;
+                        var taken = new bool[byLambda.Count];
+                        for (var added = true; added;)
+                        {
+                            added = false;
+                            for (var i = 0; i < byLambda.Count; i++)
+                            {
+                                var lambda = byLambda[i];
+                                if (taken[i] || !(any || NamesTypeParameter(lambda.Type) || held.Any(f => Types.Assignable(lambda.Type, f))))
+                                {
+                                    continue;
+                                }
+
+                                taken[i] = added = true;
+                                reached.UnionWith(lambda.Classes);
+                                held.AddRange(lambda.Functions);
+                                any |= lambda.Open || lambda.Functions.Any(NamesTypeParameter);
+                            }
+                        }
                     }
 
                     list.AddRange(reached.Select(r => (r, field)));
@@ -1796,7 +1826,7 @@ public sealed partial class Checker
     /// type argument a call of the file gives, the first call of the file that gives a type parameter on that way such an argument,
     /// since the checker of <c>std/</c> or of the folder does not see the file's calls.
     /// </summary>
-    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstUse)
+    private HashSet<ClassSymbol> CapturedClasses(Dictionary<ClassSymbol, int> firstUse, List<CapturingLambda> byLambda)
     {
         var models = new List<SemanticModel> { model };
         models.AddRange(used.Values.Select(u => u.model));
@@ -1815,6 +1845,13 @@ public sealed partial class Checker
                 var met = new HashSet<TypeParameterSymbol>(ReferenceEqualityComparer.Instance);
                 var reached = CapturedBy(info, arguments, met);
                 all.UnionWith(reached);
+                var functions = new List<FunctionType>();
+                foreach (var v in info.Captures)
+                {
+                    FunctionTypesHeld(v.Type, functions, []);
+                }
+
+                byLambda.Add(new CapturingLambda(info.Type, new HashSet<ClassSymbol>(reached), functions, info.Captures.Any(v => NamesTypeParameter(v.Type))));
                 if (ReferenceEquals(m, model))
                 {
                     foreach (var c in reached)
@@ -1978,6 +2015,63 @@ public sealed partial class Checker
     }
 
     /// <summary>Whether a value of the type holds a function value, outside the instances of classes, whose own fields are judged as theirs.</summary>
+    /// <summary>
+    /// R9 (assumed): a lambda of the program, its type, the classes its captures hold, the function types its captures can hold, and
+    /// whether the type of a capture names a type parameter, which a call can make any function type.
+    /// </summary>
+    private sealed record CapturingLambda(FunctionType Type, HashSet<ClassSymbol> Classes, List<FunctionType> Functions, bool Open);
+
+    /// <summary>R9 (assumed): the function types a value of the type can hold, at any depth, as <see cref="HoldsFunctionValue"/> finds them.</summary>
+    private static void FunctionTypesHeld(KurzType type, List<FunctionType> into, HashSet<DataSymbol> path)
+    {
+        switch (type)
+        {
+            case FunctionType f:
+                into.Add(f);
+                break;
+            case ListType l:
+                FunctionTypesHeld(l.Element, into, path);
+                break;
+            case MapType m:
+                FunctionTypesHeld(m.Key, into, path);
+                FunctionTypesHeld(m.Value, into, path);
+                break;
+            case UnionType u:
+                foreach (var c in u.Cases)
+                {
+                    FunctionTypesHeld(c, into, path);
+                }
+
+                break;
+            case DataType d when path.Add(d.Symbol):
+                foreach (var f in d.Symbol.Fields)
+                {
+                    FunctionTypesHeld(SubstituteData(d, f.Type), into, path);
+                }
+
+                break;
+            case DataType d:
+                foreach (var a in HeldArguments(d))
+                {
+                    FunctionTypesHeld(a, into, path);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>R9 (assumed): whether a type names a type parameter at any depth, so that a field of it can hold a lambda of any type.</summary>
+    private static bool NamesTypeParameter(KurzType type) => type switch
+    {
+        TypeParameterType => true,
+        ListType l => NamesTypeParameter(l.Element),
+        MapType m => NamesTypeParameter(m.Key) || NamesTypeParameter(m.Value),
+        DataType d => d.TypeArguments.Any(NamesTypeParameter),
+        UnionType u => u.Cases.Any(NamesTypeParameter),
+        FunctionType f => f.Parameters.Any(NamesTypeParameter) || NamesTypeParameter(f.Result),
+        _ => false,
+    };
+
     private static bool HoldsFunctionValue(KurzType type, HashSet<DataSymbol> path) => type switch
     {
         FunctionType => true,
