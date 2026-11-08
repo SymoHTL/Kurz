@@ -347,8 +347,11 @@ public sealed partial class Checker
             if (!readers.Contains(f))
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+                continue;
             }
-            else if (ReadsFields(f))
+
+            Unread(f, () => RefuseParametersNamedLikeTypeParameters(f));
+            if (ReadsFields(f))
             {
                 ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
@@ -506,6 +509,21 @@ public sealed partial class Checker
                 default:
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// V9, T33: a parameter of a function that reads its type, named like one of its type parameters, is refused from the text, whether
+    /// or not a call makes a copy, as a function's parameters are part of its signature (section 4, the owner, 2026-11-07, "Refused
+    /// always"); a copy that declares it again reports nothing more, the refusal being kept among the faults of the text.
+    /// </summary>
+    private void RefuseParametersNamedLikeTypeParameters(FunctionSymbol f)
+    {
+        foreach (var p in f.Declaration?.Parameters.Where(p => f.TypeParameters.Any(t => t.Name == p.Name)) ?? [])
+        {
+            var d = Diagnostic.Error(ErrorIds.Redeclared, p.Line, TypeParameterClash(p.Name));
+            copyReported.Add((d.Id, d.Line, d.Message));
+            Add(d);
         }
     }
 
@@ -1338,8 +1356,8 @@ public sealed partial class Checker
     /// <summary>
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
-    /// error of its own (the owner, 2026-11-03), and a function whose constant has no type of the list is not read (E1); one whose constant's
-    /// type is no name it can read is read, with the constant of no type, whose uses report nothing more (E1).
+    /// error of its own (the owner, 2026-11-03). A function whose constant has no type of the list, or a type that is no name it can read,
+    /// is read, with the constant of no type, whose uses and calls report nothing more, while its body's own errors are reported (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
@@ -1350,8 +1368,7 @@ public sealed partial class Checker
         }
 
         Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
-        modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
-        return Types.Error;
+        return Types.Error; // the function is read, as for a type that was not read, the constant of no type (E1)
     }
 
     /// <summary>T35: the types a type parameter's constant can have, as the record lists them.</summary>
@@ -1634,6 +1651,7 @@ public sealed partial class Checker
         else if (IsTypeParameterName(name))
         {
             Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+            type = Types.Error; // T33, E1: the refused parameter stands with no type, so that `T.Make` in a copy reports nothing more
         }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
