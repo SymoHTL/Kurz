@@ -301,15 +301,23 @@ knowing `HttpHeaders` by name and against an iteration interface). It is the ind
 first step, since a range is a value, and each step reads `NameAt(i)` and `ValueAt(i)` as they are
 then, so that a removal inside the block gives `NameAt`'s own error once an index is out of range and
 an item added inside it is not walked (§4, the owner, 2026-11-04, "Index loop, Count once")
-*(proposed: that `Count` is an `int` member and `NameAt` and `ValueAt` take an `int`, the two names
-taking the types of their results)*. A removal at or before the index shifts the items after it, so
-that the item after the current one is not walked, with no error *(assumed, §4: a reading of that
-answer, which names the error at the end alone)*. The error at the end is the class's own `NameAt`'s:
-for `HttpHeaders` it is `index-out-of-range`, for an index below 0 or at `Count` or beyond, as for an
-index outside a list *(proposed: the error, which neither §12 nor the owner names)*. Two names over
+*(proposed: that `Count` is an `int` member, the two names taking the types of the results of
+`NameAt` and `ValueAt`)*. `NameAt(i)` and `ValueAt(i)` are called as any call with one `int` argument
+is, by overload resolution, so that a method with a default for a second parameter, or one overload
+among others, fits, and a class whose `NameAt` or `ValueAt` has no overload that such a call fits is
+`type-mismatch`, as C#'s `foreach` finds `GetEnumerator` (§4, the owner, 2026-11-06, #39, comment
+6681669642). A removal at or before the index shifts the items after it back by as many places as it
+removed items there, so that as many items after the current one are not walked, with no error,
+`HttpHeaders`'s `Remove` taking out every value of a name; an insertion there shifts them forward, so
+that as many items at the end are not walked, with no error *(assumed, §4: a reading of that answer,
+which names the error at the end alone, as C#'s `for (int i = 0, n = list.Count; i < n; i++)` walks a
+list)*. The error at the end is the class's own `NameAt`'s
+*(proposed, for a class other than `HttpHeaders`: the error, which neither §12 nor the owner names
+for it)*: for `HttpHeaders` it is `index-out-of-range`, for an index below 0 or at `Count` or beyond,
+as for an index outside a list (§12, the owner, 2026-11-03, #110, comment 6615254370). Two names over
 any other type, a list, a range and a class that lacks one of the three members, or whose `Count` is
-not an `int` or whose `NameAt` or `ValueAt` takes no `int`, among them, and one name over a class
-with all three members, are `type-mismatch` *(proposed: the error; §4 gives the form over a map and
+not an `int`, among them, and one name over any class, are `type-mismatch` *(proposed: the error; §4
+gives the form over a map and
 §12 over such a class, and over nothing else)*. Over a list, a range and a map the loop runs over the collection as it was when
 the loop started: the collection is a value (M1), and a change to the variable inside the block is a
 change to the variable, not to what the loop walks. For a map §4 states it, in the words of the option the owner

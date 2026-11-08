@@ -155,7 +155,7 @@ public sealed partial class Checker
         /// <summary>The statement can end and the next one run.</summary>
         Completes,
 
-        /// <summary>Every path leaves the block: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, or branches that all do.</summary>
+        /// <summary>The end of the statement cannot be reached: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all leave, or a <c>while true</c> with no <c>break</c> of its own that can be reached.</summary>
         Ends,
     }
 
@@ -204,6 +204,9 @@ public sealed partial class Checker
 
         /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs.</summary>
         public List<LoopExits> Loops { get; } = [];
+
+        /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, so that a <c>break</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
+        public bool Unreached { get; set; }
     }
 
     private sealed class Scope
@@ -344,8 +347,11 @@ public sealed partial class Checker
             if (!readers.Contains(f))
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+                continue;
             }
-            else if (ReadsFields(f))
+
+            Unread(f, () => RefuseParametersNamedLikeTypeParameters(f));
+            if (ReadsFields(f))
             {
                 ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
@@ -503,6 +509,21 @@ public sealed partial class Checker
                 default:
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// V9, T33: a parameter of a function that reads its type, named like one of its type parameters, is refused from the text, whether
+    /// or not a call makes a copy, as a function's parameters are part of its signature (section 4, the owner, 2026-11-07, "Refused
+    /// always"); a copy that declares it again reports nothing more, the refusal being kept among the faults of the text.
+    /// </summary>
+    private void RefuseParametersNamedLikeTypeParameters(FunctionSymbol f)
+    {
+        foreach (var p in f.Declaration?.Parameters.Where(p => f.TypeParameters.Any(t => t.Name == p.Name)) ?? [])
+        {
+            var d = Diagnostic.Error(ErrorIds.Redeclared, p.Line, TypeParameterClash(p.Name));
+            copyReported.Add((d.Id, d.Line, d.Message));
+            Add(d);
         }
     }
 
@@ -1352,23 +1373,19 @@ public sealed partial class Checker
     /// <summary>
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
-    /// error of its own (the owner, 2026-11-03), and a function whose constant has no type of the list, or one that is no name, is not read (E1).
+    /// error of its own (the owner, 2026-11-03). A function whose constant has no type of the list, or a type that is no name it can read,
+    /// is read, with the constant of no type, whose uses and calls report nothing more, while its body's own errors are reported (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
         var type = Resolve(p.Constant!);
-        if (HoldsConstant(type))
+        if (Types.IsError(type) || HoldsConstant(type))
         {
-            return type;
+            return type; // a type that was not read has its diagnostic, and the function is read, the uses of its constant reporting nothing more (E1)
         }
 
-        if (!Types.IsError(type))
-        {
-            Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
-        }
-
-        modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
-        return Types.Error;
+        Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
+        return Types.Error; // the function is read, as for a type that was not read, the constant of no type (E1)
     }
 
     /// <summary>T35: the types a type parameter's constant can have, as the record lists them.</summary>
@@ -1651,6 +1668,7 @@ public sealed partial class Checker
         else if (IsTypeParameterName(name))
         {
             Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+            type = Types.Error; // T33, E1: the refused parameter stands with no type, so that `T.Make` in a copy reports nothing more
         }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
@@ -1871,14 +1889,17 @@ public sealed partial class Checker
         PushNested(block.Statements);
         blockDepth++;
         var flow = Flow.Completes;
+        var unreached = frame.Unreached;
         foreach (var s in block.Statements)
         {
             if (CheckStatement(s) == Flow.Ends)
             {
                 flow = Flow.Ends;
+                frame.Unreached = true; // F3, N3: the statements after it are never reached
             }
         }
 
+        frame.Unreached = unreached;
         blockDepth--;
         PopNested();
         PopScope();
@@ -1941,8 +1962,7 @@ public sealed partial class Checker
                 }
 
             case WhileStatement w:
-                CheckLoop(w.Condition, w.Body);
-                return Flow.Completes;
+                return CheckLoop(w.Condition, w.Body) ? Flow.Completes : Flow.Ends;
             case ForInStatement f:
                 CheckForIn(f);
                 return Flow.Completes;
@@ -1961,9 +1981,9 @@ public sealed partial class Checker
                 {
                     NotSupported(b.Line, "`break` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
-                else
+                else if (!frame.Unreached)
                 {
-                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
+                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop; F3: a `break` that is reached lets the loop end
                 }
 
                 return Flow.Ends;
@@ -2628,9 +2648,10 @@ public sealed partial class Checker
     /// (section 4, the owner, 2026-11-04, "Index loop, Count once"; section 12, the owner, 2026-11-02, "any class with <c>Count</c>,
     /// <c>NameAt(i)</c> and <c>ValueAt(i)</c>"), each member found and visible at the loop's place as a member access there finds it
     /// (K6, K7, F9): <c>h.Count</c>, read with no call, a field or a property of the instance, and <c>h.NameAt(i)</c> and
-    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance of one <c>int</c> (proposed, C6: a <c>Count</c> of an
-    /// <c>int</c>, the <c>int</c> of the index and a result of each method, which the two names take); a class of <c>std/</c> is read
-    /// through its symbol, as one of the file.
+    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance that the call with one <c>int</c> fits, weighed as a call
+    /// is, so that a default for a second parameter, a widening of the <c>int</c> and one overload among others count (section 4, the
+    /// owner, 2026-11-06, #39, comment 6681669642), each with a result (proposed, C6: a <c>Count</c> of an <c>int</c> and a result of
+    /// each method, which the two names take); a class of <c>std/</c> is read through its symbol, as one of the file.
     /// </summary>
     private bool WalkedByIndex(ClassSymbol c)
     {
@@ -2641,8 +2662,7 @@ public sealed partial class Checker
 
         bool TakesAnIndex(string name) =>
             MethodsOf(c, name) is { } methods
-            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1
-                && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int } && !Types.IsVoid(m.ReturnType) && Visible(m));
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && !Types.IsVoid(m.ReturnType) && Visible(m) && FitsAnIndex(m));
     }
 
     private void CheckReturn(ReturnStatement r)

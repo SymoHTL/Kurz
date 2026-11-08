@@ -161,6 +161,11 @@ public sealed partial class Emitter
     {
         for (var i = temporaries.Count - 1; i >= 0; i--)
         {
+            if (temporaries[i].Type is MapType && walkedMaps.Contains((fn, temporaries[i].Value)))
+            {
+                fn.Emit($"call void {StdFunction("MapWalk")}(ptr {temporaries[i].Value}, i32 -1)"); // the loop over the map ends: at its end, a `break`, a `return` or a case propagated out of its body
+            }
+
             Release(temporaries[i].Value, temporaries[i].Type);
         }
     }

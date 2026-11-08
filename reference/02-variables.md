@@ -129,12 +129,17 @@ is a type parameter of the function around it, one that holds a constant among t
 `redeclared` too, in each of the forms T33 lists, a parameter, a loop's variable, a binding of a
 `match` arm and a lambda's parameter among them, so that `T.Kind`, `T.Fields` and `T.Make` read the
 type a copy binds and the name of such a constant its value (T33). C# refuses a parameter, a local
-variable and a `foreach` variable named like a method's type parameter (CS0412), and Kurz refuses a
-lambda's parameter so named as C# did up to its language version 7.3 (§4, the owner, 2026-11-03,
-"redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same reading for both"). The
-refusal stands where the body is checked (T33): once from its text, or in each copy a call makes
+variable and a `foreach` variable named like a method's type parameter (CS0412), and lets a lambda's
+parameter, a variable inside a lambda and a local function's parameter so named hide it, all three of
+which it refused up to its language version 7.3; Kurz refuses a lambda's parameter and a variable
+inside a lambda so named, as C# did up to 7.3 (§4, the owner, 2026-11-03,
+"redeclared, as C#'s CS0412", and 2026-11-04 for a constant, "the same reading for both"). A
+parameter of the function is part of its signature and is refused from its text in every case, where no
+call reaches the function too (T33; §4, the owner, 2026-11-07, "Refused always"). Each other such
+declaration is refused where the body is checked (T33): once from its text, or in each copy a call makes
 where T33 or T35 checks the function in its copies alone, so not at all where no call reaches such a
-function. `M = 3` with the name `M` of such a type parameter is a declaration, since no variable of
+function. *(assumed, §4, with the build: each is reported once, at the declaration, however many copies
+give it (T33))* `M = 3` with the name `M` of such a type parameter is a declaration, since no variable of
 that name is visible to assign (V8), and so it is `redeclared`. Whether a declaration in a method of
 a generic type, named like a type parameter of that type, is refused is open (§14).
 

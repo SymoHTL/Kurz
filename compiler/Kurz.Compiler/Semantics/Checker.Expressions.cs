@@ -459,6 +459,11 @@ public sealed partial class Checker
             return new Typed(constant.Of, constant.Value); // T35: in a copy, the constant its call gave, known while it compiles
         }
 
+        if (variable is null && TypeParameter(n.Name)?.Constant is { } unread && Types.IsError(unread))
+        {
+            return Typed.Error; // T35: a constant whose type was not read has its diagnostic already, and its uses none (E1)
+        }
+
         if (variable is not null)
         {
             variable.Read = true;
