@@ -1,0 +1,14 @@
+// expect: error argument-mismatch at 14
+// rules: F12, D11
+
+class A {
+    pub virtual int F(int x = 1) => x
+}
+
+class B : A {
+    pub override int F(int x) => x * 10
+}
+
+A a = B()
+print(a.F())
+print(B().F())
