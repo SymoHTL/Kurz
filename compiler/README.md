@@ -2070,14 +2070,20 @@ round can ask about it by the rule's id.
   argument 3 and `T`, not argument 1, which gives `U` nothing where `d` gives `U` its type (#156,
   comment 6620467625); the type parameter that failed is the one at which the inference ended (the
   owner, 2026-11-04, #156, comment 6643376941), in a nested position the one whose type an argument
-  before bound and that position contradicts (assumed, #156, comment 6620846564). Where every argument
+  before bound and that position contradicts (assumed, #156, comment 6620846564), and where none
+  differs so, because the position contradicts itself or an earlier type at an occurrence after its
+  first, the first in the order of declaration whose occurrences there fail with every other type
+  parameter left open: `Q(Pair<int, string>(1, "s"), 5)` for `int Q<T>(Pair<T, T> a, List<T> c)` names
+  argument 2 and `T` (the owner, 2026-11-06, #156, comment 6692304530; the owner chose the fix, #39,
+  comment 6691280436). Where every argument
   gives that type parameter a type and they differ, or no argument stands in a position, it names none
   (the owner, 2026-11-04, #156, comment 6643376941). The id stays
   T27's: no argument stands in the type parameter's position. An argument with an
   error of its own gives its type parameters nothing and is no `cannot-infer`: its own error stands
   alone, in a nested position (`Count(nothing)` and `Count(null)` for a `List<T>`) as in a direct one
-  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument fails to give that
-  type parameter a type (below). Its reason, that a call whose own argument
+  (E1) (the owner, 2026-11-03, #156, comment 6600034940), unless another argument with no error of its
+  own gives that type parameter nothing, or a lambda fits no function type its parameter could be
+  (below). Its reason, that a call whose own argument
   does not fit reports that misfit alone, is a convention of the messages the pipeline took, not the
   owner (#156, comment 6566609960). The call's result is read as a direct position reads it: one that
   does not name the type parameter stays, so `Count(nothing)` is an `int`, and one that does reports
