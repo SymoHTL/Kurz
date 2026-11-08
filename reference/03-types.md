@@ -180,9 +180,9 @@ long big = small
 print(big)
 ```
 
-A constant that a copy passes on to a type parameter holding a constant of a wider integer type widens the same way, and
-one passed on to a narrower type is `type-mismatch` (T1), as T35 reads a value of another type where a constant
-stands.
+A constant that a copy passes on to a type parameter holding a constant of a wider integer type widens the same way
+(§4, the owner, 2026-11-03). *(assumed, §4: one passed on to a narrower type is `type-mismatch` (T1), as T35 reads a
+value of a type that does not widen where a constant stands)*
 
 Case: [types/const-parameter-widening.kz](../corpus/types/const-parameter-widening.kz)
 ```kurz
@@ -1489,9 +1489,11 @@ type parameter of the function around it, one that holds a constant among them (
 CS0412 refuses a parameter, a local variable and a `foreach` variable named like a method's type parameter, and as C#
 refused, up to its language version 7.3, the three forms its later versions let hide the type parameter, a lambda's
 parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
-CS0412", and 2026-11-04 for a constant, "the same reading for both"), where the body is checked (below): once from its
-text, or in each copy a call makes for a function checked in its copies alone, so not at all where no call reaches such
-a function, and once, at the declaration, however many copies give it (below). *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
+CS0412", and 2026-11-04 for a constant, "the same reading for both"): a parameter of the function, part of its
+signature, from its text in every case, where no call reaches the function too (§4, the owner, 2026-11-07, "Refused
+always"), and each other such declaration where the body is checked (below): once from its text, or in each copy a call
+makes for a function checked in its copies alone, so not at all where no call reaches such a function. *(assumed, §4,
+with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
 and `TypeKind.List` among them, a file, a socket and a hasher being of the kind `TypeKind.Class`; an arm of a `match`
@@ -1511,21 +1513,27 @@ argument is `syntax`; in the lambda's body `f` stands as in a loop over `T.Field
 fields gives its value, and a variable the body names counts as read in a copy of such a type, as in an arm of a
 `match` on `T.Kind` that a copy does not read; a case that a call in a body gives beside the field's type leaves the function that holds `T.Make`, as one of any argument of a call does (§5),
 the bodies running in the order of the fields, as F12 evaluates arguments)* Where that function does not list such a case, it is `unlisted-case` at that call's line in
-the body, with O3's text, once for the copies that give it; the call that made the copy, where a copy that gives an
+the body, with O3's text; the call that made the copy, where a copy that gives an
 outcome its function does not list is `unlisted-case` above, is the place of an outcome the type gives, `Invalid` (§4,
-the owner, 2026-11-06, against moving the report to the call that made the copy). A generic function that reads its type, and one that passes its type parameter to such
+the owner, 2026-11-06, against moving the report to the call that made the copy). *(assumed, §4, with the build: it is
+reported once for each case the copies give, the same case of several copies once)* A generic function that reads its type, and one that passes its type parameter to such
 a function, is checked only in the copies that calls make, in its body: an error in its body shows at its first copy,
 and the body of one that no call reaches is never checked (§4, the owner, 2026-11-01, "Only per copy, as Zig"). Its
 signature, its type parameters among them, is checked from the text in every case, so that F16 refuses a type parameter
 of a function no call reaches too (§4, the owner, 2026-11-06, "Signature always, body per copy"; the cost is that a
-misnamed type parameter in a function nobody calls is an error, where Zig analyses no part of it).
+misnamed type parameter in a function nobody calls is an error, where Zig analyses no part of it). *(§4, the author's
+note, 2026-11-07, read from Zig's source and not checked with a Zig compiler: Zig's AstGen refuses a parameter that
+shadows a declaration in a function nobody references too, a `comptime` type parameter among them, and only its
+analysis of the body waits for a reference)*
 A copy is made at the first call that names its type arguments in the order the checker reads a file: the bodies of its
-functions, in the order their names first appear, then the methods of its classes, then the top-level code, the calls of
+functions, in the order of their declarations, the overloads of one name at the first of them, then the methods of its
+classes, class by class and method by method in the order of their declarations, then the top-level code, the calls of
 a copy's body before the calls that follow the call that made it. A later call with the same type arguments reads that
 copy, so that an error of the copy is reported once, and one reported at the call, `kind-not-read` or the
 `unlisted-case` of an outcome the type gives, shows at that first call, the call that made it (§4, the owner,
 2026-11-06, against the first call in the order of the text and against a report at every call that names the copy;
-the cost is that the line named is not always the first in the file). *(assumed, §4, with the build: a call that infers
+the cost is that the line named is not always the first in the file). The order is stated for one file, and the order
+across the files of a program is open (§14). *(assumed, §4, with the build: a call that infers
 its type arguments makes a copy as one that writes them; a fault of the function's text that several copies give,
 `redeclared` (V9) among them, is reported once, at its line, and one that differs between copies, `kind-not-read` for
 each kind, once for each copy)*
@@ -1981,11 +1989,11 @@ operand: a literal with its `-`, an `enum`'s value, or an expression in brackets
 it is checked against the parameter's type as a parameter's default value is (F12), so `const byte N = 300` is
 `constant-overflow` (T6), `const Mode M = Color.Red` is `type-mismatch` (T1) and `const int N = (F())` is
 `default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
-a type parameter among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the name of an earlier
+a type parameter that holds a type among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the name of an earlier
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
-count the call may write, and one that writes none takes the defaults (below). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+count the call may write, while a call that writes none is read in the assumed clause below. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
 `enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
@@ -1997,7 +2005,8 @@ constant's (T8), or a type, where the constant stands is `type-mismatch` (T1); a
 constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
 loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
-`redeclared`, as for any type parameter, in each copy a call makes, so not at all where no call reaches the function
+`redeclared`, as for any type parameter: a parameter of the function from its text in every case (§4, the owner,
+2026-11-07, "Refused always"), and each other in each copy a call makes, so not at all where no call reaches the function
 (V9, T33; §4, the owner, 2026-11-04, "the same reading for both"); `M = Mode.Loud` with that name is such a
 declaration (V8, V9). The type parameter itself takes no name of a variable at the outermost level of the top-level
 code, whether or not a call makes a copy (F16).
