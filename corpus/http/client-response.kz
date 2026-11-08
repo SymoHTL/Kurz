@@ -12,6 +12,8 @@
 // | 200 5 TooLarge: response body over limit
 // | 200 6 Protocol: malformed response: unexpected end of body
 // | 200 7 Protocol: malformed response: bad chunk size
+// | 200 8 2 [first]
+// | 200 8 Protocol: malformed response: bad chunk
 // allow: raw native
 // rules: W14
 
@@ -19,7 +21,7 @@
 // a `304` have none; the trailer of a chunked body is read past, each line within the size line, and the connection serves the
 // next response; a `1xx` before the response is read past; a response of HTTP/1.0 keeps its connection only with
 // `Connection: keep-alive`, and one with `Connection: close` or read to the close keeps it not; `ReadAllText(max)` past its bound and a
-// body that ends early or is malformed give the response's errors
+// body that ends early or is malformed give the response's errors, as a trailer line past the size line gives `bad chunk`
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -168,6 +170,9 @@ void Responses(int port) {
     print(Show(client, port, 10))
     print(Show(client, port, 100))
     print(Show(client, port, 100))
+    small = HttpClient(HttpClientOptions(Limits: HttpLimits(MaxChunkSizeLine: 16)))
+    print(Show(small, port, 100))
+    print(Show(small, port, 100))
 }
 
 Against([
@@ -187,4 +192,6 @@ Against([
     "close",
     "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n",
     "close",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nfirst\r\n0\r\nX-Checksum: 12\r\n\r\n",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nlast\r\n0\r\nX-Checksum: 123\r\n\r\n",
 ], (int port) => Responses(port))
