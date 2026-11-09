@@ -1,0 +1,152 @@
+// expect: output
+// | void
+// | [HTTP/1.1 206 Partial Content|Content-Type: application/octet-stream|Content-Range: bytes 3-6/10|Content-Length: 4|Date: <29>||3456]
+// | called /c
+// | called /n
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>||abcHTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>||abc]
+// | called /n
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>||abc]
+// | called /c
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>|Connection: close||abc]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 0|Date: <29>||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 0|Date: <29>||]
+// | io: invalid data
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 2|Date: <29>||a]
+// | io: invalid data
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 5|Date: <29>||ab]
+// rules: W11
+
+// a response a function writes under a `Content-Length` the handler set goes as it is, not in chunks, and keeps its connection: a
+// part of a file, the range a seek reaches, as a `206`; a body written in two writes; a `HEAD` with the head alone, the count in
+// it, and no function called; to HTTP/1.0 with the count and `Connection: close`; a count of 0 with no body; a write that would
+// pass the count writes none of its bytes and closes the connection with `InvalidData`, the body cut; and a body short of its
+// count at the function's return closes it with that error too
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+// `response` with `Content-Length: count`, or the `500` of a header that cannot be set
+HttpResponse Counted(HttpResponse response, string count) {
+    response.Headers.Set("Content-Length", count) else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+File.WriteAll("serve-stream-length.txt", "0123456789".Bytes) else {
+    IoError e => print(e)
+}
+
+ranged = (HttpRequest r) => {
+    response = HttpResponse.Stream(206, (HttpWriter w) => {
+        f = File.Open("serve-stream-length.txt")
+        f.Seek(3)
+        mut part = Bytes()
+        f.Read(mut part, 4)
+        w.Write(part)
+    })
+    response.Headers.Set("Content-Range", "bytes 3-6/10") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return Counted(response, "4")
+}
+counted = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+    print("called {r.Path}")
+    w.Write("a")
+    w.Write("bc")
+}), "3")
+empty = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => w.Write("")), "0")
+over = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("a")
+    w.Write("bc")
+}), "2")
+under = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => w.Write("ab")), "5")
+get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
+Exchange("GET /r HTTP/1.1\r\nHost: h\r\n\r\n", ranged, HttpLimits())
+Exchange("GET /c HTTP/1.1\r\nHost: h\r\n\r\n{get}", counted, HttpLimits())
+Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", counted, HttpLimits())
+Exchange("GET /c HTTP/1.0\r\n\r\n", counted, HttpLimits())
+Exchange("GET /e HTTP/1.1\r\nHost: h\r\n\r\n{get}", empty, HttpLimits())
+Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\n{get}", over, HttpLimits())
+Exchange("GET /u HTTP/1.1\r\nHost: h\r\n\r\n{get}", under, HttpLimits())
+File.Delete("serve-stream-length.txt") else {
+    IoError e => print(e)
+}

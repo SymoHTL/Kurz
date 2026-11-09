@@ -1,0 +1,21 @@
+// expect: output
+// | 1
+// | 2
+// rules: F3
+
+// a comparison of constants and an `||` of constants are constants too, so neither `while` can end at its condition, and the end
+// of neither function can be reached
+int Same() {
+    while 1 == 1 {
+        return 1
+    }
+}
+
+int Either() {
+    while false || true {
+        return 2
+    }
+}
+
+print(Same())
+print(Either())

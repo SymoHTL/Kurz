@@ -1,0 +1,5 @@
+// expect: error unknown-name at 5
+// rules: T38
+
+// a timestamp counts from 1970 with `FromUnixSeconds`; `FromSeconds` is a duration's, and no member of `timestamp`
+print(timestamp.FromSeconds(5))

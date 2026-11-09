@@ -202,6 +202,12 @@ or record, a class's comparing references; the cost is that a class derived from
 file of the program, can make `==` on the base `type-mismatch` where no line changed, and that the
 check reads every class of the program)*.
 
+`==` on two values of an interface, and a key of an interface's type, read the classes that
+implement it as the paragraph above reads the classes derived from a class: false where the classes
+of the two instances differ, else the class's own `==`, and its own hash for a key, so that such a
+field of a class that implements it makes `==` on the interface `type-mismatch` *(assumed, §4:
+proposed on #110, comment 6567439435, and not objected to in the answer, comment 6573113786)*.
+
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
 class User(string Name)
@@ -1197,6 +1203,69 @@ field's line against the class's). The call of the primary one is direct; a furt
 without it is `constructor-must-chain`. A constructor written in the body is private without `pub`,
 as every member is (F9); the primary constructor, and the empty constructor of a class without one,
 are visible wherever the class is.
+
+A constructor of a class without a primary constructor passes the arguments of its base with
+`: base(...)`, as C# writes them: `Dog(int legs) : base(legs)`. `base` is a word right after a
+constructor's `:` and a name everywhere else (L18), as `as` is a word of a `use` line alone (F10)
+(the owner, 2026-11-03, against no `base`, under which a base whose constructor takes arguments
+needs a primary constructor in each class derived from it, and against a core word, which no
+program could use as a name). `: base(...)` picks among the constructors of the base as a
+construction does, and its arguments read the parameters and no instance, as those of `: this(...)`
+do. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
+`: this(...)` nor `: base(...)` runs the constructor of the base that takes no arguments, as C#'s
+implied `base()` does, and so does the empty constructor of a class without one; where the base has
+no such constructor, that constructor is `argument-mismatch`, at its line or at the class's, as C#
+reports CS7036 there *(assumed: C#'s error, which the answer does not name)*. In a further
+constructor of a class with a primary constructor, `: base(...)` is `constructor-must-chain`, and
+in a class without a base class it is `syntax` *(assumed: the error for text no rule gives a
+meaning)*.
+
+Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
+```kurz
+class Animal(string Name) {
+    pub Animal(int legs) : this("legs {legs}") {
+        print("Animal {legs}")
+    }
+}
+
+class Dog : Animal {
+    pub Dog(int legs) : base(legs) {
+        print("Dog {Name}")
+    }
+
+    pub Dog(string name) : base(name) { }
+}
+
+class Pet(string Name = "pet")
+
+class Cat : Pet
+
+base = Dog(4)
+print(base.Name)
+print(Dog("rex").Name)
+print(Cat().Name)
+```
+
+Case: [classes/base-constructor-takes-arguments.kz](../corpus/classes/base-constructor-takes-arguments.kz)
+```kurz
+class Animal(string Name)
+
+class Dog : Animal {
+    pub Dog(string name) : base(name) { }
+    pub Dog() { }
+}
+
+print(Dog("rex").Name)
+```
+
+Case: [classes/base-without-base-class.kz](../corpus/classes/base-without-base-class.kz)
+```kurz
+class Animal {
+    pub Animal() : base() { }
+}
+
+print(Animal() == Animal())
+```
 
 Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)
 ```kurz

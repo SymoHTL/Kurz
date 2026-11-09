@@ -800,6 +800,201 @@ Closed() else {
 }
 ```
 
+### S27 (decided, §12) Moving the position
+
+`f.Seek(offset)` moves the position of a `File` or a `TcpStream` to `offset` bytes from the start of
+the file and gives `void | IoError`, as Rust's `Seek::seek(SeekFrom::Start(n))` through a
+`BufReader` and C#'s `FileStream.Position = n`. The bytes the read buffer holds (S3, S24) are
+dropped, as `BufReader::seek` discards its buffer, so that the next `Read`, `Fill` or pull of a line
+reads at the new position. A handle the system cannot seek, a socket or a pipe, gives the `IoError`
+of the kind `NotSeekable` (S1) (§12, the owner, 2026-11-08, #110, comment 6721051459, G5 (a) of
+comment 6717319917, against a part of a file as a response and against a read at an offset that
+moves no position; the cost is the system call and this rule, and a position every holder of the
+handle shares, as it shares the buffer, S5). *(assumed, §12, the defaults of the product pass of G5
+(#110, comment 6728933408): `offset` a `long`, as `File.Size` gives one (S7) and C#'s `Position` is
+one; an offset past the
+end allowed, a read there giving no bytes and a write there extending the file with bytes of 0 before
+it, as C# and Rust allow it; a file `File.Create` made seeking too, since a write goes to the system
+with no buffer of its own (S4); the seek a call in flight on the handle (S5) that takes the buffer's
+lock, so that a fill through another holder puts no bytes of the old position after it; a failed
+seek keeping the buffer, as `BufReader::seek` keeps it where the inner seek fails; and in a build for
+Windows `not supported`, as every call on a file, S11)* An `offset` below 0 stops the program with
+`index-out-of-range` before the call enters the handle, as a `Read`'s `max` below 0 does (§12, the
+owner, 2026-11-09, #110, comment 6735258248, G5 Q3, "index-out-of-range", against the system's
+`EINVAL` as an `IoError` of the kind `InvalidInput`).
+
+Case: [system/seek-read.kz](../corpus/system/seek-read.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a read of three bytes leaves the rest of the file in the handle's buffer: a seek drops it, so that the read after it starts at the
+// offset, before those bytes or past them, and a read past the end of the file gives no bytes
+void | IoError Run() {
+    File.WriteAll("seek-read.txt", "0123456789".Bytes)
+    f = File.Open("seek-read.txt")
+    File.Delete("seek-read.txt")
+    mut first = Bytes()
+    f.Read(mut first, 3)
+    print(Text(first))
+    f.Seek(1)
+    mut back = Bytes()
+    f.Read(mut back, 3)
+    print(Text(back))
+    long tail = 10 - 3
+    f.Seek(tail)
+    mut ahead = Bytes()
+    f.Read(mut ahead, 3)
+    print(Text(ahead))
+    f.Seek(100)
+    mut past = Bytes()
+    n = f.Read(mut past, 3)
+    print(n)
+    f.Seek(0)
+    mut whole = Bytes()
+    f.Read(mut whole, 100)
+    print(Text(whole))
+}
+
+Run() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/seek-fill.kz](../corpus/system/seek-fill.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a fill after a seek holds the bytes at the offset, not the ones the buffer held, and a seek after a consume starts at its offset,
+// not where the consume left the buffer
+void | IoError Run() {
+    File.WriteAll("seek-fill.txt", "abcdef".Bytes)
+    f = File.Open("seek-fill.txt")
+    File.Delete("seek-fill.txt")
+    mut all = Bytes()
+    f.Fill(mut all)
+    print(Text(all))
+    f.Seek(3)
+    mut rest = Bytes()
+    f.Fill(mut rest)
+    print(Text(rest))
+    f.Consume(1)
+    f.Seek(5)
+    mut last = Bytes()
+    f.Fill(mut last)
+    print(Text(last))
+}
+
+Run() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/seek-write.kz](../corpus/system/seek-write.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a file the program creates seeks too: a write after a seek lands at the offset, one past the end extends the file with bytes of 0
+// before it, and a seek after a `Close` gives the closed handle's error
+void | IoError Run() {
+    f = File.Create("seek-write.txt")
+    f.Write("abcdef".Bytes)
+    f.Seek(2)
+    f.Write("XY".Bytes)
+    f.Seek(8)
+    f.Write("Z".Bytes)
+    f.Close()
+    f.Seek(0) else {
+        IoError e => print(e)
+    }
+
+    bytes = File.ReadAll("seek-write.txt")
+    File.Delete("seek-write.txt")
+    mut head = Bytes()
+    for i in 0..<6 {
+        head.Add(bytes[i])
+    }
+
+    print(Text(head))
+    print(bytes.Count)
+    print(bytes[6])
+    print(bytes[8])
+}
+
+Run() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/seek-stream.kz](../corpus/system/seek-stream.kz)
+```kurz
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a stream cannot seek: the system's `ESPIPE` is `NotSeekable`, and the failed seek keeps the bytes the buffer holds for the read
+// after it
+void | IoError Run() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("hello".Bytes)
+    client.ShutdownWrite()
+    mut seen = Bytes()
+    server.Fill(mut seen)
+    server.Seek(0) else {
+        IoError e => {
+            print(e.Kind)
+            print(e.Code)
+        }
+    }
+
+    mut read = Bytes()
+    server.Read(mut read, 100)
+    print(Text(read))
+}
+
+Run() else {
+    IoError e => print(e)
+}
+```
+
+Case: [system/seek-negative.kz](../corpus/system/seek-negative.kz)
+```kurz
+void | IoError Negative() {
+    File.WriteAll("seek-negative.txt", "abc".Bytes)
+    f = File.Open("seek-negative.txt")
+    File.Delete("seek-negative.txt")
+    long offset = -1
+    f.Seek(offset)
+}
+
+Negative() else {
+    IoError e => print(e)
+}
+```
+
 ### S4 (assumed, §12) Writing writes every byte
 
 `f.Write(bytes)` writes every byte of `bytes`, a `Bytes`, and returns `void | IoError`: where the

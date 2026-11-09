@@ -139,6 +139,21 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     }
 
     [Fact]
+    public void In_a_property_or_a_fields_default_of_a_type_with_a_member_named_Log_a_level_of_Log_is_a_log_call_and_the_member_is_reached()
+    {
+        // P1 outside the type's methods: a parameter of a primary constructor named `Log`, whose type has an `Information` of its own,
+        // beside a log call in a field's default and in a property, each inside a lambda, and properties that give the member by
+        // its name alone and through `this`; and a method named `Log`, called in a method and in a property's lambda
+        const string text = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    () => void report = () => Log.Information(\"in a field's default\")\n\n    pub () => void Notice => () => Log.Information(\"in a property\")\n\n    pub Sink Kept => Log\n\n    pub Sink Through => this.Log\n\n    pub void Pay() {\n        report()\n        n = Notice\n        n()\n        k = Kept\n        k.Information(\"the member through a property\")\n        t = Through\n        t.Information(\"the member through this in a property\")\n    }\n}\n\nclass Audit {\n    pub void Log() {\n        print(\"the method Log\")\n    }\n\n    pub () => void Call => () => Log()\n\n    pub void Run() {\n        c = Call\n        c()\n        Log.Information(\"a log call beside a method named Log\")\n    }\n}\n\no = Orders(Sink())\no.Pay()\na = Audit()\na.Run()\n";
+        if (Logged(text, "log-member-outside-a-method") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["the member through a property", "the member through this in a property", "the method Log"], run.Output);
+            Assert.Equal(["Information Orders: in a field's default", "Information Orders: in a property", "Information Audit: a log call beside a method named Log"], run.Lines);
+        }
+    }
+
+    [Fact]
     public void With_nothing_set_a_call_site_is_on_from_information_and_each_level_writes_its_name()
     {
         const string text = "Log.Trace(\"t\")\nLog.Debug(\"d\")\nLog.Information(\"i\")\nLog.Warning(\"w\")\nLog.Error(\"e\")\nLog.Critical(\"c\")\n";
