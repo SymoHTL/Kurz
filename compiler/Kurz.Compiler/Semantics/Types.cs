@@ -130,6 +130,16 @@ public sealed record ClassType(ClassSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>K6: an <c>interface</c>: a reference to a counted instance of any class that implements it, one type per declaration.</summary>
+public sealed record InterfaceType(InterfaceSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(InterfaceType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>
 /// R3, R5: <c>weak T?</c>, a reference to an instance of the class <c>T</c> that does not keep it alive, null once the instance is
 /// freed. It is the type of a place, a variable, a parameter, a result, a field or a list's item, which takes a <c>T</c>, a
@@ -485,6 +495,7 @@ public static class Types
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (InterfaceType x, InterfaceType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
@@ -601,6 +612,11 @@ public static class Types
         if (from is ClassType fc && to is ClassType tc)
         {
             return fc.Symbol.HasBaseOrIs(tc.Symbol); // K6: an instance of a derived class where its base is required
+        }
+
+        if (from is ClassType ic && to is InterfaceType face)
+        {
+            return ic.Symbol.Implements(face.Symbol); // K6: an instance of a class that implements the interface where it is required
         }
 
         if (from is ListType fl && to is ListType tl)

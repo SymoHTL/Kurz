@@ -2693,6 +2693,9 @@ static mut long logDropped = 0
 
 // A line the system took in part before a write that took nothing (P9): the stream stands inside it, and a line feed ends it before
 // the next line written.
+// Kurz has no atomic form, so the count and the flag are plain `static mut`s, as `Random`'s are: the runtime starts no thread, and two
+// threads a program starts through C (R16) that log at once race on them, where an atomic exchange of each would not: both may write
+// the line feed, or one may clear the flag while the other's line stands cut, and a count may lose a line.
 static mut bool logCut = false
 
 // The buffer of each thread in which `LogLine` puts a line together before its write, and its size.

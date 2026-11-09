@@ -1,0 +1,14 @@
+// expect: error missing-member at 8
+// rules: K7
+
+interface Bump {
+    void Go(mut int n)
+}
+
+class Step : Bump {
+    pub void Go(int n) {
+        print(n)
+    }
+}
+
+print(1)
