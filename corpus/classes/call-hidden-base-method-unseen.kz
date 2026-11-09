@@ -1,0 +1,13 @@
+// expect: error not-visible at 10
+// rules: F13
+
+class Counter(int Start) {
+    int Next(int step) => Start + step
+}
+
+class Ticket(int Seat) : Counter {
+    // `Ticket` sees no `Next`: the call is `not-visible`, though its argument fits no `Next` of the chain
+    pub int Take() => Next("one")
+}
+
+print(Ticket(1, 2).Take())

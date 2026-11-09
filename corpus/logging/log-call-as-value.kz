@@ -1,0 +1,5 @@
+// expect: error syntax at 4
+// rules: P1
+
+paid = Log.Information("paid")
+print(paid)

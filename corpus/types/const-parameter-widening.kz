@@ -1,0 +1,13 @@
+// expect: output
+// | 8
+// rules: T35, T8
+
+void Wide<const long W>() {
+    print(W + 1)
+}
+
+void Pass<const int L>() {
+    Wide<L>()
+}
+
+Pass<7>()
