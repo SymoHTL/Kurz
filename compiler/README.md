@@ -2491,9 +2491,11 @@ round can ask about it by the rule's id.
   `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
   is read again until what it keeps holds, a `while true` leaves by its `break`s alone, and a `throw`
   leaves no path. The base's constructor runs before the body, as C#, Java and Swift run it: the one
-  `: base(...)` picks, whose arguments read the parameters and no instance, else the one that takes
-  no arguments, as C#'s implied `base()`, and where the base has none the constructor that implies
-  it is `argument-mismatch`, as C#'s CS7036. `base` is read as that word right after a
+  `: base(...)` picks, whose arguments read the parameters and no instance, else the one that a call
+  with no arguments reaches, the defaults of its parameters given, as C#'s implied `base()`, and where
+  the base has none the constructor that implies
+  it is `argument-mismatch`, as C#'s CS7036, and `: base(...)` in a class without a base class is
+  `syntax` (the owner, 2026-11-09, #409, comment 6737367678). `base` is read as that word right after a
   constructor's `:` alone, as `as` in a `use` line, and is a name everywhere else (L18).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
