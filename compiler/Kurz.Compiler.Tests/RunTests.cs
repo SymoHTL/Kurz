@@ -113,7 +113,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 441 : 532;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 999 : 538;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -135,7 +135,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "http/response-transfer-encoding.kz", "http/response-large.kz",
         "http/serve-keep-alive.kz", "http/serve-close.kz", "http/serve-refused.kz", "http/serve-head.kz", "http/serve-drain.kz",
         "http/serve-limits.kz", "http/serve-accept.kz", "http/serve-timeouts.kz",
-        "http/response-stream.kz", "http/serve-stream.kz", "http/serve-stream-timeouts.kz",
+        "http/response-stream.kz", "http/serve-stream.kz", "http/serve-stream-timeouts.kz", "http/stream-handler-no-cycle.kz",
         "http/client-get.kz", "http/client-pool.kz", "http/client-errors.kz", "http/client-response.kz", "http/client-malformed.kz",
         "http/client-limits.kz", "http/client-redirects.kz", "http/client-timeout.kz", "http/client-timeout-body.kz",
     ];

@@ -1,0 +1,16 @@
+// expect: output
+// | 201
+// rules: R9
+
+// a handler that reads a class that holds a `mut` response closes no ring through the response's function, since that field counts
+// only the lambdas whose type it can hold and a handler is none of them, and the function that writes the body reads nothing of the
+// class (R9, the owner, 2026-11-04, #110, comment 6643368937)
+class App(mut HttpResponse Cached)
+
+void Keep((HttpRequest) => HttpResponse handler) {
+}
+
+app = App(HttpResponse.Text(200, "x"))
+Keep((HttpRequest r) => app.Cached)
+app.Cached = HttpResponse.Stream(201, (HttpWriter w) => w.Write("y"))
+print(app.Cached.Status)

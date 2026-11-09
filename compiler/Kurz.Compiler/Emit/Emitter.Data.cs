@@ -443,6 +443,9 @@ public sealed partial class Emitter
 
             case ClassType c when Layout.Fat(c.Symbol):
                 return EqualThroughTable(left, right, c.Symbol); // K13: by the instances' classes, then by the equality of that class
+            case InterfaceType face:
+                comparedThroughInterface.Add(face.Symbol);
+                return EqualPairs(left, right); // K13 with K6: by the instances' classes, which their tables for the interface tell, then by that class's equality
 
             case ClassType c:
                 return fn.Value($"call i1 {ClassEqual(c.Symbol)}(ptr {left}, ptr {right})");

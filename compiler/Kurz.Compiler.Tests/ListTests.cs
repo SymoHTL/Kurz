@@ -2881,6 +2881,304 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "5 6 quiet 5", // an override without `pub`, called through the base, inside its class and by the base's `Text`
     ];
 
+    // interfaces (K6, K7), each value of one the instance's address and its class's table for the interface: calls through that
+    // table, a class whose base names the interface, a base that names two, a `void` method with parameters, a `mut` one among them,
+    // an own `pub` method where the base has a private one, an interface value printed by its `Text` (A10), held by a `data` value's
+    // field, in a list, nullable, compared and used as a map's key, whose class decides its equality (K13), and a case of a union
+    private const string Interfaces = """
+        interface Shape {
+            int Area()
+            string Text()
+        }
+
+        interface Named {
+            string Name()
+            void Rename(string to, int times)
+        }
+
+        interface Bumper {
+            void Bump(mut int m)
+        }
+
+        class Base(mut string Label) : Shape, Bumper {
+            pub virtual int Area() => 1
+            pub string Text() => "{Label} {Area()}"
+            pub virtual void Bump(mut int m) {
+                m = m + 1
+            }
+        }
+
+        class Square(int Side) : Base, Named {
+            pub override int Area() => Side * Side
+            pub override void Bump(mut int m) {
+                m = m + Side
+            }
+            pub string Name() => "square {Side}"
+            pub void Rename(string to, int times) {
+                for i in 0..<times {
+                    Label = "{Label}{to}"
+                }
+            }
+        }
+
+        class Dot(int X) : Shape {
+            pub int Area() => 0
+            pub string Text() => "dot {X}"
+        }
+
+        class Step(int By) : Bumper {
+            pub void Bump(mut int m) {
+                m = m + By
+            }
+        }
+
+        class Hidden {
+            int Area() => 100
+
+            pub int Use() => Area()
+        }
+
+        class Shown : Hidden, Shape {
+            pub int Area() => 5
+            pub string Text() => "shown"
+        }
+
+        class Tag(string V) : Named equal by V {
+            pub string Name() => V
+            pub void Rename(string to, int times) {
+                print("tag {to} {times}")
+            }
+        }
+
+        data Holder(Shape S, int K)
+
+        int Total(List<Shape> all) {
+            mut t = 0
+            for s in all {
+                t = t + s.Area()
+            }
+            return t
+        }
+
+        string Show(Named? x) {
+            if x == null {
+                return "none"
+            }
+            return x.Name()
+        }
+
+        int | Shape Pick(int k) {
+            if k > 1 {
+                return Square("p", k)
+            }
+
+            if k > 0 {
+                return Dot(k)
+            }
+
+            return k
+        }
+
+        Base b = Square("sq", 3)
+        Shape fromBase = b
+        List<Shape> shapes = [Base("b"), Square("s", 2), Dot(7), fromBase]
+        print(Total(shapes))
+        for s in shapes {
+            print(s)
+        }
+        print("{shapes[2]} and {shapes[1].Area()}")
+        sq = Square("x", 4)
+        Named n = sq
+        n.Rename("!", 2)
+        print(sq.Label)
+        print(Show(n))
+        print(Show(null))
+        print(Show(Tag("t")))
+        Tag("u").Rename("v", 3)
+        h = Holder(Dot(1), 5)
+        print(h)
+        Named a = Tag("k")
+        Named c = Tag("k")
+        Named d = sq
+        print("{a == c} {a == d} {d == n} {a == Tag("z")}")
+        mut names = Map<Named, int>()
+        names[a] = 1
+        names[c] = 2
+        names[d] = 3
+        names[Tag("other")] = 4
+        print("{names.Count} {names[Tag("k")] ?? 0} {names[n] ?? 0} {names[Square("x", 4)] ?? 0}")
+        mut Shape? maybe = null
+        print(maybe == null)
+        maybe = Dot(3)
+        print(maybe)
+        for i in 0..<3 {
+            print(match Pick(i) {
+                int v => "int {v}"
+                Shape s => "{s} {s.Area()}"
+            })
+        }
+        y = Pick(3) else {
+            Shape s => s.Area()
+        }
+        print(y)
+        mut count = 1
+        List<Bumper> bumpers = [Step(2), Base("q"), b, sq]
+        for bump in bumpers {
+            bump.Bump(mut count)
+        }
+        print(count)
+        Shape shown = Shown()
+        print("{shown.Area()} {Shown().Use()}")
+        """;
+
+    private static readonly string[] InterfacesPrint =
+    [
+        "14", // each item's `Area` through its interface's table, the derived class's override among them
+        "b 1", // the base's `Text` calls the override of the instance's class
+        "s 4",
+        "dot 7",
+        "sq 9", // a value of the base type made one of the interface, through the table of the instance's class
+        "dot 7 and 4",
+        "x!!", // a `void` method called through the interface writes the instance's field
+        "square 4",
+        "none",
+        "t",
+        "tag v 3",
+        "Holder { S = dot 1, K = 5 }",
+        "true false true false", // K13: `Tag` compares by `V`, `Square` by identity, through the interface
+        "3 2 3 0",
+        "true",
+        "dot 3",
+        "int 0", // an interface as a case of a union
+        "dot 1 0",
+        "p 4 4",
+        "9",
+        "11", // a `mut` parameter through the second interface a base names, a leaf's method and a derived class's override among them
+        "5 100", // K7: the class's own `pub` method implements the interface where its base has a private one of that signature
+    ];
+
+    // arms of a class over a value of an interface, of a base class, of a `T?`, of a union and of a call's other cases (C4, O5, K6;
+    // the owner, 2026-11-02, #110): the instance's class is the arm's or derives from it, one comparison with the class's table for
+    // the interface where the arm's class has no base and no derived class, one with the class's table where nothing derives from
+    // it, and else a walk through the tables' links, two steps from a leaf up to its base's base among them; the arm's name holds
+    // the instance past the end of a temporary subject and past an assignment over the field the subject was read from
+    private const string ClassArms = """
+        interface Shape {
+            int Area()
+        }
+
+        class Dot : Shape {
+            pub int Area() => 1
+        }
+
+        class Base(int N) : Shape {
+            pub virtual int Area() => N
+        }
+
+        class Mid(int M) : Base(M) {
+            pub override int Area() => M * 10
+        }
+
+        class Leaf(int L) : Mid(L)
+
+        class Other(int O) : Base(O)
+
+        class Box(mut Shape? Held)
+
+        string Kind(Shape s) => match s {
+            Dot d => "dot {d.Area()}"
+            Leaf l => "leaf {l.L} {l.Area()}"
+            Mid m => "mid {m.M} {m.Area()}"
+            Base b => "base {b.N}"
+            else => "other"
+        }
+
+        string Root(Shape s) => match s {
+            Base b => "base {b.N} {b.Area()}"
+            else => "not"
+        }
+
+        string Of(Base b) => match b {
+            Leaf l => "leaf {l.L}"
+            Mid m => "mid {m.M}"
+            else => "base {b.N}"
+        }
+
+        string Opt(Base? b) => match b {
+            null => "none"
+            Mid m => "mid {m.M}"
+            else => "some"
+        }
+
+        string Either(int | Shape v) => match v {
+            int n => "int {n}"
+            Mid m => "mid {m.M}"
+            else => "shape"
+        }
+
+        int | Shape Pick(int n) {
+            if n == 0 {
+                return 5
+            }
+
+            if n == 1 {
+                return Mid(6)
+            }
+
+            return Dot()
+        }
+
+        int Got(int n) {
+            x = Pick(n) else {
+                Mid m => m.M
+                Dot => 1
+                else => -1
+            }
+            return x
+        }
+
+        Shape Make(int k) => Leaf(k)
+
+        List<Shape> all = [Dot(), Base(2), Mid(3), Leaf(4), Other(5)]
+        for s in all {
+            print(Kind(s))
+        }
+        print("{Root(Leaf(6))} {Root(Dot())}")
+        print("{Of(Base(2))} {Of(Mid(3))} {Of(Leaf(4))} {Of(Other(5))}")
+        print("{Opt(null)} {Opt(Leaf(8))} {Opt(Other(9))}")
+        print("{Either(1)} {Either(Leaf(2))} {Either(Dot())}")
+        print("{Got(0)} {Got(1)} {Got(2)}")
+        print(match Make(7) {
+            Mid m => "made {m.M}"
+            else => "none"
+        })
+        box = Box(Mid(4))
+        match box.Held {
+            null => print("empty")
+            Mid m => {
+                box.Held = null
+                print("kept {m.M} {m.Area()} {box.Held == null}")
+            }
+            else => print("other")
+        }
+        """;
+
+    private static readonly string[] ClassArmsPrint =
+    [
+        "dot 1", // a class with no base and no derived class, by its table for the interface
+        "base 2", // a walk from the instance's class to the arm's
+        "mid 3 30",
+        "leaf 4 40", // a class nothing derives from, by its own table read from its table for the interface
+        "base 5",
+        "base 6 60 not", // two steps up, and the override of the instance's class through the arm's name
+        "base 2 mid 3 leaf 4 base 5", // over a base class
+        "none mid 8 some", // over a `T?`
+        "int 1 mid 2 shape", // over a union
+        "5 6 1", // over a call's other cases
+        "made 7", // a temporary subject
+        "kept 4 40 true", // the arm's name holds the instance the field let go of
+    ];
+
     // instances made and let go of through every way out of a block, as the lists' rounds take them: a variable, a field assigned
     // over, a `return` and a `break` and a `continue` that leave a block, a call's result nothing holds, a `data` value's field, a
     // lambda's environment and a list's item, each holding a chain of links
@@ -3218,6 +3516,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             mut e = Big(Fill(2000), null)
             e.Xs.Add(1)
             total = total + b.Xs.Count + c.Xs.Count + d.Xs.Count + e.Xs.Count
+        }
+
+        print(round)
+        print(total)
+        """;
+
+    // instances made and let go of as an interface, through every way out of a block: a variable, a field assigned over, a `return`,
+    // a `continue`, a result nothing holds, a lambda's environment, a list's item and a map's key, each holding a chain of links
+    private const string InterfaceRounds = """
+        interface Sized {
+            int Size()
+        }
+
+        class Link(int V, Link? Next)
+
+        class Bag(mut Link? Chain, List<int> Xs) : Sized {
+            pub virtual int Size() => Xs.Count
+        }
+
+        class Pack(int Extra) : Bag {
+            pub override int Size() => Xs.Count + Extra
+        }
+
+        class Box(mut Sized? Inner)
+
+        Sized Make(int n) {
+            mut xs = List<int>()
+            mut Link? chain = null
+            for i in 0..<n {
+                xs.Add(i)
+                chain = Link(i, chain)
+            }
+
+            if n % 2 == 0 {
+                return Bag(chain, xs)
+            }
+
+            Bag b = Pack(chain, xs, 0)
+            return b
+        }
+
+        mut round = 0
+        mut total = 0
+        while round < 3000 {
+            round = round + 1
+            a = Make(100)
+            box = Box(a)
+            box.Inner = Make(101)
+            box.Inner = null
+            for j in 0..<3 {
+                c = Make(100)
+                if j == 1 {
+                    continue
+                }
+
+                total = total + c.Size()
+            }
+
+            Make(100)
+            f = () => a.Size()
+            mut all = List<Sized>()
+            all.Add(Make(100))
+            mut keys = Map<Sized, int>()
+            keys[a] = 1
+            keys[Make(10)] = 2
+            total = total + f() + all[0].Size() + keys.Count - 202
         }
 
         print(round)
@@ -3631,6 +3995,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Equality, toolchain.Runtime, "class-equality"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, toolchain.Runtime, "class-inheritance"), 0, InheritancePrint, "");
         Ran(BuildAndRun(FunctionFields, toolchain.Runtime, "function-fields"), 0, FunctionFieldsPrint, "");
+        Ran(BuildAndRun(Interfaces, toolchain.Runtime, "class-interfaces"), 0, InterfacesPrint, "");
+        Ran(BuildAndRun(ClassArms, toolchain.Runtime, "class-arms"), 0, ClassArmsPrint, "");
     }
 
     [Fact]
@@ -3921,6 +4287,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         Ran(BuildAndRun(propertyChange, fenced, "property-change-fenced"), 0, ["3", "[7]", "2", "[7]"], "");
         Ran(BuildAndRun(FunctionFields, fenced, "function-fields-fenced"), 0, FunctionFieldsPrint, "");
+        Ran(BuildAndRun(Interfaces, fenced, "class-interfaces-fenced"), 0, InterfacesPrint, "");
+        Ran(BuildAndRun(ClassArms, fenced, "class-arms-fenced"), 0, ClassArmsPrint, "");
         // the first release a program lays out is of a class that holds another, whose release it lays out inside its own: the flag of
         // a release under way stands once in the program
         Ran(BuildAndRun("class A(B Inner)\nclass B(int N)\n\nvoid Show(A a) {\n    print(a.Inner.N)\n}\n\nShow(A(B(2)))\n", fenced, "class-holds-class-fenced"), 0, ["2"], "");
@@ -3935,6 +4303,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(WeakHeldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "weak-held-rounds-fenced"), 0, ["20", "4000"], "");
         Ran(BuildAndRun(BlockCopyRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "block-copy-rounds-fenced"), 0, ["20", "120220"], "");
         Ran(BuildAndRun(FunctionFieldRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "function-field-rounds-fenced"), 0, ["20", "20000"], "");
+        Ran(BuildAndRun(InterfaceRounds.Replace("while round < 3000", "while round < 20", StringComparison.Ordinal), fenced, "interface-rounds-fenced"), 0, ["20", "4000"], "");
         // lists of more than 262144 bytes made and dropped, blocks the thread keeps and gives out again outside the fence: a `Where`
         // over 100000 items in five rounds
         const string where = "mut xs = List<long>()\nfor i in 0..<100000 {\n    xs.Add(long(i))\n}\nmut long total = 0\nfor r in 0..<5 {\n    total = total + long(xs.Where(x => x % 3 == 0).Count)\n}\nprint(total)\n";
@@ -4024,6 +4393,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(WeakHeldRounds, Budget(), "weak-held-rounds"), 0, ["3000", "600000"], "");
         Ran(BuildAndRun(BlockCopyRounds, Budget(), "block-copy-rounds"), 0, ["3000", "18033000"], "");
         Ran(BuildAndRun(FunctionFieldRounds, Budget(), "function-field-rounds"), 0, ["3000", "3000000"], "");
+        Ran(BuildAndRun(InterfaceRounds, Budget(), "interface-rounds"), 0, ["3000", "600000"], "");
 
         // the positive control: the same lists, all of them held, outgrow the same memory
         const string held = "mut all = List<List<int>>()\nmut round = 0\nwhile round < 3000 {\n    round = round + 1\n    mut xs = List<int>()\n    mut i = 0\n    while i < 1000 {\n        xs.Add(i)\n        i = i + 1\n    }\n    all.Add(xs)\n}\nprint(all.Count)\n";
@@ -4067,6 +4437,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var buttons = BuildAndRun(FunctionFieldRounds.Replace("mut round = 0\n", "mut all = List<Button>()\nmut round = 0\n", StringComparison.Ordinal).Replace("    total = total + b.OnClick()\n", "    total = total + b.OnClick()\n    all.Add(b)\n", StringComparison.Ordinal), Budget(), "function-field-rounds-held");
         Assert.Equal(1, buttons.Code);
         Assert.StartsWith("error: allocation-failed (", buttons.Error, StringComparison.Ordinal);
+
+        // and the instances, each with a chain of 1000 links, all held as the interface
+        var sized = BuildAndRun(InterfaceRounds.Replace("    a = Make(100)\n", "    a = Make(100)\n    held.Add(Make(1000))\n", StringComparison.Ordinal).Replace("mut round = 0\n", "mut held = List<Sized>()\nmut round = 0\n", StringComparison.Ordinal).Replace("print(round)", "print(held.Count)", StringComparison.Ordinal), Budget(), "interface-rounds-held");
+        Assert.Equal(1, sized.Code);
+        Assert.StartsWith("error: allocation-failed (", sized.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -5225,8 +5600,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
         }
 
-        // the positive control: the same 1521 keys under a bound no probe passes stay on the fast hash, one order in two runs, every entry
-        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound), "map-switch-none");
+        // the positive control: the same 1521 keys under a bound no insert passes, with no lookup that rehashes, stay on the fast hash, one
+        // order in two runs, every entry
+        var held = RunTwice(Filled("int", grown.Select(k => k.ToString(CultureInfo.InvariantCulture))), Edited(NoBound, NoLookupRehash), "map-switch-none");
         Assert.Equal(held.First, held.Second);
         Assert.Equal("1521 1521 -1", string.Join(" ", held.First.Take(3)));
 
@@ -5275,6 +5651,259 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("600 600 -1", string.Join(" ", fenced.First.Take(3)));
         Assert.NotEqual(fenced.First, fenced.Second);
     }
+
+    [Fact]
+    public void A_map_whose_read_passes_more_than_512_slots_rehashes_in_place_onto_SipHash_1_3_and_keeps_every_entry()
+    {
+        // section 4 (the owner, 2026-11-02, "lookups count too"; the bound assumed there): 520 keys whose fast hash starts their probe
+        // at the first group fill 65 groups of a block of 1024 slots, and the 520th insert passes 64, 512 slots, so the map stays on
+        // the fast hash and two runs print one order. A read of a 521st such key, which the map does not hold, passes all 65 groups,
+        // 520 slots, and rehashes the block in place onto SipHash-1-3 under the keys the system gives each process, so that two runs
+        // print two orders after it; the map gives every entry after the read, and 1000 keys more grow it, the slots entries can take
+        // counted again from its capacity
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the cases take
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var (first, second) = RunTwice(ReadPast(held, absent, []), toolchain.Runtime, "map-read-past");
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal("-1", first[1]);
+        Assert.NotEqual(first[2], second[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[2].Trim('[', ']').Split(", ").Order());
+        Assert.Equal(["520", "520", "1000", "1520", "0"], first.Skip(3));
+
+        // removed entries first: their slots, of 128 in groups with no slot of 255, do not end the read's probe, which passes the 65
+        // groups as before; after the rehash the map gives every entry left, and 1000 keys more grow it
+        var removed = Enumerable.Range(100, 10).ToList();
+        var (gone, goneAgain) = RunTwice(ReadPast(held, absent, removed), toolchain.Runtime, "map-read-past-removed");
+        Assert.Equal(gone[0], goneAgain[0]); // the removals rehashed nothing: the read did
+        Assert.Equal("-1", gone[1]);
+        Assert.NotEqual(gone[2], goneAgain[2]);
+        Assert.Equal(held.Select((k, i) => (k, i)).Where(e => !removed.Contains(e.i)).Select(e => $"{e.k}: {e.i}").Order(), gone[2].Trim('[', ']').Split(", ").Order());
+        Assert.Equal(["510", "510", "1000", "1510", "1045"], gone.Skip(3));
+
+        // the slots entries can take after the rehash, counted again from the capacity: 896 of the block's 1024 slots less its 510
+        // entries, 386, the removed entries' 10 among them. Under an allocator that refuses a block of more than 16384 bytes, which
+        // the block of 2048 slots a growth takes is, 386 keys more fill the block of 1024 and the 387th grows it
+        var room = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "pub byte* Allocate(long size) {\n    if size > 16384 {\n        return null\n    }\n\n    mut byte* p = null\n"));
+        Ran(BuildAndRun(Refilled(held, absent, removed, 386), room, "map-read-past-room"), 0, ["-1", "896", "1045"], "");
+        var over = BuildAndRun(Refilled(held, absent, removed, 387), room, "map-read-past-room-over");
+        Assert.StartsWith("error: allocation-failed (", over.Error, StringComparison.Ordinal);
+
+        // the positive control: the same program with no lookup that rehashes stays on the fast hash, one order in two runs
+        var still = RunTwice(ReadPast(held, absent, []), Edited(NoLookupRehash), "map-read-past-none");
+        Assert.Equal(still.First, still.Second);
+        Assert.Equal(["520", "520", "1000", "1520", "0"], still.First.Skip(3));
+
+        // the rehash moves the entries within the block with nothing allocated, as hashbrown's `rehash_in_place` moves them: under an
+        // allocator that refuses every block of 8192 bytes or more after the first, which the block of 1024 slots is, the read rehashes
+        // the block and the map gives every entry. The positive control: under the same allocator, 400 keys more grow the block, and the
+        // block of 2048 slots the growth asks for is refused
+        var oneBlock = Edited(("std/std.kz", "pub byte* Allocate(long size) {\n    mut byte* p = null\n", "thread static mut long largeAsked = 0\n\npub byte* Allocate(long size) {\n    if size >= 8192 {\n        mut long seen = 0\n        raw {\n            largeAsked = largeAsked + 1\n            seen = largeAsked\n        }\n\n        if seen > 1 {\n            return null\n        }\n    }\n\n    mut byte* p = null\n"));
+        Ran(BuildAndRun(InPlace(held, absent, 0), oneBlock, "map-read-past-in-place"), 0, ["-1", "520", "520"], "");
+        var grownPast = BuildAndRun(InPlace(held, absent, 400), oneBlock, "map-read-past-in-place-grown");
+        Assert.StartsWith("error: allocation-failed (", grownPast.Error, StringComparison.Ordinal);
+
+        // `ContainsKey` looks its key up as a read does (section 4, the owner, 2026-11-02, "lookups count too"): its lookup of the 521st
+        // key passes the 65 groups and rehashes the block, so that two runs print one order before it and two after it, and the map
+        // gives every entry. The positive control: with no lookup that rehashes, two runs print one order after it as well
+        var contains = $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nprint(m)\n" + $"print(m.ContainsKey({absent}))\n" + "print(m)\n";
+        var (asked, askedAgain) = RunTwice(contains, toolchain.Runtime, "map-contains-past");
+        Assert.Equal(asked[0], askedAgain[0]);
+        Assert.Equal("false", asked[1]);
+        Assert.NotEqual(asked[2], askedAgain[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), asked[2].Trim('[', ']').Split(", ").Order());
+        var unasked = RunTwice(contains, Edited(NoLookupRehash), "map-contains-past-none");
+        Assert.Equal(unasked.First, unasked.Second);
+        Assert.Equal("false", unasked.First[1]);
+
+        // keys of 8 bytes hash as the word of their bytes: strings, whose blocks the rehash moves within the block without a count
+        // more or less, under the allocator that makes every freed block inaccessible
+        var strings = SameGroupKeys(521, k => $"k{k:D7}");
+        Assert.Equal(521, strings.Count); // the floor: the keys the case takes
+        var text = $"List<string> keys = [{string.Join(", ", strings.Take(520).Select(k => $"\"{k}\""))}]\nmut m = Map<string, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\n" + $"print(m)\nprint(m[\"{strings[520]}\"] ?? -1)\nprint(m)\n" +
+            "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\n";
+        var fenced = RunTwice(text, Fenced, "map-read-past-strings-fenced");
+        Assert.Equal(fenced.First[0], fenced.Second[0]);
+        Assert.Equal("-1", fenced.First[1]);
+        Assert.NotEqual(fenced.First[2], fenced.Second[2]);
+        Assert.Equal("520", fenced.First[3]);
+
+        // a key of one word keeps no hash in its slot, so that the rehash takes each entry's hash from its key: an entry of an `int` and
+        // a `data` value of two `int`s takes 12 bytes, which change places byte by byte; after the read every key is found with its
+        // value, the walk sums them, and two runs walk the map in two orders
+        var wide = $"data D(int A, int B)\n\nList<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\n" +
+            "mut m = Map<int, D>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = D(i, i * 2)\n}\n" + $"gone = m[{absent}] ?? D(-1, -1)\nprint(gone.A)\n" +
+            "mut found = 0\nfor i in 0..<keys.Count {\n    d = m[keys[i]] ?? D(-1, -1)\n    if d.A == i && d.B == i * 2 {\n        found = found + 1\n    }\n}\nprint(found)\n" +
+            "mut sum = 0\nmut long order = 0\nfor k, v in m {\n    sum = sum + v.B - v.A\n    order = (order * 31 + k) % 1000000007\n}\nprint(sum)\nprint(order)\n";
+        var (one, two) = RunTwice(wide, toolchain.Runtime, "map-read-past-wide");
+        Assert.Equal(["-1", "520", "134940"], one.Take(3));
+        Assert.NotEqual(one[3], two[3]);
+    }
+
+    [Fact]
+    public void A_read_inside_a_loop_over_the_map_rehashes_no_block_the_loop_holds()
+    {
+        // section 4 (the owner, 2026-11-03): a loop over a map walks its block's slots by their index, so a read past the bound inside
+        // it leaves the block on the fast hash, and the loop gives every entry once: 520 entries, their values' sum. The loop's end, a
+        // `return` inside a loop and a `break` each let go of the loop's hold, so that the read after them, outside every loop,
+        // rehashes the block: two runs print one order before it and two after it. A write inside the loop to a map value that shares
+        // the block copies it (M3), and no loop holds the copy, which a read past the bound rehashes. A loop over a map with no block
+        // yet counts nothing. The program runs under the allocator that makes every freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = $"List<int> keys = [{string.Join(", ", keys.Take(520).Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut seen = 0\nmut sum = 0\nfor k, v in m {\n" +
+            $"    x = m[{absent}] ?? -1\n    seen = seen + 1\n    sum = sum + v + x + 1\n}}\nprint(seen)\nprint(sum)\nprint(m)\n" +
+            "print(First(m))\nmut broke = 0\nfor k, v in m {\n    broke = broke + 1\n    break\n}\nprint(broke)\n" +
+            $"mut twin = m\nfor k, v in m {{\n    twin[-7] = -7\n}}\nprint(twin[{absent}] ?? -1)\nprint(twin)\nprint(twin.Count)\n" +
+            $"print(m[{absent}] ?? -1)\nprint(m)\nmut none = Map<int, int>()\nfor k, v in none {{\n    print(k)\n}}\nprint(none.Count)\n\nint First(Map<int, int> fm) {{\n    for k, v in fm {{\n        return v\n    }}\n\n    return -1\n}}\n";
+        var (first, second) = RunTwice(text, Fenced, "map-read-in-loop-fenced");
+        Assert.Equal(["520", "134940"], first.Take(2));
+        Assert.Equal(first.Take(4), second.Take(4));
+        Assert.Equal(11, first.Count);
+        Assert.Equal("1", first[4]);
+        Assert.Equal(["-1", "521", "-1"], new[] { first[5], first[7], first[8] });
+        Assert.NotEqual(first[6], second[6]);
+        Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Append("-7: -7").Order(), first[6].Trim('[', ']').Split(", ").Order());
+        Assert.NotEqual(first[9], second[9]);
+        Assert.Equal(keys.Take(520).Select((k, i) => $"{k}: {i}").Order(), first[9].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("0", first[10]); // the loop over the map with no block
+    }
+
+    [Fact]
+    public void A_read_inside_the_text_of_a_map_rehashes_no_block_the_text_walks()
+    {
+        // section 4 (the answer of 2026-11-03 read for the text of a map, assumed there): the text of a map walks its block's slots by
+        // their index, as a loop over it does, and a class's `Text()` runs inside the walk for each value, so a read past the bound that
+        // the `Text()` makes, through a weak reference to the holder of the map, leaves the block on the fast hash, and the text gives
+        // every entry one time: 520 entries. The text lets go of its hold at its end, so that the read after it, outside every walk,
+        // rehashes the block: two runs print one text before it and two after it. The program runs under the allocator that makes every
+        // freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = "class Holder(mut Map<int, Node> M)\n\nclass Node(int I, int Far, weak Holder? Back) {\n    pub string Text() {\n" +
+            "        back = Back\n        if back == null {\n            return \"{I}\"\n        }\n\n        x = back.M[Far]\n        if x == null {\n" +
+            "            return \"{I}\"\n        }\n\n        return \"{I}!\"\n    }\n}\n\n" +
+            $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\n" +
+            "h = Holder(Map<int, Node>())\nfor i in 0..<keys.Count {\n" + $"    h.M[keys[i]] = Node(i, {absent}, h)\n" + "}\n\nprint(h.M)\n" +
+            $"gone = h.M[{absent}]\n" + "print(gone == null)\nprint(h.M)\n";
+        var (first, second) = RunTwice(text, Fenced, "map-read-in-text-fenced");
+        Assert.Equal(3, first.Count);
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[0].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("true", first[1]);
+        Assert.NotEqual(first[2], second[2]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[2].Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_loop_over_a_map_that_a_case_propagates_out_of_lets_go_of_the_block()
+    {
+        // section 4 (the owner, 2026-11-03): a loop over a map lets go of its hold where a case propagates out of its body, as at its
+        // end, a `break` and a `return`: the loop of `Scan` propagates `NotFound` out of its first turn, so that the read past the bound
+        // after it, outside every loop, rehashes the block, and two runs print one order before it and two after it; the map gives every
+        // entry and takes one more. The program runs under the allocator that makes every freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = "data NotFound\n\nint | NotFound Find(int id) {\n    if id < 0 {\n        return NotFound\n    }\n\n    return id\n}\n\n" +
+            "int | NotFound Scan(Map<int, int> sm) {\n    mut total = 0\n    for k, v in sm {\n        x = Find(-1)\n        total = total + x\n    }\n\n    return total\n}\n\n" +
+            $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nprint(m)\nmatch Scan(m) {\n    int t => print(t)\n    NotFound => print(\"not found\")\n}\n" +
+            $"print(m[{absent}] ?? -1)\nprint(m)\nm[{absent}] = 5\nprint(m.Count)\n";
+        var (first, second) = RunTwice(text, Fenced, "map-loop-propagated-fenced");
+        Assert.Equal(5, first.Count);
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal(["not found", "-1"], first.Skip(1).Take(2));
+        Assert.NotEqual(first[3], second[3]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("521", first[4]);
+
+        // the positive control: with the loop's count never lowered, the same read rehashes nothing, one order in two runs
+        (string Path, string Old, string New) kept = ("std/std.kz", "            *Ptr<int>(block + 44) = *Ptr<int>(block + 44) + change", "            *Ptr<int>(block + 44) = 1");
+        var (still, stillAgain) = RunTwice(text, Edited([.. Fence, kept]), "map-loop-propagated-kept");
+        Assert.Equal(5, still.Count);
+        Assert.Equal(still[3], stillAgain[3]);
+    }
+
+    [Fact]
+    public void A_write_inside_the_text_of_a_map_copies_the_block_the_text_walks()
+    {
+        // section 4 with K2: the text of a map walks a value that holds the block with a count of its own besides the map a write
+        // reaches, a read of a field taking one (K2), so a write that a class's `Text()` makes inside the text, through a weak reference
+        // to the holder of the map, finds the block shared and copies it first (M3), 2000 keys that grow the copy, and the text walks
+        // the block it holds: its 520 entries, then the map's 2520. The text of the field, of a local copy and of a parameter, under the
+        // allocator that makes every freed block inaccessible
+        const string Classes = "class Holder(mut Map<int, Node> M, mut int Done)\n\nclass Node(int I, weak Holder? Back) {\n    pub string Text() {\n" +
+            "        back = Back\n        if back == null {\n            return \"{I}\"\n        }\n\n        Holder held = back\n" +
+            "        if held.Done == 0 {\n            held.Done = 1\n            for j in 0..<2000 {\n                held.M[3000000 + j] = Node(-1, null)\n            }\n        }\n\n" +
+            "        return \"{I}\"\n    }\n}\n\n";
+        const string Fill = "h = Holder(Map<int, Node>(), 0)\nfor i in 0..<520 {\n    h.M[i * 7 + 1] = Node(i, h)\n}\n\nprint(h.M.Count)\n";
+        var forms = new (string Name, string Functions, string Use)[]
+        {
+            ("field", "", "print(h.M)\n"),
+            ("local-copy", "", "m2 = h.M\nprint(m2)\n"),
+            ("parameter", "void Show(Map<int, Node> m) {\n    print(m)\n}\n\n", "Show(h.M)\n"),
+        };
+        foreach (var (name, functions, use) in forms)
+        {
+            var run = BuildAndRun(Classes + functions + Fill + use + "print(h.M.Count)\n", Fenced, $"map-write-in-text-{name}-fenced");
+            Assert.True(run.Code == 0, $"{name}: exit {run.Code}, {run.Error}");
+            Assert.Equal(3, run.Output.Count);
+            Assert.Equal(["520", "2520"], new[] { run.Output[0], run.Output[2] });
+            Assert.Equal(Enumerable.Range(0, 520).Select(i => $"{i * 7 + 1}: {i}").Order(), run.Output[1].Trim('[', ']').Split(", ").Order());
+        }
+
+        // the positive control: a write that never finds a block shared grows the block in place under the walk, which the fence ends
+        (string Path, string Old, string New) never = ("std/std.kz", "pub bool MapShared(byte* block) {\n    return ListShared(block)\n}", "pub bool MapShared(byte* block) {\n    return false\n}");
+        var bad = BuildAndRun(Classes + Fill + "print(h.M)\nprint(h.M.Count)\n", Edited([.. Fence, never]), "map-write-in-text-never-shared");
+        Assert.NotEqual(0, bad.Code);
+        Assert.Equal(["520"], bad.Output);
+    }
+
+    /// <summary>The lookup's rehash turned off, which leaves every map that no insert moved on the fast hash.</summary>
+    private static readonly (string Path, string Old, string New) NoLookupRehash = ("std/std.kz", "        if *Ptr<int>(block + 36) == 0 && ", "        if false && ");
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, removes the keys at the indexes
+    /// <paramref name="removed"/>, prints the map, reads the key <paramref name="absent"/>, which it does not hold, prints what the read
+    /// gave and the map, then how many of the keys the map gives back with their index and its count, then puts 1000 keys more in and
+    /// prints how many of those it gives back, its count and the sum of the values the removals gave.
+    /// </summary>
+    private static string ReadPast(IEnumerable<long> keys, string absent, IEnumerable<int> removed) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nList<int> removed = [{string.Join(", ", removed)}]\n" +
+        "mut m = Map<int, int>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut taken = 0\nfor i in 0..<removed.Count {\n    t = m.Remove(keys[removed[i]]) ?? -1\n    taken = taken + t\n}\n" +
+        $"print(m)\nprint(m[{absent}] ?? -1)\nprint(m)\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\nprint(m.Count)\n" +
+        "for i in 1000000..<1001000 {\n    m[i] = i\n}\nmut more = 0\nfor i in 1000000..<1001000 {\n    w = m[i] ?? -1\n    if w == i {\n        more = more + 1\n    }\n}\nprint(more)\nprint(m.Count)\nprint(taken)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, removes the keys at the indexes
+    /// <paramref name="removed"/>, prints what a read of the key <paramref name="absent"/>, which it does not hold, gave, puts
+    /// <paramref name="more"/> keys more in and prints its count and the sum of the values the removals gave.
+    /// </summary>
+    private static string Refilled(IEnumerable<long> keys, string absent, IEnumerable<int> removed, int more) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nList<int> removed = [{string.Join(", ", removed)}]\n" +
+        "mut m = Map<int, int>()\nfor i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nmut taken = 0\nfor i in 0..<removed.Count {\n    t = m.Remove(keys[removed[i]]) ?? -1\n    taken = taken + t\n}\n" +
+        $"print(m[{absent}] ?? -1)\nfor i in 0..<{more} {{\n    m[2000000 + i] = i\n}}\nprint(m.Count)\nprint(taken)\n";
+
+    /// <summary>
+    /// A program that puts each of <paramref name="keys"/> into a map with its index as its value, prints what a read of the key
+    /// <paramref name="absent"/>, which it does not hold, gave, then how many of the keys the map gives back with their index, puts
+    /// <paramref name="more"/> keys more in and prints its count.
+    /// </summary>
+    private static string InPlace(IEnumerable<long> keys, string absent, int more) =>
+        $"List<int> keys = [{string.Join(", ", keys.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+        "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\n" + $"print(m[{absent}] ?? -1)\n" +
+        "mut found = 0\nfor i in 0..<keys.Count {\n    v = m[keys[i]] ?? -1\n    if v == i {\n        found = found + 1\n    }\n}\nprint(found)\n" +
+        $"for i in 0..<{more} {{\n    m[2000000 + i] = i\n}}\nprint(m.Count)\n";
 
     [Fact]
     public void The_map_programs_print_the_same_with_every_map_moved_onto_SipHash_1_3_at_its_first_insert()
