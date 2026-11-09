@@ -1,0 +1,14 @@
+// expect: throws index-out-of-range at 9
+// rules: S27
+
+void | IoError Negative() {
+    File.WriteAll("seek-negative.txt", "abc".Bytes)
+    f = File.Open("seek-negative.txt")
+    File.Delete("seek-negative.txt")
+    long offset = -1
+    f.Seek(offset)
+}
+
+Negative() else {
+    IoError e => print(e)
+}

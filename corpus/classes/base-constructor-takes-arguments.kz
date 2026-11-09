@@ -1,0 +1,11 @@
+// expect: error argument-mismatch at 8
+// rules: K14
+
+class Animal(string Name)
+
+class Dog : Animal {
+    pub Dog(string name) : base(name) { }
+    pub Dog() { }
+}
+
+print(Dog("rex").Name)
