@@ -101,7 +101,7 @@ def block_reference(root):
     return table(["Reference and corpus", "Count"], [
         ("Rules in the reference", counted["rules"]),
         *[(f"of them {status}", counted[status]) for status in ("decided", "assumed", "proposed", "open")],
-        ("Corpus cases, none of them run", counted["cases"]),
+        ("Corpus cases", counted["cases"]),
         ("Compile-error ids", counted["errors"]),
         ("Run-time error ids", counted["runtime"]),
     ])
@@ -404,7 +404,7 @@ def cases_in(base):
     cases.append(("reference: counts from a red lint are refused",
                   isinstance(red_reference, kit.Refused) and "not green" in str(red_reference), repr(red_reference)))
     rows = ("| Rules in the reference | 11 |", "| of them decided | 5 |", "| of them assumed | 3 |", "| of them proposed | 2 |",
-            "| of them open | 1 |", "| Corpus cases, none of them run | 13 |", "| Compile-error ids | 7 |", "| Run-time error ids | 4 |")
+            "| of them open | 1 |", "| Corpus cases | 13 |", "| Compile-error ids | 7 |", "| Run-time error ids | 4 |")
     cases.append(("reference: rules by status, cases and error ids are counted, each row from its own key",
                   all(row in str(green_reference) for row in rows) and str(green_reference).count("|") == 10 * 3, green_reference))
 

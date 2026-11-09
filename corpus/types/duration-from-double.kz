@@ -1,0 +1,19 @@
+// expect: output
+// | 1s 500ms
+// | 250us
+// | -250ms
+// | 2ns
+// | 4ns
+// | 309ms 170us 819ns
+// | 0ms
+// rules: T38
+
+// each count is a `double`, its exact value rounded to the nearest nanosecond, ties to even; the sixth is a little under
+// 309170819.5 ns, and its product in a `double` is 309170819.5, so that a rounding of that product alone would give 820ns
+print(duration.FromSeconds(1.5))
+print(duration.FromMilliseconds(0.25))
+print(duration.FromSeconds(-0.25))
+print(duration.FromNanoseconds(2.5))
+print(duration.FromNanoseconds(3.5))
+print(duration.FromSeconds(0.30917081949999997))
+print(duration.FromSeconds(0.0000000001))
