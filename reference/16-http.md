@@ -268,7 +268,22 @@ reading actor sets it to written when its write ends, a server that finds the wr
 for written, at most one write of 25 bytes, and then writes its head, and a written `100 Continue`
 is no begun response, so that a `408` or a `413` can still go out after it (§6, §12, the owner,
 2026-11-07, issue 39, comment 6706852249) *(assumed, §6, §12: that the reading actor writes nothing
-when it finds a response begun)*. The exception covers the pair's state as a whole, the flag, the
+when it finds a response begun)*. The test-and-set is a compare-and-swap: a body's first read moves
+the flag from free to `100 Continue` under way and writes only where that move succeeds, so that a
+read that finds it under way, written or begun writes nothing, and the server, once the handler's
+call has returned, moves it from free or from written to a response begun before a response's
+head, and where it finds it under way reads it again until it reads written, and then moves it;
+where that move at the return finds it free, the body of a request that expects `100-continue` is
+unread by every actor and gets Q10's close at the return (below), and where it finds the write
+under way or written, that close does not hold (§6, §12) *(assumed, §6, §12: those moves)*. The
+socket's write bound, 5 seconds for each call of the system by default, holds the server's wait,
+since the reading actor's write is a write on the connection's socket, held in that actor as the
+moved body's reads are, which stands open in §14; the write's end, failed or not, an end of the
+reading actor during it among them, sets the flag to written, so that the server's head meets a
+failed connection as any write on it does; and the wait is the server's read of the flag (§6,
+§12) *(assumed, §6, §12: those readings, which the owner's answer of 2026-11-08 took, issue 39,
+comment 6724695653, but for the end of the reading actor)*. The exception covers the pair's state
+as a whole, the flag, the
 time of the body's last read and the server's end of the body, each part atomic and shared only
 between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249).
 The response is
@@ -279,9 +294,11 @@ closes there (above) and whose next read gives `request timed out`, as a body th
 it (below) (§12) *(assumed, §12: that exception's read)*. A body left
 unread is drained when its last owner drops it, and the connection reads its next request only after
 that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306). A body
-that the server has ended (below), and one that its own read ended, past `MaxRequestBodySize` or
-under the body's rate (below), drains nothing at its drop, and its connection is closed and not
-read again (§12) *(assumed, §12: that exception)*.
+that the server has ended (below), one that its own read ended, past `MaxRequestBodySize` or
+under the body's rate (below), and the body of a request that expects `100-continue` whose
+connection Q10's close ended at the return (above), which the server ends through the halves'
+pair of types, each drains nothing at its drop, and its connection is closed and not read again
+(§12) *(assumed, §12: that exception, and Q10's close in it)*.
 
 The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
 by `MaxDrainSize`, and where either ends it the connection closes, with no error to any reader, and
@@ -334,23 +351,25 @@ The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
 (§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), with P2 (the grace from the
 return, comment 6680351318) for every other moved body than the body of a request that expects
-`100-continue`, which keeps Q10's close at the return, above (§12, the owner, 2026-11-06, issue 39,
+`100-continue` that no read has reached, which keeps Q10's close at the return, above (§12, the
+owner, 2026-11-06, issue 39,
 comment 6682072588), so that a first read during
 the call is never past the grace for a body that no read had reached (§12) *(assumed, §12: that
 reading)*. The time between
 reads counts in the body's rate as the time a read waits does, and a time past the grace since the
-last read ends the body at the first of a read that finds it passed and the server's timing once the
-handler's call has returned, the first of the two measures to end the body ending it, the grace
-being that of the body's rate in `HttpLimits`, which Q8's answer takes as
+last read ends the body at whichever comes first, a read that finds it passed, during the handler's
+call or after it, or the server's timing once the call has returned, the first of the body's rate
+and the grace to end the body ending it, the grace being that of the body's rate in `HttpLimits`,
+which Q8's answer takes as
 the longest time since the body's last read too; a body that the handler reads itself counts only
 the time a read waits, since Q8 was asked of a moved body, and a body the handler reads and then
 moves is a moved body, whose last read is the handler's until another actor reads it (§12)
 *(assumed, §12: those readings)*. That a moved body's read under the rate closes the connection is decided, as is
 its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
-wait or a deadline the scheduler reads at each switch, while the time between reads is the
-server's once the handler's call has returned, timed as the server times the grace, and during the
-call a read checks it itself (above) (§12).
+wait or a deadline the scheduler reads at each switch, while the time between reads is timed by
+the server once the handler's call has returned, as the server times the grace, and checked by
+each read itself, during the call and after it (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
@@ -371,9 +390,10 @@ shows only when the code runs (§12) *(assumed, §12: that cost)*. The call's bo
 written `move`, since the call takes the body and reads it to its end when it sends it, so that the
 call writes `move` at the body, as section 6 asks of a call (§6, §12) *(assumed, §12: the
 parameter's word)*; a call that fails before it sends a byte, `request has two bodies` among them,
-drops the body, so that a retry makes a new one from its file or its chunks, while a relayed body of
-a server's request, which cannot be sent again, is drained at that drop as at any drop of its last
-owner (above), and a call that fails after it sent a byte drops the body too (§12) *(assumed, §12:
+drops the body, so that a retry makes a new one from its file or its chunks, while a body made from
+a stream, which the call takes with its stream, cannot be sent again, and a relayed body of a
+server's request, which cannot be sent again either, is drained at that drop as at a drop of its
+last owner (above), and a call that fails after it sent a byte drops the body too (§12) *(assumed, §12:
 those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
@@ -382,7 +402,7 @@ No case: the compiler reads no `copy` and no `move`, at a send, on a parameter o
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
 server or client of §12, which the halves of the stream, the first read's `100 Continue` and its
-test-and-set on a flag of four states, the pair's shared state, the rate
+compare-and-swap on a flag of four states, the pair's shared state, the rate
 between reads, the count of a body without a declared length, the two bodies of a client's call
 and the makers of an `HttpBody` need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
