@@ -4146,7 +4146,7 @@ public sealed class CheckerTests
         // with R9: a ring with a step through an interface's type and a step through a field that can hold a function value, which reaches
         // the class a lambda captures, cites both
         Assert.EndsWith("nothing would free such a ring (R8, R9)", ErrorText("interface Node {\n    int V()\n}\nclass Box(mut () => int F) : Node {\n    pub int V() => 1\n}\nclass Cell(int N, Node? Next)\n\nc = Cell(1, null)\nb = Box(() => c.N)\nprint(b.V())"), StringComparison.Ordinal);
-        // and one without `mut` too, with the `mut` field elsewhere on the ring *(assumed, as R2 and R4 read a base's type)*
+        // and one without `mut` too, with the `mut` field elsewhere on the ring (R8, *assumed* for a field without `mut`)
         Assert.Equal([(ErrorIds.ReferenceCycle, 4)], Errors("interface Node {\n    int V()\n}\nclass Holder(Node N)\nclass Leaf(mut Holder? H) : Node {\n    pub int V() => 1\n}\n\nprint(1)"));
         Clean("interface Node {\n    int V()\n}\nclass Holder(Node N)\nclass Leaf(mut Holder? H)\nclass Dot : Node {\n    pub int V() => 1\n}\n\nprint(1)");
         // K13: `==` on an interface reads every class that implements it, a field without `==` among them (`type-mismatch`), and an

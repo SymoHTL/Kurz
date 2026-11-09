@@ -202,6 +202,12 @@ or record, a class's comparing references; the cost is that a class derived from
 file of the program, can make `==` on the base `type-mismatch` where no line changed, and that the
 check reads every class of the program)*.
 
+`==` on two values of an interface, and a key of an interface's type, read the classes that
+implement it as the paragraph above reads the classes derived from a class: false where the classes
+of the two instances differ, else the class's own `==`, and its own hash for a key, so that such a
+field of a class that implements it makes `==` on the interface `type-mismatch` *(assumed, §4:
+proposed on #110, comment 6567439435, and not objected to in the answer, comment 6573113786)*.
+
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
 class User(string Name)
