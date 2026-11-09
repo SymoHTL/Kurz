@@ -1310,18 +1310,27 @@ public sealed class Parser
             var name = Advance();
             var parameters = ParseParameters(typesOptional: false);
             IReadOnlyList<Argument>? thisArguments = null;
+            IReadOnlyList<Argument>? baseArguments = null;
             if (Match(TokenKind.Colon))
             {
-                if (!MatchKeyword("this"))
+                if (MatchKeyword("this"))
                 {
-                    throw Fail("`this`");
+                    thisArguments = ParseArguments();
                 }
-
-                thisArguments = ParseArguments();
+                else if (At(TokenKind.Name) && Current.Text == "base")
+                {
+                    // K14, L18: `base` is a word right after a constructor's `:` and a name everywhere else, as `as` in a `use` line (F10)
+                    Advance();
+                    baseArguments = ParseArguments();
+                }
+                else
+                {
+                    throw Fail("`this` or `base`");
+                }
             }
 
             var body = ParseBlockAfter(name.Line, "the constructor");
-            return new ConstructorDeclaration(start.Line, modifiers, name.Text, parameters, thisArguments, body);
+            return new ConstructorDeclaration(start.Line, modifiers, name.Text, parameters, thisArguments, baseArguments, body);
         }
 
         var type = ParseType();

@@ -1,0 +1,37 @@
+// expect: output
+// | abcdef
+// | def
+// | f
+// rules: S27
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a fill after a seek holds the bytes at the offset, not the ones the buffer held, and a seek after a consume starts at its offset,
+// not where the consume left the buffer
+void | IoError Run() {
+    File.WriteAll("seek-fill.txt", "abcdef".Bytes)
+    f = File.Open("seek-fill.txt")
+    File.Delete("seek-fill.txt")
+    mut all = Bytes()
+    f.Fill(mut all)
+    print(Text(all))
+    f.Seek(3)
+    mut rest = Bytes()
+    f.Fill(mut rest)
+    print(Text(rest))
+    f.Consume(1)
+    f.Seek(5)
+    mut last = Bytes()
+    f.Fill(mut last)
+    print(Text(last))
+}
+
+Run() else {
+    IoError e => print(e)
+}

@@ -93,10 +93,11 @@ type parameter; so a button's `mut () => void` field is not reached by an `(int)
 that reads the button, unless a `() => void` lambda captures that one (§3, the owner,
 2026-11-04, #110, comment 6643368937, answering comment 6624472418). *(assumed, §3: the count is transitive,
 the lambdas a function value of a counted lambda can be counted in turn until no lambda is added;
-the types on the way are the lambda's own type, which makes it count for every field where it names
-a type parameter, so that a `(T) => void` lambda that reads the button reaches its `() => void`
-field, and the type of a value a counted lambda captures, or of a function value such a value
-holds, which makes every lambda of the program count where it names one)* The cost
+the types on the way are the lambda's own type, which, where that type names a type parameter,
+makes the lambda count for every field, so that a `(T) => void` lambda that reads the button
+reaches its `() => void` field, and the type of a value a counted lambda captures, or of a function
+value such a value holds, which, where that type names a type parameter, makes every lambda of the
+program count)* The cost
 is not local: once a class has a field of function type, any lambda the field counts, anywhere in
 the program, that captures an instance of that class, or of a class that holds one, makes it an
 error, and the lambda can sit in another file. An event handler escapes the error only in a program
@@ -134,8 +135,9 @@ b.OnClick()
 Case: [memory/function-field-other-type.kz](../corpus/memory/function-field-other-type.kz)
 ```kurz
 // a lambda whose type the field cannot hold, `(int) => void` beside a `() => void` field, closes no ring through it in this program,
-// though it reads the button: the field does not count it by its type (R9, the owner, 2026-11-04, #110, comment 6643368937), no lambda
-// the field counts captures it, and its type names no type parameter (R9, assumed)
+// though it reads the button: the field does not count it by its type, and no lambda the field counts captures a function value that
+// can be it (R9, the owner, 2026-11-04, #110, comment 6643368937); its own type names no type parameter, and no lambda the field
+// counts captures a value whose type names one (R9, assumed)
 class Button(string Name, mut () => void OnClick)
 
 void Each(List<int> xs, (int) => void f) {
@@ -233,8 +235,8 @@ Case: [http/stream-handler-no-cycle.kz](../corpus/http/stream-handler-no-cycle.k
 ```kurz
 // a handler that reads a class that holds a `mut` response closes no ring through the response's function, since no lambda that
 // field counts captures `app`: a handler is no lambda of a type the field can hold (R9, the owner, 2026-11-04, #110, comment
-// 6643368937), the function that writes the body reads nothing of the class, and neither lambda captures a function value or a value
-// whose type names a type parameter, through which the field would count more (R9, assumed)
+// 6643368937), the function that writes the body reads nothing of the class, and neither lambda captures a function value, through
+// which the field would count more (R9, the owner, the same comment), or a value whose type names a type parameter (R9, assumed)
 class App(mut HttpResponse Cached)
 
 void Keep((HttpRequest) => HttpResponse handler) {
@@ -298,6 +300,10 @@ target as a temporary does, to the end of its statement or its condition, and lo
 `k = p.Keeper` keeps the target alive while `k` lives, and a `T?` parameter takes the read as it
 is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `weak T?` until
 `?.`, `??`, a test or a member makes a `T?` of it, as Rust's `Weak::upgrade` gives one).
+
+`weak` may stand before an interface as before a class: a `weak I?` is the two words of a value of
+the interface and holds the weak count of the instance's block, as Rust's `Weak<dyn Trait>` (§3,
+the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
 
 A `weak T?` type stands wherever a type stands: a field, a list's item, a variable, a parameter, a
 return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type
@@ -1528,7 +1534,10 @@ if Arm.AdvSimd.IsSupported {
 ### R8 (decided, §3) Fields of interface type
 
 A `mut` field of interface type can hold any implementer, so R2 is judged with the whole program
-in view.
+in view. A field of interface type without `mut` reaches every implementer as well, so a ring
+through it is refused where another field on the ring is `mut`, as R2 and R4 read a field of a
+base's type *(assumed, §3: proposed on #110, comment 6567439435, and not objected to in the
+answer, comment 6573113786)*.
 
 Case: [memory/cycle-through-interface.kz](../corpus/memory/cycle-through-interface.kz)
 ```kurz

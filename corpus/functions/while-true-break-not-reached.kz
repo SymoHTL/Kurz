@@ -3,7 +3,7 @@
 // rules: F3
 
 int Once() {
-    while (true) {
+    while true {
         return 5
         break
     }

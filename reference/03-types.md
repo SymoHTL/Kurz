@@ -788,22 +788,34 @@ print(Negate(-9223372036854775808ns)) // one constant: the parameter's type take
 ### T38 (decided, §4) A time of a count
 
 `duration.FromSeconds(n)` is the duration of `n` seconds, as C#'s `TimeSpan.FromSeconds`, and there
-is one for each unit of a duration literal (L14): `FromNanoseconds`, `FromMicroseconds`,
-`FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours` and `FromDays`.
+is one for each unit.
 `timestamp.FromUnixSeconds(n)` and `timestamp.FromUnixMilliseconds(n)` are the timestamp `n` seconds
 or milliseconds after 1970-01-01 (T24), as C#'s `DateTimeOffset.FromUnixTimeSeconds` and
-`FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` (T18). The count is a `long` or a `double`,
-the double's value rounded to the nanosecond (§4, the owner, 2026-11-08, G4 (b), "Also a double, as
-C#" and "Seconds + milliseconds, as C#"). *(assumed, §4: a count of an integer type that widens to
-`long` (T8) takes the `long` form, and any other number the `double` form, as C#'s better conversion
-picks `TimeSpan.FromSeconds(long)` for an integer; a type that widens to neither is `type-mismatch`.
-The double's exact value is rounded to the nearest nanosecond, ties to even, as Rust's
-`Duration::from_secs_f64` rounds.)* A time that leaves the range of its type raises `overflow` (E3)
-in every build, as T31's arithmetic does, NaN and an infinity among them, and a constant count whose
-time does not fit is `constant-overflow` (T6). *(assumed, §4: the defaults of the product pass that
-the answer took, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with
-the overflow.)* No constructor stands on the wide pair (T29), into which the narrow value widens. How
-a program reads a count back from a time is open (§14).
+`FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` under T18 (§4, the owner, 2026-11-08,
+issue 110, comment 6721051459, G4 (b)). The units are those of a duration literal (L14):
+`FromNanoseconds`, `FromMicroseconds`, `FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours`
+and `FromDays` *(assumed, §4: the default of the product pass that the answer took, issue 110,
+comment 6723644046)*. The count is a `long` or a `double`, the double's value rounded to
+the nanosecond (§4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#" and
+"Seconds + milliseconds, as C#"). C#'s two Unix-time constructors take a `long` alone, so the `double`
+form of the timestamp's two is Kurz's own, which that comment states of every `timestamp.FromUnixX`
+as of every `duration.FromX`. *(assumed, §4: a count of an integer type that widens to `long` (T8)
+takes the `long` form, and any other number the `double` form, as C#'s better conversion picks
+`TimeSpan.FromSeconds(long)` for an integer, an overload of .NET 9 on; a type that widens to neither
+is `type-mismatch`. So a `ulong` count is rounded to the nearest `double` first, as every integer
+widens into a `double` (T23), and one above 2^53 can lose its last units without a word, as C# rounds
+`TimeSpan.FromMicroseconds(9007199254740993UL)` to 9007199254740992 microseconds; that loss is the
+cost, and `long(u)` keeps every count whose time fits exact. The double's exact value is rounded to
+the nearest nanosecond, ties to even, as Rust's `Duration::from_secs_f64` rounds.)* A time that
+leaves the range of its type raises `overflow` (E3) in every build, as T31's arithmetic does, NaN and
+an infinity among them, and a constant count whose time does not fit is `constant-overflow` (T6), a
+constant NaN or infinity among them, as `int(1.0 / 0.0)` is, and a `ulong` constant by the time of
+the `double` it is rounded to. No constructor stands on the wide pair (T29), into which the narrow
+value widens. *(assumed, §4: the defaults of the product pass that the answer took, the wide pair's
+among them, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with the
+overflow, and a constant one as T6 reads `int(1.0 / 0.0)`.)* A constructor of one time type called on
+the other, `timestamp.FromSeconds(5)`, is `unknown-name` (V10). How a program reads a count back from
+a time is open (§14).
 
 Case: [types/duration-from-count.kz](../corpus/types/duration-from-count.kz)
 ```kurz
@@ -816,11 +828,10 @@ print(duration.FromSeconds(n))
 print(duration.FromMinutes(n))
 print(duration.FromHours(-3))
 print(duration.FromDays(big))
-print(duration.FromSeconds(n) == 90s)
 
 // a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
 long odd = 9007199254740993
-print(duration.FromNanoseconds(odd) - duration.FromNanoseconds(odd - 1))
+print(duration.FromNanoseconds(odd))
 ```
 
 Case: [types/duration-from-double.kz](../corpus/types/duration-from-double.kz)
@@ -869,9 +880,21 @@ Case: [types/duration-from-constant-overflow.kz](../corpus/types/duration-from-c
 print(duration.FromDays(106752))
 ```
 
+Case: [types/duration-from-constant-nan.kz](../corpus/types/duration-from-constant-nan.kz)
+```kurz
+// a constant NaN is no count of a time, as `int(1.0 / 0.0)` is no `int` (T6)
+print(duration.FromSeconds(0.0 / 0.0))
+```
+
 Case: [types/duration-from-string.kz](../corpus/types/duration-from-string.kz)
 ```kurz
 print(duration.FromSeconds("90"))
+```
+
+Case: [types/timestamp-from-seconds.kz](../corpus/types/timestamp-from-seconds.kz)
+```kurz
+// a timestamp counts from 1970 with `FromUnixSeconds`; `FromSeconds` is a duration's, and no member of `timestamp`
+print(timestamp.FromSeconds(5))
 ```
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
@@ -1369,7 +1392,9 @@ A generic function or type lists its type parameters between `<` and `>` after i
 parameter is limited to the types that implement an interface by naming the interface after a
 colon: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the constraint on a value
 (record, section 13). A use names the type arguments, or leaves them to be inferred (T27). An
-argument whose type does not meet the limit is the compile error `type-mismatch`.
+argument whose type does not meet the limit is the compile error `type-mismatch`. An interface
+may take type parameters too, and each list of type arguments gives each class that implements it
+a table of its own (§4, the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
 
 Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
 ```kurz
@@ -1580,9 +1605,15 @@ refused, up to its language version 7.3, the three forms its later versions let 
 parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"): a parameter of the function, part of its
 signature, from its text in every case, where no call reaches the function too (§4, the owner, 2026-11-07, "Refused
-always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, and the name reads it, not the type
-the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in `T.Kind` read as a value, so
-that none of them reports anything more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
+always") *(assumed, §4, with the build: what follows reads only a program that the parameter's `redeclared` refused, so that
+`T.Kind`, `T.Fields` and `T.Make` always read the type a copy binds, and the name of a constant its value, in every
+program the checker accepts (§4, the owner, 2026-11-03 and 2026-11-04); in a copy such a parameter stands with no type, and the
+name reads it, not the type the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in
+`T.Kind` read as a value, so that none of them reports anything more, the parameter's `redeclared` being the one error
+of its cause, E1, and the name of a constant reads such a parameter in the same way, not the constant's value,
+`void F<const int N>(int N)`; the name in a type position, `T r`, `Other<T>(x)` or `T?`, reads the type parameter, as
+it does in the same program without the parameter, and the body of that loop and the bodies of the `match`'s arms are
+checked as any block is, so that each reports the errors it reports without the parameter)*, and each other such
 declaration where the body is checked (below): once from its text, or in each copy a call
 makes for a function checked in its copies alone, so not at all where no call reaches such a function. *(assumed, §4,
 with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
@@ -2117,12 +2148,15 @@ it is checked against the parameter's type as a parameter's default value is (F1
 `default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
 a type parameter that holds a type among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the function
 is still read, with the constant of no type, so that its body's own errors are reported while the constant's uses and the
-type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and a call's count of
-type arguments (T19) and its arguments are read as for any call, E1)* *(assumed, §4, with the build: the name of an earlier
+type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and the type argument is not
+read at all, so that its own errors, `unknown-name` among them, are not reported either, `Name<Missing>()`; and a call's
+count of type arguments (T19) and its arguments are read as for any call, so that a call that writes none, `Name()`,
+takes the constant's default, and with none is `cannot-infer` (T27), E1)* *(assumed, §4, with the build: the name of an earlier
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
-count the call may write, while a call that writes none is read in the assumed clause below. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+count the call may write, while a call that writes none infers them or takes their defaults, and is `cannot-infer` (T27) where it can do neither, as C# infers them (CS0411)
+(§4, the owner, 2026-11-09, "Confirm 'at least one'"). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
 `enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
