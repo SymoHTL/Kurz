@@ -784,18 +784,29 @@ public sealed class CheckerTests
     [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
-        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in parentheses or not, is reached only through a
-        // `break` of that loop that can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after
-        // it; a `break` of the loop makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end
-        // cannot be reached; only the literal is read so, as the record narrows C#'s constant `true` (assumed), so `!false` and `true && true`
-        // are read as conditions that can be false
+        // F3, as in C#: the end point of a `while` whose condition is the constant `true` is reached only through a `break` of that loop that
+        // can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after it; a `break` of the loop
+        // makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end cannot be reached
         const string Search = "int First(List<int> xs) {\n    mut i = 0\n    while true {\n        if xs[i] > 2 {\n            return xs[i]\n        }\n\n        i = i + 1\n    }\n}\n\nprint(First([1, 2, 3, 4]))";
         Clean(Search);
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
+        // every condition whose value is a constant is read as that value, as C# reads it (section 4, the owner, 2026-11-08, "C#'s rule"):
+        // in any number of parentheses, under `!`, `&&` and a comparison of constants; the branch it does not take is never reached
         Clean(Search.Replace("    while true {", "    while (true) {"));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
+        Clean(Search.Replace("    while true {", "    while ((true)) {"));
+        Clean(Search.Replace("    while true {", "    while !false {"));
+        Clean(Search.Replace("    while true {", "    while true && true {"));
+        Clean(Search.Replace("    while true {", "    while 1 == 1 {"));
+        Clean(Search.Replace("        i = i + 1\n", "        if false {\n            break\n        }\n\n        i = i + 1\n")); // never reached
+        Clean("int One() {\n    if true {\n        return 1\n    }\n}\n\nprint(One())"); // its end never reached, as C#'s `if (true) return 1;`
+        Clean("int Two() {\n    if false {\n        print(0)\n    } else {\n        return 2\n    }\n}\n\nprint(Two())");
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int Zero() {\n    while false {\n        return 0\n    }\n}\n\nprint(Zero())")); // ends at once
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int One() {\n    if false {\n        return 1\n    }\n}\n\nprint(One())"));
+        // N3: the branch a constant condition does not take adds nothing to what holds after the `if`
+        const string Flip = "mut string? s = \"a\"\nif false {\n    s = null\n}\n\nprint(s.Bytes.Count)";
+        Clean(Flip);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(Flip.Replace("if false", "if true")));
         Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached
         Clean("int Spin() {\n    while true {\n        while true {\n            return 1\n        }\n\n        break\n    }\n}\n\nprint(Spin())"); // after an endless loop
         Clean(Search.Replace("        i = i + 1\n", "        mut j = 0\n        while j < 3 {\n            if j == i {\n                break\n            }\n\n            j = j + 1\n        }\n\n        i = i + 1\n"));
@@ -808,6 +819,11 @@ public sealed class CheckerTests
         Clean(Size);
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
         Clean(Size.Replace("            return 0\n", "            return 0\n            break\n")); // a `break` never reached leaves `e` as it was
+        // N3: a `continue` after a statement whose end cannot be reached adds nothing to what holds at the loop's head, as a `break` adds
+        // nothing to what holds after the loop; one that is reached brings back the `null` it saw
+        const string Len = "int Len() {\n    mut string? s = \"abc\"\n    mut n = 0\n    while n < 3 {\n        n = n + 1\n        if n == 2 {\n            s = null\n            return 0\n            continue\n        }\n    }\n\n    return s.Bytes.Count\n}\n\nprint(Len())";
+        Clean(Len);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Len.Replace("            return 0\n", "")));
     }
 
     [Fact]
@@ -5619,6 +5635,30 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void An_inference_where_the_field_s_type_meets_another_type_gives_the_walk_no_type_argument_and_reports_in_each_copy_at_its_line()
+    {
+        // T34 (assumed, the record's section 4): an inference on the text where the field's type meets another type reports no error
+        // there, and each copy infers the call with the field's real type and reports as any call does, at the call's own line (the walk
+        // at the cap of pull request 370, comment 6698323204 on issue 39); the walk reads no type argument where such an inference gives
+        // none, so the call takes no part (the walk at the cap of pull request 387, comment 6721393631 on issue 39, stated so, assumed, by
+        // the owner's answer of 2026-11-08, comment 6722257772 there)
+        const string Show = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Show<T>(T x) {{\n    for f in T.Fields {{\n"
+            + "        print({0})\n    }}\n}}\n\nShow(Point(1, 2))";
+        // the field is an `int` in the copy `Show<Point>`: an `int` beside it runs, a `string` is `type-mismatch` at the call's line, 7
+        Clean(string.Format(Show, "Choose(f.Get(x), 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(string.Format(Show, "Choose(f.Get(x), \"s\")")));
+        const string Deep = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n"
+            + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        // the field's type beside `T` gives no type on the text, so a function no call reaches is not refused for its cycle, where the same
+        // call with `x` in place of the field's value is; called, the copy `Deep<Point>` infers it, where `int` meets `Point`, and is
+        // `cannot-infer` at the call's line, 8, not at the outer call, in the list as without it
+        Clean(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "print(1)"));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(Deep, "Deep([Choose(x, x)], n - 1)", "print(1)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "Deep(Point(1, 2), 3)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep(Choose(f.Get(x), x), n - 1)", "Deep(Point(1, 2), 3)")));
+    }
+
+    [Fact]
     public void A_call_in_an_arm_of_a_match_on_T_Kind_inside_a_loop_over_T_Fields_is_read_in_the_copies_alone()
     {
         // T34 with T33: each copy takes the one arm of its kind, so a call in an arm of a `match` on `T.Kind` takes no part in the walk,
@@ -5891,6 +5931,8 @@ public sealed class CheckerTests
     [InlineData("void Name<const Unknown M>() {\n    print(x)\n}\n\nName<1>()", "4: unknown-name: no type named `Unknown` is visible here (V10)|5: unknown-name: no `x` is visible here (V10)")]
     [InlineData("void Name<const string S>() {\n    print(S)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Name<const string S>() {\n    print(x)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|5: unknown-name: no `x` is visible here (V10)")]
+    [InlineData("void Name<const string S>() {\n}\n\nName<1, 2>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|7: syntax: `Name` takes 1 type arguments (T19; E4 for another count)")]
+    [InlineData("void Name<const string S>(int a) {\n    print(a)\n}\n\nName<1>(\"x\")", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|8: type-mismatch: a `string` where an `int` is required (T1)")]
     [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: syntax: `double` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
     [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
@@ -6059,6 +6101,27 @@ public sealed class CheckerTests
         // the function from its text, where no call makes a copy too (the owner, 2026-11-07, "Refused always"), as C# refuses a method's parameter, local and `foreach`
         // variable so named (CS0412), and a lambda's parameter and a variable inside a lambda as C# did up to its language version 7.3, so `T.Make`, `T.Fields` and `T.Kind` always read the type a copy binds and `M` the constant; the declaration is the one error (E1)
         Assert.Equal(expected.Split('|'), Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+    }
+
+    [Fact]
+    public void A_parameter_named_like_the_type_parameter_is_what_its_name_reads_in_a_copy()
+    {
+        // T33, E1 (section 4, assumed with the build): in a copy, the parameter refused for the type parameter's name stands with no type, and the
+        // name reads it, not the type the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in `T.Kind` read as a
+        // value, so that its `redeclared` is the one error; each type argument is one the bound reading refuses, and the same program without the
+        // parameter is the control that shows it
+        (string Program, string Control, string Bound)[] uses =
+        [
+            ("T Zero<T>(int T) => T.Make(f => 0)\n\nprint(Zero<Named>(1))", "T Zero<T>() => T.Make(f => 0)\n\nprint(Zero<Named>())", "7: type-mismatch: an `int` where a `string` is required (T1)"),
+            ("void Each<T>(int T) {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nEach<long>(1)", "void Each<T>() {\n    for f in T.Fields {\n        print(f.Name)\n    }\n}\n\nEach<long>()", "13: kind-not-read: `Each<long>`: `long` is of the kind `TypeKind.Long`, and `T.Fields` in `Each` walks the fields of a `data` type alone (T33)"),
+            ("void Kind<T>(int T) {\n    match T.Kind {\n        TypeKind.Data => print(1)\n    }\n}\n\nKind<long>(1)", "void Kind<T>() {\n    match T.Kind {\n        TypeKind.Data => print(1)\n    }\n}\n\nKind<long>()", "13: kind-not-read: `Kind<long>`: `long` is of the kind `TypeKind.Long`, which no arm of the `match` on `T.Kind` in `Kind` takes (T33)"),
+            ("void Show<T>(int T) {\n    bool b = T.Kind\n    print(b)\n}\n\nShow<long>(2)", "void Show<T>() {\n    bool b = T.Kind\n    print(b)\n}\n\nShow<long>()", "8: type-mismatch: a `TypeKind` where a `bool` is required (T1)"),
+        ];
+        foreach (var (program, control, bound) in uses)
+        {
+            Assert.Equal(["7: redeclared: `T` is a type parameter of the function around it (V9)"], Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+            Assert.Equal(bound.Split('|'), Check(Shapes + control).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        }
     }
 
     [Fact]

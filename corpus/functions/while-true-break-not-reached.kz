@@ -1,0 +1,12 @@
+// expect: output
+// | 5
+// rules: F3
+
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+print(Once())

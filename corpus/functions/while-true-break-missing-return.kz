@@ -1,0 +1,19 @@
+// expect: error missing-return at 4
+// rules: F3
+
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if i == xs.Count {
+            break
+        }
+
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4]))

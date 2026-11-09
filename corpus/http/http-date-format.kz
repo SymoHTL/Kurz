@@ -1,0 +1,25 @@
+// expect: output
+// | Thu, 01 Jan 1970 00:00:00 GMT
+// | Sun, 06 Nov 1994 08:49:37 GMT
+// | Sun, 06 Nov 1994 08:49:37 GMT
+// | Wed, 31 Dec 1969 23:59:59 GMT
+// | Fri, 11 Apr 2262 23:47:16 GMT
+// | Tue, 21 Sep 1677 00:12:43 GMT
+// allow: raw
+// rules: W18
+
+// `HttpDate.Format` writes the IMF-fixdate of a `timestamp`, its second taken towards the past, so that a fraction is dropped and
+// the last nanosecond before 1970 is in 1969, for every instant a `timestamp` holds, the first and the last among them
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(HttpDate.Format(*Ptr<timestamp>(&bits)))
+    }
+}
+
+Show(0)
+Show(784111777000000000)
+Show(784111777999999999)
+Show(-1)
+Show(9223372036854775807)
+Show(-9223372036854775808)
