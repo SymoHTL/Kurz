@@ -310,13 +310,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // again; a slot of a key of a kind whose hash can read more than one word holds its hash first, as .NET keeps an entry's hash
         // code (issue 157, item 14, under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
         const string program =
-            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\n\nlongduration far = 100000days\n" +
+            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\ninterface Named {\n    string Name()\n}\n\n" +
+            "class Tag(string N) : Named {\n    pub string Name() => N\n}\n\nlongduration far = 100000days\n" +
             "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
             "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
             "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
             "mut j = Map<duration, int>()\nj[90min] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
             "mut m = Map<float, int>()\nm[1.5f] = 1\nmut n = Map<Cell, int>()\nn[Cell(1)] = 1\nmut o = Map<Spot, int>()\no[Spot(1, 2)] = 1\n" +
-            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count)\n";
+            "mut p = Map<Named, int>()\np[Tag(\"a\")] = 1\n" +
+            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count + p.Count)\n";
         var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
         Assert.True(compiled is not null, "no program");
         string[] layouts =
@@ -336,6 +338,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "Map<longduration, int>\" = type { i64, i128, i32 }",
             "Map<int?, int>\" = type { i64, { i8, [1 x i32] }, i32 }",
             "Map<Spot, int>\" = type { i64, ptr, i32 }",
+            "Map<Named, int>\" = type { i64, %kz.obj, i32 }",
         ];
         Assert.All(layouts, layout => Assert.Contains($"\n%\"entry.{layout}", compiled.Ir, StringComparison.Ordinal));
     }
@@ -642,5 +645,51 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("%\"c.Holder\" = type { i64, i64, ptr, %kz.obj, ptr, %kz.obj }", program.Ir, StringComparison.Ordinal);
         Assert.Contains("%\"c.Mid\" = type { i64, i64, i32, i32 }", program.Ir, StringComparison.Ordinal); // the counts, the base's `N`, then `M`
         Ran(Toolchain.Run(toolchain.Build(program, "class-layout")), 0, ["1", "5", "3", "8", "3", "true"], string.Empty);
+    }
+
+    [Fact]
+    public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
+    {
+        // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for
+        // the interface, whose words are the class's release, its weak release, its equality and its hash where `==` or a key reads them,
+        // and a slot for each method of the interface in its order; its `null` is the pair of the address 0 (N1); a class nothing derives
+        // from has that table alone, and its own references stay the one word of the address
+        const string Program = """
+            interface Shape {
+                int Area()
+                int Twice(int k)
+            }
+
+            class Dot(int R) : Shape {
+                pub int Area() => R
+                pub int Twice(int k) => R * k
+            }
+
+            class Holder(Shape S, Shape? T)
+
+            int Both(Shape x, Shape? y) {
+                if y == null {
+                    return x.Area()
+                }
+
+                return x.Area() + y.Twice(2)
+            }
+
+            int Own(Dot d) => d.R
+
+            h = Holder(Dot(1), null)
+            print(Both(h.S, h.T))
+            print(Both(Dot(2), Dot(3)))
+            print(Own(Dot(4)))
+            """;
+        var program = Emit(Program);
+        string Parameters(string name) =>
+            Regex.Match(program.Ir, $@"^define [^@\n]*@""[^""]*\.{name}\.[0-9]+""\(([^)]*)\)", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal("%kz.obj %p0, %kz.obj %p1", Parameters("Both"));
+        Assert.Equal("ptr %p0", Parameters("Own"));
+        Assert.Contains("%\"c.Holder\" = type { i64, i64, %kz.obj, %kz.obj }", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("@\"table.Dot.Shape\" = internal constant [7 x ptr] [", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
     }
 }

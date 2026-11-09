@@ -120,7 +120,11 @@ type the value is runs, as C#'s `switch` does; an arm may name a class or a `dat
 a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run, because an earlier
 arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
 that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
-in the table and a subtype check per arm). An `else` arm after arms that cover every case, and a
+in the table and a subtype check per arm). An arm may name a class that implements an interface that
+is a case as well, which tests the class of the instance at run time, as C#'s `is` does; no list of the
+classes that implement an interface, or that derive from a class, is closed, so such an arm covers no
+case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
+comment 6573113786, against a compile error). An `else` arm after arms that cover every case, and a
 literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
 arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
 earlier one handles; an arm that names a type that is no case of the union and derived from none,
@@ -211,6 +215,51 @@ void Show(User | NotFound u) {
 }
 
 Show(Admin("Ann", 2))
+```
+
+Case: [control/match-derived-class-arm.kz](../corpus/control/match-derived-class-arm.kz)
+```kurz
+class User(string Name)
+
+class Admin(int Level) : User
+
+class Root(bool Top) : Admin
+
+void Show(User u) {
+    match u {
+        Admin a => print("admin {a.Level} {a.Name}")
+        User x => print("user {x.Name}")
+    }
+}
+
+Show(Root("Ann", 3, true))
+Show(Admin("Bea", 2))
+Show(User("Cy"))
+```
+
+Case: [control/match-implementing-arm.kz](../corpus/control/match-implementing-arm.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+void Show(Shape s) {
+    match s {
+        Square q => print("square {q.Side}")
+        else => print("area {s.Area()}")
+    }
+}
+
+Show(Square(3))
+Show(Dot())
 ```
 
 ### C5 (assumed, §8) `while`

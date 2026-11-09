@@ -1,6 +1,6 @@
 ---
 name: a-test-never-picks-the-port-of-its-server
-description: On 2026-11-06 a test of `HttpServerTests` failed twice, once in CI and once in the image, and on 2026-11-07 three of its tests failed once each in the same way: in the image its client was connected and reset within 0.5 ms of the test's start, before the program was launched, while the program then waited in its accept until the test's time ended, so the client's connection had reached another socket on the port the test had chosen and freed for the program. A server program a test runs binds port 0 and writes the port it got into a file beside it, and the client connects only to that port
+description: On 2026-11-06 a test of `HttpServerTests` failed twice, once in CI and once in the image, and on 2026-11-07 three of its tests failed once each in the same way: in the image its client was connected and reset within 0.5 ms of the test's start, before the program could have bound its port, while the program then waited in its accept until the test's time ended, so the client's connection had reached another socket on the port the test had chosen and freed for the program. A server program a test runs binds port 0 and writes the port it got into a file beside it, and the client connects only to that port
 metadata:
   type: feedback
 ---

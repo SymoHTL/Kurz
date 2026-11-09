@@ -1,0 +1,22 @@
+// expect: output
+// | admin 3 Ann
+// | admin 2 Bea
+// | user Cy
+// rules: C4
+
+class User(string Name)
+
+class Admin(int Level) : User
+
+class Root(bool Top) : Admin
+
+void Show(User u) {
+    match u {
+        Admin a => print("admin {a.Level} {a.Name}")
+        User x => print("user {x.Name}")
+    }
+}
+
+Show(Root("Ann", 3, true))
+Show(Admin("Bea", 2))
+Show(User("Cy"))
