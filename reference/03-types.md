@@ -1372,6 +1372,9 @@ colon: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the cons
 argument whose type does not meet the limit is the compile error `type-mismatch`. An interface
 may take type parameters too, and each list of type arguments gives each class that implements it
 a table of its own (§4, the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
+Whether one class may implement such an interface with two lists of type arguments, whether a
+generic class may implement it with its own type parameter, whether it may stand as a limit, and
+what a class that names it without type arguments is stand open (§14).
 
 Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
 ```kurz

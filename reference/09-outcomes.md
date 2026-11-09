@@ -924,6 +924,11 @@ case is `void` (O10) there is no value to recover with, and an arm is a statemen
 statements between braces, after which the program goes on after the call; `print("none")` in
 O10's case is such an arm. A block of statements is allowed in every arm; its last statement is
 what the arm does. *(proposed: the record shows one statement per arm)*
+An arm is read as an arm of `match` (C4): one that names an interface the call's cases implement,
+or a class or a `data` type they derive from, covers those cases, as C#'s `catch (IOException e)`
+catches the exceptions derived from its type (§5, the owner, 2026-11-09, #408, comment 6748445211,
+"Cover, as match does", against `type-mismatch` as built); one that names a type the call cannot
+return beside its success is `type-mismatch` (T1), as such an arm of `match` is.
 
 Case: [outcomes/else-recover.kz](../corpus/outcomes/else-recover.kz)
 ```kurz
@@ -1065,6 +1070,66 @@ y = Plain() else {
 print(y)
 ```
 
+Case: [outcomes/else-interface-arm.kz](../corpus/outcomes/else-interface-arm.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+data NotFound
+
+int | Dot | Square | NotFound Find(int id) {
+    if id == 1 {
+        return Dot()
+    }
+    if id == 2 {
+        return Square(3)
+    }
+    if id == 3 {
+        return NotFound
+    }
+    return id
+}
+
+int Size(int id) {
+    value = Find(id) else {
+        Shape s => s.Area()
+        NotFound => 0
+    }
+    return value
+}
+
+print(Size(1))
+print(Size(2))
+print(Size(3))
+print(Size(7))
+```
+
+Case: [outcomes/else-arm-no-case.kz](../corpus/outcomes/else-arm-no-case.kz)
+```kurz
+data NotFound
+
+int | NotFound Find(int id) {
+    if id == 1 {
+        return 10
+    }
+    return NotFound
+}
+
+value = Find(2) else {
+    string s => 0
+}
+print(value)
+```
+
 ### O6 (decided, §5, §6) Exceptions
 
 An exception is for a situation the function cannot recover from. There is no `catch`. An
@@ -1132,7 +1197,9 @@ throw ConfigMissing("app.json")
 
 A `match` on a union lists every case of the union, or ends in an `else` arm (C9). A missing case
 is the compile error `match-not-exhaustive`, reported at the `match`. Without this, a new case in
-a signature would pass silently through every `match` that was written before.
+a signature would pass silently through every `match` that was written before. An arm of an interface
+or of a base class covers every case whose class implements it or derives from it (C4), so a new such
+case goes to that arm, as a case goes to `else`.
 
 Case: [outcomes/match-not-exhaustive.kz](../corpus/outcomes/match-not-exhaustive.kz)
 ```kurz

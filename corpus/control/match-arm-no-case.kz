@@ -1,0 +1,12 @@
+// expect: error type-mismatch at 8
+// rules: C4
+
+data Yes
+data No
+
+string Say(Yes | No v) => match v {
+    string s => s
+    else => "no"
+}
+
+print(Say(Yes))

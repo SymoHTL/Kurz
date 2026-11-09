@@ -124,12 +124,28 @@ in the table and a subtype check per arm). An arm may name a class that implemen
 is a case as well, which tests the class of the instance at run time, as C#'s `is` does; no list of the
 classes that implement an interface, or that derive from a class, is closed, so such an arm covers no
 case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
-comment 6573113786, against a compile error). An `else` arm after arms that cover every case, and a
+comment 6573113786, against a compile error). An arm may also name an interface that cases of the union implement, or a class that
+cases derive from, directly or through a class between: it covers exactly those cases, which each case's class decides while the
+program compiles, takes them by the case the value holds, with no test of the instance's class at run time, and counts for O8 (§5, the owner, 2026-11-09, #408, comments 6737367326 and 6737634153, against the
+refusal as built). Such an arm is `unreachable-arm` only when every case it covers is taken by the arms above it, as C# reads a
+pattern that earlier ones subsume, and an arm of such a case after it is `unreachable-arm` too (§5, the owner, 2026-11-09, #408,
+comment 6737634153, against any overlap being an error). An `else` arm after arms that cover every case, and a
 literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
 arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
 earlier one handles; an arm that names a type that is no case of the union, derived from none and implementing none,
 `string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
-of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
+of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14),
+and so is an arm of an interface that no case implements or of a class that no case derives from (§5). An arm of a `data` type covers the cases
+whose `data` types derive from it (D6), as an arm of a base class does (§5, the owner, 2026-11-09, #408, comment 6748445211,
+"Cover, as a base class", against `type-mismatch` as built). An arm of an interface over a case that is another interface
+tests at run time whether the class of the instance implements the arm's interface too, as C#'s `is` does, and covers no case
+(O8), so the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-09, #408, comment 6748445211, "Test at run time, as C#", against
+`type-mismatch` as built; the cost is a search per such arm, one comparison of the instance's table for each class of the program
+that implements both); where no class of the program implements both, it is `type-mismatch` *(assumed, §5: the reading of
+2026-10-11 over the program compiled whole)*. Such an arm is `unreachable-arm` where the arms above take every case it tests,
+as an arm that can never run is (§5, the owner, 2026-10-09). Which classes
+derive from a class and which implement an
+interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
 A value whose type is a type parameter is C10's.
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
@@ -260,6 +276,150 @@ void Show(Shape s) {
 
 Show(Square(3))
 Show(Dot())
+```
+
+Case: [control/match-base-class-arm.kz](../corpus/control/match-base-class-arm.kz)
+```kurz
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+class Cat(int Lives) : Animal
+
+data Gone
+
+void Show(Dog | Cat | Gone v) {
+    match v {
+        Dog d => print("dog {d.Name} {d.Legs}")
+        Animal a => print("animal {a.Name}")
+        Gone => print("gone")
+    }
+}
+
+Show(Dog("rex", 4))
+Show(Cat("tom", 9))
+Show(Gone)
+```
+
+Case: [control/match-interface-arm.kz](../corpus/control/match-interface-arm.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+data Empty
+
+void Show(Dot | Square | Empty v) {
+    match v {
+        Square q => print("square {q.Side}")
+        Shape s => print("area {s.Area()}")
+        Empty => print("empty")
+    }
+}
+
+Show(Square(3))
+Show(Dot())
+Show(Empty)
+```
+
+Case: [control/match-data-base-arm.kz](../corpus/control/match-data-base-arm.kz)
+```kurz
+data Beast(string Name)
+data Hound(int Legs) : Beast
+data Lynx(int Lives) : Beast
+data Gone
+
+string Say(Hound | Lynx | Gone v) => match v {
+    Hound h => "hound {h.Name} {h.Legs}"
+    Beast b => "beast {b.Name}"
+    Gone => "gone"
+}
+
+print(Say(Hound("rex", 4)))
+print(Say(Lynx("tom", 9)))
+print(Say(Gone))
+```
+
+Case: [control/match-interface-test.kz](../corpus/control/match-interface-test.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+class Round(int R) : Shape, Named {
+    pub virtual int Area() => R
+    pub string Name() => "round"
+}
+
+class Ring(int Hole) : Round {
+    pub override int Area() => R - Hole
+}
+
+class Tag(string Text) : Named {
+    pub string Name() => Text
+}
+
+string Show(Named | int v) => match v {
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+int Area(Named n) => match n {
+    Shape s => s.Area()
+    else => 0
+}
+
+print(Show(Dot()))
+print(Show(Ring(5, 1)))
+print(Show(Tag("t")))
+print(Show(5))
+print(Area(Dot()))
+print(Area(Tag("u")))
+```
+
+Case: [control/match-arm-no-case.kz](../corpus/control/match-arm-no-case.kz)
+```kurz
+data Yes
+data No
+
+string Say(Yes | No v) => match v {
+    string s => s
+    else => "no"
+}
+
+print(Say(Yes))
+```
+
+Case: [control/match-data-arm-no-derived.kz](../corpus/control/match-data-arm-no-derived.kz)
+```kurz
+data Beast(string Name)
+data Stray(string Name)
+data Gone
+
+string Say(Stray | Gone v) => match v {
+    Beast b => b.Name
+    else => "gone"
+}
+
+print(Say(Gone))
 ```
 
 ### C5 (assumed, §8) `while`
