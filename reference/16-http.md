@@ -2577,7 +2577,7 @@ place of the handler's head, after the responses held before it, as for a functi
 before its first write (above), and the connection closes in stages, as after the writer's other
 `500` (§12, the owner, 2026-11-09, #412, comment 6740344904, "500 + close, as #411", and #411,
 comment 6737456858, "In stages"; the cost is the handler's status, which is lost); Kestrel
-answers `500` there too, and keeps the connection. A function's own `IoError` after its first
+answers `500` there too. A function's own `IoError` after its first
 write cuts a counted body short and closes the connection, as it ends a chunked one, since no
 status can be sent after the head went out (above). A `HEAD` is answered with
 the head, the count in it and no `Transfer-Encoding`, the function not called; a count of 0 sends no
