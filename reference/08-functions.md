@@ -103,7 +103,7 @@ print(Pick(false))
 Case: [functions/while-true-break-not-reached.kz](../corpus/functions/while-true-break-not-reached.kz)
 ```kurz
 int Once() {
-    while (true) {
+    while true {
         return 5
         break
     }
@@ -111,6 +111,10 @@ int Once() {
 
 print(Once())
 ```
+
+A `while true` with a `break` of its own that can be reached ends that way, so the end of the
+function after it can be reached, and a function that has no `return` there is `missing-return` at
+the function's line:
 
 Case: [functions/while-true-break-missing-return.kz](../corpus/functions/while-true-break-missing-return.kz)
 ```kurz
@@ -131,6 +135,9 @@ int First(List<int> xs) {
 
 print(First([1, 2, 3, 4]))
 ```
+
+A `while` whose condition is no constant, a parameter `go` here, can end at its condition, so a
+function whose only `return` stands in its body is `missing-return` at the function's line:
 
 Case: [functions/while-not-constant-missing-return.kz](../corpus/functions/while-not-constant-missing-return.kz)
 ```kurz
@@ -180,6 +187,26 @@ int Three(List<int> xs) {
 print(One())
 print(Two())
 print(Three([1, 2, 3]))
+```
+
+Case: [functions/constant-condition-compare.kz](../corpus/functions/constant-condition-compare.kz)
+```kurz
+// a comparison of constants and an `||` of constants are constants too, so neither `while` can end at its condition, and the end
+// of neither function can be reached
+int Same() {
+    while 1 == 1 {
+        return 1
+    }
+}
+
+int Either() {
+    while false || true {
+        return 2
+    }
+}
+
+print(Same())
+print(Either())
 ```
 
 ### F4 (assumed, §8) `void`

@@ -20,12 +20,15 @@
 // | TooSmall
 // | TooLarge
 // | TooLarge
+// | TooSmall
+// | InvalidDigit
 // rules: W18
 
 // `HttpDate.Parse` reads the IMF-fixdate, RFC 850's form, whose two digits of the year name 1970 to 2069, and asctime's form,
 // whose day is two digits or a space and one, after ASCII's whitespace is taken from both ends; it refuses an empty text, a
 // name in another case, a weekday that is not the date's, a zone other than GMT, a second of 60, a day the month does not have
-// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds
+// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds; a text that breaks two
+// checks takes the kind of the first in W18's order, the year before the day of the month, and the weekday before the range
 void Show(string text) {
     match HttpDate.Parse(text) {
         timestamp t => print(t)
@@ -54,3 +57,5 @@ Show("1994-11-06T08:49:37Z")
 Show("Wed, 31 Dec 1969 23:59:59 GMT")
 Show("Fri, 11 Apr 2262 23:47:17 GMT")
 Show("Sat, 12 Apr 2262 00:00:00 GMT")
+Show("Thu, 29 Feb 1969 00:00:00 GMT")
+Show("Mon, 12 Apr 2262 00:00:00 GMT")

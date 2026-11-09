@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 5
+// rules: T38
+
+// a constant NaN is no count of a time, as `int(1.0 / 0.0)` is no `int` (T6)
+print(duration.FromSeconds(0.0 / 0.0))

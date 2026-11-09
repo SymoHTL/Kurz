@@ -127,7 +127,7 @@ case (O8), and the `match` has `else` or the case's own arm after it (§5, the o
 comment 6573113786, against a compile error). An `else` arm after arms that cover every case, and a
 literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
 arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
-earlier one handles; an arm that names a type that is no case of the union and derived from none,
+earlier one handles; an arm that names a type that is no case of the union, derived from none and implementing none,
 `string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
 of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14).
 A value whose type is a type parameter is C10's.
