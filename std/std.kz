@@ -6283,6 +6283,107 @@ pub class HttpHeaders {
     }
 }
 
+// The parameters of a request's query, its names and values in their order, as `r.QueryValues()` reads them from `r.Query`, a type
+// every file sees (design record, section 12: the owner, 2026-11-06, G2 (a); W1, W19), read as ASP.NET Core's
+// `QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read them: a name compares exactly, byte for byte, where a
+// header's name compares without regard to ASCII case (W4), and a repeated name keeps each of its values apart, in their order.
+pub class HttpQuery {
+    mut List<string> names = List<string>()
+    mut List<string> values = List<string>()
+
+    // The first value of the name, or null where the query does not hold it.
+    pub string? Get(string name) {
+        for i in 0..<names.Count {
+            if names[i] == name {
+                return values[i]
+            }
+        }
+
+        return null
+    }
+
+    // Every value of the name, in their order, in a new list; empty where the query does not hold it.
+    pub List<string> GetAll(string name) {
+        mut all = List<string>()
+        for i in 0..<names.Count {
+            if names[i] == name {
+                all.Add(values[i])
+            }
+        }
+
+        return all
+    }
+
+    // How many names and values the query holds, each value of a repeated name counted: a read-only property (K7).
+    pub int Count => names.Count
+
+    // The name at the index, in their order: an index outside 0 to `Count - 1` stops the program with index-out-of-range, as a
+    // list's index does (W4).
+    pub string NameAt(int i) => names[i]
+
+    // The value at the index, the value of the name `NameAt(i)` gives, and outside them the same stop.
+    pub string ValueAt(int i) => values[i]
+
+    // The pairs of a query's text, as the crate reads them: split at each `&`, an empty piece skipped, each piece split at its first
+    // `=`, and a piece without one the name with the empty value (W19).
+    internal void ReadText(string query) {
+        b = query.Bytes
+        mut start = 0
+        mut i = 0
+        while i <= b.Count {
+            if i == b.Count || b[i] == 38 {
+                if i > start {
+                    mut equals = start
+                    while equals < i && b[equals] != 61 {
+                        equals = equals + 1
+                    }
+
+                    names.Add(HttpQueryText(b, start, equals))
+                    if equals < i {
+                        values.Add(HttpQueryText(b, equals + 1, i))
+                    } else {
+                        values.Add("")
+                    }
+                }
+
+                start = i + 1
+            }
+
+            i = i + 1
+        }
+    }
+}
+
+// A name or a value of a query, the bytes of `b` from `from` up to `to`: a `+` read as a space before the escapes, each `%` with two
+// hex digits after it within them the byte they name, a `%` without them kept, and the bytes read as UTF-8 with each maximal part
+// of a sequence that is no UTF-8 read as U+FFFD, as the crate decodes them lossily (`string.FromUtf8Lossy`, T15; W19).
+string HttpQueryText(Bytes b, int from, int to) {
+    mut out = Bytes()
+    mut i = from
+    while i < to {
+        if b[i] == 43 {
+            out.Add(byte(32))
+            i = i + 1
+            continue
+        }
+
+        if b[i] == 37 && i + 2 < to {
+            high = UrlHexValue(b[i + 1])
+            low = UrlHexValue(b[i + 2])
+            if high >= 0 && low >= 0 {
+                out.Add(byte(high * 16 + low))
+                i = i + 3
+                continue
+            }
+        }
+
+        out.Add(b[i])
+        i = i + 1
+    }
+
+    return string.FromUtf8Lossy(out)
+}
+
 // A lowest rate of data, in bytes a second after a grace, as Kestrel's `MinDataRate` holds both (design record, section 12: the
 // owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
 pub data HttpRate(int BytesPerSecond, duration Grace)
@@ -6316,6 +6417,14 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
     // that the loop reads the next one without a wait and may hold this one's response until it writes the next (F9).
     internal mut bool next = false
 
+    // The parameters of `Query`, read anew at each call, as `HttpQuery` reads them, while `Query` stays the raw text (design record,
+    // section 12: the owner, 2026-11-06, G2 (a); W5, W19).
+    pub HttpQuery QueryValues() {
+        q = HttpQuery()
+        q.ReadText(Query)
+        return q
+    }
+
     // The next request of the stream, its head read whole through the stream's buffer and its body left there for `Body`, or the
     // failure of the network, or the request the server refuses (W5), read under the limits of `HttpLimits()`: the limits a server
     // is given reach the parser through `HttpReadRequest`, which no program calls, with no second public form (W7; section 12, Q3).
@@ -6332,7 +6441,7 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 // `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
 // expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
-// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
+// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again, but for the refusal of `ReadAll` for its own `max`, after which the body is still readable (W6).
 pub class HttpBody {
     mut TcpStream? stream = null
     mut long remaining = 0
@@ -6752,7 +6861,8 @@ pub class HttpResponse {
     pub static HttpResponse Empty(int status) => Of(status, "")
 
     // A response whose body `body` writes, as `application/octet-stream`: the writer calls `body` with an `HttpWriter`, the head
-    // goes out with its first write, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // goes out with its first write of bytes, or at its return where it wrote none, each `w.Write` a chunk, and the function's return
+    // ends the body (W11). A status that has no body, 100 to 199,
     // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
     pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
         if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
@@ -6778,8 +6888,8 @@ pub class HttpResponse {
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length, or by the close where a function writes it; false where the writer wrote its
-    // own `500` in its place, or where the head of a body a function writes announced a close, after which the loop closes the
-    // connection. The responses `pending` holds go out first, in the same
+    // own `500` in its place, or where the writer of a body a function writes announced a close because the request's body still
+    // awaited `100 Continue`, after which the loop closes the connection. The responses `pending` holds go out first, in the same
     // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
     // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
     // writes has gone out (F9).
@@ -6965,11 +7075,13 @@ pub class HttpResponse {
 
 // The writer of a streamed response, which `HttpResponse.Stream` gives its function (design record, section 12; W11): `Write` sends
 // a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
-// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
-// write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
-// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing. A write that failed leaves
-// the writer failed: every later write, and the end of the body, gives its `IoError` again and writes nothing, so that the client
-// sees the body cut, never a chunk that a failed write left part of followed by another.
+// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing, the head neither. The head goes
+// out with the first write of bytes, or at the end of the body where the function wrote none, and the `CR LF` that ends a chunk with
+// the write after it, so that no write of a few bytes waits for the acknowledgement of the one before. Once the function returned, a
+// write gives `IoError(InvalidInput)` and writes nothing, that of a failed writer too. A write that failed leaves the writer failed:
+// every later write while the function runs, and the end of the body, gives its `IoError` again and writes nothing, so that a client
+// of HTTP/1.1 sees the body cut, never a chunk that a failed write left part of followed by another, while one of HTTP/1.0, whose
+// body the close ends, cannot tell it from a whole one.
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -7087,7 +7199,9 @@ pub class HttpWriter {
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
-    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9).
+    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9). A head that
+    // announced a close is never held: the loop holds only where the request's body has no chunks and a length of 0, and the head
+    // announces a close only where that body, chunked or of a length above 0, still awaits `100 Continue`.
     internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
         f = failure
@@ -7579,6 +7693,329 @@ pub class Uri {
     }
 }
 
+// The escapes of RFC 3986, section 2.1, read and written as C#'s `Uri.UnescapeDataString` and `Uri.EscapeDataString` read and
+// write them, and made as Rust's `percent-encoding` crate makes them (design record, section 12; W17). `r.Path` stays as the
+// request gave it (W5), and a program decodes it where it wants the text.
+pub class Url {
+    // The text with each `%` that has two hex digits after it, of either case, read as the byte they name, and the bytes then read
+    // as UTF-8: the string, or `InvalidUtf8` at the first position of the decoded bytes that is no UTF-8, as `string.FromUtf8`
+    // gives it. A `%` without two hex digits after it stays as it is, and a `+` stays a `+`. No path is checked, so `%2F` gives
+    // a `/` and `%00` the character U+0000. A text without a `%` is given back as it is, as the crate borrows it.
+    pub static string | InvalidUtf8 Decode(string text) {
+        if !text.Contains('%') {
+            return text
+        }
+
+        b = text.Bytes
+        mut out = Bytes()
+        mut i = 0
+        while i < b.Count {
+            if b[i] == 37 && i + 2 < b.Count {
+                high = UrlHexValue(b[i + 1])
+                low = UrlHexValue(b[i + 2])
+                if high >= 0 && low >= 0 {
+                    out.Add(byte(high * 16 + low))
+                    i = i + 3
+                    continue
+                }
+            }
+
+            out.Add(b[i])
+            i = i + 1
+        }
+
+        return string.FromUtf8(out)
+    }
+
+    // The text with each byte of its UTF-8 other than RFC 3986's unreserved ones, the ASCII letters, the digits and `-._~`, written
+    // as `%` and two upper-case hex digits, as C#'s `EscapeDataString` writes it, so that `Decode` gives the text back. A text
+    // with no other byte is given back as it is, as the crate borrows it.
+    pub static string Encode(string text) {
+        b = text.Bytes
+        mut i = 0
+        while i < b.Count && UrlUnreserved(b[i]) {
+            i = i + 1
+        }
+
+        if i == b.Count {
+            return text
+        }
+
+        mut out = Bytes()
+        for j in 0..<b.Count {
+            c = b[j]
+            if UrlUnreserved(c) {
+                out.Add(c)
+            } else {
+                out.Add(byte(37))
+                out.Add(UrlHexDigit(int(c) >> 4))
+                out.Add(UrlHexDigit(int(c) & 15))
+            }
+        }
+
+        // every byte written is ASCII, so the bytes are UTF-8 and the arm is never taken
+        encoded = string.FromUtf8(out) else {
+            InvalidUtf8 => ""
+        }
+
+        return encoded
+    }
+}
+
+// The value of the hex digit `c`, of either case, or -1 where `c` is none.
+int UrlHexValue(byte c) {
+    if c >= 48 && c <= 57 {
+        return int(c) - 48
+    }
+
+    if c >= 97 && c <= 102 {
+        return int(c) - 87
+    }
+
+    if c >= 65 && c <= 70 {
+        return int(c) - 55
+    }
+
+    return -1
+}
+
+// The digit of `d`, 0 to 15, in upper-case hexadecimal, as RFC 3986, section 2.1, writes an escape.
+byte UrlHexDigit(int d) {
+    if d < 10 {
+        return byte(48 + d)
+    }
+
+    return byte(55 + d)
+}
+
+// Whether `c` is one of RFC 3986's unreserved bytes, which `Url.Encode` leaves as they are: an ASCII letter, a digit, `-`, `.`, `_`
+// or `~`.
+bool UrlUnreserved(byte c) => c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 45 || c == 46 || c == 95 || c == 126
+
+// A date of HTTP, RFC 9110, section 5.6.7, the form of a `Date`, a `Last-Modified` and an `If-Modified-Since`, written and read
+// as Rust's `httpdate` crate, which hyper uses, writes and reads it (design record, section 12; W18).
+pub class HttpDate {
+    // The IMF-fixdate of `at`, `Sun, 06 Nov 1994 08:49:37 GMT`, its second taken towards the past, as the crate drops the
+    // fraction; the server writes its own `Date` by the same function.
+    pub static string Format(timestamp at) => HttpDateOf(HttpSecondOf(at))
+
+    // The instant of a date in one of the three forms RFC 9110 has a recipient read, after ASCII's whitespace is taken from
+    // both ends, as the crate trims it: the IMF-fixdate, RFC 850's `Sunday, 06-Nov-94 08:49:37 GMT`, whose two digits of the year
+    // name 1970 to 2069 as the crate reads them, and asctime's `Sun Nov  6 08:49:37 1994`. Names are compared with their case,
+    // and the weekday must be the date's, as the crate checks it. `Empty` for a text of whitespace alone; `TooSmall` for a year
+    // before 1970, which the crate refuses; `TooLarge` past the last second a `timestamp` holds, 2262-04-11 23:47:16; and
+    // `InvalidDigit` for every other text, one in none of the three forms, a time past 23:59:59, a day the month does not have
+    // and a weekday that is not the date's among them.
+    pub static timestamp | ParseError Parse(string text) {
+        b = text.TrimAscii().Bytes
+        if b.Count == 0 {
+            return ParseError(ParseKind.Empty)
+        }
+
+        mut f = HttpImfFixdate(b)
+        if f.Year < 0 {
+            f = HttpRfc850Date(b)
+        }
+
+        if f.Year < 0 {
+            f = HttpAsctime(b)
+        }
+
+        if f.Year < 0 {
+            return ParseError(ParseKind.InvalidDigit)
+        }
+
+        if f.Year < 1970 {
+            return ParseError(ParseKind.TooSmall)
+        }
+
+        if f.Hour > 23 || f.Minute > 59 || f.Second > 59 || f.Day < 1 || f.Day > HttpDaysIn(f.Month, f.Year) {
+            return ParseError(ParseKind.InvalidDigit)
+        }
+
+        long days = HttpDaysFrom(f.Year, f.Month, f.Day)
+        if int((days + 3) % 7) != f.Weekday {
+            return ParseError(ParseKind.InvalidDigit)
+        }
+
+        long second = days * 86400 + long(f.Hour) * 3600 + long(f.Minute) * 60 + long(f.Second)
+        if second > 9223372036 {
+            return ParseError(ParseKind.TooLarge)
+        }
+
+        long bits = second * 1_000_000_000
+        raw {
+            return *Ptr<timestamp>(&bits)
+        }
+    }
+}
+
+// The fields of a date of HTTP as one of its forms writes them, before they are checked: the weekday from 0 for Monday, the
+// month from 1, and a `Year` of -1 where the text is not that form.
+data HttpDateFields(int Weekday, int Day, int Month, int Year, int Hour, int Minute, int Second)
+
+HttpDateFields HttpDateNone() => HttpDateFields(0, 0, 0, -1, 0, 0, 0)
+
+// `Sun, 06 Nov 1994 08:49:37 GMT`, the IMF-fixdate.
+HttpDateFields HttpImfFixdate(Bytes b) {
+    if b.Count != 29 || b[3] != 44 || b[4] != 32 || b[7] != 32 || b[11] != 32 || b[16] != 32 || b[19] != 58 || b[22] != 58 || !HttpDateWord(b, 25, " GMT") {
+        return HttpDateNone()
+    }
+
+    weekday = HttpDateName(b, 0, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    month = HttpDateName(b, 8, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+    day = HttpDateNumber(b, 5, 2)
+    year = HttpDateNumber(b, 12, 4)
+    hour = HttpDateNumber(b, 17, 2)
+    minute = HttpDateNumber(b, 20, 2)
+    second = HttpDateNumber(b, 23, 2)
+    if weekday < 0 || month < 0 || day < 0 || year < 0 || hour < 0 || minute < 0 || second < 0 {
+        return HttpDateNone()
+    }
+
+    return HttpDateFields(weekday, day, month + 1, year, hour, minute, second)
+}
+
+// `Sunday, 06-Nov-94 08:49:37 GMT`, RFC 850's form, whose year of two digits is 1970 to 2069, 70 to 99 the 1900s, as the crate
+// reads it.
+HttpDateFields HttpRfc850Date(Bytes b) {
+    names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    mut weekday = -1
+    mut at = 0
+    for i in 0..<names.Count {
+        n = names[i].Bytes.Count
+        if weekday < 0 && b.Count == n + 24 && HttpDateWord(b, 0, names[i]) && HttpDateWord(b, n, ", ") {
+            weekday = i
+            at = n + 2
+        }
+    }
+
+    if weekday < 0 || b[at + 2] != 45 || b[at + 6] != 45 || b[at + 9] != 32 || b[at + 12] != 58 || b[at + 15] != 58 || !HttpDateWord(b, at + 18, " GMT") {
+        return HttpDateNone()
+    }
+
+    month = HttpDateName(b, at + 3, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+    day = HttpDateNumber(b, at, 2)
+    mut year = HttpDateNumber(b, at + 7, 2)
+    hour = HttpDateNumber(b, at + 10, 2)
+    minute = HttpDateNumber(b, at + 13, 2)
+    second = HttpDateNumber(b, at + 16, 2)
+    if month < 0 || day < 0 || year < 0 || hour < 0 || minute < 0 || second < 0 {
+        return HttpDateNone()
+    }
+
+    if year < 70 {
+        year = year + 2000
+    } else {
+        year = year + 1900
+    }
+
+    return HttpDateFields(weekday, day, month + 1, year, hour, minute, second)
+}
+
+// `Sun Nov  6 08:49:37 1994`, asctime's form, whose day is two digits or a space and one digit.
+HttpDateFields HttpAsctime(Bytes b) {
+    if b.Count != 24 || b[3] != 32 || b[7] != 32 || b[10] != 32 || b[13] != 58 || b[16] != 58 || b[19] != 32 {
+        return HttpDateNone()
+    }
+
+    weekday = HttpDateName(b, 0, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    month = HttpDateName(b, 4, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+    mut day = HttpDateNumber(b, 8, 2)
+    if b[8] == 32 {
+        day = HttpDateNumber(b, 9, 1)
+    }
+
+    year = HttpDateNumber(b, 20, 4)
+    hour = HttpDateNumber(b, 11, 2)
+    minute = HttpDateNumber(b, 14, 2)
+    second = HttpDateNumber(b, 17, 2)
+    if weekday < 0 || month < 0 || day < 0 || year < 0 || hour < 0 || minute < 0 || second < 0 {
+        return HttpDateNone()
+    }
+
+    return HttpDateFields(weekday, day, month + 1, year, hour, minute, second)
+}
+
+// Whether the bytes of `word` stand in `b` from `at`.
+bool HttpDateWord(Bytes b, int at, string word) {
+    w = word.Bytes
+    if at + w.Count > b.Count {
+        return false
+    }
+
+    for i in 0..<w.Count {
+        if b[at + i] != w[i] {
+            return false
+        }
+    }
+
+    return true
+}
+
+// The position in `names` of the name of three bytes that stands in `b` from `at`, or -1 where none does.
+int HttpDateName(Bytes b, int at, List<string> names) {
+    for i in 0..<names.Count {
+        if HttpDateWord(b, at, names[i]) {
+            return i
+        }
+    }
+
+    return -1
+}
+
+// The number the `count` decimal digits of `b` from `at` write, or -1 where one of them is no digit.
+int HttpDateNumber(Bytes b, int at, int count) {
+    mut n = 0
+    for i in 0..<count {
+        c = b[at + i]
+        if c < 48 || c > 57 {
+            return -1
+        }
+
+        n = n * 10 + int(c) - 48
+    }
+
+    return n
+}
+
+// The days of `month` in `year` of the Gregorian calendar.
+int HttpDaysIn(int month, int year) {
+    if month == 2 {
+        if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            return 29
+        }
+
+        return 28
+    }
+
+    if month == 4 || month == 6 || month == 9 || month == 11 {
+        return 30
+    }
+
+    return 31
+}
+
+// The days from 1970-01-01 to the date, a year from 1970 on, by the algorithm `days_from_civil`, the inverse of the
+// `civil_from_days` that `HttpDateOf` writes a day by.
+long HttpDaysFrom(int year, int month, int day) {
+    mut long y = long(year)
+    if month <= 2 {
+        y = y - 1
+    }
+
+    era = y / 400
+    yoe = y - era * 400
+    mut long mp = long(month) - 3
+    if month <= 2 {
+        mp = long(month) + 9
+    }
+
+    doy = (153 * mp + 2) / 5 + long(day) - 1
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    return era * 146097 + doe - 719468
+}
+
 // The options of a client, with .NET's names and, but for the redirects, its defaults (design record, section 12; W13): the
 // connections to one host, which no number bounds, `int.MaxValue` as .NET's; the time an idle connection is kept, 1 minute; the
 // life of a connection, which no time bounds, the largest `duration`, since no member of `HttpLimits` turns off; the redirects
@@ -7942,7 +8379,7 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
         now = HttpSecondOf(timestamp.Now)
         if now != second {
             second = now
-            date = "Date: {HttpDate(now)}\r\n"
+            date = "Date: {HttpDateOf(now)}\r\n"
         }
 
         pace = limits.MinResponseDataRate
@@ -8043,8 +8480,8 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                         return
                     }
 
-                    // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), with no `408`, since the
-                    // head has gone out
+                    // a body under its rate gives the server's own `request timed out`, as Q12 (b) of section 12 gives it to a read of
+                    // the function, with no `408`, since the head has gone out (W11, assumed)
                     drained = body.Drain(limits.MaxDrainSize) else {
                         IoError e => return e
                         HttpError e => return e
@@ -8201,7 +8638,7 @@ long HttpSecondOf(timestamp at) {
 
 // The second `second` since 1970-01-01 as HTTP's `Date` writes it, RFC 9110's IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`
 // (section 5.6.7), the civil date of its day by the algorithm `civil_from_days`, which chrono's dates follow too.
-string HttpDate(long second) {
+string HttpDateOf(long second) {
     mut days = second / 86400
     if second < 0 && days * 86400 != second {
         days = days - 1
