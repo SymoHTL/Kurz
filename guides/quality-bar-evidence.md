@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-11-09
-digest: 1ffd976703460737582a07ba2806dffff70e491994fb9c84e2c90f41fa1a062c
+digest: 6b4c3fa9be56cff3abca38eb854712d7fb3852bf7f8b4e76663eb1619bb1866e
 ttl_days: 60
 metadata:
   type: reference
@@ -105,8 +105,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 439 |
-| Bullets of the Open section | 64 |
+| Occurrences of the marker *(assumed)* | 440 |
+| Bullets of the Open section | 65 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -118,12 +118,12 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 289 |
-| of them decided | 248 |
+| Rules in the reference | 290 |
+| of them decided | 249 |
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 1 |
-| Corpus cases | 1003 |
+| Corpus cases | 1010 |
 | Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 370 |
-| Pull requests merged | 345 |
-| Merged over red, with a recorded waiver | 191 |
-| Review findings posted: high | 325 |
-| Review findings posted: medium | 4622 |
-| Review findings posted: low | 4671 |
+| Pull requests opened by a writer, or merged | 372 |
+| Pull requests merged | 346 |
+| Merged over red, with a recorded waiver | 192 |
+| Review findings posted: high | 326 |
+| Review findings posted: medium | 4629 |
+| Review findings posted: low | 4676 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->

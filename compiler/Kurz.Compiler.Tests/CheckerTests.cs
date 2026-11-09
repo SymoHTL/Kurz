@@ -503,6 +503,28 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_time_of_a_count_takes_a_number_that_widens_to_long_or_double_and_a_constant_that_does_not_fit_is_constant_overflow()
+    {
+        // T38 (section 4, the owner, 2026-11-08, G4 (b), "Also a double, as C#"): an integer type that widens to `long` takes the `long`
+        // form, any other number the `double` form, a `ulong` and a `float` among them, and a type that widens to neither is type-mismatch
+        Clean("int n = 5\nprint(duration.FromSeconds(n))\nprint(timestamp.FromUnixMilliseconds(n))");
+        Clean("ulong u = 5\nprint(duration.FromMinutes(u))");
+        Clean("float f = float(1.5)\nprint(duration.FromHours(f))");
+        Assert.Equal([(ErrorIds.TypeMismatch, 2)], Errors("decimal d = 1m\nprint(duration.FromSeconds(d))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(timestamp.FromUnixSeconds(true))"));
+
+        // T6: a constant count whose time does not fit is constant-overflow at the count's line, of a `long` and of a `double`; the
+        // largest counts that fit are clean
+        Clean("print(duration.FromDays(106751))\nprint(duration.FromSeconds(9223372036.854))");
+        Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("print(1s)\nprint(duration.FromDays(106752))"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(timestamp.FromUnixSeconds(9223372037.0))"));
+
+        // V10: the constructors of one type are no members of the other
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(timestamp.FromSeconds(5))"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(duration.FromUnixSeconds(5))"));
+    }
+
+    [Fact]
     public void A_part_of_a_list_is_a_list_and_its_ends_are_a_range_s()
     {
         // M9 (section 4, the owner, 2026-10-29, "A List<T>, a value"), with C8's ends: integers of one sign, in order where both are literals
