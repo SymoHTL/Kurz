@@ -1,8 +1,8 @@
 ---
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
-generated: 2026-11-08
-digest: b87635c7324c2b04ea37ab00412f194059e7921307869fc970771e4b0ea3c179
+generated: 2026-11-09
+digest: 9574972c2454e6ec75ac3035f6b66346f5c1f5296764a18a384f1d7eded21454
 ttl_days: 60
 metadata:
   type: reference
@@ -80,13 +80,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 90 |
+| Entries in INDEX.md | 91 |
 | tagged (untagged) | 2 |
 | tagged HARD | 33 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 16 |
 | tagged RECIPE | 9 |
-| tagged TRAP | 42 |
+| tagged TRAP | 43 |
 | Review rule sections | 12 |
 | Review rules | 71 |
 <!-- /generated:store -->
@@ -105,8 +105,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 414 |
-| Bullets of the Open section | 61 |
+| Occurrences of the marker *(assumed)* | 437 |
+| Bullets of the Open section | 64 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -118,12 +118,12 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 288 |
-| of them decided | 247 |
+| Rules in the reference | 289 |
+| of them decided | 248 |
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 1 |
-| Corpus cases, none of them run | 980 |
+| Corpus cases, none of them run | 1003 |
 | Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 340 |
-| Pull requests merged | 313 |
-| Merged over red, with a recorded waiver | 162 |
-| Review findings posted: high | 301 |
-| Review findings posted: medium | 4313 |
-| Review findings posted: low | 4448 |
+| Pull requests opened by a writer, or merged | 366 |
+| Pull requests merged | 342 |
+| Merged over red, with a recorded waiver | 188 |
+| Review findings posted: high | 316 |
+| Review findings posted: medium | 4503 |
+| Review findings posted: low | 4589 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->

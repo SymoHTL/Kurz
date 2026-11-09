@@ -18,8 +18,8 @@
 
 // a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
 // to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
-// connection whose call ran out is used again, the next call opening a new one; a body whose bytes are all in the stream's buffer,
-// read after the call's time ran out, gives `TimedOut` and not its bytes; and a body whose
+// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came in the one write of
+// its head, read after the call's time ran out, gives `TimedOut` and not its bytes, which were in the stream's buffer; and a body whose
 // bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
 // remains of it: a body of a length, one read to the close, and a chunk's size line
 extern "C" {
@@ -205,8 +205,8 @@ void Trickled(int port) {
     print(elapsed >= 300ms && elapsed < 900ms)
 }
 
-// one call of a time of 300 milliseconds whose body comes with its head, so that its every byte is in the stream's buffer,
-// read after the call's time ran out
+// one call of a time of 300 milliseconds whose body comes in the one write of its head, which the head's read takes whole, so that
+// the body's bytes are in the stream's buffer, read 400 milliseconds later, after the call's time ran out
 string Late(HttpClient client, int port) {
     match client.Get(Address(port, "/")) {
         HttpResponseMessage r => {

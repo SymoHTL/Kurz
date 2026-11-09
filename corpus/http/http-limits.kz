@@ -5,8 +5,8 @@
 // | 1048576 32768
 // rules: W7
 
-// the bounds a server holds a connection to, each with the default ASP.NET Core's Kestrel gives it, and a rate a slow client is
-// held to after its grace
+// the bounds a server holds a connection to, the first seven with the defaults ASP.NET Core's Kestrel gives them and the four after
+// them the server's own, an idle connection's 5 seconds where Kestrel waits 130, and a rate a slow client is held to after its grace
 d = HttpLimits()
 print("{d.MaxRequestLineSize} {d.MaxRequestHeadersTotalSize} {d.MaxRequestHeaderCount} {d.MaxRequestBodySize} {d.RequestHeadersTimeout}")
 print("{d.MinRequestBodyDataRate.BytesPerSecond} {d.MinRequestBodyDataRate.Grace} {d.MinResponseDataRate.BytesPerSecond} {d.MinResponseDataRate.Grace}")

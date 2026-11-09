@@ -1,0 +1,9 @@
+// expect: error type-mismatch at 7
+// rules: K13
+
+class Shape(string Name)
+class Tally(Map<string, int> Counts) : Shape
+
+bool Same(Shape a, Shape b) => a == b
+
+print(Same(Shape("a"), Shape("a")))

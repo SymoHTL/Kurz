@@ -2,3 +2,4 @@
 // rules: P1
 
 paid = Log.Information("paid")
+print(paid)
