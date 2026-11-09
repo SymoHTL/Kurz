@@ -1,0 +1,36 @@
+// expect: output
+// | 1
+// | 2
+// | 3
+// rules: F3
+
+int One() {
+    if true {
+        return 1
+    }
+}
+
+int Two() {
+    while !false {
+        return 2
+    }
+}
+
+int Three(List<int> xs) {
+    mut i = 0
+    while true {
+        if false {
+            break
+        }
+
+        if xs[i] == 3 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(One())
+print(Two())
+print(Three([1, 2, 3]))
