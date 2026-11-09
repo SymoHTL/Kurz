@@ -6053,6 +6053,10 @@ public sealed class CheckerTests
     [InlineData("void Name<const string S>() {\n    print(x)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|5: unknown-name: no `x` is visible here (V10)")]
     [InlineData("void Name<const string S>() {\n}\n\nName<1, 2>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|7: syntax: `Name` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Name<const string S>(int a) {\n    print(a)\n}\n\nName<1>(\"x\")", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|8: type-mismatch: a `string` where an `int` is required (T1)")]
+    [InlineData("void Name<const string S>() {\n}\n\nName()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
+    [InlineData("void Name<const string S = \"a\">() {\n}\n\nName()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Name<const string S>() {\n}\n\nName<Missing>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Missing>()", "7: unknown-name: no type named `Missing` is visible here (V10)")]
     [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: syntax: `double` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
     [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
@@ -6093,7 +6097,9 @@ public sealed class CheckerTests
         // checked as a parameter's default value is, against the parameter's type (T1), its range (T6) and a constant (F12); a default, or a constant's type, that was not read gives the calls no second error, and the type of
         // a constant that names such a parameter none either, while a body whose constant's type was not read, or is outside the list, is read, and its own
         // error is reported, as before T35's refusals, and the uses of its constant none (E1); an argument past every type parameter, a
-        // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); the
+        // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); a type argument at a constant whose type
+        // was not read is not read, so its own error, an unknown name, is not reported, while a call that writes none takes the default
+        // or is `cannot-infer` as for any call (T27, E1); the
         // constant is a value of its type in the body; `f(a < 64, c > (d))` is the call `a<64, c>(d)` (the owner, 2026-11-02)
         Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
@@ -6241,6 +6247,38 @@ public sealed class CheckerTests
         {
             Assert.Equal(["7: redeclared: `T` is a type parameter of the function around it (V9)"], Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
             Assert.Equal(bound.Split('|'), Check(Shapes + control).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        }
+    }
+
+    [Fact]
+    public void A_parameter_named_like_a_type_parameter_leaves_the_rest_of_a_copy_as_it_reads_without_it()
+    {
+        // T33, E1 (section 4, assumed with the build): in a copy the name of a constant's refused parameter reads that parameter, not the
+        // constant's value, so that its `redeclared` is the one error, where the same program without the parameter reports the use
+        Assert.Equal(["7: redeclared: `N` is a type parameter of the function around it (V9)"],
+            Check(Shapes + "void F<const int N>(int N) {\n    string s = N\n    print(s)\n}\n\nF<1>(2)").Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        Assert.Equal(["8: type-mismatch: an `int` where a `string` is required (T1)"],
+            Check(Shapes + "void F<const int N>() {\n    string s = N\n    print(s)\n}\n\nF<1>()").Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+
+        // the name in a type position reads the type parameter, the body of a loop over `T.Fields` and of a `match` arm on `T.Kind` are
+        // checked as any block, and the copy is still made and checked, so that a loop over another type parameter's fields reports what
+        // the type it binds gives: each program reports, beside the `redeclared`, what its control, the same program without the
+        // parameter, reports
+        (string Program, int Line, string Errors)[] rows =
+        [
+            ("void Zero<T>(int T) {\n    T r = 1\n    print(r)\n}\n\nZero<string>(1)", 7, "8: type-mismatch: an `int` where a `T` is required (T1)|9: no-text: a `T` has no text to print (A4, A7, A10)"),
+            ("void Other<U>(U u) {\n    print(1)\n}\n\nvoid Pass<T>(int T) {\n    Other<T>(\"x\")\n}\n\nPass<long>(1)", 11, "12: type-mismatch: a `string` where a `T` is required (T1)"),
+            ("void Opt<T>(int T) {\n    T? x = \"a\"\n    print(1)\n}\n\nOpt<long>(1)", 7, "8: type-mismatch: a `string` where a `T?` is required (T1)|8: unused-variable: `x` is never read (V5)"),
+            ("void Each<T>(int T) {\n    for f in T.Fields {\n        int bad = \"a\"\n        print(bad)\n    }\n}\n\nEach<Named>(1)", 7, "9: type-mismatch: a `string` where an `int` is required (T1)"),
+            ("void Kind<T>(int T) {\n    match T.Kind {\n        TypeKind.Data => {\n            int bad = \"a\"\n            print(bad)\n        }\n    }\n}\n\nKind<Named>(1)", 7, "10: type-mismatch: a `string` where an `int` is required (T1)"),
+            ("void Each<T, U>(int T) {\n    for f in U.Fields {\n        print(f.Name)\n    }\n}\n\nEach<long, long>(1)", 7, "13: kind-not-read: `Each<long, long>`: `long` is of the kind `TypeKind.Long`, and `U.Fields` in `Each` walks the fields of a `data` type alone (T33)"),
+        ];
+        foreach (var (program, line, errors) in rows)
+        {
+            var control = program.Replace("(int T)", "()").Replace(">(1)", ">()");
+            Assert.NotEqual(program, control);
+            Assert.Equal([$"{line}: redeclared: `T` is a type parameter of the function around it (V9)", .. errors.Split('|')], Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+            Assert.Equal(errors.Split('|'), Check(Shapes + control).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
         }
     }
 
