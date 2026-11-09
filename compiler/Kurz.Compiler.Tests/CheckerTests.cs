@@ -3680,6 +3680,17 @@ public sealed class CheckerTests
     }
 
     [Theory]
+    [InlineData("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = this.Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()", 8)] // `this.Log`
+    [InlineData("class Audit {\n    string Tag = Log()\n\n    string Log() {\n        return \"m\"\n    }\n\n    pub void Run() {\n        print(Tag)\n    }\n}\n\nAudit().Run()", 2)] // `Log()` for a method named `Log`
+    public void In_a_fields_default_of_a_type_with_a_member_named_log_this_log_and_a_method_log_are_unknown_name(string program, int line)
+    {
+        // P1 in a field's default, where K7 reads no `this` and no method of the instance
+        Assert.Equal([(ErrorIds.UnknownName, line)], Errors(program));
+        // the positive control: `Log` alone reaches a parameter of the primary constructor
+        Clean("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()");
+    }
+
+    [Theory]
     [InlineData("f = Log.Information\nprint(f)", ErrorIds.UnknownName)]
     [InlineData("y = Log\nprint(y)", ErrorIds.UnknownName)]
     [InlineData("x = Log.Information(\"a\")\nprint(x)", ErrorIds.Syntax)]

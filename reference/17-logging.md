@@ -16,11 +16,14 @@ function, variable or parameter `Log` at any level is `redeclared` too, as of `E
 while a member named `Log` of a type, a method or a field, a parameter of a primary constructor
 among them, is not, and in that type's methods, its properties and its fields' defaults (a
 constructor declared in a class's body is `not supported`, K14), `Log.Information("a")` stays a log
-call, though the member's type has a method `Information`; there `Log` alone, `Log()` and `this.Log`
-reach the member, as K7 reads a member's name. A member of `Log` that names no level is
-`unknown-name` (V10), there too, `Log.Foo("a")` though the member's type has a method `Foo`, and so
-are `Log`, where no member takes its name, and a log function used as a value, `f = Log.Information`,
-there too. A log call gives
+call, though the member's type has a method `Information`. In the type's methods and its
+properties, `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a member's name; in a
+field's default, where K7 reads no `this` and no method or property of the instance, `Log` alone
+reaches a parameter of the primary constructor named `Log`, while `this.Log`, and `Log()` for a
+method named `Log`, are `unknown-name` (K7). A member of `Log` that names no level is `unknown-name`
+(V10), `Log.Foo("a")` in such a type too, though the member's type has a method `Foo`. So are `Log`
+alone where no member takes its name, and a log function used as a value, `f = Log.Information`, in
+such a type too. A log call gives
 nothing: it is a statement, as a call of `print` is, and `x = Log.Information("a")` is `syntax`, a
 call with a `void` success used as a value (O10). *(proposed)*
 
@@ -210,8 +213,9 @@ its level from the merged list as P5 takes it, by the longest prefix it starts w
 operator turns a category up or down through `KURZ_LOG` where the part does not name its prefix:
 beside the part's `Orders=Warning`, `KURZ_LOG="OrdersAudit=Debug"` gives the category of a type
 `OrdersAudit` the level `Debug`, while `Orders` keeps `Warning` (§12, the owner, 2026-11-06, answer
-P10). "Its prefix" is the prefix whose entry gives the category its level, the longest of the
-merged list that the category starts with, as §12 reads it. The level without a prefix is one
+P10). "Its prefix" reads so: `KURZ_LOG` turns a category up or down where the longest prefix of
+`KURZ_LOG` that the category starts with is longer than every prefix of it that the part names, as
+§12 reads it. *(assumed, §12: a reading of the owner's "its prefix")* The level without a prefix is one
 entry of each list: the part's wins where it declares one, and else the variable's, as ASP.NET's
 `Default` key is layered as every other key. *(proposed)*
 
