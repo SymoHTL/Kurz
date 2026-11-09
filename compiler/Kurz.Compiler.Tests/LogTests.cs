@@ -114,6 +114,31 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     }
 
     [Fact]
+    public void A_call_in_a_fields_default_or_a_property_takes_the_name_of_its_type()
+    {
+        // P6, the owner's answer M11: a log call gives nothing, so it stands in a field's default or a property inside a lambda
+        const string text = "class Orders {\n    () => void report = () => Log.Information(\"in a field's default\")\n\n    pub () => void Notice => () => Log.Information(\"in a property\")\n\n    pub void Pay() {\n        report()\n        n = Notice\n        n()\n    }\n}\n\no = Orders()\no.Pay()\n";
+        if (Logged(text, "log-member-category") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["Information Orders: in a field's default", "Information Orders: in a property"], run.Lines);
+        }
+    }
+
+    [Fact]
+    public void Log_alone_reaches_a_member_named_Log_and_a_call_of_a_level_of_Log_stays_a_log_call()
+    {
+        // P1: a parameter of a primary constructor named `Log`, whose type has an `Information` of its own
+        const string text = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    pub void Pay() {\n        Log.Information(\"a log call\")\n        this.Log.Information(\"through this\")\n        s = Log\n        s.Information(\"by its name alone\")\n    }\n}\n\no = Orders(Sink())\no.Pay()\n";
+        if (Logged(text, "log-member-named-log") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["through this", "by its name alone"], run.Output);
+            Assert.Equal(["Information Orders: a log call"], run.Lines);
+        }
+    }
+
+    [Fact]
     public void With_nothing_set_a_call_site_is_on_from_information_and_each_level_writes_its_name()
     {
         const string text = "Log.Trace(\"t\")\nLog.Debug(\"d\")\nLog.Information(\"i\")\nLog.Warning(\"w\")\nLog.Error(\"e\")\nLog.Critical(\"c\")\n";
@@ -247,7 +272,7 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
         var refused = Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Windows), testBuild: true);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal("program.kz:2: not supported: a log call, whose line holds the time of the clock, which the runtime of Windows does not give (S11, P6)", diagnostic.At("program.kz"));
+        Assert.Equal((DiagnosticKind.NotSupported, 2), (diagnostic.Kind, diagnostic.Line)); // E2: the id and the line, not the wording
         Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), [], Builder.CheckRuntime(Target.Linux), testBuild: true).Program); // the positive control
     }
 

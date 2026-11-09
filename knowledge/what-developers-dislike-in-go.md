@@ -74,7 +74,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 9. Data races with no compile-time safety
 
 - Evidence: A Study of Real-World Data Races in Golang, a peer-reviewed study (PLDI 2022) (https://arxiv.org/abs/2204.00764): "We have deployed this detector in Uber's 46 million lines of Go codebase hosting 2100 distinct microservices, found over 2000 data races, and fixed over 1000 data races, spanning 790 distinct code patches submitted by 210 unique developers over a six-month period." The Go FAQ (https://go.dev/doc/faq#atomic_maps): "This was not an easy decision, however, since it means uncontrolled map access can crash the program." The sync package source (https://github.com/golang/go/blob/master/src/sync/mutex.go): "A Mutex must not be copied after first use."
-- Kurz: AVOIDED. Section 6 says: "An actor handles one message at a time, so there are no locks and no data races inside it." It also says: "Two actors can never reach the same mutable object." Kurz has no mutex to copy.
+- Kurz: AVOIDED. Section 6 says: "An actor handles one message at a time, so there are no locks and no data races inside it." It also says: "The region check below holds that two actors never reach the same mutable object, but for two exceptions of a server's stream that it does not see (section 12)". Both exceptions rest on `std/`'s code, which the compiler does not check, and the state they share is atomic. Kurz has no mutex to copy.
 
 ## 10. Garbage-collector tuning and memory limits
 
