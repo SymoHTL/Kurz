@@ -346,6 +346,16 @@ Gate: review rule "rules for sessions".
   rule cites a section that exists); the order is a `judgment step`.
 - **Every Kurz sample in the reference is a corpus case**, shown under a `Case:` line that links
   its file. Gate: `reference`.
+- **A clause names another clause by its date and comment, its section or its rule, never by its
+  place.** On 2026-11-08 a take of `main` that kept every word of both sides left pull request
+  387's "(the assumed clause before this one)", in the record and in T33, naming the clause pull
+  request 378 had put between it and the clause it meant
+  ([knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md](knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md)).
+  Gate: `reference` for "the", "a" or "an", then at most "assumed" or "decided", then "clause",
+  "reading", "sentence" or "statement", then "before this one" or "after this one", in the record
+  and the reference. A pointer by place in other words is a `judgment step`: other words before
+  the noun ("the proposed clause", "the owner's sentence"), a plural, and the wider words of place,
+  "above" and "below".
 - **No case stands on an open rule**: it would bake in a pick nobody made. A rule that can have
   no case says why in a `No case:` line. Gate: `reference`.
 - **An error a case expects has an id in the error table** (`reference/12-errors.md`), and the
@@ -486,8 +496,13 @@ Gate: review rule "rules for sessions".
       `compiler-windows` run holds. The bound is this rule's reading of the owner's approval of the
       floor (comment 6680659012), not the owner's own words, and the owner chose it on 2026-11-07
       (comment 6711916489): for a pull request that removes run cases, it lies below `main`'s floor;
+    - the numbers `tools/quality_evidence.py` generates in `guides/quality-bar-evidence.md`, and
+      nothing else of that file, resolved by running that tool on the merged tree, with the gate
+      `knowledge` green there (pull request 385, comment 6735260898);
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
-    the lines a conflict block joined and for the floor;
+    the lines a conflict block joined, for the floor and for the numbers that tool generates (this
+    rule's reading of comment 6735260898, which approved a take with the evidence guide generated
+    again, not the owner's own words);
   - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
     before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
@@ -510,7 +525,8 @@ Gate: review rule "rules for sessions".
   2026-11-06 to the floor of `RunTests` (comment 6680659012), by pull request 359, whose measured
   count pull request 362 bounded; and on 2026-11-07 by pull request 377, to the same-end append
   (comment 6694541027, of 2026-11-06) and the line verdicts (comment 6710283110), with the floor's
-  bound that the owner chose that day (comment 6711916489). The tool switches the whole ruleset off for the one merge and restores it; while it is off
+  bound that the owner chose that day (comment 6711916489); and on 2026-11-09 to the numbers the
+  evidence guide's tool generates (pull request 385, comment 6735260898). The tool switches the whole ruleset off for the one merge and restores it; while it is off
   nothing on the server holds any pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
@@ -660,7 +676,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the case tables of X3 are what the pinned version of the Unicode Character Database gives (`unicode-tables`) | that the pinned version is still the one Rust's stable release pins (#143) |
-| the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
+| the reference and the corpus agree in shape, and no clause of the record or the reference names another as "the clause before this one" or "the reading after this one" does, with at most "assumed" or "decided" before the noun (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`); a pointer by place in other words, "above" and "below" among them (`judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |

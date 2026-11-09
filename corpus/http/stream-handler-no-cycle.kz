@@ -2,9 +2,10 @@
 // | 201
 // rules: R9
 
-// a handler that reads a class that holds a `mut` response closes no ring through the response's function, since that field counts
-// only the lambdas whose type it can hold and a handler is none of them, and the function that writes the body reads nothing of the
-// class (R9, the owner, 2026-11-04, #110, comment 6643368937)
+// a handler that reads a class that holds a `mut` response closes no ring through the response's function, since no lambda that
+// field counts captures `app`: a handler is no lambda of a type the field can hold (R9, the owner, 2026-11-04, #110, comment
+// 6643368937), the function that writes the body reads nothing of the class, and neither lambda captures a function value or a value
+// whose type names a type parameter, through which the field would count more (R9, assumed)
 class App(mut HttpResponse Cached)
 
 void Keep((HttpRequest) => HttpResponse handler) {

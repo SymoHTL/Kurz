@@ -39,6 +39,56 @@ public sealed partial class Emitter
         return cut;
     }
 
+    /// <summary>
+    /// T38: the time of a count of <see cref="CallInfo.TimeScale"/> nanoseconds each, raising <c>overflow</c> where it leaves the range of 64
+    /// bits, in every build, as T31's arithmetic does. A <c>long</c> count is multiplied. A <c>double</c> one is split at its point: its whole
+    /// units are multiplied as a <c>long</c>, and its fraction's product is rounded to the nearest nanosecond, ties to even, where the error
+    /// of that product (<c>fma</c>) decides a product that was rounded onto a half, so that the double's exact value is rounded once, as
+    /// <c>Checker.NanosecondsOf</c> rounds it; every other unit is an even count of nanoseconds, so the whole units keep the parity the
+    /// rounding of the fraction picked, and a count of nanoseconds is rounded whole. NaN and an infinity fail the range and raise.
+    /// </summary>
+    private string EmitTimeFrom(CallExpression c, CallInfo info)
+    {
+        var real = Types.IsFloating(info.Target!);
+        var count = Arguments(c, info, _ => info.Target!, _ => false, _ => null, cConvention: false, owned: false).Single()[(real ? "double " : "i64 ").Length..];
+        var scale = Number(info.TimeScale);
+        if (!real)
+        {
+            return info.TimeScale == 1 ? count : Arithmetic("mul", count, scale, Types.Duration, c.Line, checkedBuild: true);
+        }
+
+        module.Declare("declare double @llvm.trunc.f64(double)");
+        module.Declare("declare double @llvm.rint.f64(double)");
+        module.Declare("declare double @llvm.fma.f64(double, double, double)");
+        if (info.TimeScale == 1)
+        {
+            // a count of nanoseconds is rounded whole, ties to even: split at its point, a tie of its fraction would go to the even
+            // fraction, 3.5 to 3, where the even of the whole count is 4
+            var nearest = fn.Value($"call double @llvm.rint.f64(double {count})");
+            var above = fn.Value($"fcmp oge double {nearest}, {RealText(-9223372036854775808.0)}");
+            var below = fn.Value($"fcmp olt double {nearest}, {RealText(9223372036854775808.0)}");
+            RaiseUnless(fn.Value($"and i1 {above}, {below}"), c.Line);
+            return fn.Value($"fptosi double {nearest} to i64");
+        }
+
+        var whole = fn.Value($"call double @llvm.trunc.f64(double {count})");
+        var low = fn.Value($"fcmp oge double {whole}, {RealText(-9223372036854775808.0)}");
+        var high = fn.Value($"fcmp olt double {whole}, {RealText(9223372036854775808.0)}");
+        RaiseUnless(fn.Value($"and i1 {low}, {high}"), c.Line);
+        var units = Arithmetic("mul", fn.Value($"fptosi double {whole} to i64"), scale, Types.Duration, c.Line, checkedBuild: true);
+        var fraction = fn.Value($"fsub double {count}, {whole}");
+        var step = RealText(info.TimeScale);
+        var product = fn.Value($"fmul double {fraction}, {step}");
+        var error = fn.Value($"call double @llvm.fma.f64(double {fraction}, double {step}, double {fn.Value($"fneg double {product}")})");
+        var near = fn.Value($"call double @llvm.rint.f64(double {product})");
+        var off = fn.Value($"fsub double {product}, {near}");
+        var up = fn.Value($"and i1 {fn.Value($"fcmp oeq double {off}, {RealText(0.5)}")}, {fn.Value($"fcmp ogt double {error}, {RealText(0.0)}")}");
+        var down = fn.Value($"and i1 {fn.Value($"fcmp oeq double {off}, {RealText(-0.5)}")}, {fn.Value($"fcmp olt double {error}, {RealText(0.0)}")}");
+        var rounded = fn.Value($"select i1 {up}, double {fn.Value($"fadd double {near}, {RealText(1.0)}")}, double {near}");
+        rounded = fn.Value($"select i1 {down}, double {fn.Value($"fsub double {rounded}, {RealText(1.0)}")}, double {rounded}");
+        return Arithmetic("add", units, fn.Value($"fptosi double {rounded} to i64"), Types.Duration, c.Line, checkedBuild: true);
+    }
+
     /// <summary>S25: <c>t.Elapsed</c>, <c>instant.Now - t</c>, the reading taken first and the clock read after it.</summary>
     private string Elapsed(string reading, int line) =>
         TimeArithmetic(TokenKind.Minus, EmitMonotonicNow(line), Types.Instant, reading, Types.Instant, Types.Duration, line);

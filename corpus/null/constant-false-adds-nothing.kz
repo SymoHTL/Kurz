@@ -1,0 +1,11 @@
+// expect: output
+// | 1
+// rules: N3
+
+// the `then` of `if false` is never reached, so the `null` it assigns adds nothing to what holds after it, and `s` stays not null
+mut string? s = "a"
+if false {
+    s = null
+}
+
+print(s.Bytes.Count)

@@ -287,8 +287,11 @@ public sealed record FunctionDeclaration(
 /// <summary>A field written in a type body (K7): <c>mut int count = 0</c>, <c>pub static int Step = 2</c>, <c>int x</c>, or <c>mut count = 0</c> without a written type, the reading on K7 with V2 (K7 shows a field as <c>Type name</c>; V2 declares a variable without one, and the record's actor bodies write the form).</summary>
 public sealed record FieldDeclaration(int Line, Modifiers Modifiers, TypeSyntax? Type, string Name, Expression? Value) : Statement(Line);
 
-/// <summary>A further constructor (K14): <c>pub Counter() : this(0) { }</c>.</summary>
-public sealed record ConstructorDeclaration(int Line, Modifiers Modifiers, string Name, IReadOnlyList<Parameter> Parameters, IReadOnlyList<Argument>? ThisArguments, Block Body) : Statement(Line);
+/// <summary>
+/// A further constructor (K14): <c>pub Counter() : this(0) { }</c>, or one that passes the arguments of its base,
+/// <c>pub Dog(string n) : base(n) { }</c>; at most one of the two lists is set.
+/// </summary>
+public sealed record ConstructorDeclaration(int Line, Modifiers Modifiers, string Name, IReadOnlyList<Parameter> Parameters, IReadOnlyList<Argument>? ThisArguments, IReadOnlyList<Argument>? BaseArguments, Block Body) : Statement(Line);
 
 public enum TypeDeclarationKind
 {
