@@ -18,7 +18,9 @@ namespace Kurz.Compiler.Emit;
 /// module whose first parameter is the instance, <c>this</c>, which it borrows from the caller as a function borrows its arguments
 /// (K7), with its table where its class has a base or derived classes. A read of a counted field through an instance takes a count of
 /// its own, a temporary of the region, since a call can assign the field through another reference while the value is still in use
-/// (K2, K9).
+/// (K2, K9). A constructor of a class's body is a function of the module that fills the block it takes, as C#'s <c>.ctor</c> fills
+/// the object <c>new</c> allocated: first what its <c>: this(...)</c> calls, or the base's construction and the defaults of the body,
+/// then its body, whose first assignment of a field stores into a field that holds nothing yet (K14).
 /// </summary>
 public sealed partial class Emitter
 {
@@ -48,25 +50,49 @@ public sealed partial class Emitter
     // each class whose body's defaults are queued for their function, with its name (K7)
     private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
 
+    // each constructor of a class's body queued for its function, with its name (K14)
+    private readonly Queue<(ConstructorSymbol Constructor, string Name)> constructorsPending = new();
+
     /// <summary>
-    /// K1, K7, K10: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
-    /// default; where a class of the chain writes the explicit form, the fields of each class from its constructor's arguments
-    /// (<see cref="FillFields"/>); then each field of the body its default, in their order, read in the class's file through the
-    /// instance being built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7,
-    /// K18). A class with derived classes gives the pair of the address and its table.
+    /// K1, K7, K10, K14: an instance with both counts at one, filled as <see cref="Construct"/> fills it. A class with derived classes
+    /// gives the pair of the address and its table.
     /// </summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
     {
         var symbol = ((ClassType)info.Target!).Symbol;
         var block = layout.ClassBlock(symbol);
+        var p = Construct(symbol, c, info, () =>
+        {
+            var allocated = Allocate(block);
+            fn.Emit($"store i64 1, ptr {allocated}");
+            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {allocated}, i32 0, i32 1")}");
+            return allocated;
+        });
+        return Layout.Fat(symbol) ? Pair(p, Table(symbol)) : p;
+    }
+
+    /// <summary>
+    /// K1, K7, K10, K14: the arguments of the construction read, then the block <paramref name="block"/> gives filled. A constructor
+    /// of the body fills it by its function (<see cref="EmitConstructor"/>). The primary constructor, and the empty one of a class
+    /// without one, store each field of the primary constructor, which owns the argument bound to it or its default; where a class
+    /// of the chain has a call of its base, the fields of each class from its constructor's arguments (<see cref="FillFields"/>);
+    /// then each field of the body with an <c>=</c> its default, in their order, read in the class's file through the instance being
+    /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18).
+    /// </summary>
+    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block)
+    {
         string p;
-        if (symbol.Chain.All(x => x.BaseCall is null))
+        if (info.Constructor is { } made)
+        {
+            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false);
+            p = block();
+            fn.Emit($"call void {Constructor(made)}({string.Join(", ", arguments.Prepend($"ptr {p}"))})");
+        }
+        else if (symbol.Chain.All(x => x.BaseCall is null))
         {
             // each parameter of the constructor is a field, which owns the argument bound to it
             var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
-            p = Allocate(block);
-            fn.Emit($"store i64 1, ptr {p}");
-            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            p = block();
             for (var i = 0; i < arguments.Count; i++)
             {
                 fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, symbol.Fields.IndexOf(symbol.Constructor[i].Field))}");
@@ -74,7 +100,7 @@ public sealed partial class Emitter
 
             // K7: the fields of the body follow the primary constructor's, each given its default by the class's function of
             // them (ClassDefaults); a class in a chain declares none
-            if (symbol.Fields.Any(f => f.Body is not null))
+            if (symbol.Fields.Any(f => f.Body?.Value is not null))
             {
                 fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
             }
@@ -82,19 +108,18 @@ public sealed partial class Emitter
         else
         {
             var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false);
-            p = Allocate(block);
-            fn.Emit($"store i64 1, ptr {p}");
-            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            p = block();
             FillFields(symbol, arguments, p);
         }
 
-        return Layout.Fat(symbol) ? Pair(p, Table(symbol)) : p;
+        return p;
     }
 
     /// <summary>
     /// K10, K11: the fields of class <paramref name="x"/> in the block <paramref name="p"/> of an instance being made, from the arguments
     /// bound to its constructor, which it borrows: the base's first, from the arguments the explicit form computes over the parameters
-    /// or from those the short form passes on, then the class's own, each with a count of its own.
+    /// or from those the short form passes on, or by the base's constructor that takes no arguments, for a class without a primary
+    /// constructor (K14), then the class's own, each with a count of its own.
     /// </summary>
     private void FillFields(ClassSymbol x, List<string> arguments, string p)
     {
@@ -109,7 +134,17 @@ public sealed partial class Emitter
                 slots[Model.DeclarationOf(x.Constructor[i].Declaration)] = slot;
             }
 
-            FillFields(b, Arguments(call, Model.CallOf(call), j => b.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(b, j), cConvention: false, owned: false), p);
+            var info = Model.CallOf(call);
+            if (info.Constructor is not null)
+            {
+                // K14: a constructor of the base's body, before the class's own fields take theirs, which it cannot read: the checker
+                // refuses `this` and a method of the instance in a constructor of a class with derived classes
+                Construct(b, call, info, () => p);
+            }
+            else
+            {
+                FillFields(b, Arguments(call, info, j => b.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(b, j), cConvention: false, owned: false), p);
+            }
         }
         else if (x.Base is { } shortBase)
         {
@@ -169,13 +204,99 @@ public sealed partial class Emitter
             for (var i = symbol.Fields.Count(f => f.Body is null); i < symbol.Fields.Count; i++)
             {
                 var field = symbol.Fields[i];
-                var d = field.Body!.Value!;
+                if (field.Body!.Value is not { } d)
+                {
+                    continue; // K14: a field a constructor's body assigns
+                }
+
                 var index = i;
                 At(d.Line);
                 InRegion(() => fn.Emit($"store {Ir(field.Type)} {EmitDefault(unit, d, field.Type, owned: true)}, ptr {InstanceFieldPointer(symbol, "%this", index)}"));
             }
 
             fn.Return(null);
+            End();
+        }
+        finally
+        {
+            unit = caller;
+        }
+    }
+
+    /// <summary>K14: the function of a constructor of a class's body, queued on first use and emitted once (<see cref="EmitConstructor"/>).</summary>
+    private string Constructor(ConstructorSymbol made)
+    {
+        var key = $"{classOwners[made.Owner].Prefix}.{made.Owner.Name}.new.{Number(made.Line)}";
+        if (!instances.TryGetValue(key, out var name))
+        {
+            name = $"@\"{key}\"";
+            instances[key] = name;
+            constructorsPending.Enqueue((made, name));
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// K14: the function <see cref="Constructor"/> names, which takes the block of the instance and the parameters, which it borrows:
+    /// what its <c>: this(...)</c> calls, a construction into the same block; without one the base's construction into that block,
+    /// the one <c>: base(...)</c> picks or C#'s implied <c>base()</c>, and the defaults of the body (<see cref="ClassDefaults"/>); then
+    /// its body, with the instance as <c>this</c>, whose table no code there reads, since the checker refuses <c>this</c> and a method
+    /// of it in a class with derived classes. A trace names its frame by the class, as the construction is written.
+    /// </summary>
+    private void EmitConstructor(ConstructorSymbol made, string name)
+    {
+        var caller = unit;
+        var symbol = made.Owner;
+        unit = classOwners[symbol];
+        try
+        {
+            features = NoFeatures; // one function serves every construction, so what it calls is compiled for the CPU alone (R18)
+            var d = made.Declaration;
+            foreach (var p in made.Parameters)
+            {
+                RequireSupported(p.Type, p.Line);
+            }
+
+            var parameters = made.Parameters.Select((p, i) => $"{Ir(p.Type)} %p{i}").Prepend("ptr %this");
+            Begin(new IrFunction($"internal void {name}({string.Join(", ", parameters)})", FeatureAttributes(features)), NoMap, Types.Void);
+            Trace(symbol.Name, Symbol(name), d.Line);
+            var type = Ir(new ClassType(symbol));
+            var self = fn.Alloca(type, "this");
+            fn.Emit($"store {type} {(Layout.Fat(symbol) ? Pair("%this", "null") : "%this")}, ptr {self}");
+            slots[Model.ThisOf(made)] = self;
+            for (var i = 0; i < made.Parameters.Count; i++)
+            {
+                var p = made.Parameters[i];
+                var slot = fn.Alloca(Ir(p.Type), p.Name);
+                fn.Emit($"store {Ir(p.Type)} %p{i}, ptr {slot}");
+                slots[Model.DeclarationOf(d.Parameters[i])] = slot;
+                if (i < made.InitializerParameters.Count)
+                {
+                    slots[made.InitializerParameters[i]] = slot; // the same parameter, as the arguments of `: this(...)` read it
+                }
+            }
+
+            At(d.Line);
+            if (made.ThisCall is { } call)
+            {
+                InRegion(() => Construct(symbol, call, Model.CallOf(call), () => "%this"));
+            }
+            else
+            {
+                if (made.BaseCall is { } baseCall)
+                {
+                    // `: base(...)` or C#'s implied `base()`: the base's part of the block, before the defaults and the body (K14)
+                    InRegion(() => Construct(symbol.Base!, baseCall, Model.CallOf(baseCall), () => "%this"));
+                }
+
+                if (symbol.Fields.Any(f => f.Body?.Value is not null))
+                {
+                    fn.Emit($"call void {ClassDefaults(symbol)}(ptr %this)");
+                }
+            }
+
+            EmitBody(null, d.Body, d.Line);
             End();
         }
         finally
@@ -412,12 +533,20 @@ public sealed partial class Emitter
     /// K2, K9, M4: an assignment into a <c>mut</c> field of an instance, the value read first (the owner, 2026-10-24, "Value first"),
     /// then the instance the field is in, then the field, which lets go of its old value after it holds the new one.
     /// </summary>
-    private void EmitFieldAssignment(Expression value, KurzType targetType, Func<(string Pointer, ClassSymbol Symbol)> instance, string field)
+    private void EmitFieldAssignment(Expression value, KurzType targetType, Func<(string Pointer, ClassSymbol Symbol)> instance, string field, bool first = false)
     {
         var owned = Convert(Owned(value), TypeOf(value), targetType, value.Line);
         var (pointer, symbol) = instance();
         var index = symbol.FieldIndex(field);
-        Store(owned, symbol.Fields[index].Type, InstanceFieldPointer(symbol, Address(pointer, symbol), index));
+        var place = InstanceFieldPointer(symbol, Address(pointer, symbol), index);
+        if (first)
+        {
+            fn.Emit($"store {Ir(symbol.Fields[index].Type)} {owned}, ptr {place}"); // K14: a constructor's first assignment, into a field that holds nothing
+        }
+        else
+        {
+            Store(owned, symbol.Fields[index].Type, place);
+        }
     }
 
     /// <summary>M5, M9: the place of a list, a map or a hasher held by a field of an instance, for a <c>mut</c> member; null for any other receiver.</summary>

@@ -68,11 +68,6 @@ public sealed class CorpusTests
     /// <summary>Cases that cite only rules the checker reads and still use a construct it does not, each with that construct; an entry whose case cites a rule outside the checker is redundant and refused.</summary>
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
-        ["classes/constructor-assigns-twice.kz"] = "a constructor in the body of a class (K14)",
-        ["classes/constructor-must-chain.kz"] = "a constructor in the body of a class (K14)",
-        ["classes/field-read-before-assignment.kz"] = "a constructor in the body of a class (K14)",
-        ["classes/field-unassigned.kz"] = "a constructor in the body of a class (K14)",
-        ["classes/further-constructor.kz"] = "a constructor in the body of a class (K14)",
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
         ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
         ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
