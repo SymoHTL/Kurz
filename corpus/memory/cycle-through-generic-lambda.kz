@@ -2,7 +2,7 @@
 // rules: R9
 
 // a lambda whose type names a type parameter is a lambda of whatever type a use gives that parameter, so one that reads the button
-// through a panel closes the ring through a field of another function type (R9, assumed)
+// through a panel closes the ring through a field of another function type (R9, the owner, 2026-11-04, #110, comment 6643368937)
 class Button(string Name, mut (int) => void OnClick)
 class Panel(Button B)
 

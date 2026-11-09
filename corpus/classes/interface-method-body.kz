@@ -1,0 +1,15 @@
+// expect: error syntax at 6
+// rules: K7
+
+interface Shape {
+    int Area()
+    string Text() => "area {Area()}"
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+    pub string Text() => "dot"
+}
+
+Shape s = Dot()
+print(s.Area())

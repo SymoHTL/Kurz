@@ -188,6 +188,7 @@ public sealed partial class Emitter
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
         var prepared = 0;
+        var preparedFaces = 0;
         var facets = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
@@ -210,6 +211,11 @@ public sealed partial class Emitter
             else if (prepared < tabled.Count)
             {
                 PrepareTable(tabled[prepared++]); // K6: what a table holds, which can name more functions
+            }
+            else if (preparedFaces < interfaceTabled.Count)
+            {
+                var (symbol, face) = interfaceTabled[preparedFaces++];
+                PrepareInterfaceTable(symbol, face); // K6: what a class's table for an interface holds
             }
             else if (!TableFacets(facets))
             {

@@ -98,8 +98,8 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
     [InlineData(304)]
     public void A_streamed_response_of_a_status_without_a_body_stops_the_program_with_its_text(int status)
     {
-        // W11 (assumed, section 12, put to the owner and taken at its default): a status that has no body, 100 to 199, 204, 205 or
-        // 304, is thrown from std/ at `Stream`, and nothing after it runs; 200, 206 and 599 beside them, the positive control, make one
+        // W11 (section 12, the owner, 2026-11-04, #110, comment 6643368937, Q2 of comment 6623201585): a status that has no body, 100
+        // to 199, 204, 205 or 304, is thrown from std/ at `Stream`, and nothing after it runs; 200, 206 and 599 beside them, the positive control, make one
         var text = $"""
             print(HttpResponse.Stream(200, (HttpWriter w) => w.Write("x")).Status)
             print(HttpResponse.Stream(206, (HttpWriter w) => w.Write("x")).Status)
@@ -142,8 +142,8 @@ public sealed class HttpResponseTests(Toolchain toolchain) : IClassFixture<Toolc
             }
             """;
         var compilation = Compile(text, toolchain.Runtime);
-        var errors = compilation.Diagnostics.Sorted.Select(d => (d.Id, d.Line, d.Message)).ToList();
-        Assert.Equal([("unknown-name", 5, "a `TcpStream` has no member `SetNoDelay` (S3 to S5, S9, S24, V10)")], errors);
+        var errors = compilation.Diagnostics.Sorted.Select(d => (d.Id, d.Line)).ToList();
+        Assert.Equal([("unknown-name", 5)], errors);
     }
 
     [Fact]

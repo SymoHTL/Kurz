@@ -1,0 +1,26 @@
+// expect: output
+// | square 3
+// | area 1
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+void Show(Shape s) {
+    match s {
+        Square q => print("square {q.Side}")
+        else => print("area {s.Area()}")
+    }
+}
+
+Show(Square(3))
+Show(Dot())

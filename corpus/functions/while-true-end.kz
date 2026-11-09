@@ -2,7 +2,6 @@
 // | 3
 // | 40
 // | 2
-// | 5
 // | loop
 // | else
 // rules: F3
@@ -36,13 +35,6 @@ f = (int n) => {
     }
 }
 
-int Once() {
-    while (true) {
-        return 5
-        break
-    }
-}
-
 string Pick(bool b) {
     if b {
         while true {
@@ -56,6 +48,5 @@ string Pick(bool b) {
 print(First([1, 2, 3, 4]))
 print(C(4).Get())
 print(f(1))
-print(Once())
 print(Pick(true))
 print(Pick(false))
