@@ -810,7 +810,8 @@ reads at the new position. A handle the system cannot seek, a socket or a pipe, 
 of the kind `NotSeekable` (S1) (§12, the owner, 2026-11-08, #110, comment 6721051459, G5 (a) of
 comment 6717319917, against a part of a file as a response and against a read at an offset that
 moves no position; the cost is the system call and this rule, and a position every holder of the
-handle shares, as it shares the buffer, S5). *(assumed, §12, the defaults of the product pass of G5
+handle shares, as it shares the buffer, S5). Any other failure of the system's seek, `EINVAL` past
+the file system's largest offset among them, gives its `IoError` by S1. *(assumed, §12, the defaults of the product pass of G5
 (#110, comment 6728933408): `offset` a `long`, as `File.Size` gives one (S7) and C#'s `Position` is
 one; an offset past the
 end allowed, a read there giving no bytes and a write there extending the file with bytes of 0 before
@@ -818,10 +819,12 @@ it, as C# and Rust allow it; a file `File.Create` made seeking too, since a writ
 with no buffer of its own (S4); the seek a call in flight on the handle (S5) that takes the buffer's
 lock, so that a fill through another holder puts no bytes of the old position after it; a failed
 seek keeping the buffer, as `BufReader::seek` keeps it where the inner seek fails; and in a build for
-Windows `not supported`, as every call on a file, S11)* An `offset` below 0 stops the program with
+Windows `not supported`, as every call of this chapter, a stream's too, S11)* An `offset` below 0 stops the program with
 `index-out-of-range` before the call enters the handle, as a `Read`'s `max` below 0 does (§12, the
 owner, 2026-11-09, #110, comment 6735258248, G5 Q3, "index-out-of-range", against the system's
 `EINVAL` as an `IoError` of the kind `InvalidInput`).
+
+No case: the largest offset the system seeks to depends on the file system a case runs on.
 
 Case: [system/seek-read.kz](../corpus/system/seek-read.kz)
 ```kurz
@@ -1108,6 +1111,8 @@ Case: [system/consume-closed.kz](../corpus/system/consume-closed.kz)
 Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negative.kz)
 
 Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
+
+Case: [system/seek-write.kz](../corpus/system/seek-write.kz)
 
 ### S6 (decided, §12) A whole file
 

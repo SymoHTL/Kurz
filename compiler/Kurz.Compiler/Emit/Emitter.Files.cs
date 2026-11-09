@@ -450,11 +450,11 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S27: <c>f.Seek(offset)</c>: an <c>offset</c> below 0 raises <c>index-out-of-range</c> before the call enters the handle, as a
-    /// <c>Read</c>'s <c>max</c> below 0 does (section 12, assumed); then, under the lock of the handle's buffer, so that a fill through
-    /// another holder puts no bytes of the old position after it, the runtime's <c>Seek</c>, the system's <c>lseek</c> from the start,
-    /// whose failure keeps the buffer, as Rust's <c>BufReader::seek</c> keeps it where the inner seek fails, and whose success drops the
-    /// bytes the buffer holds, as <c>BufReader::seek</c> discards them (section 12, the owner, 2026-11-08, G5); a call in flight on the
-    /// handle (S5).
+    /// <c>Read</c>'s <c>max</c> below 0 does (section 12, the owner, 2026-11-09, G5 Q3); then the runtime's <c>Seek</c>, the system's
+    /// <c>lseek</c> from the start, whose success drops the bytes the buffer holds, as <c>BufReader::seek</c> discards them (section 12,
+    /// the owner, 2026-11-08, G5), under the lock of the handle's buffer, so that a fill through another holder puts no bytes of the old
+    /// position after it, and whose failure keeps the buffer, as Rust's <c>BufReader::seek</c> keeps it where the inner seek fails
+    /// (section 12, assumed); a call in flight on the handle (S5).
     /// </summary>
     private void EmitFileSeek(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
     {

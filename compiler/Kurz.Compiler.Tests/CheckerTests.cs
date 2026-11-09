@@ -2640,7 +2640,7 @@ public sealed class CheckerTests
     public void A_file_and_a_stream_seek_to_a_long_and_a_listener_does_not()
     {
         // S27: a file's and a stream's `Seek` take an offset that is a `long`, an `int` widened to it; a listener has no `Seek`, and an
-        // offset of another type fits no form
+        // offset of another type, a `string`, is `type-mismatch` against the `long` of `Seek`'s one form
         const string Program = "void | IoError Moved() {\n    f = File.Open(\"a\")\n    long at = 3\n    f.Seek(at)\n    f.Seek(1)\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Seek(0)\n}\n\nMoved() else {\n    IoError e => print(e)\n}";
         Clean(Program); // the positive control
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Program.Replace("c.Seek(0)", "c.Close()\n    l.Seek(0)", StringComparison.Ordinal)));
@@ -4424,6 +4424,19 @@ public sealed class CheckerTests
         var (via, _) = CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nf = () => w(1)\nprint(f())\n", watched);
         Assert.Equal([(ErrorIds.ReferenceCycle, 3)], via.Items.Select(d => (d.Id, d.Line)));
         Assert.Empty(CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nprint(w(1))\n", watched).Diagnostics.Items);
+        // the least line of the file a lambda of std/ comes through, found in a later pass: `y` at line 4 is counted first and gives the
+        // `(string) => int` lambda of std/ its line, `x` at line 3 only in the pass after, through `y`'s `(int) => int`, and its own
+        // capture of that lambda lowers the line to 3
+        var named = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n\n    pub (string) => int Named() => (string k) => OnChange() + k.Bytes.Count\n"));
+        var (lower, _) = CheckSeeingStd("h = HttpHeaders()\ns = h.Named()\nx = (int n) => s(\"a\") + n\ny = () => x(1) + s(\"b\")\nprint(y())\n", named);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 3)], lower.Items.Select(d => (d.Id, d.Line)));
+        // a lambda of a generic function of the file that the field counts and that captures a value of its type parameter makes the
+        // field count every lambda (R9, the owner, 2026-11-04, #110, comment 6643368937, a captured value's type read as on the way, R9,
+        // assumed), so a lambda of std/ that captures the class closes the ring, reported at that lambda; without the type parameter
+        // nothing in the file closes it
+        var (open, _) = CheckSeeingStd("T Keep<T>(T x) {\n    f = () => x\n    return f()\n}\n\nprint(Keep(1))\n", named);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 2)], open.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd("int Keep(int x) {\n    f = () => x\n    return f()\n}\n\nprint(Keep(1))\n", named).Diagnostics.Items);
         var (through, _) = CheckSeeingStd("class App(mut HttpHeaders? H)\n\nint Zero(App app) => 0\n\na = App(null)\nh = HttpHeaders()\nh.OnChange = () => Zero(a)\na.H = h\n", runtime);
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
         // the positive control: no lambda of the file captures an instance

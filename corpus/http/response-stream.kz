@@ -7,7 +7,8 @@
 // | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|t|0||]
 // | InvalidInput []
 // | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|a]
-// | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||]
+// | NotFound [HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||]
+// | NotFound [HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close||]
 // | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||]
 // | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|k|0||]
 // | invalid input: writer used after its response ended
@@ -15,13 +16,14 @@
 // rules: W11
 
 // a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
-// `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
-// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
-// `chunked` added; a response written again is written whole again, its head and the end of its body, its function called again
-// with a writer of its own; a `Content-Length` the handler set that is no number
-// is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
-// write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
-// call gives `IoError(InvalidInput)` and writes nothing
+// `string` one chunk, a write of no bytes none (W11, assumed), and the function's return writes the chunk of no bytes that ends the
+// body; its `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is
+// kept, `chunked` added; a response written again is written whole again, its head and the end of its body, its function called
+// again with a writer of its own (W11, assumed); a `Content-Length` the handler set that is no number is `InvalidInput` with nothing
+// written (W11, assumed); a function's `IoError` after its first write ends the body without its last chunk (W11, assumed), and one
+// before it is answered `500` with `Connection: close` in place of the head, under a `Content-Length` the handler set too (section 12,
+// the owner, 2026-11-09, #411, comment 6735967844), `Write` giving that error either way (W11, assumed); `WriteHead` writes the head
+// alone and calls no function (W11, assumed); and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()
 
@@ -115,6 +117,12 @@ void | IoError | HttpError All() {
         size = File.Size("response-stream-missing.txt")
         w.Write("{size}")
     }), false)
+    counted = HttpResponse.Stream(200, (HttpWriter w) => {
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    })
+    counted.Headers.Set("Content-Length", "3")
+    Wire(counted, false)
     Wire(HttpResponse.Stream(200, (HttpWriter w) => {
         print("called")
         w.Write("c")

@@ -4,7 +4,7 @@
 // | 9
 // | 0
 // | 90
-// rules: S27
+// rules: S27, S5
 
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
