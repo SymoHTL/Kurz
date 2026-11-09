@@ -45,7 +45,7 @@ public sealed partial class Emitter
     /// and every move of an entry follows. A key of a kind whose hash can read more than one word keeps it, as .NET's
     /// <c>Dictionary</c> keeps each entry's hash code, so that a growth does not hash the key again: a string's bytes, a time of 128
     /// bits, a <c>data</c> value's fields, a list's items, a union's tag and value, the fields of an instance that does not compare by
-    /// identity, by its content (K4) or by the fields it names (K5); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
+    /// identity, by its content (K4) or by the fields it names (K5), a value of an interface (K6); a <c>data</c> value of one <c>int</c> keeps it too. A key of one
     /// word, an integer, a <c>bool</c>, a <c>char</c>, an enum's value, a time of 64 bits, a <c>double</c>, a <c>float</c> or an instance
     /// that compares by identity, whose hash is the fast hash of the one word, its address for the instance, or SipHash-1-3 under the
     /// block's keys after the map switched (<see cref="KeyHash"/>), keeps none, as hashbrown's buckets keep none, and a growth hashes it
@@ -59,6 +59,7 @@ public sealed partial class Emitter
     {
         PrimitiveType { Kind: Primitive.String } => true,
         ClassType c => !c.Symbol.ComparesByIdentity, // K4: an instance that compares by identity is hashed by its address
+        InterfaceType => true, // K6 with K13: hashed through its class's table, by the content of an instance whose class compares by it
         DataType or ListType or UnionType => true,
         _ => Lower.IrType(key) == "i128",
     };
@@ -104,6 +105,9 @@ public sealed partial class Emitter
 
             case ClassType c when Layout.Fat(c.Symbol):
                 return HashThroughTable(block, key, c.Symbol); // K13: by the hash of the instance's class
+            case InterfaceType face:
+                hashedThroughInterface.Add(face.Symbol);
+                return HashPair(block, key); // K13 with K6: by the hash of the instance's class, which its table for the interface holds
 
             case DataType or ListType or UnionType or ClassType:
                 {
@@ -240,7 +244,9 @@ public sealed partial class Emitter
     /// the comparison of the hash and the key settles); a group with a slot of 255, which holds no entry, ends the probe, and one of
     /// 128, whose entry was removed, does not. A probe that passes more than 512 slots, 65 groups without a slot of 255, in a block on
     /// the fast hash that no loop over a map and no text of a map holds, rehashes the block in place onto SipHash-1-3 and finds the key again under its
-    /// new hash (section 4, the owner, 2026-11-02, "lookups count too"): past the bound the lookup gives what
+    /// new hash (section 4: a read's lookup, <c>map[key]</c>'s and <c>ContainsKey</c>'s, the owner, 2026-11-02, "lookups count too";
+    /// the bound, and the lookups of <c>m[k] = v</c> and <c>Remove</c>, assumed there; the loop's hold the owner's answer of 2026-11-03,
+    /// and the text's assumed there): past the bound the lookup gives what
     /// <see cref="FarEntry"/> gives.
     /// </summary>
     private string FindEntry(MapType type) => Helper($"find.{Lower.Mangle(type)}", "ptr", ["ptr", Ir(type.Key), "i64"], () => ProbeBody(type, far: false));

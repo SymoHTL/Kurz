@@ -53,7 +53,7 @@ public sealed class CorpusTests
     /// (S17 to S23), standard error (A17), a top-level <c>return</c> with a value (F17), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
     /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
-    /// (K14) or an interface (K6) among them, stands in <see cref="UnsupportedByConstruct"/>.
+    /// (K14) among them, stands in <see cref="UnsupportedByConstruct"/>.
     /// </summary>
     private static bool OutsideTheChecker(string rule) =>
         rule is "N9"
@@ -73,10 +73,6 @@ public sealed class CorpusTests
         ["classes/field-read-before-assignment.kz"] = "a constructor in the body of a class (K14)",
         ["classes/field-unassigned.kz"] = "a constructor in the body of a class (K14)",
         ["classes/further-constructor.kz"] = "a constructor in the body of a class (K14)",
-        ["classes/inherit.kz"] = "an interface (K6)",
-        ["classes/interface-method-inherited-private.kz"] = "an interface (K6)",
-        ["classes/interface-method-private.kz"] = "an interface (K6)",
-        ["classes/interface-missing-member.kz"] = "an interface (K6)",
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
         ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
         ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",

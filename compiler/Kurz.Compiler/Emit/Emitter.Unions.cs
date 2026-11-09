@@ -235,6 +235,16 @@ public sealed partial class Emitter
                         }
 
                         var take = fn.Label("derived");
+                        if (armType is ClassType armClass)
+                        {
+                            var (holds, held) = ClassArm(value, type, armClass.Symbol); // the instance's class is the arm's or derives from it (K6)
+                            fn.CondBranch(holds, take, next);
+                            fn.Block(take);
+                            fn.Emit($"store {Ir(armType)} {held}, ptr {slot}");
+                            fn.Branch(body);
+                            return slot;
+                        }
+
                         fn.CondBranch(HoldsDerived(value, ((DataType)armType).Symbol), take, next); // the arm's type derives from the value's (D6)
                         fn.Block(take);
                         fn.Emit($"store ptr {value}, ptr {slot}");
@@ -245,7 +255,7 @@ public sealed partial class Emitter
                     foreach (var c in cases)
                     {
                         var takes = TakesCase(c, armType);
-                        if (!takes && !(armType is DataType && c is DataType && Types.Assignable(armType, c)))
+                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)))
                         {
                             continue;
                         }
@@ -258,6 +268,14 @@ public sealed partial class Emitter
                         if (takes)
                         {
                             fn.Emit($"store {Ir(armType)} {Convert(payload, c, armType, tp.Line)}, ptr {slot}");
+                        }
+                        else if (armType is ClassType armClass)
+                        {
+                            var take = fn.Label("derived");
+                            var (holds, held) = ClassArm(payload, c, armClass.Symbol); // the instance's class is the arm's or derives from it (K6)
+                            fn.CondBranch(holds, take, other);
+                            fn.Block(take);
+                            fn.Emit($"store {Ir(armType)} {held}, ptr {slot}");
                         }
                         else
                         {

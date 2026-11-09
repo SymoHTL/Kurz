@@ -83,13 +83,6 @@ f = (int n) => {
     }
 }
 
-int Once() {
-    while (true) {
-        return 5
-        break
-    }
-}
-
 string Pick(bool b) {
     if b {
         while true {
@@ -103,9 +96,90 @@ string Pick(bool b) {
 print(First([1, 2, 3, 4]))
 print(C(4).Get())
 print(f(1))
-print(Once())
 print(Pick(true))
 print(Pick(false))
+```
+
+Case: [functions/while-true-break-not-reached.kz](../corpus/functions/while-true-break-not-reached.kz)
+```kurz
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+print(Once())
+```
+
+Case: [functions/while-true-break-missing-return.kz](../corpus/functions/while-true-break-missing-return.kz)
+```kurz
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if i == xs.Count {
+            break
+        }
+
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4]))
+```
+
+Case: [functions/while-not-constant-missing-return.kz](../corpus/functions/while-not-constant-missing-return.kz)
+```kurz
+int First(List<int> xs, bool go) {
+    mut i = 0
+    while go {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4], true))
+```
+
+Case: [functions/constant-condition-end.kz](../corpus/functions/constant-condition-end.kz)
+```kurz
+int One() {
+    if true {
+        return 1
+    }
+}
+
+int Two() {
+    while !false {
+        return 2
+    }
+}
+
+int Three(List<int> xs) {
+    mut i = 0
+    while true {
+        if false {
+            break
+        }
+
+        if xs[i] == 3 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(One())
+print(Two())
+print(Three([1, 2, 3]))
 ```
 
 ### F4 (assumed, §8) `void`
