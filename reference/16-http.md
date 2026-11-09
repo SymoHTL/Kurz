@@ -1249,8 +1249,11 @@ headers and, where the body is not chunked, the `Content-Length` of the body, wh
 the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
 body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date`, nor `Connection` but on its own
 `500` (below), which the server's loop adds (§12, assumed). A `204` and a `304` get no body, no
-`Content-Length` of the writer's and no `Transfer-Encoding`, a handler's dropped (§12, assumed),
-and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
+`Content-Length` of the writer's and no `Transfer-Encoding`, a handler's dropped (§12, assumed);
+a `Content-Length` the handler set is dropped on a `204` and kept on a `304`, as RFC 9110, section
+8.6, has it (§12, the owner, 2026-11-09, pull request 413, comment 6735967569, "Drop on 204, keep
+304 (Recommended)"), the `304`'s unchecked against its empty body (§12, assumed); and an empty `205`
+is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
 `HttpResponse.Text` and `HttpResponse.Bytes` given a `205` and a body that is not empty stop the
 program with `thrown` and the text `status 205 takes no body`, as a status outside the range does,
 since they see the status and the body (§12, assumed: the reading said back with Q14). A response
@@ -1352,8 +1355,9 @@ All() else {
 
 Case: [http/response-bodiless.kz](../corpus/http/response-bodiless.kz)
 ```kurz
-// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
-// says `Content-Length: 0`
+// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; a `Content-Length` the
+// handler set is dropped on a `204` and kept on a `304`, unchecked against its empty body; an empty `205` says
+// `Content-Length: 0`
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -1378,6 +1382,12 @@ void | IoError | HttpError All() {
     coded = HttpResponse.Text(204, "dropped")
     coded.Headers.Set("Transfer-Encoding", "gzip")
     Wire(coded)
+    sized = HttpResponse.Empty(204)
+    sized.Headers.Set("Content-Length", "7")
+    Wire(sized)
+    cached = HttpResponse.Empty(304)
+    cached.Headers.Set("Content-Length", "7")
+    Wire(cached)
 }
 
 All() else {
@@ -2335,7 +2345,10 @@ All() else {
 
 The server's loop holds a request's head to `RequestHeadersTimeout` from its first byte and its body
 to `MinRequestBodyDataRate` after that rate's grace, and a request that falls under either is answered
-`408 Request Timeout` and its connection closes (§12, the owner, 2026-11-01, "Kestrel's bounds"), the
+`408 Request Timeout` and its connection closes (§12, the owner, 2026-11-01, "Kestrel's bounds"),
+where no part of its response went out before (§12, assumed: a moved body's `408` sent only while no
+response has begun, W3, read for every body, so that a body under its rate while a streamed response
+goes out closes the connection with no `408`, W11), the
 handler's response unwritten (§12, assumed), and `ServeConnection` gives the `HttpError` of that refused request,
 `HttpError(Protocol, "request timed out")` (§12, the owner, 2026-11-03, "The server's error texts mirror the client's"); it holds a response to `MinResponseDataRate` after its
 grace, and under it the connection closes, since its status has gone out (§12, the owner, 2026-11-01,
@@ -2349,7 +2362,8 @@ a read of a head waits what remains of the head's time alone, with no 5 seconds 
 inside the server (Q10 (b)); before each refill of a body the read may wait until the body would fall
 under its rate, the longer of the grace and the bytes read so far at the rate, less the time its reads
 waited already (Q11 (a)); and a handler's read of a body that falls under its rate gives
-`HttpError(Protocol, "request timed out")`, answered `408` (Q12 (b)) (#110, comment 6643368937).
+`HttpError(Protocol, "request timed out")`, answered `408` (Q12 (b)) (#110, comment 6643368937),
+where no part of its response went out before (§12, assumed, above).
 *(assumed, §12, not put to the owner: `KeepAliveTimeout` the wait for the first byte of each request,
 the first of a connection among them; a remainder of zero or below the timeout, with no call of the
 system; each write of a response, a refusal's among them, given the longer of the grace and its length

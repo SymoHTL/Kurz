@@ -3,10 +3,13 @@
 // | HTTP/1.1 304 Not Modified|Content-Type: text/plain; charset=utf-8||
 // | HTTP/1.1 205 Reset Content|Content-Length: 0||
 // | HTTP/1.1 204 No Content|Content-Type: text/plain; charset=utf-8||
+// | HTTP/1.1 204 No Content||
+// | HTTP/1.1 304 Not Modified|Content-Length: 7||
 // rules: W8
 
-// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; an empty `205`
-// says `Content-Length: 0`
+// a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; a `Content-Length` the
+// handler set is dropped on a `204` and kept on a `304`, unchecked against its empty body; an empty `205` says
+// `Content-Length: 0`
 void | IoError Wire(HttpResponse r) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -31,6 +34,12 @@ void | IoError | HttpError All() {
     coded = HttpResponse.Text(204, "dropped")
     coded.Headers.Set("Transfer-Encoding", "gzip")
     Wire(coded)
+    sized = HttpResponse.Empty(204)
+    sized.Headers.Set("Content-Length", "7")
+    Wire(sized)
+    cached = HttpResponse.Empty(304)
+    cached.Headers.Set("Content-Length", "7")
+    Wire(cached)
 }
 
 All() else {
