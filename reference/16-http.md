@@ -2863,7 +2863,8 @@ it cannot tell from the pool's own actor (§12, assumed). *(assumed, §12: the o
 `MaxConnectionsPerServer = 2147483647`, .NET's `int.MaxValue`, `PooledConnectionIdleTimeout = 1min`,
 `PooledConnectionLifetime` the largest `duration`, since no member of `HttpLimits` turns off (W7),
 `MaxAutomaticRedirections`, the count of redirects (W15), and `Limits = HttpLimits()` (W14); a
-`MaxConnectionsPerServer` at or below 0 giving `too many connections to the host` to every call, a
+`MaxConnectionsPerServer` at or below 0 refusing every call, with `too many connections to the host` for every call that
+the scheme's refusals let through (W16), a
 `PooledConnectionIdleTimeout` or `PooledConnectionLifetime` at or below 0 passed by each connection by
 the checkout after its body, which closes it, and a `MaxAutomaticRedirections` at or below 0 following
 none (W15), none of these values refused; a pool with no timer, which at
@@ -4086,17 +4087,19 @@ lookup or connect, and no value turns the bound off; every end of the call's tim
 0, "")`, as the bound of `Connect` gives it, a read that the system ended with its 11 among them, and a
 write so ended under the bound of the writes assumed below; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
 sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
-the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host is at `MaxConnectionsPerServer`, is refused as
-at any other time, before the time is read, so that `ftp://127.0.0.1/` at a time of zero gives `Unsupported`, as C#'s
-`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts, in the owner's words (§12, the owner,
-2026-11-07, issue 39, comment 6711941714, "Refusals first"), where .NET's source starts the timeout first, `CancelAfter` in
-`PrepareCancellationTokenSource`, and its `SocketsHttpHandler` then refuses the scheme before anything waits, and its `Timeout`
-refuses a time of zero (§12, the author's note). Once the call's time has run out, every read of the call gives `TimedOut`, even where
+the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host and port are at `MaxConnectionsPerServer`, is
+refused as at any other time, before the time is read, so that `ftp://127.0.0.1/` at a time of zero gives `Unsupported`, as C#'s
+`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts, in the owner's words, the comparison
+with C# being the owner's reading, which the author's note below corrects (§12, the owner, 2026-11-07, issue 39, comment
+6711941714, "Refusals first"). Once the call's time has run out, every read of the call gives `TimedOut`, even where
 its bytes are already in the stream's buffer, where Rust's `tokio::time::timeout` polls the read first and gives a
-byte already there (§12, the owner, 2026-11-07, issue 39, comment 6710610814). *(assumed, §12: a `TimedOut` the system
+byte already there (§12, the owner, 2026-11-07, issue 39, comment 6710610814). *(assumed, §12: the author's note on .NET's
+source, that `HttpClient.SendAsync` starts its timeout first, `CancelAfter` in `PrepareCancellationTokenSource`, and its
+`SocketsHttpHandler` then refuses the scheme before anything waits, so that .NET's refusal comes before any wait rather than
+before the timeout starts, and that its `Timeout` refuses a time of zero; a `TimedOut` the system
 gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
 since the client does not tell it from its own, and its request not sent once more, as one whose time ran
-out, the one end of a pooled connection that the pool's resend (W13) leaves out, at the cost of a call on a pooled
+out, an end of a pooled connection that the pool's resend (W13) also leaves out, at the cost of a call on a pooled
 connection that the system ends with its 110 failing where the resend would have sent it once more on a new connection; the
 client reading what remains before each step and
 giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
@@ -4104,9 +4107,11 @@ giving `TimedOut` when nothing remains, so that it passes no time of zero or bel
 among the call's refusals, refused before the time is read as the two the owner named; the refusals read in the
 order the address of `https`, a scheme other than `http`, a host and port at `MaxConnectionsPerServer`, by which the pool counts, so that under a
 `MaxConnectionsPerServer` at or below 0, which refuses every call (W13), `ftp://127.0.0.1/` gives `Unsupported`; the call's
-refusals given so at each address of a chain, as at its first: at a redirect the client drains its body, counts it against
+refusals given so at each address of a chain, as at its first: at a redirect the client drains its body, a failure of that drain, a `TimedOut` after the call's time
+among them, ending the drain and closing its connection and not the call, counts the redirect against
 `MaxAutomaticRedirections` (W15), then meets the refusals of the address it follows and reads the time only after them, so that
-a redirect to `ftp://` after the call's time ran out gives `Unsupported` and not `TimedOut`; each write bounded by what remains in the same way, and the connect
+a redirect to `ftp://` after the call's time ran out gives `Unsupported` and not `TimedOut`, whether its body's drain ended or
+failed; each write bounded by what remains in the same way, and the connect
 through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
 `Read` held to the call's time as the helpers' reads are, as Go's `Client.Timeout` holds the reads of a
 body after its call returned, where .NET's `ResponseHeadersRead` ends the send at the head (checked
@@ -4115,11 +4120,8 @@ time ran out not sent once more
 on a new connection, and its connection not given back to the pool, closed when the program lets go of
 the response or, where the time ran out before a response, at once; the bound held by the socket's own
 times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
-server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
-name read as the third option of the open entry of §14 on it, which stays open: bounded by no time of the call's, but by the
-resolver's own or by a module of the name service that waits longer, and its time counted against the call's, so that the lookup
-can run past the call's time, a connect given what remains can end later than the call's time by the
-lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
+server holds its bounds (W10), how it holds on an actor's socket standing open (§14); and the time read from `instant.Now`
+(S25)
 as the time passed against the bound, never as the sum of the start and the bound, which can overflow
 (T36))*
 
@@ -4323,9 +4325,11 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 // a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
 // to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
 // connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came in the one write of
-// its head, read after the call's time ran out, gives `TimedOut` and not its bytes, which were in the stream's buffer; and a body whose
-// bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
-// remains of it: a body of a length, one read to the close, and a chunk's size line
+// its head, read after the call's time ran out, gives `TimedOut` and not its bytes, which a head's read on loopback usually takes
+// into the stream's buffer; a body whose bytes come one at a time, each before a read's time would run out, still ends at the
+// call's time, since each read waits only what remains of it: a body of a length, one read to the close, and a chunk's size line;
+// and a redirect to `ftp://` whose body does not come ends the drain of that body at the call's time, its `TimedOut` dropped with
+// its connection, so that the refusal of the scheme answers the call, at the call's time and not before it
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -4509,8 +4513,9 @@ void Trickled(int port) {
     print(elapsed >= 300ms && elapsed < 900ms)
 }
 
-// one call of a time of 300 milliseconds whose body comes in the one write of its head, which the head's read takes whole, so that
-// the body's bytes are in the stream's buffer, read 400 milliseconds later, after the call's time ran out
+// one call of a time of 300 milliseconds whose body comes in the one write of its head, six bytes, which the head's read on
+// loopback usually takes whole, the body's bytes then in the stream's buffer, though TCP does not promise that one read takes one
+// write; the body read 400 milliseconds later, after the call's time ran out, gives `TimedOut` either way
 string Late(HttpClient client, int port) {
     match client.Get(Address(port, "/")) {
         HttpResponseMessage r => {
@@ -4535,6 +4540,16 @@ void Buffered(int port) {
     print(Late(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
 }
 
+// one call of a time of 300 milliseconds that a `302` sends to `ftp://`, whose body does not come: the drain of that body ends at
+// the call's time, its `TimedOut` dropped with its connection, and the refusal of the next address's scheme answers the call; and
+// whether it answered at the call's time and not before it, as a drain that did not wait would
+void Redirected(int port) {
+    start = instant.Now
+    print(Show(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 900ms)
+}
+
 Against([
     "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\nabc",
     "hold",
@@ -4554,6 +4569,8 @@ Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\n", "~abcdefghij"], (int port
 Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n", "~3;abcdefghij\r\nabc\r\n0\r\n\r\n"],
     (int port) => Trickled(port))
 Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 6\r\n\r\nbuffer", "hold"], (int port) => Buffered(port))
+Against(["HTTP/1.1 302 Found\r\nX-Connection: #\r\nLocation: ftp://127.0.0.1/\r\nContent-Length: 10\r\n\r\n", "hold"],
+    (int port) => Redirected(port))
 ```
 
 No case: of a write that waits, since the request of `Get` is a head of a few bytes, which the socket's buffer takes at once
