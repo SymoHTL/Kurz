@@ -6,7 +6,7 @@ owner, 2026-11-01, Q7 (b)).
 ### W1 (decided, §12) The types every file sees
 
 Every file sees `HttpServer`, `HttpRequest`, `HttpResponse`, `HttpHeaders`, `HttpError`, `HttpKind`,
-`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `HttpResponseMessage`, `HttpBody` and
+`HttpLimits`, `HttpClient`, `HttpClientOptions`, `HttpRequestMessage`, `Uri`, `Url`, `HttpDate`, `HttpQuery`, `HttpResponseMessage`, `HttpBody` and
 `HttpWriter`, with `UriError`, `UriKind` and `HttpRate`, as `std/`
 declares them, as it sees `File` and `TcpStream` (S2, S8). A file's own declaration of one of these
 names that binds it in a scope, a type, a type parameter, a function, a variable, a parameter, a
@@ -34,7 +34,8 @@ of the streamed response §12 gives, "A response can be streamed"; the two of `U
 `HttpRate`, whose type a program names to change a rate of `HttpLimits`, are the record's assumptions;
 `HttpRequestMessage`: the owner, 2026-11-04, issue 156, comment 6643376941, Q2 (a); and
 `HttpResponseMessage`, the response a client gets, is the owner's (W14; the owner, 2026-11-05,
-issue 110, comment 6657251329, C2)).
+issue 110, comment 6657251329, C2), and so are `Url` (W17), `HttpDate` (W18) and `HttpQuery` (W19; the owner,
+2026-11-06, issue 110, comment 6680237968, G1 (a), G3 (a) and G2 (a))).
 
 Case: [http/http-error-redeclared.kz](../corpus/http/http-error-redeclared.kz)
 ```kurz
@@ -4536,3 +4537,235 @@ remaining and ends as `TimedOut` before any connect, which no output tells from 
 gives of its own, its 110, while time remains, whose request is not sent once more either, which a second send would
 show, since no run of the suite makes the system give it: it comes where the system's retries of a segment nobody
 answers run out.
+
+### W17 (decided, §12) `Url`
+
+`Url.Decode(text)` gives `string | InvalidUtf8` and `Url.Encode(text)` gives a `string`: static
+functions of the class `Url` of `std/`, which every file sees (W1), as C#'s `Uri.UnescapeDataString`
+and `Uri.EscapeDataString`, made as Rust's `percent-encoding` crate decodes and encodes, while
+`r.Path` stays as the request gave it (W5). `Decode` reads each `%` with two hex digits after it
+as the byte they name, leaves a `%` without them as it is, and leaves a `+` a `+`, since RFC 3986
+gives it no meaning in a path (§12, the owner, 2026-11-06, issue 110, comment 6680237968, G1 (a),
+asked in comment 6673104097). `%00` gives U+0000, as C# and the crate decode it (§12, the owner, 2026-11-08,
+issue 110, comment 6721051459, "U+0000", asked in comment 6715300573). *(assumed, §12, the other readings of
+the product pass of 2026-11-08, issue 110, comment 6715300573, not put to the owner: `Decode` reads
+hex digits of either case and gives the decoded bytes as `string.FromUtf8` gives them, `InvalidUtf8`
+with the count of the decoded bytes in front of the first sequence that is no UTF-8 (T15); no path
+is checked, so that a key holds `/`, `..` or a NUL decoded as any
+other byte; `Encode` leaves
+RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, as `EscapeDataString`
+leaves them, and writes each other byte of the text's UTF-8, `/` among them, as `%` and two
+upper-case hex digits, as RFC 3986, section 2.1, writes them; `Decode(Encode(s))` is `s` for every
+string; and both run in a build for Windows, as the parse of a `Uri` does)*
+
+Case: [http/url-decode.kz](../corpus/http/url-decode.kz)
+```kurz
+// `Url.Decode` reads each `%` and two hex digits, of either case, as the byte they name and the bytes as UTF-8: a `%` without
+// two hex digits after it stays as it is, a `+` stays a `+`, no path is checked, `%00` gives U+0000, and bytes that are no UTF-8
+// give `InvalidUtf8` with the count of the decoded bytes in front of them
+void Show(string text) {
+    match Url.Decode(text) {
+        string s => print("[{s}]")
+        InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+    }
+}
+
+Show("/docs/with%20space.txt")
+Show("plain")
+Show("a+b")
+Show("%41%2fb%2Fc")
+Show("100%")
+Show("%4")
+Show("%zz")
+Show("%41%")
+Show("%C3%A9")
+Show("..%2F..%2Fetc")
+match Url.Decode("%00x") {
+    string s => print("{s.Bytes.Count} {s.Bytes[0]}")
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}
+Show("%FF")
+Show("a%C3")
+```
+
+Case: [http/url-encode.kz](../corpus/http/url-encode.kz)
+```kurz
+// `Url.Encode` leaves RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, and writes each other byte of the
+// text's UTF-8 as `%` and two upper-case hex digits, `/` among them; `Url.Decode` gives the text back
+print(Url.Encode("AZaz09-._~"))
+print(Url.Encode("with space.txt"))
+print(Url.Encode("a/b?c=d&e+"))
+print(Url.Encode("é%"))
+print(Url.Encode(""))
+text = "key with/é and %41+"
+match Url.Decode(Url.Encode(text)) {
+    string s => print(s == text)
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}
+```
+
+### W18 (decided, §12) `HttpDate`
+
+`HttpDate.Format(t)` writes the IMF-fixdate of RFC 9110, section 5.6.7, of a `timestamp`,
+`Sun, 06 Nov 1994 08:49:37 GMT`, and `HttpDate.Parse(text)` gives `timestamp | ParseError` and reads
+it, together with the two obsolete forms the RFC has a recipient read, RFC 850's
+`Sunday, 06-Nov-94 08:49:37 GMT` and asctime's `Sun Nov  6 08:49:37 1994`: static functions of the
+class `HttpDate` of `std/`, which every file sees (W1), as Rust's `httpdate` crate, which hyper uses,
+writes and reads them, and the server writes its own `Date` (W9) by the same function (§12, the
+owner, 2026-11-06, issue 110, comment 6680237968, G3 (a), asked in comment 6673104097).
+The readings are the crate's where it has one (§12, the owner, 2026-11-08, issue 110, comment 6721051459,
+"httpdate's readings", asked in comment 6715835046 as one question): `Format` takes the second towards the past, as
+the crate drops the fraction, and writes every instant a `timestamp` holds, 1677 to 2262, one before
+1970 among them, where the crate stops the program; `Parse` takes ASCII's whitespace from both ends
+first (X4's `TrimAscii`), as the crate trims the text, compares the names of the days and the months
+with their case, reads the two digits of RFC 850's year as 1970 to 2069, as the crate does, where the
+RFC reads them by the clock, reads asctime's day as two digits or a space and one digit, and checks
+each separator; and it refuses, by X7's kinds, a text of whitespace alone as `Empty`, a year before
+1970, which the crate refuses, as `TooSmall`, an instant past the last second a `timestamp` holds,
+2262-04-11 23:47:16, as `TooLarge`, and every other text as `InvalidDigit`, a text of no form, an hour
+past 23, a minute or a second past 59, a second of 60 among them, a day the month does not have and a
+weekday that is not the date's, which the crate checks, among them.
+
+Case: [http/http-date-format.kz](../corpus/http/http-date-format.kz)
+```kurz
+// `HttpDate.Format` writes the IMF-fixdate of a `timestamp`, its second taken towards the past, so that a fraction is dropped and
+// the last nanosecond before 1970 is in 1969, for every instant a `timestamp` holds, the first and the last among them
+void Show(long nanoseconds) {
+    long bits = nanoseconds
+    raw {
+        print(HttpDate.Format(*Ptr<timestamp>(&bits)))
+    }
+}
+
+Show(0)
+Show(784111777000000000)
+Show(784111777999999999)
+Show(-1)
+Show(9223372036854775807)
+Show(-9223372036854775808)
+```
+
+Case: [http/http-date-parse.kz](../corpus/http/http-date-parse.kz)
+```kurz
+// `HttpDate.Parse` reads the IMF-fixdate, RFC 850's form, whose two digits of the year name 1970 to 2069, and asctime's form,
+// whose day is two digits or a space and one, after ASCII's whitespace is taken from both ends; it refuses an empty text, a
+// name in another case, a weekday that is not the date's, a zone other than GMT, a second of 60, a day the month does not have
+// and a text of no form, a year before 1970, and an instant past the last second a `timestamp` holds
+void Show(string text) {
+    match HttpDate.Parse(text) {
+        timestamp t => print(t)
+        ParseError e => print(e.Kind)
+    }
+}
+
+Show("Sun, 06 Nov 1994 08:49:37 GMT")
+Show("Sunday, 06-Nov-94 08:49:37 GMT")
+Show("Sun Nov  6 08:49:37 1994")
+Show("Sun Nov 06 08:49:37 1994")
+Show(" \tSun, 06 Nov 1994 08:49:37 GMT\r\n")
+Show("Thursday, 01-Jan-70 00:00:00 GMT")
+Show("Tuesday, 31-Dec-69 23:59:59 GMT")
+Show("Tue, 29 Feb 2000 00:00:00 GMT")
+Show("Fri, 11 Apr 2262 23:47:16 GMT")
+Show("")
+Show("   ")
+Show("sun, 06 Nov 1994 08:49:37 GMT")
+Show("Mon, 06 Nov 1994 08:49:37 GMT")
+Show("Sun, 06 Nov 1994 08:49:37 UTC")
+Show("Sun, 06 Nov 1994 08:49:60 GMT")
+Show("Thu, 29 Feb 2001 00:00:00 GMT")
+Show("Sun, 6 Nov 1994 08:49:37 GMT")
+Show("1994-11-06T08:49:37Z")
+Show("Wed, 31 Dec 1969 23:59:59 GMT")
+Show("Fri, 11 Apr 2262 23:47:17 GMT")
+Show("Sat, 12 Apr 2262 00:00:00 GMT")
+```
+
+### W19 (decided, §12) `HttpQuery`
+
+`r.QueryValues()` gives the parameters of `r.Query` as an `HttpQuery`, its names and values in
+their order, while `r.Query` stays the raw text (W5): a class of `std/`, which every file sees (W1),
+with `Get(name)`, the first value of the name, a `string?`, `GetAll(name)`, every value of it,
+`Count`, `NameAt(i)` and `ValueAt(i)`, as `HttpHeaders` has them (W4), but comparing a name exactly,
+and reading a `+` as a space, as a form's query writes one, as ASP.NET Core's
+`QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read a query (§12, the owner,
+2026-11-06, issue 110, comment 6680237968, G2 (a), asked in comment 6673104097, with the option's
+`HttpQuery.Parse(r.Query)` made a method of the request, whose name says what it reads).
+The name is `QueryValues`, and the readings are the crate's where it has one (§12, the owner,
+2026-11-08, issue 110, comment 6721051459, "form_urlencoded's", asked in comment 6716242509 as one question):
+`HttpQuery()` holding no pair, and no member changing one; the query read anew at
+each call, which a program tells from one parse held only by the time it takes; the text split at each `&`, an empty piece skipped, and a `;` no separator; each piece
+split at its first `=`, and a piece without one the name with the empty value; a `+` read as a space
+before the escapes, so that `%2B` gives a `+`; each `%` with two hex digits after it the byte they
+name, and a `%` without them kept, as `Url.Decode` keeps it (W17); the decoded bytes read as UTF-8,
+each maximal part of a sequence that is no UTF-8 read as U+FFFD, as `string.FromUtf8Lossy` reads
+them (T15), where `Url.Decode` refuses them, since `QueryValues()` cannot fail; a repeated name
+keeping each of its values apart, in their order; `GetAll` giving a new list; `NameAt(i)` and
+`ValueAt(i)` outside 0 to `Count - 1` stopping the program with `index-out-of-range`, as W4's do; and
+the walk `for name, value in q` of C6 and W4, which any class with `Count`, `NameAt(i)` and
+`ValueAt(i)` meets. *(assumed, §12: `HttpQuery.FromQuery(r.Query)`, the form shown beside
+`r.QueryValues()`, the reading taken of the answer of 2026-11-06)*.
+The compiler does not build this walk, as W4 says of every class, so the case walks the query by
+index; the stop of `NameAt(i)` and `ValueAt(i)` outside the pairs is held by `HttpTests`, as W4's.
+
+Case: [http/http-query.kz](../corpus/http/http-query.kz)
+```kurz
+// the parameters of a request's query, as `r.QueryValues()` reads them from `r.Query`, which stays the raw text: split at each `&`,
+// an empty piece skipped, each piece split at its first `=`, a piece without one the name with the empty value, a `+` a space before
+// the escapes, so that `%2B` is a `+`, a `%` without two hex digits kept, bytes that are no UTF-8 read as U+FFFD, a `;` no
+// separator, and a name compared exactly, a repeated one keeping each of its values in their order; `GetAll` gives a new list, and
+// `HttpQuery()` holds no pair
+void | IoError Show(string query) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET /p?{query} HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    match HttpRequest.Read(server) {
+        HttpRequest r => {
+            q = r.QueryValues()
+            mut line = "{q.Count}"
+            for i in 0..<q.Count {
+                line = "{line} [{q.NameAt(i)}={q.ValueAt(i)}]"
+            }
+
+            print(line)
+        }
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError Find(string query) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("GET /p?{query} HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+    match HttpRequest.Read(server) {
+        HttpRequest r => {
+            q = r.QueryValues()
+            mut all = q.GetAll("a")
+            print("{q.Get("a") ?? "none"} {q.Get("A") ?? "none"} {all.Count} {all[0]} {all[1]} [{q.Get("b") ?? "none"}] {q.GetAll("c").Count} {r.Query}")
+            all.Add("x")
+            print("{all.Count} {q.GetAll("a").Count} {HttpQuery().Count}")
+        }
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError All() {
+    Show("a=1&b=2&a=3")
+    Show("a=1&&b=2&")
+    Show("flag&=x&k=v=w")
+    Show("q=a+b%2Bc&n%20m=%41%e2%82%ac")
+    Show("p=100%&r=%4&s=%zz")
+    Show("x=%FF%41&y=%E2%82")
+    Show("")
+    Show("a=1;b=2")
+    Find("a=1&b=&a=3")
+}
+
+All() else {
+    IoError e => print(e)
+}
+```

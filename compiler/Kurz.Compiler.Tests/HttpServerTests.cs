@@ -31,7 +31,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     /// <summary>std/ with <c>HttpServer.DateOf</c>, the <c>Date</c> the loop writes in the given second since 1970-01-01.</summary>
     private static readonly Lazy<CheckedRuntime> WithDate = new(() => ListTests.Edited(("std/std.kz", "pub class HttpServer {\n", """
         pub class HttpServer {
-            pub static string DateOf(long second) => HttpDate(second)
+            pub static string DateOf(long second) => HttpDateOf(second)
 
         """)));
 
