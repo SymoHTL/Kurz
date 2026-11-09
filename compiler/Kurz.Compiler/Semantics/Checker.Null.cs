@@ -11,7 +11,7 @@ internal readonly record struct NullPath(VariableSymbol Root, string Fields)
         ReferenceEquals(Root, other.Root) && (other.Fields.Length == 0 || Fields == other.Fields || Fields.StartsWith(other.Fields + ".", StringComparison.Ordinal));
 }
 
-/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop that can be reached.</summary>
+/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop, where that <c>break</c> or <c>continue</c> can be reached.</summary>
 internal sealed class LoopExits
 {
     public List<ImmutableHashSet<NullPath>> Breaks { get; } = [];
@@ -294,8 +294,9 @@ public sealed partial class Checker
     /// (section 4, an assumption there). Where a reading ends with less known than it began with, it is read again from that, its
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
     /// what the condition leaves where it is false, joined with what held at each <c>break</c> that can be reached, and a <c>while true</c>
-    /// what held at those <c>break</c>s alone; a <c>break</c> or a <c>continue</c> after a statement whose end cannot be reached adds
-    /// nothing; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
+    /// what held at those <c>break</c>s alone; a <c>break</c> or a <c>continue</c> that is never reached adds nothing, one after a statement
+    /// whose end cannot be reached, in the branch a constant condition never takes or in the body of <c>while false</c> (the frame's
+    /// <c>Unreached</c>); a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
     /// Returns whether the loop can end: a <c>while</c> whose condition is the constant <c>true</c> ends only through a <c>break</c> of its
     /// own that can be reached, as the end point of C#'s <c>while (true)</c> is reached only through one (F3), and the same constant decides
     /// both; the body of one whose condition is the constant <c>false</c> is never reached, as in C#.

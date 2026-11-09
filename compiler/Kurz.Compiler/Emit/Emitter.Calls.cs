@@ -61,6 +61,7 @@ public sealed partial class Emitter
             CallKind.StringCase => EmitStringCase(c),
             CallKind.StringSubstring => EmitStringSubstring(c, info),
             CallKind.Parse => EmitParse(c, info),
+            CallKind.TimeFrom => EmitTimeFrom(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
             CallKind.BlackBox => EmitBlackBox(c, info),

@@ -1,0 +1,4 @@
+// expect: error constant-overflow at 4
+// rules: T38
+
+print(duration.FromDays(106752))

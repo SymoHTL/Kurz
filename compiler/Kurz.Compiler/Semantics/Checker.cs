@@ -85,7 +85,7 @@ public sealed partial class Checker
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -1378,7 +1378,8 @@ public sealed partial class Checker
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
     /// error of its own (the owner, 2026-11-03). A function whose constant has no type of the list, or a type that is no name it can read,
-    /// is read, with the constant of no type, whose uses and calls report nothing more, while its body's own errors are reported (E1).
+    /// is read, with the constant of no type, whose uses and the type argument a call gives it report nothing more, while its body's own
+    /// errors, and a call's count of type arguments and its arguments, are reported (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
@@ -1672,7 +1673,7 @@ public sealed partial class Checker
         else if (IsTypeParameterName(name))
         {
             Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
-            type = Types.Error; // T33, E1: the refused parameter stands with no type, so that `T.Make` in a copy reports nothing more
+            type = Types.Error; // T33, E1: the refused parameter stands with no type, and its name reads it in a copy, so that `T.Make`, `T.Fields` and `T.Kind` report nothing more
         }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {

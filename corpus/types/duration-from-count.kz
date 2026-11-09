@@ -1,0 +1,26 @@
+// expect: output
+// | 1us 500ns
+// | 2ms
+// | 1s 500ms
+// | 1min 30s
+// | 1h 30min
+// | -3h
+// | 2days
+// | true
+// | 1ns
+// rules: T38
+
+int n = 90
+long big = 2
+print(duration.FromNanoseconds(1500))
+print(duration.FromMicroseconds(2000))
+print(duration.FromMilliseconds(1500))
+print(duration.FromSeconds(n))
+print(duration.FromMinutes(n))
+print(duration.FromHours(-3))
+print(duration.FromDays(big))
+print(duration.FromSeconds(n) == 90s)
+
+// a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
+long odd = 9007199254740993
+print(duration.FromNanoseconds(odd) - duration.FromNanoseconds(odd - 1))

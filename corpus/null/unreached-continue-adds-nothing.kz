@@ -1,0 +1,22 @@
+// expect: output
+// | 3
+// rules: N3
+
+// the `continue` after the `return` is never reached, so the `null` it saw adds nothing at the loop's head, and `s` stays not
+// null after the loop
+int Length(int stop) {
+    mut string? s = "abc"
+    mut n = 0
+    while n < 3 {
+        n = n + 1
+        if n == stop {
+            s = null
+            return 0
+            continue
+        }
+    }
+
+    return s.Bytes.Count
+}
+
+print(Length(5))

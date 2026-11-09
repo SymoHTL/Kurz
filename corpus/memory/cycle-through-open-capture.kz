@@ -2,7 +2,7 @@
 // rules: R9
 
 // a lambda the field can hold that captures a value of a type parameter holds whatever function a use gives that parameter, so a
-// lambda of another type that reads the button closes the ring through the field (R9, the owner, 2026-11-04, #110, comment 6643368937)
+// lambda of another type that reads the button closes the ring through the field (R9, assumed)
 class Button(string Name, mut () => void OnClick)
 class Panel(Button B)
 
