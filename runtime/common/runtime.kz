@@ -373,8 +373,8 @@ pub string ListText(byte* texts, long count) {
     return text
 }
 
-// Whether two strings hold the same bytes (T18), on the runtime's own path, where Rust's `==` of two `str` calls the C library's
-// `bcmp` after the test of the lengths, reading no byte past the end of either: the counts, then the first bytes, where two
+// Whether two strings hold the same bytes (T18), on the runtime's own path (Rust's `==` of two `str` calls the C library's `bcmp`
+// after the test of the lengths), reading no byte past the end of either: the counts, then the first bytes, where two
 // different strings of one count most often differ; 1 to 3 bytes as their middle and last byte; 4 to 16 as four words of 4, the
 // first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end, so that every
 // count from 4 to 16 takes one path, and their differences joined by `|` and tested once: `==` of 200k words of 3 to 10 letters and
@@ -435,8 +435,8 @@ bool SameBytes(byte* x, byte* y, long a) {
 // first, and where they differ the order is their difference, a value, as a compare a byte at a time gives it. A `-1` or a `1` chosen
 // by a test of which byte is the lower became, where `Order` went into the loop of its one caller, a branch on that test, which
 // mispredicted on every second pair of random words: `<` of 200k such words and the next took 35.2 ms so, 12.2 ms with the difference
-// and 15.8 ms a byte at a time (Rust 18.1 ms). Where the first bytes agree, the shared bytes are compared on the runtime's own path,
-// where Rust's `Ord` calls the C library's `memcmp`, reading no byte past the end of either, as words read with their first byte
+// and 15.8 ms a byte at a time (Rust 18.1 ms). Where the first bytes agree, the shared bytes are compared on the runtime's own path
+// (Rust's `Ord` calls the C library's `memcmp` here), reading no byte past the end of either, as words read with their first byte
 // highest, so that the order of two words is the order of their bytes: 1 to 3 as their first, middle and last byte; 4 to 16 as four
 // words of 4, the first two at 0 and at 4 (at 0 again below 8 bytes) and the last two ending 4 bytes before the end and at the end;
 // more than 16 as 16 bytes at a time, then as four words of 8, the 16 bytes where that stopped and the 16 that end the shared bytes.
@@ -2693,6 +2693,9 @@ static mut long logDropped = 0
 
 // A line the system took in part before a write that took nothing (P9): the stream stands inside it, and a line feed ends it before
 // the next line written.
+// Kurz has no atomic form, so the count and the flag are plain `static mut`s, as `Random`'s are: the runtime starts no thread, and two
+// threads a program starts through C (R16) that log at once race on them, where an atomic exchange of each would not: both may write
+// the line feed, or one may clear the flag while the other's line stands cut, and a count may lose a line.
 static mut bool logCut = false
 
 // The buffer of each thread in which `LogLine` puts a line together before its write, and its size.

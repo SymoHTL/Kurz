@@ -1,0 +1,18 @@
+// expect: error match-not-exhaustive at 13
+// rules: O8
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+void Show(Shape s) {
+    match s {
+        Square q => print("square {q.Side}")
+    }
+}
+
+Show(Square(3))
