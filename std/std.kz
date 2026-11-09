@@ -4536,12 +4536,15 @@ pub bool MapTripped(byte* block) {
 }
 
 // One loop over a map more (`change` 1) or less (-1) holds the block, nothing for a map that holds none:
-// a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
-// (`MapLongLookup`). A loop counts itself where it starts and lets go where it ends: at its end, a `break`,
-// a `return` or a case propagated out of its body. A write inside it finds the block shared, since the
-// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`). The
-// text of a map counts itself so while it walks the block, since a class's `Text()` it calls for a key or
-// a value can look a key up in a map that holds the block.
+// a loop walks the block's slots by their index, so a lookup inside it must rehash no block it holds
+// (`MapLongLookup`; section 4, the owner, 2026-11-03). A loop counts itself where it starts and lets go
+// where it ends: at its end, a `break`, a `return` or a case propagated out of its body. The text of a map
+// counts itself so while it walks the block, since a class's `Text()` it calls for a key or a value can
+// look a key up in a map that holds the block (section 4, assumed there: the reading of the answer of
+// 2026-11-03 for the text, #39, comment 6688570158). A write inside either finds the block shared and
+// copies it first, the copy counting no loop (`MapCopy`): the loop holds the block with a count of its
+// own, and the text walks a value that holds one besides the map the write reaches, as a read of a field
+// takes a count of its own (K2).
 pub void MapWalk(byte* block, int change) {
     raw {
         if block != null {
@@ -4552,7 +4555,9 @@ pub void MapWalk(byte* block, int change) {
 
 // For a lookup whose probe passed more than 512 slots, 65 groups of 8 without a slot of 255: whether the
 // block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
-// over a map and no text of a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the
+// over a map and no text of a map holds it (section 4: a read's lookup, the owner, 2026-11-02, "lookups
+// count too"; the bound and the lookups of `m[k] = v` and `Remove` assumed there; the loop's hold the
+// owner's answer of 2026-11-03, and the text's assumed there); the
 // block is then marked as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code
 // moves the entries under their new hashes (`MapRehashMark`, `MapRehashPlace`).
 pub bool MapLongLookup(byte* block) {
@@ -4579,7 +4584,7 @@ pub bool MapFastHash(byte* block) {
 
 // The first step of the rehash in place onto SipHash-1-3, as hashbrown's `prepare_rehash_in_place` takes
 // it: every entry's control byte made 128 and every removed entry's 255, so that 128 marks an entry not
-// yet in the slot its new hash probes first, and the slots entries can still take made the block's
+// yet placed under its new hash, and the slots entries can still take made the block's
 // capacity less its count, which gives the removed entries' slots to new entries. The emitted code then
 // calls `MapRehashPlace` for each slot marked 128 with the new hash of the key in it, until the slot holds
 // no entry marked 128, as hashbrown's `rehash_in_place` calls its hasher for the slot.
@@ -4604,8 +4609,9 @@ pub void MapRehashMark(byte* block) {
 
 // One step of the rehash in place, as hashbrown's `rehash_in_place` takes it, with nothing allocated: the
 // entry marked 128 in the slot `i`, of `entry` bytes, whose key's new hash is `hash`, put in the first
-// slot of its probe whose control byte is 255 or 128. It stays in its slot where that slot is in its own
-// group, takes the slot of 255 and leaves its own 255, or changes places with the entry marked 128 there,
+// slot of its probe whose control byte is 255 or 128. It stays in the slot `i` where `i` is in the group
+// of 8 of that first slot, takes the slot of 255 and leaves its own 255, or changes places with the entry
+// marked 128 there,
 // which the slot `i` then holds. An entry changes places word by word where its bytes are a multiple of 8,
 // and byte by byte where they are not, as an entry of a key of one word and a value of 12 bytes is.
 pub void MapRehashPlace(byte* block, long entry, long i, ulong hash) {
@@ -6281,9 +6287,11 @@ pub class HttpHeaders {
 // owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
 pub data HttpRate(int BytesPerSecond, duration Grace)
 
-// The limits of a request, with Kestrel's names, types and defaults (design record, section 12: the owner, 2026-10-31, "HttpLimits
-// data", and 2026-11-03, Kestrel's member names and types, the four fixed numbers made members), a type every file sees (W1, W5).
-// The bounds of time are held and read by nothing yet: they wait for the monotonic clock (section 12).
+// The limits of a request, a type every file sees (W1, W5): the first seven with the names, types and defaults of Kestrel's
+// `KestrelServerLimits`, and the four numbers the server held fixed made members, `KeepAliveTimeout` with Kestrel's name and the
+// owner's 5 seconds, where Kestrel waits 130, and the other three with names of their own (design record, section 12: the owner,
+// 2026-10-31, "HttpLimits data" and "Persistent, 100 req, 5 s", and 2026-11-03, Kestrel's member names and types, the four fixed
+// numbers made members). The server's loop holds the bounds of time by the monotonic clock (W10).
 pub data HttpLimits(
     int MaxRequestLineSize = 8kb,
     int MaxRequestHeadersTotalSize = 32kb,
@@ -6390,7 +6398,7 @@ pub class HttpBody {
     // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
     internal bool AwaitsContinue => expects
 
-    // Whether a read of the body ran out of its time, which the server answers `408` (F9).
+    // Whether a read of the body ran out of its time, which the server answers `408` where no head of a response went out (F9).
     internal bool TimedOut => timedOut
 
     // The response's head on its way to the client, after which no read sends `100 Continue` (F9).
@@ -6571,9 +6579,13 @@ pub class HttpBody {
         return n
     }
 
-    // The whole body, or `request body over limit` where it holds more than `max` bytes, `response body over limit` for a response.
+    // The whole body, or `request body over limit` where it holds more than `max` bytes, `response body over limit` for a response:
+    // a declared length before its first byte is
+    // read, so that the body stays for the reads after it, and a chunked body once more than `max` of its bytes were read, which are
+    // dropped; a `max` below zero refuses every body, an empty one among them, as it refuses every declared length (section 12,
+    // assumed).
     pub Bytes | IoError | HttpError ReadAll(int max) {
-        if !chunked && !toEnd && remaining > max {
+        if max < 0 || !chunked && !toEnd && remaining > max {
             return HttpError(HttpKind.TooLarge, "{side} body over limit")
         }
 
@@ -6739,8 +6751,8 @@ pub class HttpResponse {
     // A response with no body and no `Content-Type`.
     pub static HttpResponse Empty(int status) => Of(status, "")
 
-    // A response whose body `body` writes, as `application/octet-stream`: the writer sends the head, then calls `body` with an
-    // `HttpWriter`, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // A response whose body `body` writes, as `application/octet-stream`: the writer calls `body` with an `HttpWriter`, the head
+    // goes out with its first write, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
     // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
     pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
         if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
@@ -6765,8 +6777,9 @@ pub class HttpResponse {
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
-    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
-    // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
+    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length, or by the close where a function writes it; false where the writer wrote its
+    // own `500` in its place, or where the head of a body a function writes announced a close, after which the loop closes the
+    // connection. The responses `pending` holds go out first, in the same
     // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
     // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
     // writes has gone out (F9).
@@ -6875,7 +6888,12 @@ pub class HttpResponse {
             out.AddRange("Connection: close\r\n".Bytes)
         }
 
-        out.AddRange("\r\n".Bytes)
+        // the head of a body a function writes ends where it goes out, with the writer's first write
+        streamed = withBody && !bodiless && body != null
+        if !streamed {
+            out.AddRange("\r\n".Bytes)
+        }
+
         if pending.Count > 0 {
             pending.AddRange(out)
             out = pending
@@ -6893,9 +6911,9 @@ pub class HttpResponse {
         }
 
         if body != null {
-            // the head goes out with the first chunk, in one write, so that the chunk does not wait for the acknowledgement of
-            // the head, and the last chunk after the function's return, held as a response is where `hold`
-            w = HttpWriter.Make(s, out, chunked, pace, request)
+            // the head goes out with the first chunk, in one write up to 64 KiB of it, so that the chunk does not wait for the
+            // acknowledgement of the head, and the last chunk after the function's return, held as a response is where `hold`
+            w = HttpWriter.Make(s, out, chunked, pace, request, !close && headers.Get("Connection") == null)
             body(w) else {
                 IoError e => {
                     w.Abort()
@@ -6904,7 +6922,7 @@ pub class HttpResponse {
             }
 
             w.End(mut pending, hold)
-            return true
+            return !w.Closes
         }
 
         if isFile {
@@ -6949,7 +6967,9 @@ pub class HttpResponse {
 // a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
 // the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
 // write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
-// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing.
+// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing. A write that failed leaves
+// the writer failed: every later write, and the end of the body, gives its `IoError` again and writes nothing, so that the client
+// sees the body cut, never a chunk that a failed write left part of followed by another.
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -6958,13 +6978,18 @@ pub class HttpWriter {
     mut bool sent = false
     mut HttpRate? pace = null
     mut HttpBody? request = null
+    mut bool announce = false
+    mut bool closes = false
+    mut IoError? failure = null
 
-    // The writer of a body on `s`, the head `head` going out with its first write, before which a read of the body `answered` may
-    // still send `100 Continue` (F9: `internal`, the maker std/'s writer calls). The stream is set to `TCP_NODELAY`, as Kestrel sets
-    // every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
+    // The writer of a body on `s`, the head `head`, all but the empty line that ends it, going out with its first write, before which
+    // a read of the body `answered` may still send `100 Continue`; where `mayClose`, a head that goes out while that body still
+    // awaits `100 Continue` says `Connection: close` (F9: `internal`, the maker std/'s writer calls). The stream is set to
+    // `TCP_NODELAY` at each streamed response, one call of the system each, and the option stays set on it after the response, as
+    // Kestrel sets every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
     // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
     // A stream the option cannot be set on is written as it is, the option only a matter of time.
-    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered) {
+    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered, bool mayClose) {
         s.SetNoDelay(true) else {
             IoError e => {
             }
@@ -6976,16 +7001,32 @@ pub class HttpWriter {
         w.chunked = isChunked
         w.pace = rate
         w.request = answered
+        w.announce = mayClose
         return w
     }
 
-    // The head on its way: no read of the request's body sends `100 Continue` after it.
+    // Whether the head announced a close the server's loop makes after the function (F9).
+    internal bool Closes => closes
+
+    // The head on its way, once: its empty line, after a `Connection: close` where the request's body still awaits `100 Continue`,
+    // since the server's loop closes such a connection after the function; no read of the request's body sends `100 Continue` after it.
     void Started() {
+        if sent {
+            return
+        }
+
         sent = true
         b = request
         if b != null {
+            if announce && b.AwaitsContinue {
+                ahead.AddRange("Connection: close\r\n".Bytes)
+                closes = true
+            }
+
             b.Begin()
         }
+
+        ahead.AddRange("\r\n".Bytes)
     }
 
     // Writes `bytes` as one chunk of the body.
@@ -6995,13 +7036,28 @@ pub class HttpWriter {
             return IoError(IoKind.InvalidInput, 0, "writer used after its response ended")
         }
 
+        f = failure
+        if f != null {
+            return f
+        }
+
         if bytes.Count == 0 {
             return
         }
 
+        Put(s, bytes) else {
+            IoError e => {
+                failure = e
+                return e
+            }
+        }
+    }
+
+    // The head where it has not gone out, and `bytes` as one chunk.
+    void | IoError Put(TcpStream s, Bytes bytes) {
+        Started()
         mut out = ahead
         ahead = Bytes()
-        Started()
         if chunked {
             out.AddRange("{HttpHex(bytes.Count)}\r\n".Bytes)
         }
@@ -7009,8 +7065,11 @@ pub class HttpWriter {
         if bytes.Count <= 65536 {
             out.AddRange(bytes)
         } else {
-            HttpWrite(s, pace, out)
-            out = Bytes()
+            if out.Count > 0 {
+                HttpWrite(s, pace, out)
+                out = Bytes()
+            }
+
             HttpWrite(s, pace, bytes)
         }
 
@@ -7027,17 +7086,23 @@ pub class HttpWriter {
     pub void | IoError Write(string text) => Write(text.Bytes)
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
-    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response (F9).
+    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
+    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9).
     internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
+        f = failure
+        if f != null {
+            return f
+        }
+
         s = stream
         if s == null {
             return
         }
 
+        Started()
         mut out = ahead
         ahead = Bytes()
-        Started()
         if chunked {
             out.AddRange("0\r\n\r\n".Bytes)
         }
@@ -7052,7 +7117,8 @@ pub class HttpWriter {
         }
     }
 
-    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that the client sees it cut (F9).
+    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that a client of HTTP/1.1 sees it
+    // cut, while one of HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
     internal void Abort() {
         ended = true
         s = stream

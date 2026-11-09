@@ -67,14 +67,12 @@ public sealed partial class Checker
                         model.RecordPattern(tp, type);
                         if (known && !Types.IsError(type))
                         {
-                            if (DerivedClassArm(type, cases))
+                            if (!cases.Any(c => IsCaseOf(type, c)))
                             {
-                                NotSupported(arm.Line, $"an arm of `{type}`, a class derived from a case of `{subjectType}`, which tests the instance's class at run time (C4, K6)");
-                                armWrong = true;
-                            }
-                            else if (!cases.Any(c => IsCaseOf(type, c)))
-                            {
-                                Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case of `{subjectType}` and derived from none (C4, T1)");
+                                // over an interface case, an arm's class can also implement it (I6)
+                                Report(ErrorIds.TypeMismatch, arm.Line, cases.Any(c => c is InterfaceType)
+                                    ? $"`{type}` is no case of `{subjectType}`, derives from none and implements none (C4, K6, T1)"
+                                    : $"`{type}` is no case of `{subjectType}` and derived from none (C4, T1)");
                                 armWrong = true;
                             }
                             else if (covered.Any(c => IsCaseOf(type, c)))
@@ -279,12 +277,14 @@ public sealed partial class Checker
             ? (copy, bound, constant)
             : null;
 
-    /// <summary>C4: whether an arm's type names a case: the case itself, or a data type derived from it (D6); no widening (T8) makes a case.</summary>
-    /// <summary>K6 with C4: whether an arm names a class derived from a class among the cases, which the checker does not read.</summary>
-    private static bool DerivedClassArm(KurzType type, IEnumerable<KurzType> cases) =>
-        type is ClassType arm && cases.Any(c => c is ClassType b && !ReferenceEquals(arm.Symbol, b.Symbol) && arm.Symbol.HasBaseOrIs(b.Symbol));
-
-    private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c));
+    /// <summary>
+    /// C4: whether an arm's type names a case: the case itself, a data type derived from it (D6), or a class derived from the case's
+    /// class or that implements the case's interface, whose arm tests the instance's class at run time, as C#'s <c>is</c> (K6; the
+    /// owner, 2026-11-02, #110); no widening (T8) makes a case. No list of the classes derived from a class or of those that implement
+    /// an interface is closed, so such an arm covers no case (O8), and one after an arm of its case's type is <c>unreachable-arm</c>.
+    /// </summary>
+    private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c))
+        || (type is ClassType arm && ((c is ClassType b && arm.Symbol.HasBaseOrIs(b.Symbol)) || (c is InterfaceType face && arm.Symbol.Implements(face.Symbol))));
 
     /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17), and <c>null</c>, the case of a nullable value (N1, C9; section 4, the owner, 2026-10-30, "Allow, as C#").</summary>
     private static bool IsLiteralPattern(Expression e) => Unwrap(e) switch
@@ -424,12 +424,7 @@ public sealed partial class Checker
                         }
                         else
                         {
-                            if (DerivedClassArm(type, rest))
-                            {
-                                NotSupported(arm.Line, $"an arm of `{type}`, a class derived from a case the call can return, which tests the instance's class at run time (O5, K6)");
-                                armWrong = true;
-                            }
-                            else if (!rest.Any(c => IsCaseOf(type, c)))
+                            if (!rest.Any(c => IsCaseOf(type, c)))
                             {
                                 Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case the call can return beside its success (O5, T1)");
                                 armWrong = true;
