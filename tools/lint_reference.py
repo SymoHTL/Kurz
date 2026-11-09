@@ -38,6 +38,12 @@ Fails on:
   note saying why none can, such a note on a compile-error row or on a row that a case does expect, or a rule that no case expecting the id
   names; a row under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
   any other head or outside a table, since its id would go unchecked;
+- a pointer to another clause by its place in a chapter or in the record, outside a code block:
+  "the", "a" or "an", then at most "assumed" or "decided", then "clause", "reading", "sentence" or
+  "statement", then "before this one" or "after this one", read whole where a line break splits it,
+  which a merge that keeps every word of both sides turns to another clause where it puts one
+  between them (knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md); a
+  pointer by place in other words is not read;
 - a design record that cannot be read, said once instead of as every section it would lack;
 - a chapter or a corpus file that cannot be read, missing or not UTF-8, named with what went unchecked (its
   rules, or the case); the rest of the tree is still checked, so a case that names a rule of an unread
@@ -65,6 +71,9 @@ ERROR_HEAD = "| id | rules | meaning |"  # an error table starts with this line,
 SEPARATOR = re.compile(r"\|(?:[ \t]*:?-+:?[ \t]*\|)+")
 # a fence the lint would not see: Markdown also opens a block with a fence indented up to three spaces, or of tildes
 LOOKALIKE = re.compile(r" {1,3}```| {0,3}~~~")
+# a pointer to another clause by its place: on 2026-11-08 a take of main that kept every word of both sides left pull request 387's
+# "(the assumed clause before this one)" naming the clause pull request 378 had put between it and the clause it meant
+POINTER = re.compile(r"\b(?:the|an?)\s+(?:(?:assumed|decided)\s+)?(?:clause|reading|sentence|statement)\s+(?:before|after)\s+this\s+one\b", re.I)
 
 
 def rule_heading(line):
@@ -97,10 +106,27 @@ def parse_case(text):
             "line": int(m.group(4) or m.group(6) or 0), "rules": rest[0][len("// rules: "):].split(", "), "body": body}, None
 
 
+def pointers(name, text):
+    """The pointers to another clause by its place in a chapter or the record, each with its line, as errors. A line inside a
+    code block is content, and is not read; a pointer that a line break splits is read whole."""
+    lines, fence = text.split("\n"), False
+    for n, line in enumerate(lines):
+        if line.startswith("```"):
+            fence = not fence
+            lines[n] = ""
+        elif fence:
+            lines[n] = ""
+    prose = "\n".join(lines)
+    return [f"{name}:{prose.count(chr(10), 0, m.start()) + 1}: a pointer by position, \"{' '.join(m.group(0).split())}\": name the clause it "
+            "means by its date and comment, its section or its rule, since a merge can put another clause between them"
+            for m in POINTER.finditer(prose)]
+
+
 def read_tree(root):
     """({chapter path: text}, {corpus path relative to corpus/: text}, the design record's section numbers and texts,
     or None when the record cannot be read, [what could not be read: a chapter, a case or the record, each
-    named with its reason]). A file that is not UTF-8, or cannot be opened, is left out and named, never a crash."""
+    named with its reason], the record's text or None). A file that is not UTF-8, or cannot be opened, is left out and
+    named, never a crash."""
     chapters, cases, unread = {}, {}, []
     ref = os.path.join(root, "reference")
     for name in sorted(os.listdir(ref)) if os.path.isdir(ref) else []:
@@ -121,14 +147,15 @@ def read_tree(root):
     try:
         record = kit.read(os.path.join(root, "kurz-design.md"))
     except (OSError, UnicodeDecodeError) as e:  # a record that is not UTF-8 is unread, like one that is not there
-        return chapters, cases, None, unread + [f"kurz-design.md cannot be read ({type(e).__name__}: {e}): no rule's sections were checked"]
+        return chapters, cases, None, unread + [f"kurz-design.md cannot be read ({type(e).__name__}: {e}): no rule's sections were checked"], None
     parts = re.split(r"(?m)^## (\d+)\. .*$", record)
-    return chapters, cases, dict(zip(parts[1::2], parts[2::2])), unread
+    return chapters, cases, dict(zip(parts[1::2], parts[2::2])), unread, record
 
 
 def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
-    chapters, files, sections, unread = read_tree(root)
+    chapters, files, sections, unread, record = read_tree(root)
     errors, rules, links, error_ids, no_case = list(unread), {}, [], {}, set()
+    errors += pointers("kurz-design.md", record) if record is not None else []
     parsed = {}
     for path, text in files.items():
         parsed[path], why = parse_case(text)
@@ -136,6 +163,7 @@ def lint(root, rules_floor=RULES_FLOOR, cases_floor=CASES_FLOOR):
             errors.append(f"corpus/{path}: {why}")
 
     for chapter, text in chapters.items():
+        errors += pointers(chapter, text)
         lines, current, fence, covered, shown, in_table = text.split("\n"), None, None, set(), set(), False
         table = "error"  # rows before the run-time heading are compile errors, which a case expects with `error`
         for n, line in enumerate(lines):
@@ -278,7 +306,7 @@ def sync(root, say=print):
     could not be removed is named in the refusal, to be removed by hand. A chapter, a case or the
     record that cannot be read refuses the run before anything is written: the record is not used
     here, but an unread file is never passed over. Returns the chapters written."""
-    chapters, files, _, unread = read_tree(root)
+    chapters, files, _, unread, _ = read_tree(root)
     if unread:
         raise kit.Refused("; ".join(unread) + "; nothing was written")
     new = {}
@@ -465,6 +493,15 @@ def cases_in(base):
             tree(edit(ref, "|---|---|---|\n| `assign-immutable` | V2 |", "| :--- | --- | ---: |\n| `assign-immutable` | V2 |")), None),
         "a tilde line or an indented fence inside a block is content, not a lookalike fence": (
             tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n```text\n~~~\n  ```\n```")), None),
+        "a pointer by position in a chapter is refused": (tree(edit(ref, "Nobody chose.", "Nobody chose, as the reading before this one says.")),
+                                                         "02-variables.md:26: a pointer by position, \"the reading before this one\""),
+        "a pointer by position that a line break splits is refused whole": (
+            tree(edit(ref, "Nobody chose.", "Nobody chose, as the assumed reading\nafter this one says.")),
+            "a pointer by position, \"the assumed reading after this one\""),
+        "a pointer by position in the record is refused": (tree(edit("kurz-design.md", "- fast\n", "- fast, as the statement after this one says\n")),
+                                                           "kurz-design.md:5: a pointer by position"),
+        "a pointer by position inside a code block is content, not a pointer": (
+            tree(edit(ref, "Nobody chose.", "Nobody chose.\n\n```text\nthe clause before this one\n```")), None),
         "a code block right after an error table ends the table: a later table's head is no error row": (
             tree(edit(ref, "| `assign-immutable` | V2 | a second assignment |\n\n## Run-time errors",
                       "| `assign-immutable` | V2 | a second assignment |\n```text\nx\n```\n| a | b |\n|---|---|\n| x | y |\n\n## Run-time errors")),
