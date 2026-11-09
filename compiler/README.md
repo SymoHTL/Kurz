@@ -768,8 +768,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   address of the instance's block and the table of the instance's class, as Rust lays out
   `Rc<dyn Trait>`, while the reference to a class nothing derives from, a derived one among them, stays
   the address alone, and no block holds a table; the table, one constant per class, holds the release of
-  an instance, the release of its weak count, its `==` and its hash where it compares by content, then its
-  `virtual` methods, the base's first, each `override` in the slot of the method it overrides (K7); a call
+  an instance, the release of its weak count, its `==` and its hash where it compares by content, the
+  table of its base, null for a class with none, then its `virtual` methods, the base's first, each `override` in the slot of the method it overrides, and the
+  address of its table for each interface it names that its base does not name (K7); a call
   of a `virtual` method through a reference that holds a table calls the slot of the instance's class, and
   every other call is direct; a method of a class with a base or a derived class takes `this` as that
   pair, and an instance given where its base is expected takes the table of its class; the construction
@@ -788,7 +789,22 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   function per class that gives true for one address before it reads a field; and through references
   that hold a table, false where the two tables differ, as D15 says of `data` values, and else that
   function of the instance's class, from its slot, as a map's key of such a type is hashed by its
-  class's slot (K13). The
+  class's slot (K13); a value of an interface (K6), the pair of the address of the instance's block and
+  its class's table for the interface, as Rust lays out `Rc<dyn Trait>`, its `null` the address 0 with no
+  table (N1): that table, one constant per class and interface, holds the class's release, the release
+  of its weak count, its `==` and its hash where `==` or a key reads them through the interface, the
+  class's own table where the class has a base or a derived class, else null, then a
+  slot for each method of the interface in its order, the class's method, or for a class with a base or
+  a derived class a function that makes the pair `this` is from the address; an instance given where an
+  interface is expected takes that table, a constant where its static type is a class nothing derives
+  from, and else read from the table the reference holds, in the slot of the interface; a call through an interface calls its slot with the address,
+  the text of such a value is its `Text()` through its slot (A10), and `==` and a key compare and hash it
+  as through a reference that holds a table (K13); an arm of a class over a value of an interface or of a
+  class some class derives from tests the class of the instance (C4, O5, K6): a comparison of the table
+  for the interface with the arm's class's where that class has no base and no derived class, else of the
+  table of the instance's class, read from the table for the interface, with the arm's class's where
+  nothing derives from it, and else a walk from it through the tables of its bases, and the arm's name
+  holds the address, or the pair where something derives from the arm's class. The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
@@ -921,7 +937,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   each slot, padded to a multiple of 16 bytes, then the slots, each the hash of its key, 8 bytes, the
   key and the value, laid out as a `data` value of the three, for a key of a kind whose hash can read
   more than one word (a string, a time of 128 bits, a `data` value, a list, a union, an instance that
-  does not compare by identity: by its content, K4, or by the fields it names, K5), as .NET's
+  does not compare by identity: by its content, K4, or by the fields it names, K5, a value of an
+  interface, K6, hashed as its instance's class hashes), as .NET's
   `Dictionary` keeps each entry's hash code, and the key and the value alone for a key of one word (an
   integer, a `bool`, a `char`, an enum's value, a time of 64 bits, a `double`, a `float`, an instance
   that compares by identity, hashed by its address), whose growth hashes every key again, as
@@ -1608,6 +1625,24 @@ ask about it.
   that brought it, whose description has the rest); the
   reference to a class nothing derives from stays the address alone *(assumed)*. Pinned by `EmitterTests`
   for the layout and by the inheritance programs of `ListTests`.
+- K6 and K7 with K13: a value of an interface is the pair of the address and the class's table for the
+  interface, the layout of the reference to a class some class derives from (above), and a call through it
+  is one indirect call through the table, as a `virtual` call is, where the class has no base and no
+  derived class; for a class with either, the slot holds a function that makes the pair `this` is and
+  calls the method directly, one call more, which nothing measured *(assumed)*; `==` on two values of an
+  interface, and a map's key of an
+  interface's type, read the classes that implement it as K13 reads a base's derived classes, false where
+  the two classes differ *(assumed: K13 names a base and its derived classes, and no rule names an
+  interface)*; a field of an interface's type reaches every class of the program that implements it,
+  as R8 says of a `mut` one, and one without `mut` too, as R2 and R4 read a base's type *(assumed)*; and an
+  arm of a class over a value of an interface or of a base class (C4) tests the class of the instance
+  through the link each table holds, its base's in a class's table and the class's own in its table for an
+  interface, as the CLR's method table holds its parent's and C#'s `is` walks them, and not through a list
+  of the classes derived from the arm's, which a closed program would allow, since each table then holds
+  one word more and no table the program would not name otherwise is laid out but a base's; the walk is a
+  load and a comparison per base, which nothing measured *(assumed: the owner chose the test, #110, and
+  not its mechanism)*. Pinned by `CheckerTests`, by `EmitterTests` for the layout and by the interface and
+  class-arm programs of `ListTests`.
 
 ## What the compiler says about a program
 
@@ -1797,9 +1832,10 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K20, of K6 the base class, for a class with its primary constructor or none,
-its base class in both forms, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
-flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
+M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none,
+its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
+and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
+flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
@@ -1809,7 +1845,7 @@ types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, 
 `HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, and W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
-these chapters reach: A1 to A9, A10 for a type parameter, A11, A12, A14 and A15, of a class's `Text()` the
+these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11, A12, A14 and A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1857,24 +1893,27 @@ comes from the construct (E1), but where the construct holds an error of its own
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
-which is the complete one: an `interface` or a `flags` type and a value of one (chapter 7, D13,
-D17, D19, and the A-rules of their text); of a class, type parameters (T19), an interface among its
-bases (K6, K10), a constructor or a type declared in its body (K7, K14), a field there without a written type
+which is the complete one: a `flags` type and a value of one (D13, D17, D19, and the A-rules of
+their text); of an interface, type parameters (T19, K6), and of a method of one a modifier, type
+parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
+of which leaves the interface and every value of it unread; `weak` before an interface, which R3 and R5
+do not name, and the name of an interface where a value, a member or a call stands (K6); of a class,
+type parameters (T19), a constructor or a type declared in its body (K7, K14), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
 other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type
 parameters of its own (K7, section 4) and a property that is `static`, `virtual`, `override` or `prot`, which section 14
 leaves open (K7), each of which leaves the class, every class derived from it and every value of them unread, and of a
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
-(K6, K7, K18), a type after `:` that is no class or a class of `std/` the prelude brings (W1), a second base class and a base that closes a cycle of bases
-(K6), the arguments of a base for a class without a primary constructor, which a constructor in its body
+(K6, K7, K18), a type after `:` that is neither a class nor an interface, or a class of `std/` the prelude brings (W1), a
+second base class, a base class after an interface, an interface named twice or with arguments, and a base that closes a cycle of
+bases (K6, K7, K10), the arguments of a base for a class without a primary constructor, which a constructor in its body
 passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
 parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
 `override` on one method, `virtual` on a private method, and either on a `static` method, which has no
 instance to dispatch on (K7, F9), a `prot` method called through a value
-of a class that is not the calling class or derived from it (F9), an arm of a `match` or of a postfix `else`
-of a class derived from a case, which tests the instance's class at run time (C4, O5, K6), two names in a `for` loop
+of a class that is not the calling class or derived from it (F9), two names in a `for` loop
 over an instance of a class whose `Count` is a field or a property of an `int` and whose `NameAt` and `ValueAt` are methods that the
 call with one `int` fits, weighed as a call is, with a result, each of the instance and visible at the loop (F9), the walk of a class
 that section 12 decides and section 4
@@ -1888,7 +1927,7 @@ property read after `?.` (K7, N5) or after `&`, where the checker reads a field 
 method on a path that goes on after such a field, `p.Pos.Items.Add(1)`, the field named alone inside a
 method, `Pos.Items.Add(1)`, among them (K2, M4, M5), an `equal by` that names a field that holds a
 `weak` reference, which the record makes `equal-by-weak` (K8, R3), and a key type that holds, at any depth, an instance of a class whose
-`equal by` names a `mut` field, a class derived from the key's class among them, where whether
+`equal by` names a `mut` field, a class derived from the key's class or implementing the key's interface among them, where whether
 `mutable-key` reaches it is open (K12, K13, section 14); of chapter 4, a nullable `void` and a
 nullable case of a written union, which N1 does not name (N1, D9), `?.` or `?[` to a member or an
 item of a pointer, a C function type or `void`, which section 4 does not say (N5),

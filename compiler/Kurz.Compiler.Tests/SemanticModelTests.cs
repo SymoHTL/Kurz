@@ -736,6 +736,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case TypeDeclaration { Kind: TypeDeclarationKind.Enum }:
                     break; // D12: its values are constants, which the expressions that name them carry
+                case TypeDeclaration { Kind: TypeDeclarationKind.Interface }:
+                    break; // K6, K7: the signatures of its methods, which the calls through it and the classes that implement it carry
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
