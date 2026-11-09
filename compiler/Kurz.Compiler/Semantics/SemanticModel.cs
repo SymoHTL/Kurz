@@ -176,6 +176,9 @@ public enum CallKind
     /// <summary>A file's or a stream's <c>Consume(n)</c> (S24).</summary>
     FileConsume,
 
+    /// <summary>A file's or a stream's <c>Seek(offset)</c> (S27).</summary>
+    FileSeek,
+
     /// <summary>A file's or a stream's <c>Write(bytes)</c> (S4, S9).</summary>
     FileWrite,
 

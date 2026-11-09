@@ -1,0 +1,47 @@
+// expect: output
+// | 012
+// | 123
+// | 789
+// | 0
+// | 0123456789
+// rules: S27
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a read of three bytes leaves the rest of the file in the handle's buffer: a seek drops it, so that the read after it starts at the
+// offset, before those bytes or past them, and a read past the end of the file gives no bytes
+void | IoError Run() {
+    File.WriteAll("seek-read.txt", "0123456789".Bytes)
+    f = File.Open("seek-read.txt")
+    File.Delete("seek-read.txt")
+    mut first = Bytes()
+    f.Read(mut first, 3)
+    print(Text(first))
+    f.Seek(1)
+    mut back = Bytes()
+    f.Read(mut back, 3)
+    print(Text(back))
+    long tail = 10 - 3
+    f.Seek(tail)
+    mut ahead = Bytes()
+    f.Read(mut ahead, 3)
+    print(Text(ahead))
+    f.Seek(100)
+    mut past = Bytes()
+    n = f.Read(mut past, 3)
+    print(n)
+    f.Seek(0)
+    mut whole = Bytes()
+    f.Read(mut whole, 100)
+    print(Text(whole))
+}
+
+Run() else {
+    IoError e => print(e)
+}

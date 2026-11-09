@@ -1042,7 +1042,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Seek`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, each of a stream's `ShutdownWrite` and `SetNoDelay`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
@@ -1050,7 +1050,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Fill`, `Consume`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  freed with the block; each `Read`, `Fill`, `Consume`, `Seek`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
   compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
   takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
   second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
@@ -1069,6 +1069,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   left where it is, and where it holds none fills it as such a read does and takes all that read gave, the room in the list made for
   the bytes it appends, and a fill that finds the mark keeps none of them; `Consume` raises `index-out-of-range` for an `n` below 0
   before it enters and for one past the bytes the buffer holds under the lock, and else moves the position by `n` (S24);
+  `Seek` raises `index-out-of-range` for an offset below 0 before it enters, and under the lock calls the runtime's `Seek`, the
+  system's `lseek` from the start, whose failure leaves the buffer as it was and whose success sets its position and count to 0 (S27);
   `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
