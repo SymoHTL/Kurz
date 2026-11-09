@@ -121,10 +121,12 @@ a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run
 arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
 that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
 in the table and a subtype check per arm). An arm may name a class that implements an interface that
-is a case as well, which tests the class of the instance at run time, as C#'s `is` does; no list of the
-classes that implement an interface, or that derive from a class, is closed, so such an arm covers no
-case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
-comment 6573113786, against a compile error). An arm may also name an interface that cases of the union implement, or a class that
+is a case as well, which tests the class of the instance at run time, as C#'s `is` does; such an arm
+covers no case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
+comment 6573113786, against a compile error). It covers no case where the arms take every class of
+the program that implements the interface or derives from the class, too, as arms of those classes never
+complete a C# `switch` over the interface or the class *(assumed, §5: the owner's choice read without the
+reason its question gave, #110, comment 6567439435, that no list of those classes is closed)*. An arm may also name an interface that cases of the union implement, or a class that
 cases derive from, directly or through a class between: it covers exactly those cases, which each case's class decides while the
 program compiles, takes them by the case the value holds, with no test of the instance's class at run time, and counts for O8 (§5, the owner, 2026-11-09, #408, comments 6737367326 and 6737634153, against the
 refusal as built). Such an arm is `unreachable-arm` only when every case it covers is taken by the arms above it, as C# reads a
