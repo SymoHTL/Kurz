@@ -2041,7 +2041,8 @@ takes the constant's default, and with none is `cannot-infer` (T27), E1)* *(assu
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
-count the call may write, while a call that writes none is read in the assumed clause below. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+count the call may write, while a call that writes none infers them or takes their defaults, and is `cannot-infer` (T27) where it can do neither, as C# infers them (CS0411)
+(§4, the owner, 2026-11-09, "Confirm 'at least one'"). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
 `enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#
