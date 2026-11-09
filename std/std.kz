@@ -6441,7 +6441,7 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 // `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
 // expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
-// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
+// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again, but for the refusal of `ReadAll` for its own `max`, after which the body is still readable (W6).
 pub class HttpBody {
     mut TcpStream? stream = null
     mut long remaining = 0

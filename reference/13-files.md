@@ -1854,7 +1854,9 @@ print(Process(4).Environment)
 last written, `timestamp | IoError` (§12, the owner, 2026-10-30, "`Timestamp.Now`, as C#" and
 "`timestamp.Now`"). The clock goes back where the system's clock is set back; a directory gives its
 time; and a time the 64 bits of a `timestamp` do not hold is an `IoError` of the kind `InvalidData`.
-*(assumed, §12: the clock set back, the directory and the time out of range)*
+*(assumed, §12: the clock set back, the directory and the time out of range)* A timestamp of a
+program's own count is `timestamp.FromUnixSeconds(n)` or `timestamp.FromUnixMilliseconds(n)`, which
+read no clock (T38).
 
 Case: [system/clock.kz](../corpus/system/clock.kz)
 ```kurz

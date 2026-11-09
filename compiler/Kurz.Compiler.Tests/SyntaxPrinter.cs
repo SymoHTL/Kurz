@@ -35,7 +35,7 @@ internal static class SyntaxPrinter
         ExternBlock e => $"(extern{(e.Library is null ? "" : " in " + Quote(e.Library))} {{{string.Join(" ", e.Functions.Select(CFunction))}}})",
         FunctionDeclaration f => Function(f),
         FieldDeclaration f => $"(field {Mods(f.Modifiers)}{Type(f.Type)}{f.Name}{(f.Value is null ? "" : " " + Print(f.Value))})",
-        ConstructorDeclaration c => $"(constructor {Mods(c.Modifiers)}{c.Name}({Parameters(c.Parameters)}){(c.ThisArguments is null ? "" : " this(" + Arguments(c.ThisArguments) + ")")} {Print(c.Body)})",
+        ConstructorDeclaration c => $"(constructor {Mods(c.Modifiers)}{c.Name}({Parameters(c.Parameters)}){(c.ThisArguments is null ? "" : " this(" + Arguments(c.ThisArguments) + ")")}{(c.BaseArguments is null ? "" : " base(" + Arguments(c.BaseArguments) + ")")} {Print(c.Body)})",
         TypeDeclaration t => TypeDeclaration(t),
         _ => throw new InvalidOperationException(statement.GetType().Name),
     };

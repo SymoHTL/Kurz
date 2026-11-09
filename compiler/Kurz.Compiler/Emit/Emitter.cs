@@ -204,6 +204,11 @@ public sealed partial class Emitter
                 var (symbol, name) = defaultsPending.Dequeue();
                 EmitClassDefaults(symbol, name);
             }
+            else if (constructorsPending.Count > 0)
+            {
+                var (made, name) = constructorsPending.Dequeue();
+                EmitConstructor(made, name);
+            }
             else if (lambdas.Count > 0)
             {
                 EmitLambdaFunction(lambdas.Dequeue());
@@ -636,7 +641,7 @@ public sealed partial class Emitter
                 }
 
             case AssignOrDeclare a when Model.IsImplicitField(a, out _, out var field):
-                EmitFieldAssignment(a.Value, field!.Type, () => (This(a, a.Line), ClassOfThis(a, a.Line).Symbol), field.Name); // K7
+                EmitFieldAssignment(a.Value, field!.Type, () => (This(a, a.Line), ClassOfThis(a, a.Line).Symbol), field.Name, Model.IsFieldInitialization(a)); // K7, K14
                 break;
             case AssignOrDeclare a when Model.Declares(a):
                 {

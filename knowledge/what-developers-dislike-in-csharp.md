@@ -62,7 +62,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 8. Shared collections race between threads
 
 - Evidence: "Thread-Safe collections - .NET" (https://learn.microsoft.com/en-us/dotnet/standard/collections/thread-safe/): "However, the System.Collections.Generic classes don't provide any thread synchronization; user code must provide all synchronization when items are added or removed on multiple threads concurrently."
-- Kurz: AVOIDED. §6: "An actor handles one message at a time, so there are no locks and no data races inside it." and "The region check below holds that two actors never reach the same mutable object, but for two exceptions of a server's stream that it does not see (section 12)", both exceptions resting on `std/`'s code, which the compiler does not check, with the state they share atomic.
+- Kurz: AVOIDED. §6: "An actor handles one message at a time, so there are no locks and no data races inside it." and "The region check below holds that two actors never reach the same mutable object, but for two exceptions of a server's stream that it does not see (section 12)", both exceptions resting on `std/`'s code, which the compiler does not check. The first hands the read half back, so that two actors never hold it at once. In the second, the pair's flag, the time of the body's last read and the server's end of the body are atomic, while the write half, which two actors reach, is kept to one writer at a time by the flag's handshake alone: the server waits while the reading actor's `100 Continue` is under way.
 
 ## 9. `==` and `Equals` give two answers
 
