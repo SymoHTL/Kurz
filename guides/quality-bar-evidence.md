@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-11-09
-digest: 6b4c3fa9be56cff3abca38eb854712d7fb3852bf7f8b4e76663eb1619bb1866e
+digest: 74fe046baea93de48df15c8e78fa4fa63c9ceb9d200757e9b9512f8bf4217b75
 ttl_days: 60
 metadata:
   type: reference
@@ -64,7 +64,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 159 | 154 |
 | `tools/lint_knowledge.py` | 121 | 105 |
-| `tools/lint_reference.py` | 87 | 91 |
+| `tools/lint_reference.py` | 91 | 95 |
 | `tools/merge_pr.py` | 182 | 180 |
 | `tools/pr_gates.py` | 146 | 159 |
 | `tools/quality_evidence.py` | 46 | 52 |
@@ -72,7 +72,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/review/review.py` | 314 | 296 |
 | `tools/tree_gate.py` | 137 | 116 |
 | `tools/unicode_tables.py` | 35 | 23 |
-| **total** | 1372 | 1311 |
+| **total** | 1376 | 1315 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -80,13 +80,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 91 |
+| Entries in INDEX.md | 92 |
 | tagged (untagged) | 2 |
 | tagged HARD | 33 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 16 |
 | tagged RECIPE | 9 |
-| tagged TRAP | 43 |
+| tagged TRAP | 44 |
 | Review rule sections | 12 |
 | Review rules | 71 |
 <!-- /generated:store -->
@@ -145,10 +145,10 @@ fork" says write access to the head branch is enough, which a fork gives).
 | Forge | Count |
 |---|---|
 | Pull requests opened by a writer, or merged | 372 |
-| Pull requests merged | 346 |
-| Merged over red, with a recorded waiver | 192 |
-| Review findings posted: high | 326 |
-| Review findings posted: medium | 4629 |
-| Review findings posted: low | 4676 |
+| Pull requests merged | 347 |
+| Merged over red, with a recorded waiver | 193 |
+| Review findings posted: high | 327 |
+| Review findings posted: medium | 4648 |
+| Review findings posted: low | 4687 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->
