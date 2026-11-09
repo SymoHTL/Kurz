@@ -249,9 +249,9 @@ type parameter, the constant its call gave (T35), so that its condition is read 
 constant, which C# also reads, Kurz does not have.)* A branch that is never reached adds nothing to
 what holds after it. *(assumed, §4: a `break` or a `continue` that is never reached, after a statement
 whose end cannot be reached or in a branch that is never reached, adds nothing to what holds after its
-loop or at its loop's head. A branch that is never reached is checked as any other code, with what
+loop or at its loop's head.)* A branch that is never reached is checked as any other code, with what
 held before the statement, as Rust checks code it never reaches, so that a use of a nullable value
-there is `nullable-unchecked`, where C# reports nothing; which reading holds is open, §14.)* Where
+there is `nullable-unchecked`, where C# reports nothing (§4, the owner, 2026-11-09, "Check as any code"). Where
 the analysis proves nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
