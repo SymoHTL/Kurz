@@ -259,16 +259,28 @@ unread by every actor keeps the close of such a body unread at its return, and e
 body that no read has reached counts the grace from that return (below) (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q10, and 2026-11-06, issue 39, comment 6682072588). The
 write is made by `std/`'s code of that pair at the first read, in the actor that reads, under its
-flag of whether a response has begun, since the server is inside the handler's call (§12, the owner,
-2026-11-05, issue 156, comment 6669908509, Q12). The flag is taken by an atomic test-and-set before
-either write, the server's head of a response or that `100 Continue`, the second of section 6's
-exceptions to its region check (§6, §12, the owner, 2026-11-06, issue 39, comment 6682072588)
-*(assumed, §6, §12: the two sides of the test-and-set)*. The response is
+flag (§6), since the server is inside the handler's call (§12, the owner, 2026-11-05, issue 156,
+comment 6669908509, Q12). The flag is taken by an atomic test-and-set before either write, the
+server's head of a response or that `100 Continue`, within the second of section 6's exceptions to
+its region check (§6, §12, the owner, 2026-11-06, issue 39, comment 6682072588), and it holds one of
+four states, free, `100 Continue` under way, `100 Continue` written and a response begun: the
+reading actor sets it to written when its write ends, a server that finds the write under way waits
+for written, at most one write of 25 bytes, and then writes its head, and a written `100 Continue`
+is no begun response, so that a `408` or a `413` can still go out after it (§6, §12, the owner,
+2026-11-07, issue 39, comment 6706852249) *(assumed, §6, §12: that the reading actor writes nothing
+when it finds a response begun)*. The exception covers the pair's state as a whole, the flag, the
+time of the body's last read and the server's end of the body, each part atomic and shared only
+between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249).
+The response is
 written when the handler returns, while the moved body stays the other actor's to read to its end:
-every read that keeps to the body's rate gives the body's bytes, then `0` at its end. A body left
+every read that keeps to the body's rate gives the body's bytes, then `0` at its end, but for the
+body of a request that expects `100-continue` that no actor had read at the return, whose connection
+closes there (above) and whose next read gives `request timed out`, as a body the server ended gives
+it (below) (§12) *(assumed, §12: that exception's read)*. A body left
 unread is drained when its last owner drops it, and the connection reads its next request only after
 that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306). A body
-that the server has ended (below) drains nothing at its drop, and its connection is closed and not
+that the server has ended (below), and one that its own read ended, past `MaxRequestBodySize` or
+under the body's rate (below), drains nothing at its drop, and its connection is closed and not
 read again (§12) *(assumed, §12: that exception)*.
 
 The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
@@ -289,7 +301,9 @@ begun, as Kestrel's `BadHttpRequestException` of 413 is (§12) *(assumed, §12: 
 corrects the reading said back on issue 156, comment 6644555381, item 2, as the owner's choice of
 2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. For a moved body
 that read ends the body and is reported back to the server at the body's end, which sends the `413`
-while no response has begun and closes the connection (§12) *(assumed, §12: that path)*. A read
+while no response has begun and closes the connection, a report made during the handler's call taken
+once the call has returned, as for the `408` (below), the `413` then sent in place of the handler's
+response, which is not written (§12) *(assumed, §12: that path)*. A read
 of a moved body that falls under the body's rate closes the connection, and the `408` is sent only
 while no response has begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error
 `request timed out` being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment
@@ -304,23 +318,30 @@ response the handler returns is not written, with no error to any program (§12)
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
 owner, 2026-11-05, issue 156, comment 6666386552, Q8). Only the server can close without a read:
-while the read half is away and the handler's call has returned, the server times the grace from
-the body's last read, and at its end
+while the read half is away and the handler's call has returned, the server times the grace from the
+body's last read, or from the return for a moved body that no read has reached, other than the body
+of a request that expects `100-continue`, whose connection Q10's close ends at the return (above),
+and at its end
 it ends the body through the halves' pair of types, closes the connection and serves the next one,
 so that the body's next read gives `request timed out` and its drop drains nothing (§12)
 *(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
 runs, the server times nothing: it times the grace once the call has returned, and a read that
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
 2026-11-05, issue 156, comment 6669908509), from the time of the body's last read, which the pair
-holds (§12) *(assumed, §12: that check at the read, beside the server's timing after the return)*.
+holds in its shared state (§6, §12) *(assumed, §12: that check at the read, beside the server's
+timing after the return)*.
 The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
-(§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), so that a first read during
+(§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), with P2 (the grace from the
+return, comment 6680351318) for every other moved body than the body of a request that expects
+`100-continue`, which keeps Q10's close at the return, above (§12, the owner, 2026-11-06, issue 39,
+comment 6682072588), so that a first read during
 the call is never past the grace for a body that no read had reached (§12) *(assumed, §12: that
 reading)*. The time between
-reads counts in the body's rate as the time a read waits does, and a
-time past the grace since the last read ends the body at once, the first of the two to end the
-body ending it, the grace being that of the body's rate in `HttpLimits`, which Q8's answer takes as
+reads counts in the body's rate as the time a read waits does, and a time past the grace since the
+last read ends the body at the first of a read that finds it passed and the server's timing once the
+handler's call has returned, the first of the two measures to end the body ending it, the grace
+being that of the body's rate in `HttpLimits`, which Q8's answer takes as
 the longest time since the body's last read too; a body that the handler reads itself counts only
 the time a read waits, since Q8 was asked of a moved body, and a body the handler reads and then
 moves is a moved body, whose last read is the handler's until another actor reads it (§12)
@@ -328,8 +349,8 @@ moves is a moved body, whose last read is the handler's until another actor read
 its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
 wait or a deadline the scheduler reads at each switch, while the time between reads is the
-server's once the handler's call has returned, timed from the body's last read, and during the call
-a read checks it itself (above) (§12).
+server's once the handler's call has returned, timed as the server times the grace, and during the
+call a read checks it itself (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
@@ -350,7 +371,10 @@ shows only when the code runs (§12) *(assumed, §12: that cost)*. The call's bo
 written `move`, since the call takes the body and reads it to its end when it sends it, so that the
 call writes `move` at the body, as section 6 asks of a call (§6, §12) *(assumed, §12: the
 parameter's word)*; a call that fails before it sends a byte, `request has two bodies` among them,
-drops the body, so that a retry makes a new one (§12) *(assumed, §12: that reading)*. An
+drops the body, so that a retry makes a new one from its file or its chunks, while a relayed body of
+a server's request, which cannot be sent again, is drained at that drop as at any drop of its last
+owner (above), and a call that fails after it sent a byte drops the body too (§12) *(assumed, §12:
+those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
 
@@ -358,7 +382,7 @@ No case: the compiler reads no `copy` and no `move`, at a send, on a parameter o
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
 server or client of §12, which the halves of the stream, the first read's `100 Continue` and its
-test-and-set, the rate
+test-and-set on a flag of four states, the pair's shared state, the rate
 between reads, the count of a body without a declared length, the two bodies of a client's call
 and the makers of an `HttpBody` need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
