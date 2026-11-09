@@ -38,10 +38,12 @@ Fails on:
   note saying why none can, such a note on a compile-error row or on a row that a case does expect, or a rule that no case expecting the id
   names; a row under a `| id | rules | meaning |` head that does not read as one; a row that reads as one under
   any other head or outside a table, since its id would go unchecked;
-- a pointer to another clause by its place in a chapter or in the record, outside a code block: a
-  clause, reading, sentence or statement "before this one" or "after this one", which a merge that
-  keeps every word of both sides turns to another clause where it puts one between them
-  (knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md);
+- a pointer to another clause by its place in a chapter or in the record, outside a code block:
+  "the", "a" or "an", then at most "assumed" or "decided", then "clause", "reading", "sentence" or
+  "statement", then "before this one" or "after this one", read whole where a line break splits it,
+  which a merge that keeps every word of both sides turns to another clause where it puts one
+  between them (knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md); a
+  pointer by place in other words is not read;
 - a design record that cannot be read, said once instead of as every section it would lack;
 - a chapter or a corpus file that cannot be read, missing or not UTF-8, named with what went unchecked (its
   rules, or the case); the rest of the tree is still checked, so a case that names a rule of an unread

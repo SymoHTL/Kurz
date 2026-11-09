@@ -29,11 +29,15 @@ finding, beside a parenthesis of 401 that the decided sentence contradicted.
 
 - A clause names the clause it stands on by what does not move in a merge: its date and comment ("the
   owner's answer of 2026-11-06, comment 6683085368 on issue 39"), its section, or the rule's id.
-- `tools/lint_reference.py` refuses, outside a code block, a clause, reading, sentence or statement
-  "before this one" or "after this one" in `kurz-design.md` and `reference/*.md`, a pointer that a
-  line break splits among them. Gate: `reference`.
-- The lint does not read the wider words of place, "the sentence above", "the reading below", "the
-  readings above", "the statement after": about twelve stand in the record and the reference, and none
-  has broken. A take whose conflict sits beside one of them reads it by hand: `judgment step`.
+- `tools/lint_reference.py` refuses, outside a code block in `kurz-design.md` and `reference/*.md`,
+  "the", "a" or "an", then at most "assumed" or "decided", then "clause", "reading", "sentence" or
+  "statement", then "before this one" or "after this one", and it reads such a pointer whole where a
+  line break splits it. Gate: `reference`.
+- The lint reads no other pointer by place: other words before the noun ("the proposed clause before
+  this one", "the owner's sentence before this one"), a plural, and the wider words of place, "the
+  sentence above", "the reading below", "the readings above", "the statement after". On 2026-11-09
+  the record and the reference held 11 of the wider words, counted by
+  `grep -oiE "\b(sentence|reading|statement|clause)s? (above|below)\b" kurz-design.md reference/*.md | wc -l`.
+  A take whose conflict sits beside such a pointer reads it by hand: `judgment step`.
 - The kin of this trap is [a merge of main with every word kept can fail a test](a-merge-of-main-with-every-word-kept-can-fail-a-test.md):
   every word kept keeps neither every test nor every meaning.

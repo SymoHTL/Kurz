@@ -351,9 +351,11 @@ Gate: review rule "rules for sessions".
   387's "(the assumed clause before this one)", in the record and in T33, naming the clause pull
   request 378 had put between it and the clause it meant
   ([knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md](knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md)).
-  Gate: `reference` for a clause, reading, sentence or statement "before this one" or "after this
-  one" in the record and the reference; the wider words of place, "above" and "below", are a
-  `judgment step`.
+  Gate: `reference` for "the", "a" or "an", then at most "assumed" or "decided", then "clause",
+  "reading", "sentence" or "statement", then "before this one" or "after this one", in the record
+  and the reference. A pointer by place in other words is a `judgment step`: other words before
+  the noun ("the proposed clause", "the owner's sentence"), a plural, and the wider words of place,
+  "above" and "below".
 - **No case stands on an open rule**: it would bake in a pick nobody made. A rule that can have
   no case says why in a `No case:` line. Gate: `reference`.
 - **An error a case expects has an id in the error table** (`reference/12-errors.md`), and the
@@ -668,7 +670,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the case tables of X3 are what the pinned version of the Unicode Character Database gives (`unicode-tables`) | that the pinned version is still the one Rust's stable release pins (#143) |
-| the reference and the corpus agree in shape, and no clause of the record or the reference names another "before this one" or "after this one" (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
+| the reference and the corpus agree in shape, and no clause of the record or the reference names another as "the clause before this one" or "the reading after this one" does, with at most "assumed" or "decided" before the noun (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`); a pointer by place in other words, "above" and "below" among them (`judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |
