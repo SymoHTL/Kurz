@@ -2342,7 +2342,7 @@ pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
 
 // The system's `TCP_NODELAY` (1), at the level `IPPROTO_TCP` (6), of the socket `fd` set to `on`, so that a small write goes out at
 // once and not after the acknowledgement of the one before, which std/'s writer of a streamed response sets (W11), as Kestrel sets it
-// on every connection: 0, or the failure, `ENOMEM` (12) where the thread's page cannot be mapped.
+// on every connection: 0, or the system's failure as it gives it, or `ENOMEM` (12) where the thread's page cannot be mapped.
 pub long SetNoDelay(int fd, bool on) {
     mut long result = -12
     raw {

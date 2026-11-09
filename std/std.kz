@@ -4133,7 +4133,8 @@ ulong FiveDigits(int word) => match word {
 // has room for, a power of two from 8, 4 bytes each, the two keys
 // of its hash, 8 bytes each, the count of slots without an entry that entries can still take before the
 // block grows, 4 bytes, the hash it takes, 4 bytes, 0 for the fast hash and 1 for SipHash-1-3 under its
-// keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), and 4 bytes unused,
+// keys (`MapHash`), whether an insert's probe passed the bound, 4 bytes (`MapEmpty`), the count of the
+// loops over a map and the texts of a map that hold the block, 4 bytes (`MapWalk`),
 // from its 48th byte a control byte for each slot, padded to a
 // multiple of 16 bytes, and after them the slots, each `entry` bytes, as the emitted code lays out an
 // entry: the hash of its key, 8 bytes, then the key and the value, for a key of a kind the emitter's
@@ -4259,6 +4260,7 @@ byte* MapBlock(long room, long entry, ulong key0, ulong key1, mut long asked) {
             *Ptr<int>(p + 32) = int(MapCapacity(room))
             *Ptr<int>(p + 36) = 0
             *Ptr<int>(p + 40) = 0
+            *Ptr<int>(p + 44) = 0
             mut long i = 0
             while i < room {
                 p[48 + i] = 255
@@ -4324,6 +4326,7 @@ pub byte* MapCopy(byte* block, long entry, mut long asked) {
                 i = i + 1
             }
 
+            *Ptr<int>(p + 44) = 0
             *Ptr<long>(block) = *Ptr<long>(block) - 1
         }
     }
@@ -4530,6 +4533,131 @@ pub bool MapTripped(byte* block) {
     }
 
     return tripped
+}
+
+// One loop over a map more (`change` 1) or less (-1) holds the block, nothing for a map that holds none:
+// a loop walks the block's slots by their index, so that a lookup inside it rehashes no block it holds
+// (`MapLongLookup`). A loop counts itself where it starts and lets go where it ends: at its end, a `break`,
+// a `return` or a case propagated out of its body. A write inside it finds the block shared, since the
+// loop holds it with a count of its own, and copies it first, the copy counting no loop (`MapCopy`). The
+// text of a map counts itself so while it walks the block, since a class's `Text()` it calls for a key or
+// a value can look a key up in a map that holds the block.
+pub void MapWalk(byte* block, int change) {
+    raw {
+        if block != null {
+            *Ptr<int>(block + 44) = *Ptr<int>(block + 44) + change
+        }
+    }
+}
+
+// For a lookup whose probe passed more than 512 slots, 65 groups of 8 without a slot of 255: whether the
+// block rehashes in place onto SipHash-1-3, which it does where it is still on the fast hash and no loop
+// over a map and no text of a map holds it (section 4, the owner, 2026-11-02, "lookups count too"); the
+// block is then marked as on SipHash-1-3, so that `MapHash` hashes under its keys, and the emitted code
+// moves the entries under their new hashes (`MapRehashMark`, `MapRehashPlace`).
+pub bool MapLongLookup(byte* block) {
+    mut bool rehash = false
+    raw {
+        if *Ptr<int>(block + 36) == 0 && *Ptr<int>(block + 44) == 0 {
+            *Ptr<int>(block + 36) = 1
+            rehash = true
+        }
+    }
+
+    return rehash
+}
+
+// Whether the block hashes with the fast hash, not yet with SipHash-1-3.
+pub bool MapFastHash(byte* block) {
+    mut bool fast = false
+    raw {
+        fast = *Ptr<int>(block + 36) == 0
+    }
+
+    return fast
+}
+
+// The first step of the rehash in place onto SipHash-1-3, as hashbrown's `prepare_rehash_in_place` takes
+// it: every entry's control byte made 128 and every removed entry's 255, so that 128 marks an entry not
+// yet in the slot its new hash probes first, and the slots entries can still take made the block's
+// capacity less its count, which gives the removed entries' slots to new entries. The emitted code then
+// calls `MapRehashPlace` for each slot marked 128 with the new hash of the key in it, until the slot holds
+// no entry marked 128, as hashbrown's `rehash_in_place` calls its hasher for the slot.
+pub void MapRehashMark(byte* block) {
+    long room = long(MapRoom(block))
+    byte* control = MapControl(block)
+    raw {
+        mut long i = 0
+        while i < room {
+            if control[i] == 128 {
+                control[i] = 255
+            } else if control[i] < 128 {
+                control[i] = 128
+            }
+
+            i = i + 1
+        }
+
+        *Ptr<int>(block + 32) = int(MapCapacity(room)) - MapCount(block)
+    }
+}
+
+// One step of the rehash in place, as hashbrown's `rehash_in_place` takes it, with nothing allocated: the
+// entry marked 128 in the slot `i`, of `entry` bytes, whose key's new hash is `hash`, put in the first
+// slot of its probe whose control byte is 255 or 128. It stays in its slot where that slot is in its own
+// group, takes the slot of 255 and leaves its own 255, or changes places with the entry marked 128 there,
+// which the slot `i` then holds. An entry changes places word by word where its bytes are a multiple of 8,
+// and byte by byte where they are not, as an entry of a key of one word and a value of 12 bytes is.
+pub void MapRehashPlace(byte* block, long entry, long i, ulong hash) {
+    long mask = long(MapRoom(block)) - 1
+    byte* control = MapControl(block)
+    byte* slots = MapSlots(block)
+    raw {
+        mut long at = long(hash & ulong(mask)) / 8 * 8
+        mut long step = 0
+        mut long j = -1
+        while j < 0 {
+            mut long b = 0
+            while b < 8 && j < 0 {
+                if control[at + b] >= 128 {
+                    j = at + b
+                }
+
+                b = b + 1
+            }
+
+            step = step + 8
+            at = (at + step) & mask
+        }
+
+        byte mark = byte((hash >> 56) & 127UL)
+        if j / 8 == i / 8 {
+            control[i] = mark
+        } else {
+            byte taken = control[j]
+            control[j] = mark
+            mut long w = 0
+            if entry % 8 == 0 {
+                while w < entry {
+                    ulong moved = *Ptr<ulong>(slots + i * entry + w)
+                    *Ptr<ulong>(slots + i * entry + w) = *Ptr<ulong>(slots + j * entry + w)
+                    *Ptr<ulong>(slots + j * entry + w) = moved
+                    w = w + 8
+                }
+            } else {
+                while w < entry {
+                    byte moved = slots[i * entry + w]
+                    slots[i * entry + w] = slots[j * entry + w]
+                    slots[j * entry + w] = moved
+                    w = w + 1
+                }
+            }
+
+            if taken == 255 {
+                control[i] = 255
+            }
+        }
+    }
 }
 
 // For a map whose insert's probe passed the bound: a block of its slots and its count, under SipHash-1-3
@@ -6047,6 +6175,13 @@ pub class HttpHeaders {
         values.Add(value)
     }
 
+    // A name and a value the parse of a head read and proved free of CR and LF, after every value the headers hold, with no second
+    // walk of either for them (W5, W14).
+    internal void Append(string name, string value) {
+        names.Add(name)
+        values.Add(value)
+    }
+
     // The one value of the name, as hyper's `HeaderMap::insert` keeps the entry and its key (section 12: the owner,
     // 2026-11-02, the headers' pass, Q4 (a), Q5 and Q6 (b), at their defaults): the value takes the place of the name's
     // first header, which keeps its spelling, and the name's other headers are taken out; a name the headers do not
@@ -6257,7 +6392,7 @@ pub class HttpBody {
     // Whether the request expects `100-continue` and no read has sent it, so that the client may not have sent the body (F9).
     internal bool AwaitsContinue => expects
 
-    // Whether a read of the body ran out of its time, which the server answers `408` (F9).
+    // Whether a read of the body ran out of its time, which the server answers `408` where no head of a response went out (F9).
     internal bool TimedOut => timedOut
 
     // The response's head on its way to the client, after which no read sends `100 Continue` (F9).
@@ -6610,8 +6745,8 @@ pub class HttpResponse {
     // A response with no body and no `Content-Type`.
     pub static HttpResponse Empty(int status) => Of(status, "")
 
-    // A response whose body `body` writes, as `application/octet-stream`: the writer sends the head, then calls `body` with an
-    // `HttpWriter`, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // A response whose body `body` writes, as `application/octet-stream`: the writer calls `body` with an `HttpWriter`, the head
+    // goes out with its first write, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
     // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
     pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
         if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
@@ -6636,8 +6771,9 @@ pub class HttpResponse {
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
-    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length; false where the writer wrote its
-    // own `500` in its place, after which the loop closes the connection. The responses `pending` holds go out first, in the same
+    // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length, or by the close where a function writes it; false where the writer wrote its
+    // own `500` in its place, or where the head of a body a function writes announced a close, after which the loop closes the
+    // connection. The responses `pending` holds go out first, in the same
     // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
     // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
     // writes has gone out (F9).
@@ -6746,7 +6882,12 @@ pub class HttpResponse {
             out.AddRange("Connection: close\r\n".Bytes)
         }
 
-        out.AddRange("\r\n".Bytes)
+        // the head of a body a function writes ends where it goes out, with the writer's first write
+        streamed = withBody && !bodiless && body != null
+        if !streamed {
+            out.AddRange("\r\n".Bytes)
+        }
+
         if pending.Count > 0 {
             pending.AddRange(out)
             out = pending
@@ -6764,9 +6905,9 @@ pub class HttpResponse {
         }
 
         if body != null {
-            // the head goes out with the first chunk, in one write, so that the chunk does not wait for the acknowledgement of
-            // the head, and the last chunk after the function's return, held as a response is where `hold`
-            w = HttpWriter.Make(s, out, chunked, pace, request)
+            // the head goes out with the first chunk, in one write up to 64 KiB of it, so that the chunk does not wait for the
+            // acknowledgement of the head, and the last chunk after the function's return, held as a response is where `hold`
+            w = HttpWriter.Make(s, out, chunked, pace, request, !close && headers.Get("Connection") == null)
             body(w) else {
                 IoError e => {
                     w.Abort()
@@ -6775,7 +6916,7 @@ pub class HttpResponse {
             }
 
             w.End(mut pending, hold)
-            return true
+            return !w.Closes
         }
 
         if isFile {
@@ -6820,7 +6961,9 @@ pub class HttpResponse {
 // a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
 // the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
 // write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
-// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing.
+// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing. A write that failed leaves
+// the writer failed: every later write, and the end of the body, gives its `IoError` again and writes nothing, so that the client
+// sees the body cut, never a chunk that a failed write left part of followed by another.
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -6829,13 +6972,18 @@ pub class HttpWriter {
     mut bool sent = false
     mut HttpRate? pace = null
     mut HttpBody? request = null
+    mut bool announce = false
+    mut bool closes = false
+    mut IoError? failure = null
 
-    // The writer of a body on `s`, the head `head` going out with its first write, before which a read of the body `answered` may
-    // still send `100 Continue` (F9: `internal`, the maker std/'s writer calls). The stream is set to `TCP_NODELAY`, as Kestrel sets
-    // every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
+    // The writer of a body on `s`, the head `head`, all but the empty line that ends it, going out with its first write, before which
+    // a read of the body `answered` may still send `100 Continue`; where `mayClose`, a head that goes out while that body still
+    // awaits `100 Continue` says `Connection: close` (F9: `internal`, the maker std/'s writer calls). The stream is set to
+    // `TCP_NODELAY` at each streamed response, one call of the system each, and the option stays set on it after the response, as
+    // Kestrel sets every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
     // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
     // A stream the option cannot be set on is written as it is, the option only a matter of time.
-    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered) {
+    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered, bool mayClose) {
         s.SetNoDelay(true) else {
             IoError e => {
             }
@@ -6847,16 +6995,32 @@ pub class HttpWriter {
         w.chunked = isChunked
         w.pace = rate
         w.request = answered
+        w.announce = mayClose
         return w
     }
 
-    // The head on its way: no read of the request's body sends `100 Continue` after it.
+    // Whether the head announced a close the server's loop makes after the function (F9).
+    internal bool Closes => closes
+
+    // The head on its way, once: its empty line, after a `Connection: close` where the request's body still awaits `100 Continue`,
+    // since the server's loop closes such a connection after the function; no read of the request's body sends `100 Continue` after it.
     void Started() {
+        if sent {
+            return
+        }
+
         sent = true
         b = request
         if b != null {
+            if announce && b.AwaitsContinue {
+                ahead.AddRange("Connection: close\r\n".Bytes)
+                closes = true
+            }
+
             b.Begin()
         }
+
+        ahead.AddRange("\r\n".Bytes)
     }
 
     // Writes `bytes` as one chunk of the body.
@@ -6866,13 +7030,28 @@ pub class HttpWriter {
             return IoError(IoKind.InvalidInput, 0, "writer used after its response ended")
         }
 
+        f = failure
+        if f != null {
+            return f
+        }
+
         if bytes.Count == 0 {
             return
         }
 
+        Put(s, bytes) else {
+            IoError e => {
+                failure = e
+                return e
+            }
+        }
+    }
+
+    // The head where it has not gone out, and `bytes` as one chunk.
+    void | IoError Put(TcpStream s, Bytes bytes) {
+        Started()
         mut out = ahead
         ahead = Bytes()
-        Started()
         if chunked {
             out.AddRange("{HttpHex(bytes.Count)}\r\n".Bytes)
         }
@@ -6880,8 +7059,11 @@ pub class HttpWriter {
         if bytes.Count <= 65536 {
             out.AddRange(bytes)
         } else {
-            HttpWrite(s, pace, out)
-            out = Bytes()
+            if out.Count > 0 {
+                HttpWrite(s, pace, out)
+                out = Bytes()
+            }
+
             HttpWrite(s, pace, bytes)
         }
 
@@ -6898,17 +7080,23 @@ pub class HttpWriter {
     pub void | IoError Write(string text) => Write(text.Bytes)
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
-    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response (F9).
+    // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
+    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9).
     internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
+        f = failure
+        if f != null {
+            return f
+        }
+
         s = stream
         if s == null {
             return
         }
 
+        Started()
         mut out = ahead
         ahead = Bytes()
-        Started()
         if chunked {
             out.AddRange("0\r\n\r\n".Bytes)
         }
@@ -6923,7 +7111,8 @@ pub class HttpWriter {
         }
     }
 
-    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that the client sees it cut (F9).
+    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that a client of HTTP/1.1 sees it
+    // cut, while one of HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
     internal void Abort() {
         ended = true
         s = stream
@@ -8208,13 +8397,51 @@ bool HttpHeadFollows(Bytes b, int from) {
 // What a head says of its request, for its body and the server's loop.
 data HttpHead(string Method, string Path, string Query, HttpHeaders Headers, int Minor, long Length, bool Chunked, bool Continue)
 
-// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2).
+// A byte of a token, the characters of a method and a header's name (RFC 9110, section 5.6.2), as httparse's `TOKEN_MAP` holds
+// them: the bits of the bytes 0 to 63 and of the bytes 64 to 127, and no byte above.
 bool HttpTokenByte(byte c) {
-    if c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 {
-        return true
+    if c < 64 {
+        return (0x03FF6CFA00000000UL >> int(c) & 1UL) != 0
     }
 
-    return c == 33 || c >= 35 && c <= 39 || c == 42 || c == 43 || c == 45 || c == 46 || c == 94 || c == 95 || c == 96 || c == 124 || c == 126
+    if c < 128 {
+        return (0x57FFFFFFC7FFFFFEUL >> int(c - 64) & 1UL) != 0
+    }
+
+    return false
+}
+
+// The string of the `n` bytes at `p`, which the parse of a head proved ASCII and so UTF-8, made once from them, with no second
+// check (R15's `string.Allocate` and `string.FromRaw`).
+string HttpAscii(byte* p, long n) {
+    if n == 0 {
+        return ""
+    }
+
+    mut made = ""
+    raw {
+        byte* q = string.Allocate(n)
+        Copy(q, p, n)
+        made = string.FromRaw(q, n)
+    }
+
+    return made
+}
+
+// Whether the `n` bytes at `p`, a header's name and so a token, are the name `lower`, of as many bytes and spelled in lowercase, in
+// any case of ASCII, as `HttpHeaders` compares names: a byte of a token with its bit 0x20 set is a letter's lowercase only where it
+// was that letter in either case, and is `-` only where it was `-`.
+bool HttpNamed(byte* p, long n, string lower) {
+    raw {
+        byte* q = lower.Pointer
+        for i in 0..<n {
+            if (p[i] | 32) != q[i] {
+                return false
+            }
+        }
+    }
+
+    return true
 }
 
 // Whether a `Host` is a host and an optional port, a name of the bytes RFC 3986 allows in one or an address between brackets.
@@ -8271,72 +8498,152 @@ bool HttpHostValid(string host) {
 // A header line ends only at CR LF: a CR alone stays in its line and is refused there, as a control byte in a value, as httparse
 // refuses it (RFC 9112, section 2.2), so that no byte after it is read as the start of another header.
 HttpHeaders | string HttpParseHeaderLines(Bytes head, int from, int end) {
+    lines = HttpReadHeaderLines(head, from, end) else {
+        string what => return what
+    }
+
+    return lines.Headers
+}
+
+// The headers of a head's lines, and of the four names the server judges after them, `Host`, `Content-Length`,
+// `Transfer-Encoding` and `Expect` in any case of ASCII, the place of the first among the headers, -1 where the lines have none,
+// and how many the lines have (W5).
+data HttpLines(HttpHeaders Headers, int Host, int Hosts, int Length, int Lengths, int Coding, int Codings, int Expect)
+
+// The header lines of a head, as `HttpParseHeaderLines` gives them, each line read once with the mechanism of httparse 1.10.1's
+// `parse_headers_iter`, a table of tokens for the name and eight bytes at a time for the value; the faults, their words and their
+// order, and where a line ends are this parser's own, as they were before. Each fault is named where the line first shows it: a
+// line that starts with a space or a tab is folded; the name's bytes are tokens up to the colon, a space or a tab before it its
+// own fault, a CR LF before it a line
+// with none, and a CR alone no token; the spaces and tabs after the colon are skipped; and the value's bytes up to the CR LF are
+// read eight at a time while eight are left before `end`, as httparse's `match_header_value_char_8_swar` (`src/simd/swar.rs`)
+// tests them, a byte below 0x20 or 0x7F ending the words, a tab among them taken and the words going on, a CR before a LF the
+// value's end, and any other, a CR alone among them, a control byte; the spaces and tabs before the CR LF are dropped. Each name,
+// and each value of ASCII alone, is made a string once from its bytes; a value with a byte from 0x80 up is checked as
+// `string.FromUtf8` checks it. A line ends at its first CR LF, as RFC 9112, section 2.2, ends one, and the next starts after it.
+HttpLines | string HttpReadHeaderLines(Bytes head, int from, int end) {
     headers = HttpHeaders()
-    mut lineStart = from
-    while lineStart < end {
-        mut lineStop = lineStart
-        while head[lineStop] != 13 || head[lineStop + 1] != 10 {
-            lineStop = lineStop + 1
-        }
-
-        if head[lineStart] == 32 || head[lineStart] == 9 {
-            return "folded header"
-        }
-
-        mut colon = lineStart
-        while colon < lineStop && head[colon] != 58 {
-            if head[colon] == 32 || head[colon] == 9 {
-                return "space before a header's colon"
+    mut count = 0
+    mut host = -1
+    mut hosts = 0
+    mut length = -1
+    mut lengths = 0
+    mut coding = -1
+    mut codings = 0
+    mut expect = -1
+    mut at = from
+    raw {
+        byte* p = head.Pointer
+        while at < end {
+            lineStart = at
+            if p[at] == 32 || p[at] == 9 {
+                return "folded header"
             }
 
-            if !HttpTokenByte(head[colon]) {
+            while p[at] != 58 {
+                c = p[at]
+                if !HttpTokenByte(c) {
+                    if c == 13 && p[at + 1] == 10 {
+                        return "header without a colon"
+                    }
+
+                    if c == 32 || c == 9 {
+                        return "space before a header's colon"
+                    }
+
+                    return "bad header name"
+                }
+
+                at = at + 1
+            }
+
+            if at == lineStart {
                 return "bad header name"
             }
 
-            colon = colon + 1
-        }
-
-        if colon == lineStop {
-            return "header without a colon"
-        }
-
-        if colon == lineStart {
-            return "bad header name"
-        }
-
-        mut valueStart = colon + 1
-        while valueStart < lineStop && (head[valueStart] == 32 || head[valueStart] == 9) {
-            valueStart = valueStart + 1
-        }
-
-        mut valueEnd = lineStop
-        while valueEnd > valueStart && (head[valueEnd - 1] == 32 || head[valueEnd - 1] == 9) {
-            valueEnd = valueEnd - 1
-        }
-
-        for p in valueStart..<valueEnd {
-            if head[p] < 32 && head[p] != 9 || head[p] == 127 {
-                return "control byte in a header"
+            nameEnd = at
+            at = at + 1
+            while p[at] == 32 || p[at] == 9 {
+                at = at + 1
             }
-        }
 
-        name = string.FromUtf8(head[lineStart..<colon]) else {
-            InvalidUtf8 => ""
-        }
+            valueStart = at
+            mut ulong high = 0
+            while true {
+                while at + 8 <= end {
+                    ulong x = WordAt(p + at)
+                    ulong low = (x -% 0x2020202020202020UL) & ~x & 0x8080808080808080UL
+                    ulong d = x ^ 0x7F7F7F7F7F7F7F7FUL
+                    ulong stop = low | (d -% 0x0101010101010101UL) & ~d & 0x8080808080808080UL
+                    if stop != 0 {
+                        long k = FirstFlag(stop)
+                        high = high | x & (1UL << int(8 * k)) -% 1UL
+                        at = at + int(k)
+                        break
+                    }
 
-        value = string.FromUtf8(head[valueStart..<valueEnd]) else {
-            InvalidUtf8 => return "header not UTF-8"
-        }
+                    high = high | x
+                    at = at + 8
+                }
 
-        // the line holds no CR and no LF, which ended it, and no other control byte (above), so `Add` refuses nothing here
-        headers.Add(name, value) else {
-            HttpError e => return "control byte in a header"
-        }
+                c = p[at]
+                if c == 13 && p[at + 1] == 10 {
+                    break
+                }
 
-        lineStart = lineStop + 2
+                if c < 32 && c != 9 || c == 127 {
+                    return "control byte in a header"
+                }
+
+                high = high | ulong(c)
+                at = at + 1
+            }
+
+            mut valueEnd = at
+            while valueEnd > valueStart && (p[valueEnd - 1] == 32 || p[valueEnd - 1] == 9) {
+                valueEnd = valueEnd - 1
+            }
+
+            long n = long(nameEnd - lineStart)
+            name = HttpAscii(p + lineStart, n)
+            mut value = ""
+            if (high & 0x8080808080808080UL) == 0 {
+                value = HttpAscii(p + valueStart, long(valueEnd - valueStart))
+            } else {
+                value = string.FromUtf8(head[valueStart..<valueEnd]) else {
+                    InvalidUtf8 => return "header not UTF-8"
+                }
+            }
+
+            if n == 4 && HttpNamed(p + lineStart, n, "host") {
+                if hosts == 0 {
+                    host = count
+                }
+
+                hosts = hosts + 1
+            } else if n == 14 && HttpNamed(p + lineStart, n, "content-length") {
+                if lengths == 0 {
+                    length = count
+                }
+
+                lengths = lengths + 1
+            } else if n == 17 && HttpNamed(p + lineStart, n, "transfer-encoding") {
+                if codings == 0 {
+                    coding = count
+                }
+
+                codings = codings + 1
+            } else if n == 6 && expect < 0 && HttpNamed(p + lineStart, n, "expect") {
+                expect = count
+            }
+
+            headers.Append(name, value)
+            count = count + 1
+            at = at + 2
+        }
     }
 
-    return headers
+    return HttpLines(headers, host, hosts, length, lengths, coding, codings, expect)
 }
 
 // The head of a request, its request line ending at the CR at `lineEnd` and its header lines at the CR at `end` (W5).
@@ -8358,15 +8665,31 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         return HttpBad("bad request line")
     }
 
-    method = string.FromUtf8(head[0..<at]) else {
-        InvalidUtf8 => ""
+    // the method's bytes are tokens, and so ASCII; a target of ASCII alone is made into its path and its query from its bytes,
+    // split at its first `?`, and any other is checked as `string.FromUtf8` checks it, where it was before
+    mut byte* p = null
+    raw {
+        p = head.Pointer
+    }
+
+    mut method = ""
+    raw {
+        method = HttpAscii(p, long(at))
     }
 
     targetStart = at + 1
     at = targetStart
+    mut ascii = true
+    mut question = -1
     while at < lineEnd && head[at] != 32 {
         if head[at] < 33 || head[at] == 127 {
             return HttpBad("bad request line")
+        }
+
+        if head[at] >= 128 {
+            ascii = false
+        } else if head[at] == 63 && question < 0 {
+            question = at
         }
 
         at = at + 1
@@ -8376,28 +8699,37 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         return HttpBad("bad request line")
     }
 
-    target = string.FromUtf8(head[targetStart..<at]) else {
-        InvalidUtf8 => return HttpBad("target not UTF-8")
+    targetEnd = at
+    mut target = ""
+    if !ascii {
+        target = string.FromUtf8(head[targetStart..<targetEnd]) else {
+            InvalidUtf8 => return HttpBad("target not UTF-8")
+        }
     }
 
-    v = head[at + 1..<lineEnd]
-    if v.Count != 8 || v[0] != 72 || v[1] != 84 || v[2] != 84 || v[3] != 80 || v[4] != 47 || v[6] != 46 || v[5] < 48 || v[5] > 57 || v[7] < 48 || v[7] > 57 {
+    v = targetEnd + 1
+    if lineEnd - v != 8 || head[v] != 72 || head[v + 1] != 84 || head[v + 2] != 84 || head[v + 3] != 80 || head[v + 4] != 47 || head[v + 6] != 46 || head[v + 5] < 48 || head[v + 5] > 57 || head[v + 7] < 48 || head[v + 7] > 57 {
         return HttpBad("bad request line")
     }
 
-    if v[5] != 49 || v[7] > 49 {
+    if head[v + 5] != 49 || head[v + 7] > 49 {
         return HttpRefused(505, HttpError(HttpKind.Unsupported, "unsupported HTTP version"))
     }
 
-    minor = v[7] - 48
+    minor = head[v + 7] - 48
     if method == "CONNECT" {
         return HttpRefused(501, HttpError(HttpKind.Unsupported, "unsupported method"))
     }
 
     // a target in absolute form gives its path, and its authority stands as the `Host` (section 12, the owner, 2026-11-05, Q2)
+    // only a target that starts with a letter can be in absolute form, and no other is copied out to be asked
     mut form = target
     mut authority = ""
-    begins = HttpAuthorityStart(head[targetStart..<at])
+    mut begins = -1
+    if head[targetStart] >= 65 && head[targetStart] <= 90 || head[targetStart] >= 97 && head[targetStart] <= 122 {
+        begins = HttpAuthorityStart(head[targetStart..<at])
+    }
+
     absolute = begins >= 0
     if absolute {
         mut stop = targetStart + begins
@@ -8421,26 +8753,38 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
 
     mut path = form
     mut query = ""
-    question = form.IndexOf("?")
-    if question != null {
-        path = form.Substring(0, question)
-        query = form.Substring(question + 1, form.Bytes.Count - question - 1)
+    if ascii && !absolute {
+        raw {
+            if question < 0 {
+                path = HttpAscii(p + targetStart, long(targetEnd - targetStart))
+            } else {
+                path = HttpAscii(p + targetStart, long(question - targetStart))
+                query = HttpAscii(p + question + 1, long(targetEnd - question - 1))
+            }
+        }
+    } else {
+        split = form.IndexOf("?")
+        if split != null {
+            path = form.Substring(0, split)
+            query = form.Substring(split + 1, form.Bytes.Count - split - 1)
+        }
     }
 
-    headers = HttpParseHeaderLines(head, lineEnd + 2, end) else {
+    lines = HttpReadHeaderLines(head, lineEnd + 2, end) else {
         string what => return HttpBad(what)
     }
 
-    hosts = headers.GetAll("Host")
-    if hosts.Count > 1 {
+    // the four names the server judges, noted while the lines were read, are judged once every line has been read
+    headers = lines.Headers
+    if lines.Hosts > 1 {
         return HttpBad("two Host headers")
     }
 
-    if hosts.Count == 0 && minor == 1 {
+    if lines.Hosts == 0 && minor == 1 {
         return HttpBad("no Host")
     }
 
-    if hosts.Count == 1 && !HttpHostValid(hosts[0]) {
+    if lines.Hosts == 1 && !HttpHostValid(headers.ValueAt(lines.Host)) {
         return HttpBad("bad Host")
     }
 
@@ -8449,12 +8793,19 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
             return HttpBad("bad Host")
         }
 
+        // the one `Host` line takes the authority in its place, or a new one goes after every line, so the places noted stay right
         headers.Set("Host", authority) else {
             HttpError e => return HttpBad("bad Host")
         }
     }
 
-    lengths = headers.GetAll("Content-Length")
+    mut lengths = List<string>()
+    if lines.Lengths == 1 {
+        lengths.Add(headers.ValueAt(lines.Length))
+    } else if lines.Lengths > 1 {
+        lengths = headers.GetAll("Content-Length")
+    }
+
     mut length = -1L
     mut over = false
     for text in lengths {
@@ -8482,8 +8833,7 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         length = n
     }
 
-    codings = headers.GetAll("Transfer-Encoding")
-    if codings.Count > 0 && lengths.Count > 0 {
+    if lines.Codings > 0 && lines.Lengths > 0 {
         return HttpBad("Content-Length beside Transfer-Encoding")
     }
 
@@ -8491,21 +8841,23 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
     // another coding before a last `chunked` not served (section 12, the owner, 2026-11-05, Q1 and Q7)
     mut last = ""
     mut named = 0
-    for line in codings {
-        for part in line.Split(",") {
-            coding = part.TrimAscii()
-            if coding != "" {
-                last = coding.ToLowerAscii()
-                named = named + 1
+    if lines.Codings > 0 {
+        for line in headers.GetAll("Transfer-Encoding") {
+            for part in line.Split(",") {
+                coding = part.TrimAscii()
+                if coding != "" {
+                    last = coding.ToLowerAscii()
+                    named = named + 1
+                }
             }
         }
     }
 
-    if codings.Count > 0 && minor == 0 {
+    if lines.Codings > 0 && minor == 0 {
         return HttpBad("transfer encoding in HTTP/1.0")
     }
 
-    if codings.Count > 0 && last != "chunked" {
+    if lines.Codings > 0 && last != "chunked" {
         return HttpBad("transfer encoding not ending in chunked")
     }
 
@@ -8518,9 +8870,8 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
     }
 
     mut expects = false
-    expect = headers.Get("Expect")
-    if expect != null {
-        if expect.ToLowerAscii() != "100-continue" {
+    if lines.Expect >= 0 {
+        if headers.ValueAt(lines.Expect).ToLowerAscii() != "100-continue" {
             return HttpRefused(417, HttpError(HttpKind.Unsupported, "unsupported expectation"))
         }
 
@@ -8532,7 +8883,7 @@ HttpHead | HttpRefused HttpParseHead(Bytes head, int lineEnd, int end, HttpLimit
         sized = 0
     }
 
-    return HttpHead(method, path, query, headers, minor, sized, codings.Count > 0, expects)
+    return HttpHead(method, path, query, headers, minor, sized, lines.Codings > 0, expects)
 }
 
 // Where the authority of a target in absolute form starts, after its scheme and `://`, or -1 for a target in another form (RFC 9112,

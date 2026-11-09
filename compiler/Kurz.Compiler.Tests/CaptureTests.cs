@@ -18,6 +18,10 @@ public sealed class CaptureTests
     // the limit of a control, a program whose streams end with it: a cold start of `cmd.exe` on a CI runner took all of `Limit`
     private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(60);
 
+    // the time a process the run ended has to end in: the run sends the kill and does not wait, and in a run of the `gates` job the
+    // child of `sh` still ran when the test read its state at once
+    private static readonly TimeSpan EndBound = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task A_child_that_holds_the_output_after_its_program_ended_ends_the_run_at_its_limit()
     {
@@ -49,7 +53,14 @@ public sealed class CaptureTests
         Assert.True(code == -1, $"the run ended with {code}, not -1: {seen}");
         Assert.True(child.Length > 0 && child.All(char.IsAsciiDigit), $"the output holds no pid: {seen}");
         Assert.True(error.EndsWith($"`/bin/sh` ended, and an orphan holds its output: pid {child}, ended", StringComparison.Ordinal), $"the error does not say that the child {child} was ended: {seen}");
-        Assert.False(Lives(child), $"the child {child} still runs: {seen}");
+        // the child must have ended within `EndBound` of the run's end
+        var since = Stopwatch.StartNew();
+        while (Lives(child) && since.Elapsed < EndBound)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.False(Lives(child), $"the child {child} still runs {since.Elapsed} after the run ended it: {seen}");
     }
 
     [Fact]

@@ -831,6 +831,11 @@ public sealed partial class Emitter
             return Layout.Fat(tc.Symbol) && !Layout.Fat(fc.Symbol) ? Pair(value, Table(fc.Symbol)) : value; // K6: an instance of a derived class with its class's table
         }
 
+        if (from is ClassType ic && to is InterfaceType face)
+        {
+            return AsInterface(value, ic.Symbol, face.Symbol); // K6: the instance with its class's table for the interface
+        }
+
         if (from is WeakRefType fw && to is WeakRefType tw)
         {
             return Layout.Fat(tw.Target.Symbol) && !Layout.Fat(fw.Target.Symbol) ? Pair(value, Table(fw.Target.Symbol)) : value; // R3 with K6: the same weak count
@@ -994,6 +999,8 @@ public sealed partial class Emitter
                 return DerivedText(value, type, line);
             case ClassType c:
                 return InstanceText(value, c); // A5
+            case InterfaceType face:
+                return CallThrough(face.Symbol.TextMethod ?? throw new InvalidOperationException($"`{face}` declares no `Text()`: `no-text`, which the checker reports (A10)"), value, face.Symbol, []); // A10
             case WeakRefType w:
                 {
                     // A4 with R3: the text of what its read gives, the target's `Text()` or `null`
