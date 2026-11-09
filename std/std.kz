@@ -6441,7 +6441,7 @@ pub class HttpRequest(string Method, string Path, string Query, HttpHeaders Head
 // `max` bytes and gives 0 at the end,
 // `ReadAll` the whole body up to a bound and `ReadAllText` the same as text (design record, section 12; W6). The first read that needs a byte from a client that
 // expects `100-continue` sends `HTTP/1.1 100 Continue` before it, as hyper sends it, and none once the head of a response a function
-// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again.
+// writes has gone out, as hyper sends it only before the response begins. A failure of HTTP stays: every read after it gives it again, but for the refusal of `ReadAll` for its own `max`, after which the body is still readable (W6).
 pub class HttpBody {
     mut TcpStream? stream = null
     mut long remaining = 0
@@ -6861,7 +6861,8 @@ pub class HttpResponse {
     pub static HttpResponse Empty(int status) => Of(status, "")
 
     // A response whose body `body` writes, as `application/octet-stream`: the writer calls `body` with an `HttpWriter`, the head
-    // goes out with its first write, each `w.Write` a chunk, and the function's return ends the body (W11). A status that has no body, 100 to 199,
+    // goes out with its first write of bytes, or at its return where it wrote none, each `w.Write` a chunk, and the function's return
+    // ends the body (W11). A status that has no body, 100 to 199,
     // `204`, `205` or `304`, stops the program, as a status outside 200 to 599 does, with its own text for 100 to 199.
     pub static HttpResponse Stream(int status, (HttpWriter) => void | IoError body) {
         if status < 200 && status >= 100 || status == 204 || status == 205 || status == 304 {
@@ -6887,8 +6888,8 @@ pub class HttpResponse {
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
     // request of HTTP/1.0 no `Transfer-Encoding` where `plain`, its body framed by its length, or by the close where a function writes it; false where the writer wrote its
-    // own `500` in its place, or where the head of a body a function writes announced a close, after which the loop closes the
-    // connection. The responses `pending` holds go out first, in the same
+    // own `500` in its place, or where the writer of a body a function writes announced a close because the request's body still
+    // awaited `100 Continue`, after which the loop closes the connection. The responses `pending` holds go out first, in the same
     // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
     // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
     // writes has gone out (F9).
@@ -7074,11 +7075,13 @@ pub class HttpResponse {
 
 // The writer of a streamed response, which `HttpResponse.Stream` gives its function (design record, section 12; W11): `Write` sends
 // a `Bytes` or a `string` as one chunk of the body, or as it is to a peer of HTTP/1.0, each write held to the response's rate where
-// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing. The head goes out with the first
-// write, and the `CR LF` that ends a chunk with the write after it, so that no write of a few bytes waits for the acknowledgement of
-// the one before. Once the function returned, a write gives `IoError(InvalidInput)` and writes nothing. A write that failed leaves
-// the writer failed: every later write, and the end of the body, gives its `IoError` again and writes nothing, so that the client
-// sees the body cut, never a chunk that a failed write left part of followed by another.
+// the server's loop writes it, and gives the socket's `IoError`; a write of no bytes writes nothing, the head neither. The head goes
+// out with the first write of bytes, or at the end of the body where the function wrote none, and the `CR LF` that ends a chunk with
+// the write after it, so that no write of a few bytes waits for the acknowledgement of the one before. Once the function returned, a
+// write gives `IoError(InvalidInput)` and writes nothing, that of a failed writer too. A write that failed leaves the writer failed:
+// every later write while the function runs, and the end of the body, gives its `IoError` again and writes nothing, so that a client
+// of HTTP/1.1 sees the body cut, never a chunk that a failed write left part of followed by another, while one of HTTP/1.0, whose
+// body the close ends, cannot tell it from a whole one.
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -7196,7 +7199,9 @@ pub class HttpWriter {
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
-    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9).
+    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9). A head that
+    // announced a close is never held: the loop holds only where the request's body has no chunks and a length of 0, and the head
+    // announces a close only where that body, chunked or of a length above 0, still awaits `100 Continue`.
     internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
         f = failure
@@ -8475,8 +8480,8 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                         return
                     }
 
-                    // a body under its rate gives the server's own `request timed out` (section 12, Q12 (b)), with no `408`, since the
-                    // head has gone out
+                    // a body under its rate gives the server's own `request timed out`, as Q12 (b) of section 12 gives it to a read of
+                    // the function, with no `408`, since the head has gone out (W11, assumed)
                     drained = body.Drain(limits.MaxDrainSize) else {
                         IoError e => return e
                         HttpError e => return e

@@ -1057,6 +1057,10 @@ public sealed class ParserTests
         Assert.Equal(
             "(class Counter(int Start) {(constructor pub Counter() this((int 0)) {}) (function pub int Value() => Start)})",
             Tree("class Counter(int Start) {\n    pub Counter() : this(0) { }\n\n    pub int Value() => Start\n}"));
+        // K14, L18: `base` after a constructor's `:` passes the arguments of the base, and is a name everywhere else (the owner, 2026-11-03)
+        Assert.Equal(
+            "(class Dog : Animal {(constructor pub Dog(string n) base(n, (int 4)) {(assign-or-declare base n)})})",
+            Tree("class Dog : Animal {\n    pub Dog(string n) : base(n, 4) {\n        base = n\n    }\n}"));
         Assert.Equal(
             "(class Point {(field int x) (constructor pub Point(int value) {(assign-or-declare x value)})})",
             Tree("class Point {\n    int x\n\n    pub Point(int value) {\n        x = value\n    }\n}"));

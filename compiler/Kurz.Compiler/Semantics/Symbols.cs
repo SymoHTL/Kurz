@@ -181,8 +181,16 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     /// <summary>K10, K11, K16: the parameters of the primary constructor in the order a construction binds them, each with the field it gives.</summary>
     public List<ConstructorSlot> Constructor { get; } = [];
 
-    /// <summary>K10: the explicit form's arguments of the base, read as a construction of the base; null for the short form and for a class without a base.</summary>
+    /// <summary>
+    /// K10: the explicit form's arguments of the base, read as a construction of the base; K14: for a class with a base, no primary
+    /// constructor and no constructor in its body, the construction of the base with no arguments, which its empty constructor runs, as
+    /// C#'s implied <c>base()</c>, where the base has a constructor to run (a constructor of a body holds its own,
+    /// <see cref="ConstructorSymbol.BaseCall"/>); null for the short form and for a class without a base.
+    /// </summary>
     public CallExpression? BaseCall { get; set; }
+
+    /// <summary>K14: the constructors declared in the body of the class, in their order.</summary>
+    public List<ConstructorSymbol> Constructors { get; } = [];
 
     /// <summary>The class and its bases, the class first.</summary>
     public IEnumerable<ClassSymbol> Chain
@@ -281,6 +289,36 @@ public sealed class InterfaceSymbol(string name, TypeDeclaration declaration)
 
 /// <summary>K10, K11, K16: a parameter of a class's primary constructor: the field it gives, own or the base's, the class whose declaration writes it, and that parameter.</summary>
 public sealed record ConstructorSlot(FieldSymbol Field, ClassSymbol Owner, Parameter Declaration);
+
+/// <summary>
+/// K14: a constructor declared in the body of a class, private to it without <c>pub</c> (F9): its parameters and the call its
+/// <c>: this(...)</c> makes, of the primary constructor or of another constructor of the body, read as a construction of the class.
+/// </summary>
+public sealed class ConstructorSymbol(ConstructorDeclaration declaration, ClassSymbol owner)
+{
+    public ConstructorDeclaration Declaration { get; } = declaration;
+
+    public ClassSymbol Owner { get; } = owner;
+
+    public List<ParameterSymbol> Parameters { get; } = [];
+
+    public int Line => Declaration.Line;
+
+    public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>The call of <c>: this(...)</c>; null for a constructor without one.</summary>
+    public CallExpression? ThisCall { get; set; }
+
+    /// <summary>
+    /// The construction of the base this constructor runs before its body: <c>: base(...)</c>, or C#'s implied <c>base()</c> where it
+    /// calls no other constructor and the base has one to run; null where it calls another with <c>: this(...)</c>, and in a class
+    /// without a base.
+    /// </summary>
+    public CallExpression? BaseCall { get; set; }
+
+    /// <summary>The parameters as the variables the arguments of <c>: this(...)</c> or <c>: base(...)</c> read, which no instance is visible to.</summary>
+    public List<VariableSymbol> InitializerParameters { get; } = [];
+}
 
 /// <summary>
 /// An <c>enum</c> (D12) with its values in the order written, each name once, and their numbers where the declaration writes them
