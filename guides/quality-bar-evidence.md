@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-11-09
-digest: 49a4298fbb809804de545b997b951aa96b4b7e0728780159b522da6c6c5d5133
+digest: 6b4c3fa9be56cff3abca38eb854712d7fb3852bf7f8b4e76663eb1619bb1866e
 ttl_days: 60
 metadata:
   type: reference
@@ -64,7 +64,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/kit.py` | 26 | 24 |
 | `tools/lint_ci.py` | 159 | 154 |
 | `tools/lint_knowledge.py` | 121 | 105 |
-| `tools/lint_reference.py` | 91 | 95 |
+| `tools/lint_reference.py` | 87 | 91 |
 | `tools/merge_pr.py` | 182 | 180 |
 | `tools/pr_gates.py` | 146 | 159 |
 | `tools/quality_evidence.py` | 46 | 52 |
@@ -72,7 +72,7 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 | `tools/review/review.py` | 314 | 296 |
 | `tools/tree_gate.py` | 137 | 116 |
 | `tools/unicode_tables.py` | 35 | 23 |
-| **total** | 1376 | 1315 |
+| **total** | 1372 | 1311 |
 <!-- /generated:self-tests -->
 
 ## The store and the review rules
@@ -80,13 +80,13 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 92 |
+| Entries in INDEX.md | 91 |
 | tagged (untagged) | 2 |
 | tagged HARD | 33 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 16 |
 | tagged RECIPE | 9 |
-| tagged TRAP | 44 |
+| tagged TRAP | 43 |
 | Review rule sections | 12 |
 | Review rules | 71 |
 <!-- /generated:store -->
@@ -105,8 +105,8 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 435 |
-| Bullets of the Open section | 64 |
+| Occurrences of the marker *(assumed)* | 440 |
+| Bullets of the Open section | 65 |
 <!-- /generated:design -->
 
 ## The reference and the corpus
@@ -118,12 +118,12 @@ nothing in this repository executes Kurz.
 <!-- generated:reference -->
 | Reference and corpus | Count |
 |---|---|
-| Rules in the reference | 286 |
-| of them decided | 245 |
+| Rules in the reference | 290 |
+| of them decided | 249 |
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 1 |
-| Corpus cases, none of them run | 998 |
+| Corpus cases | 1010 |
 | Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 366 |
-| Pull requests merged | 341 |
-| Merged over red, with a recorded waiver | 187 |
-| Review findings posted: high | 316 |
-| Review findings posted: medium | 4503 |
-| Review findings posted: low | 4589 |
+| Pull requests opened by a writer, or merged | 372 |
+| Pull requests merged | 346 |
+| Merged over red, with a recorded waiver | 192 |
+| Review findings posted: high | 326 |
+| Review findings posted: medium | 4629 |
+| Review findings posted: low | 4676 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->

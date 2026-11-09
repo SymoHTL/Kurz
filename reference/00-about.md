@@ -544,8 +544,9 @@ leaving the text open, nine digits always and the count of nanoseconds since 197
 the fewest digits and against six digits of a year as JavaScript writes them). The instant counts
 from 1970-01-01 (T24) *(assumed: the calendar, the
 Gregorian one before its introduction as well, with no leap second and a year 0 before the year 1,
-as chrono and Unix time count, as §8 marks it)*. No construct makes a timestamp of a number but a
-read through a pointer (R10, R14), which the cases below take.
+as chrono and Unix time count, as §8 marks it)*. A timestamp is made of a number by
+`timestamp.FromUnixSeconds` and `timestamp.FromUnixMilliseconds` (T38), or by a read through a
+pointer (R10, R14), which the cases below take.
 
 Case: [values/text-timestamp.kz](../corpus/values/text-timestamp.kz)
 ```kurz

@@ -265,6 +265,11 @@ public sealed class RuntimeTests
         Assert.Equal([(ErrorIds.ReferenceCycle, 4)], ring.Select(d => (d.Id, d.Line)));
         var (_, _, wrapped) = WithSys(sys, "use sys\n\nb = sys.Make()\nprint(sys.Count(sys.Wrap(b)))\n");
         Assert.Equal([(ErrorIds.ReferenceCycle, 4)], wrapped.Select(d => (d.Id, d.Line)));
+        // a call counts only where a field of the ring counts a lambda it gives the class: the call before the file's lambda gives it
+        // to an `(int) => void` lambda of the folder, which the `() => int` field does not count, so the ring is at the file's lambda
+        const string touch = "pub class Button(mut () => int OnClick)\n\npub Button Make() => Button(() => 1)\n\npub void Keep<T>(T x) {\n}\n\npub int Touch<T>(T x) {\n    g = (int k) => Keep(x)\n    g(1)\n    return 1\n}\n";
+        var (_, _, opened) = WithSys(touch, "use sys\n\nb = sys.Make()\nprint(sys.Touch(b))\nf = () => b.OnClick()\nprint(f())\n");
+        Assert.Equal([(ErrorIds.ReferenceCycle, 5)], opened.Select(d => (d.Id, d.Line)));
         // the positive control: a type argument that holds no class
         Assert.Empty(WithSys(sys, "use sys\n\nprint(sys.Hold(1))\n").Diagnostics);
     }
