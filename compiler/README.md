@@ -2551,10 +2551,15 @@ round can ask about it by the rule's id.
   The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
-  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*. A ring
+  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*, or,
+  where the field counts a lambda of `std/` or of a folder that captures a class of the ring only
+  through a function value a lambda of the file captures, at the line of the file's first such lambda
+  *(R9, assumed)*. A ring
   of classes of `std/` or of a folder alone, which a lambda of `std/` or of a folder closes through a
   type argument that only a call of the file gives, is reported at the file's first such call (the
-  owner, 2026-11-05), since the checker of `std/` or of the folder does not see that call. One that
+  owner, 2026-11-05, #39, comment 6664350645), since the checker of `std/` or of the folder does not
+  see that call, a call counting only where it gives the argument to a lambda a field of the ring
+  counts, a reading of that answer *(assumed)*. One that
   neither a lambda nor a call of the file closes is `std/`'s own, or the folder's. A stored lambda is counted as a function value
   is, a read of the field for a call takes a count of its own (K2), so a lambda that replaces the
   field it is called through runs on, and the instance's release lets go of the environment. Pinned

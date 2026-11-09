@@ -7015,6 +7015,7 @@ pub class HttpResponse {
             out.AddRange("\r\n".Bytes)
         }
 
+        before = pending.Count
         if pending.Count > 0 {
             pending.AddRange(out)
             out = pending
@@ -7033,8 +7034,10 @@ pub class HttpResponse {
 
         if body != null {
             // the head goes out with the first chunk, in one write up to 64 KiB of it, so that the chunk does not wait for the
-            // acknowledgement of the head, and the last chunk after the function's return, held as a response is where `hold`
-            w = HttpWriter.Make(s, out, chunked, count, pace, request, !close && headers.Get("Connection") == null)
+            // acknowledgement of the head, and the last chunk after the function's return, held as a response is where `hold`; the
+            // writer's own `Connection: close` before the loop's close, beside a handler's `Connection` that does not say it (section
+            // 12, the owner, 2026-11-05, Q6)
+            w = HttpWriter.Make(s, out, before, date, chunked, count, pace, request, !close && !HttpCloses(headers))
             body(w) else {
                 IoError e => {
                     w.Abort()
@@ -7095,10 +7098,15 @@ pub class HttpResponse {
 // body the close ends, cannot tell it from a whole one. Under a `Content-Length` the handler set the body goes as it is, not in
 // chunks, held to that count, as Kestrel holds a body to `Response.ContentLength`: a write that would pass it writes none of its bytes
 // and gives `IoError(InvalidData)`, which leaves the writer failed, and a body short of it at the function's return gives that error
-// too, after the head where no write sent it (design record, section 12: G5).
+// too, after the head where no write sent it (design record, section 12: G5). A function that gives an `IoError` before its first
+// write of bytes, when nothing was written yet, is answered `500` with no body and `Connection: close` in place of the head, as Kestrel
+// answers a handler that fails before its response started, whatever `Content-Length` the handler set (design record, section 12: the
+// owner, 2026-11-09, "500 + close").
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
+    mut int before = 0
+    mut string date = ""
     mut bool chunked = true
     mut long left = -1
     mut bool ended = false
@@ -7116,8 +7124,9 @@ pub class HttpWriter {
     // Kestrel sets every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
     // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
     // A stream the option cannot be set on is written as it is, the option only a matter of time.
-    // `count` is the `Content-Length` the body is held to, or -1 where it has none.
-    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, long count, HttpRate? rate, HttpBody? answered, bool mayClose) {
+    // `count` is the `Content-Length` the body is held to, or -1 where it has none, `held` the bytes at the start of `head` that the
+    // responses held before it take, and `dated` the `Date` line or empty, for the `500` that answers an `IoError` before the first write.
+    internal static HttpWriter Make(TcpStream s, Bytes head, int held, string dated, bool isChunked, long count, HttpRate? rate, HttpBody? answered, bool mayClose) {
         s.SetNoDelay(true) else {
             IoError e => {
             }
@@ -7126,6 +7135,8 @@ pub class HttpWriter {
         w = HttpWriter()
         w.stream = s
         w.ahead = head
+        w.before = held
+        w.date = dated
         w.chunked = isChunked
         w.left = count
         w.pace = rate
@@ -7228,8 +7239,9 @@ pub class HttpWriter {
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
     // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9), and for a body
     // short of its `Content-Length`, the head where no write sent it and `IoError(InvalidData)`, a body cut the same way. A head that
-    // announced a close is never held: the loop holds only where the request's body has no chunks and a length of 0, and the head
-    // announces a close only where that body, chunked or of a length above 0, still awaits `100 Continue`.
+    // says `Connection: close` is never held: the loop holds only where it keeps the connection and the request's body has no chunks
+    // and a length of 0, while the loop's own close and a handler's `Connection: close` come only where it does not keep it, and the
+    // writer announces its own only where that body, chunked or of a length above 0, still awaits `100 Continue`.
     internal void | IoError End(mut Bytes pending, bool hold) {
         ended = true
         f = failure
@@ -7267,8 +7279,10 @@ pub class HttpWriter {
         }
     }
 
-    // The function gave an `IoError`: the head where no write sent it, and no end of the body, so that a client of HTTP/1.1 sees it
-    // cut, while one of HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
+    // The function gave an `IoError`: where no write sent the head, nothing of the response was written, so the responses held before
+    // it go out with a `500` in its place, with no body and a close, as a response the writer cannot write is answered (W8; design
+    // record, section 12: the owner, 2026-11-09, "500 + close"); else no end of the body, so that a client of HTTP/1.1 sees it cut,
+    // while one of HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
     internal void Abort() {
         ended = true
         s = stream
@@ -7276,10 +7290,9 @@ pub class HttpWriter {
             return
         }
 
-        Started()
-        out = ahead
+        mut out = ahead[0..<before]
         ahead = Bytes()
-        HttpWrite(s, pace, out) else {
+        HttpUnwritable(s, mut out, date, pace) else {
             IoError e => return
         }
     }

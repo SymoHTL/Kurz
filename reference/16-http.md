@@ -2483,7 +2483,8 @@ void Unread() {
 A handler streams a body by `HttpResponse.Stream(status, (HttpWriter w) => ...)`, a function of the
 type `(HttpWriter) => void | IoError`: the server calls the function, the head goes out in the
 system call of its first write, or at its return where it wrote nothing, as `Results.Stream` on
-Kestrel sends it (§12, the owner, 2026-11-05, #110, comment 6657251329, H1 (a)), each `w.Write`
+Kestrel sends it (§12, the owner, 2026-11-05, #110, comment 6657251329, H1 (a))
+*(assumed, §12: a write of no bytes counting as no write, below)*, each `w.Write`
 sends one chunk, or its bytes as they are under a `Content-Length` (below), and the function's return ends the body, but where an `IoError` came first (below);
 to a peer of HTTP/1.0 the body goes without chunks and the close of the connection ends it; and the
 writer writes only inside the call (§12, the owner, 2026-11-03, "A response can be streamed"), a
@@ -2492,7 +2493,17 @@ write after it giving the `IoError` below. The function takes its writer without
 takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and gives
 `void | IoError`, the function gives `void | IoError` too, and an `IoError` the function gives while
 its response is written closes the connection, since no status can be sent after the head went out
-(§12, the owner, 2026-11-03). `Stream` sends `application/octet-stream`, which a handler replaces
+(§12, the owner, 2026-11-03), and one it gives before its first write, when nothing was written yet,
+is answered `500` with no body and `Connection: close` in place of the head first, under a
+`Content-Length` the handler set too, as Kestrel answers a handler that fails before its response
+started (§12, the owner, 2026-11-09, #411, comment 6735967844, "500 + close"). A read of the
+request's body in the function that falls under its rate gives
+`HttpError(Protocol, "request timed out")`, as a handler's read does (W10) (§12, the owner,
+2026-11-04, #110, comment 6643368937, Q12 (b)). Before the close that follows a head sent while the
+request's body still awaits `100 Continue`, the head says `Connection: close`, beside a handler's
+`Connection` that does not say `close` too, as RFC 9110, section 10.1.1, asks of a server that
+answers before it read the body (§12, the owner, 2026-11-05, #110, comment 6669908217, Q6).
+`Stream` sends `application/octet-stream`, which a handler replaces
 with `Set` (§12, the owner, 2026-11-03, #110, comment 6605621326, item 7). A `Content-Length` the
 handler sets makes the writer send the body as it is, not in chunks, and holds it to that count: a
 write that would pass it, and a body short of it at the function's return, give an `IoError` of the
@@ -2511,15 +2522,19 @@ answered with the head, `Transfer-Encoding: chunked` in it, and the function not
 `HEAD` of a peer of HTTP/1.0 with the head alone, without `Transfer-Encoding`, and
 `Connection: close`; a `Content-Length` the handler set that holds anything but digits, or differs
 from another, giving `IoError(InvalidInput, 0, "")` from
-`Write` and `ServeConnection`, with nothing written and the function not called, and a write after
-the function returned giving its `IoError` with the code 0; a write of no bytes writing nothing, not
+`Write` and `ServeConnection`, with nothing written and the function not called; a write after the
+function returned, by a writer the function kept, giving its `IoError` with the code 0; a write of
+no bytes writing nothing, not
 the head either, which goes out with the next write or at the return; each write held to
 `MinResponseDataRate` (W10); `response.Write(stream)` chunking always where the handler set no
 `Content-Length`, a second `Write` of one
 response writing it whole again, its head and the end of its body, its function called again with a
-writer of its own, and `WriteHead` writing the head alone; the function's `IoError` ending the body
-without its last chunk, the head written where no write sent it, and `Write` and `ServeConnection`
-giving that error; a write that failed leaving the writer failed, every later write while the
+writer of its own, and `WriteHead` writing the head alone; the function's `IoError` after its first
+write ending the body without its last chunk, and `Write` and `ServeConnection` giving the
+function's `IoError`, after the `500` of one before its first write too, as they give the `IoError`
+of a file whose size cannot be read after its `500` (W8), the connection closing at once, with no
+close in stages, so that a client that still sends may lose that `500` to the reset of a close with
+bytes unread; a write that failed leaving the writer failed, every later write while the
 function runs and the end of the body giving its `IoError` again and writing nothing, so that a
 client of HTTP/1.1 sees the body cut, while one of HTTP/1.0, whose body the close ends, cannot tell
 it from a whole one, and a write after the function returned giving
@@ -2527,11 +2542,9 @@ it from a whole one, and a write after the function returned giving
 function returned touching neither the connection nor the response after it; the function reading
 the request's body while it writes, what it left unread drained after it and the connection closing
 where that is past `MaxDrainSize`, a body under its rate there giving the server's
-`request timed out` and closing the connection with no `408`, since the head went out, as a read of
-the function under its rate gives that error too (W10); a head that goes out while the request's
-body still awaits `100 Continue` saying `Connection: close` where the handler set no `Connection`,
-as RFC 9110, section 10.1.1, asks of a server that answers before it read the body, and the
-connection closing after the function, under a handler's own `Connection` too; a read before the
+`request timed out` and closing the connection with no `408`, since the head went out; the
+connection closing after the function where its head went out while the request's body still
+awaited `100 Continue`, whether the function read the body after its head or not; a read before the
 head went out sending `100 Continue` and none after it; no bound on the stream's whole time; the
 socket set to `TCP_NODELAY` at each streamed response, where it stays, as Kestrel sets every
 connection, a stream the option cannot be set on written as it is, with no `IoError`, and the CR LF
@@ -2554,13 +2567,14 @@ ending it (§12, the owner, 2026-11-09, the same comment, G5 Q8, "Write them").
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
 // a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
-// `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
-// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
-// `chunked` added; a response written again is written whole again, its head and the end of its body, its function called again
-// with a writer of its own; a `Content-Length` the handler set that is no number
-// is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
-// write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
-// call gives `IoError(InvalidInput)` and writes nothing
+// `string` one chunk, a write of no bytes none (W11, assumed), and the function's return writes the chunk of no bytes that ends the
+// body; its `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is
+// kept, `chunked` added; a response written again is written whole again, its head and the end of its body, its function called
+// again with a writer of its own (W11, assumed); a `Content-Length` the handler set that is no number is `InvalidInput` with nothing
+// written (W11, assumed); a function's `IoError` after its first write ends the body without its last chunk (W11, assumed), and one
+// before it is answered `500` with `Connection: close` in place of the head, under a `Content-Length` the handler set too (section 12,
+// the owner, 2026-11-09, #411, comment 6735967844), `Write` giving that error either way (W11, assumed); `WriteHead` writes the head
+// alone and calls no function (W11, assumed); and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()
 
@@ -2654,6 +2668,12 @@ void | IoError | HttpError All() {
         size = File.Size("response-stream-missing.txt")
         w.Write("{size}")
     }), false)
+    counted = HttpResponse.Stream(200, (HttpWriter w) => {
+        size = File.Size("response-stream-missing.txt")
+        w.Write("{size}")
+    })
+    counted.Headers.Set("Content-Length", "3")
+    Wire(counted, false)
     Wire(HttpResponse.Stream(200, (HttpWriter w) => {
         print("called")
         w.Write("c")
@@ -2684,10 +2704,12 @@ Case: [http/serve-stream.kz](../corpus/http/serve-stream.kz)
 // `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
 // first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
 // that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
-// awaits `100 Continue` says `Connection: close` where the handler set no `Connection`, and the connection closes after the
-// function, whether it read the body after its first write or not, and where the head says the handler's `Connection` instead; a
-// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set that is no number is
-// `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
+// awaits `100 Continue` says `Connection: close`, beside a handler's `Connection: keep-alive` too (section 12, the owner,
+// 2026-11-05, Q6), and the connection closes after the function, whether it read the body after its first write or not; a
+// function's `IoError` closes the connection, which gives it, and one before its first write is answered `500` with
+// `Connection: close` in place of the head, after the response held before it (section 12, the owner, 2026-11-09, #411, comment
+// 6735967844); and a `Content-Length` the handler set that is no number is `InvalidInput` with nothing written, here to a peer of
+// HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -2818,6 +2840,25 @@ kept = (HttpRequest r) => {
 
     return response
 }
+keptLate = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("x")
+        w.Write(Whole(r))
+    })
+    response.Headers.Set("Connection", "keep-alive") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+early = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    if r.Path == "/f" {
+        size = File.Size("serve-stream-missing.txt")
+        w.Write("{size}")
+    }
+
+    w.Write("o")
+})
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
@@ -2830,10 +2871,12 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-contin
 Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", unread, HttpLimits())
 Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
+Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\nGET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", early, HttpLimits())
 Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
 Exchange("GET /g HTTP/1.0\r\n\r\n", coded, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", kept, HttpLimits())
+Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", keptLate, HttpLimits())
 ```
 
 Case: [http/serve-stream-length.kz](../corpus/http/serve-stream-length.kz)
