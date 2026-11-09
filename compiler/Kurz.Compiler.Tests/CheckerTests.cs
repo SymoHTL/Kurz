@@ -784,18 +784,29 @@ public sealed class CheckerTests
     [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
-        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in parentheses or not, is reached only through a
-        // `break` of that loop that can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after
-        // it; a `break` of the loop makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end
-        // cannot be reached; only the literal is read so, as the record narrows C#'s constant `true` (assumed), so `!false` and `true && true`
-        // are read as conditions that can be false
+        // F3, as in C#: the end point of a `while` whose condition is the constant `true` is reached only through a `break` of that loop that
+        // can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after it; a `break` of the loop
+        // makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end cannot be reached
         const string Search = "int First(List<int> xs) {\n    mut i = 0\n    while true {\n        if xs[i] > 2 {\n            return xs[i]\n        }\n\n        i = i + 1\n    }\n}\n\nprint(First([1, 2, 3, 4]))";
         Clean(Search);
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
+        // every condition whose value is a constant is read as that value, as C# reads it (section 4, the owner, 2026-11-08, "C#'s rule"):
+        // in any number of parentheses, under `!`, `&&` and a comparison of constants; the branch it does not take is never reached
         Clean(Search.Replace("    while true {", "    while (true) {"));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
+        Clean(Search.Replace("    while true {", "    while ((true)) {"));
+        Clean(Search.Replace("    while true {", "    while !false {"));
+        Clean(Search.Replace("    while true {", "    while true && true {"));
+        Clean(Search.Replace("    while true {", "    while 1 == 1 {"));
+        Clean(Search.Replace("        i = i + 1\n", "        if false {\n            break\n        }\n\n        i = i + 1\n")); // never reached
+        Clean("int One() {\n    if true {\n        return 1\n    }\n}\n\nprint(One())"); // its end never reached, as C#'s `if (true) return 1;`
+        Clean("int Two() {\n    if false {\n        print(0)\n    } else {\n        return 2\n    }\n}\n\nprint(Two())");
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int Zero() {\n    while false {\n        return 0\n    }\n}\n\nprint(Zero())")); // ends at once
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int One() {\n    if false {\n        return 1\n    }\n}\n\nprint(One())"));
+        // N3: the branch a constant condition does not take adds nothing to what holds after the `if`
+        const string Flip = "mut string? s = \"a\"\nif false {\n    s = null\n}\n\nprint(s.Bytes.Count)";
+        Clean(Flip);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(Flip.Replace("if false", "if true")));
         Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached
         Clean("int Spin() {\n    while true {\n        while true {\n            return 1\n        }\n\n        break\n    }\n}\n\nprint(Spin())"); // after an endless loop
         Clean(Search.Replace("        i = i + 1\n", "        mut j = 0\n        while j < 3 {\n            if j == i {\n                break\n            }\n\n            j = j + 1\n        }\n\n        i = i + 1\n"));
@@ -808,6 +819,11 @@ public sealed class CheckerTests
         Clean(Size);
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
         Clean(Size.Replace("            return 0\n", "            return 0\n            break\n")); // a `break` never reached leaves `e` as it was
+        // N3: a `continue` after a statement whose end cannot be reached adds nothing to what holds at the loop's head, as a `break` adds
+        // nothing to what holds after the loop; one that is reached brings back the `null` it saw
+        const string Len = "int Len() {\n    mut string? s = \"abc\"\n    mut n = 0\n    while n < 3 {\n        n = n + 1\n        if n == 2 {\n            s = null\n            return 0\n            continue\n        }\n    }\n\n    return s.Bytes.Count\n}\n\nprint(Len())";
+        Clean(Len);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Len.Replace("            return 0\n", "")));
     }
 
     [Fact]
