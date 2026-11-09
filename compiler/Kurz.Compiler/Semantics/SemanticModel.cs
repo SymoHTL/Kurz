@@ -209,7 +209,7 @@ public enum CallKind
     /// <summary>A stream's <c>SetNoDelay(on)</c>, which only <c>std/</c> reaches (W11, assumed).</summary>
     TcpSetNoDelay,
 
-    /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls (section 12).</summary>
+    /// <summary>A stream's <c>WriteWithin(bytes, bound)</c>, which only <c>std/</c> calls: the write bound of W10.</summary>
     TcpWriteWithin,
 
     /// <summary><c>Environment.Args()</c> (S13).</summary>

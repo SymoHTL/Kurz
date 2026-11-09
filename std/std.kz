@@ -6281,9 +6281,11 @@ pub class HttpHeaders {
 // owner, 2026-11-03, "`HttpLimits` takes Kestrel's types"), a type every file sees (W1, W5).
 pub data HttpRate(int BytesPerSecond, duration Grace)
 
-// The limits of a request, with Kestrel's names, types and defaults (design record, section 12: the owner, 2026-10-31, "HttpLimits
-// data", and 2026-11-03, Kestrel's member names and types, the four fixed numbers made members), a type every file sees (W1, W5).
-// The bounds of time are held and read by nothing yet: they wait for the monotonic clock (section 12).
+// The limits of a request, a type every file sees (W1, W5): the first seven with the names, types and defaults of Kestrel's
+// `KestrelServerLimits`, and the four numbers the server held fixed made members, `KeepAliveTimeout` with Kestrel's name and the
+// owner's 5 seconds, where Kestrel waits 130, and the other three with names of their own (design record, section 12: the owner,
+// 2026-10-31, "HttpLimits data" and "Persistent, 100 req, 5 s", and 2026-11-03, Kestrel's member names and types, the four fixed
+// numbers made members). The server's loop holds the bounds of time by the monotonic clock (W10).
 pub data HttpLimits(
     int MaxRequestLineSize = 8kb,
     int MaxRequestHeadersTotalSize = 32kb,
@@ -6571,9 +6573,13 @@ pub class HttpBody {
         return n
     }
 
-    // The whole body, or `request body over limit` where it holds more than `max` bytes, `response body over limit` for a response.
+    // The whole body, or `request body over limit` where it holds more than `max` bytes, `response body over limit` for a response:
+    // a declared length before its first byte is
+    // read, so that the body stays for the reads after it, and a chunked body once more than `max` of its bytes were read, which are
+    // dropped; a `max` below zero refuses every body, an empty one among them, as it refuses every declared length (section 12,
+    // assumed).
     pub Bytes | IoError | HttpError ReadAll(int max) {
-        if !chunked && !toEnd && remaining > max {
+        if max < 0 || !chunked && !toEnd && remaining > max {
             return HttpError(HttpKind.TooLarge, "{side} body over limit")
         }
 

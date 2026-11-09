@@ -2380,7 +2380,21 @@ pub long ShutdownWrite(int fd) {
 // takes a part just inside each bound cannot hold the write past it, as the reads of the HTTP server set what remains before each
 // refill (section 12): `count`, the bytes written before a call that took none, the failure of the call that failed, or -4100,
 // `TimedOut` with the number 0, where nothing remains before a call, which is then not made, as the bound of `Connect` gives it.
+// Before it returns it sets `SO_SNDTIMEO` to the stream's default bound again (S9), so that a later write of the stream that sets no
+// time of its own, the `100 Continue` of a later request among them, is not held to the last remainder; where that fails after a
+// write that did not, its failure is given.
 pub long WriteWithin(int fd, byte* bytes, long count, long nanoseconds) {
+    long done = WrittenWithin(fd, bytes, count, nanoseconds)
+    long reset = SetTimeout(fd, 21, DefaultBound(), true)
+    if done >= 0 && reset < 0 {
+        return reset
+    }
+
+    return done
+}
+
+// The write of `WriteWithin`, which leaves `SO_SNDTIMEO` at the last remainder it set.
+long WrittenWithin(int fd, byte* bytes, long count, long nanoseconds) {
     mut long deadline = 0
     raw {
         byte* held = Endpoints()
