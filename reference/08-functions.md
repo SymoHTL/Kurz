@@ -392,18 +392,20 @@ reaches that package's folder: with a line `json` of `project.kz` and no folder 
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
 through the folder's name; a package's qualifier is the name of its line, and that of a longer path into it its last
 name, `schema` in `use json/schema`, as for a project's folder; `as` takes the place of
-the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
+the qualifier the path gives in the file, a path's last name or, for a package's line alone, the line's name, the old name reaching
 nothing through that line and being `unknown-name` where no other `use` line of the file, and no
 declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
 the project and no line of `project.kz`, a path longer than a package's line name whose folder the package lacks,
-`use json/nosuch`, and a path that passes through a folder, of the project or of a package, that holds a `project.kz`
+`use json/nosuch` where no folder `json` stands at the top (beside one, the sentence below), and a path that, after its first name, reaches or passes through a folder, of the project or of a package, that holds a `project.kz`
 of its own, which that package's line alone reaches, are `unknown-name` at the `use` line; a space beside a `/` reads
 as one between any two tokens, `use a / util` being `use a/util`, and a line break ends the path; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
-folder of the project, so that `use json` beside it names the line)*
+folder of the project, so that `use json` beside it names the line)* A longer path whose first name is both a folder at
+the top and a line of `project.kz`, and whose rest neither holds, `use json/nosuch`, is `ambiguous-name` at its `use`
+line too, not `unknown-name`: the path's first name is read before the rest (§8, the owner, 2026-11-08).
 
 Case: [functions/use-names-nothing.kz](../corpus/functions/use-names-nothing.kz)
 ```kurz

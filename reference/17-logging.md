@@ -14,11 +14,13 @@ its level: `Log.Trace`, `Log.Debug`, `Log.Information`, `Log.Warning`, `Log.Erro
 2026-11-04, Q1 (a)). *(assumed, §12: C#'s six levels with a function named after each)* A file's own
 function, variable or parameter `Log` at any level is `redeclared` too, as of `Environment` (S14),
 while a member named `Log` of a type, a method or a field, a parameter of a primary constructor
-among them, is not, and in that type's methods
-`Log.Information("a")` stays a log call, though the member's type has a method `Information`;
-there `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a member's name. A member
-of `Log` that names no level is `unknown-name` (V10), and so are `Log`, where no member takes its
-name, and a log function used as a value, `f = Log.Information`. A log call gives
+among them, is not, and in that type's methods, its properties and its fields' defaults (a
+constructor declared in a class's body is `not supported`, K14), `Log.Information("a")` stays a log
+call, though the member's type has a method `Information`; there `Log` alone, `Log()` and `this.Log`
+reach the member, as K7 reads a member's name. A member of `Log` that names no level is
+`unknown-name` (V10), there too, `Log.Foo("a")` though the member's type has a method `Foo`, and so
+are `Log`, where no member takes its name, and a log function used as a value, `f = Log.Information`,
+there too. A log call gives
 nothing: it is a statement, as a call of `print` is, and `x = Log.Information("a")` is `syntax`, a
 call with a `void` success used as a value (O10). *(proposed)*
 
@@ -135,8 +137,8 @@ their place, stands open (P8). The
 category of a call is the name of the type whose method holds it, as C#'s `ILogger<T>` names a
 category by its type, taken with no container (§12, the owner, 2026-11-04, Q1 (a)): the name as
 written, `Orders` for a method of `Orders`. A call in a constructor, in a property or in a field's
-default takes the name of the type it stands in, as a call in its method does, and a call in a
-method of a generic type takes the type's name without its type arguments, so that every instance of
+default takes the name of the type it stands in, as a call in its method does, and wherever a call
+stands in a generic type, it takes the type's name without its type arguments, so that every instance of
 one generic type shares its category, as .NET's category of `ILogger<T>` leaves them out (§12, the
 owner, 2026-11-07, answer M11). The compiler says `not supported` to a constructor declared in a
 class's body (K14) and to a generic type (T19). The category of top-level code is its file's. The
@@ -206,8 +208,10 @@ stand for every prefix the part does not name, as ASP.NET's configuration layers
 by key. The two lists are merged once, before the program's first statement, and a category takes
 its level from the merged list as P5 takes it, by the longest prefix it starts with, so that an
 operator turns a category up or down through `KURZ_LOG` where the part does not name its prefix:
-beside the part's `Orders=Warning`, `KURZ_LOG="Orders.Payments=Debug"` gives `Orders.Payments`
-the level `Debug` (§12, the owner, 2026-11-06, answer P10). The level without a prefix is one
+beside the part's `Orders=Warning`, `KURZ_LOG="OrdersAudit=Debug"` gives the category of a type
+`OrdersAudit` the level `Debug`, while `Orders` keeps `Warning` (§12, the owner, 2026-11-06, answer
+P10). "Its prefix" is the prefix whose entry gives the category its level, the longest of the
+merged list that the category starts with, as §12 reads it. The level without a prefix is one
 entry of each list: the part's wins where it declares one, and else the variable's, as ASP.NET's
 `Default` key is layered as every other key. *(proposed)*
 
