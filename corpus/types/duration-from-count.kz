@@ -6,8 +6,7 @@
 // | 1h 30min
 // | -3h
 // | 2days
-// | true
-// | 1ns
+// | 104days 5h 59min 59s 254ms 740us 993ns
 // rules: T38
 
 int n = 90
@@ -19,8 +18,7 @@ print(duration.FromSeconds(n))
 print(duration.FromMinutes(n))
 print(duration.FromHours(-3))
 print(duration.FromDays(big))
-print(duration.FromSeconds(n) == 90s)
 
 // a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
 long odd = 9007199254740993
-print(duration.FromNanoseconds(odd) - duration.FromNanoseconds(odd - 1))
+print(duration.FromNanoseconds(odd))

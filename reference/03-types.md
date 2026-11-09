@@ -792,18 +792,28 @@ is one for each unit of a duration literal (L14): `FromNanoseconds`, `FromMicros
 `FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours` and `FromDays`.
 `timestamp.FromUnixSeconds(n)` and `timestamp.FromUnixMilliseconds(n)` are the timestamp `n` seconds
 or milliseconds after 1970-01-01 (T24), as C#'s `DateTimeOffset.FromUnixTimeSeconds` and
-`FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` (T18). The count is a `long` or a `double`,
-the double's value rounded to the nanosecond (§4, the owner, 2026-11-08, G4 (b), "Also a double, as
-C#" and "Seconds + milliseconds, as C#"). *(assumed, §4: a count of an integer type that widens to
-`long` (T8) takes the `long` form, and any other number the `double` form, as C#'s better conversion
-picks `TimeSpan.FromSeconds(long)` for an integer; a type that widens to neither is `type-mismatch`.
-The double's exact value is rounded to the nearest nanosecond, ties to even, as Rust's
-`Duration::from_secs_f64` rounds.)* A time that leaves the range of its type raises `overflow` (E3)
-in every build, as T31's arithmetic does, NaN and an infinity among them, and a constant count whose
-time does not fit is `constant-overflow` (T6). *(assumed, §4: the defaults of the product pass that
-the answer took, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with
-the overflow.)* No constructor stands on the wide pair (T29), into which the narrow value widens. How
-a program reads a count back from a time is open (§14).
+`FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` under T18 (§4, the owner, 2026-11-08,
+issue 110, comment 6721051459, G4 (b)). The count is a `long` or a `double`, the double's value rounded to
+the nanosecond (§4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#" and
+"Seconds + milliseconds, as C#"). C#'s two Unix-time constructors take a `long` alone, so the `double`
+form of the timestamp's two is Kurz's own, which that comment states of every `timestamp.FromUnixX`
+as of every `duration.FromX`. *(assumed, §4: a count of an integer type that widens to `long` (T8)
+takes the `long` form, and any other number the `double` form, as C#'s better conversion picks
+`TimeSpan.FromSeconds(long)` for an integer, an overload of .NET 9 on; a type that widens to neither
+is `type-mismatch`. So a `ulong` count is rounded to the nearest `double` first, as every integer
+widens into a `double` (T23), and one above 2^53 can lose its last units without a word, as C# rounds
+`TimeSpan.FromMicroseconds(9007199254740993UL)` to 9007199254740992 microseconds; that loss is the
+cost, and `long(u)` keeps every count whose time fits exact. The double's exact value is rounded to
+the nearest nanosecond, ties to even, as Rust's `Duration::from_secs_f64` rounds.)* A time that
+leaves the range of its type raises `overflow` (E3) in every build, as T31's arithmetic does, NaN and
+an infinity among them, and a constant count whose time does not fit is `constant-overflow` (T6), a
+constant NaN or infinity among them, as `int(1.0 / 0.0)` is, and a `ulong` constant by the time of
+the `double` it is rounded to. No constructor stands on the wide pair (T29), into which the narrow
+value widens. *(assumed, §4: the defaults of the product pass that the answer took, the wide pair's
+among them, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with the
+overflow, and a constant one as T6 reads `int(1.0 / 0.0)`.)* A constructor of one time type called on
+the other, `timestamp.FromSeconds(5)`, is `unknown-name` (V10). How a program reads a count back from
+a time is open (§14).
 
 Case: [types/duration-from-count.kz](../corpus/types/duration-from-count.kz)
 ```kurz
@@ -816,11 +826,10 @@ print(duration.FromSeconds(n))
 print(duration.FromMinutes(n))
 print(duration.FromHours(-3))
 print(duration.FromDays(big))
-print(duration.FromSeconds(n) == 90s)
 
 // a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
 long odd = 9007199254740993
-print(duration.FromNanoseconds(odd) - duration.FromNanoseconds(odd - 1))
+print(duration.FromNanoseconds(odd))
 ```
 
 Case: [types/duration-from-double.kz](../corpus/types/duration-from-double.kz)
@@ -869,9 +878,21 @@ Case: [types/duration-from-constant-overflow.kz](../corpus/types/duration-from-c
 print(duration.FromDays(106752))
 ```
 
+Case: [types/duration-from-constant-nan.kz](../corpus/types/duration-from-constant-nan.kz)
+```kurz
+// a constant NaN is no count of a time, as `int(1.0 / 0.0)` is no `int` (T6)
+print(duration.FromSeconds(0.0 / 0.0))
+```
+
 Case: [types/duration-from-string.kz](../corpus/types/duration-from-string.kz)
 ```kurz
 print(duration.FromSeconds("90"))
+```
+
+Case: [types/timestamp-from-seconds.kz](../corpus/types/timestamp-from-seconds.kz)
+```kurz
+// a timestamp counts from 1970 with `FromUnixSeconds`; `FromSeconds` is a duration's, and no member of `timestamp`
+print(timestamp.FromSeconds(5))
 ```
 
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock

@@ -505,8 +505,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_time_of_a_count_takes_a_number_that_widens_to_long_or_double_and_a_constant_that_does_not_fit_is_constant_overflow()
     {
-        // T38 (section 4, the owner, 2026-11-08, G4 (b), "Also a double, as C#"): an integer type that widens to `long` takes the `long`
-        // form, any other number the `double` form, a `ulong` and a `float` among them, and a type that widens to neither is type-mismatch
+        // T38 (section 4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#"): an integer type that widens to
+        // `long` takes the `long` form, any other number the `double` form, a `ulong` and a `float` among them, and a type that widens to
+        // neither is type-mismatch
         Clean("int n = 5\nprint(duration.FromSeconds(n))\nprint(timestamp.FromUnixMilliseconds(n))");
         Clean("ulong u = 5\nprint(duration.FromMinutes(u))");
         Clean("float f = float(1.5)\nprint(duration.FromHours(f))");
@@ -514,10 +515,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(timestamp.FromUnixSeconds(true))"));
 
         // T6: a constant count whose time does not fit is constant-overflow at the count's line, of a `long` and of a `double`; the
-        // largest counts that fit are clean
-        Clean("print(duration.FromDays(106751))\nprint(duration.FromSeconds(9223372036.854))");
+        // largest counts that fit are clean, and the next count of each is the error
+        Clean("print(duration.FromDays(106751))\nprint(duration.FromSeconds(9223372036.854774))");
         Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("print(1s)\nprint(duration.FromDays(106752))"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromSeconds(9223372036.854776))"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(timestamp.FromUnixSeconds(9223372037.0))"));
+
+        // a `ulong` constant takes the `double` form and is decided by the double the program computes of it: 2^63 - 1 is 2^63 there,
+        // which no duration holds, and 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
+        Clean("print(duration.FromNanoseconds(9223372036854775295UL))");
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromNanoseconds(9223372036854775807UL))"));
 
         // V10: the constructors of one type are no members of the other
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(timestamp.FromSeconds(5))"));

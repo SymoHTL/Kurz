@@ -749,8 +749,8 @@ public sealed partial class Checker
     /// <summary>
     /// T38: the constructors of a time of a count, with the nanoseconds of one unit of each: one for each unit of a duration literal (L14),
     /// as C#'s <c>TimeSpan.FromSeconds</c> and its siblings, and on a <c>timestamp</c> the seconds and the milliseconds since 1970, as C#'s
-    /// <c>DateTimeOffset.FromUnixTimeSeconds</c> and <c>FromUnixTimeMilliseconds</c> (section 4, the owner, 2026-11-08, G4 (b), "Seconds +
-    /// milliseconds, as C#").
+    /// <c>DateTimeOffset.FromUnixTimeSeconds</c> and <c>FromUnixTimeMilliseconds</c> (section 4, the owner, 2026-11-08, issue 110, comment
+    /// 6723644046, "Seconds + milliseconds, as C#").
     /// </summary>
     private static readonly Dictionary<(string Type, string Member), long> TimeFrom = new()
     {
@@ -767,9 +767,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// T38: <c>duration.FromSeconds(n)</c> and the other constructors of <see cref="TimeFrom"/>, the time of a count, a <c>long</c> or a
-    /// <c>double</c> (section 4, the owner, 2026-11-08, "Also a double, as C#"). A count of an integer type that widens to <c>long</c> (T8)
-    /// takes the <c>long</c> form and any other number the <c>double</c> form, as C# picks <c>TimeSpan.FromSeconds(long)</c> for an integer
-    /// by its better conversion; a constant count whose time does not fit is <c>constant-overflow</c> (T6).
+    /// <c>double</c> (section 4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#"). A count of an integer type
+    /// that widens to <c>long</c> (T8) takes the <c>long</c> form and any other number the <c>double</c> form, as C# picks
+    /// <c>TimeSpan.FromSeconds(long)</c> for an integer by its better conversion from .NET 9 on; a constant count whose time does not fit is
+    /// <c>constant-overflow</c> (T6), a <c>ulong</c> constant decided by the <c>double</c> the program computes of it.
     /// </summary>
     private Typed CheckTimeFrom(CallExpression c, KurzType result, long scale, string form)
     {
@@ -797,6 +798,9 @@ public sealed partial class Checker
 
         var fits = own.Constant switch
         {
+            // the integer of the `double` form is a `ulong` (T8), which the emitter's `uitofp` rounds to the nearest double, ties to even, as
+            // C#'s conversion of a `ulong` does; C#'s conversion of a BigInteger cuts, 2^63 - 1 to 2^63 - 1024, where the program has 2^63
+            IntegerConstant k when real => NanosecondsOf((double)(ulong)k.Value, scale) is not null,
             IntegerConstant k => Types.Fits(k.Value * scale, Types.Long),
             RealConstant r => NanosecondsOf(r.Value, scale) is not null,
             _ => true,

@@ -744,8 +744,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - a time of a count (T38), `duration.FromSeconds(n)` and its siblings and `timestamp.FromUnixSeconds(n)`
   and `timestamp.FromUnixMilliseconds(n)`: a `long` count multiplied, a `double` one split at its point,
   its whole units multiplied and its fraction rounded to the nearest nanosecond, ties to even, with the
-  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, each raising
-  `overflow` in every build where the time leaves the range, NaN and an infinity among them;
+  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, but for a count
+  of nanoseconds, which is rounded whole, since a tie of its fraction, split off, would go to the even
+  fraction, 3.5 to 3, where ties to even give 4 (every other unit is an even count of nanoseconds, so
+  its whole units keep the parity the fraction's rounding picked), each raising `overflow` in every
+  build where the time leaves the range, NaN and an infinity among them;
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
