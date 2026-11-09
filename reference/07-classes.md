@@ -195,9 +195,12 @@ the static type, under which `a == b` and `b == a` can differ; the cost is that 
 collection cannot find an instance by a base-typed key. `==` on a class that another class derives
 from, and a key of it, read the fields that count of each class derived from it too, since the value
 can be an instance of any of them, so that such a field of a type `==` does not take makes `==` on the
-base `type-mismatch`, as D3 reads the fields of a type derived from a `data` type *(assumed, §4: the
-build's reading of the answer that `==` on a `data` value that holds a map or a function value is a
-compile error; C# takes `==` on any class or record, a class's comparing references)*.
+base `type-mismatch`, at the comparison, whatever the folder of the derived class, as D3 reads the
+fields of a type derived from a `data` type *(assumed, §4: the build's reading of the answer that `==`
+on a `data` value that holds a map or a function value is a compile error; C# takes `==` on any class
+or record, a class's comparing references; the cost is that a class derived from the base, in any
+file of the program, can make `==` on the base `type-mismatch` where no line changed, and that the
+check reads every class of the program)*.
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
@@ -222,6 +225,16 @@ class Root(int Level) : User equal by Level
 print(Admin(1, "Ann", 2) == Admin(1, "Bea", 3))
 print(Root(1, "Ann", 2) == Root(1, "Ann", 3))
 print(Root(1, "Ann", 2) == Root(2, "Bea", 2))
+```
+
+Case: [classes/equality-derived-map.kz](../corpus/classes/equality-derived-map.kz)
+```kurz
+class Shape(string Name)
+class Tally(Map<string, int> Counts) : Shape
+
+bool Same(Shape a, Shape b) => a == b
+
+print(Same(Shape("a"), Shape("a")))
 ```
 
 ### K5 (decided, §4) Equality by named fields
@@ -338,7 +351,10 @@ print(d.Sound())
 ### K7 (decided, §4) The body of a class
 
 Class bodies follow C#. A class names its base class and its interfaces after `:`, the base class
-first. An interface is declared with `interface` and lists the signatures of its methods; they are
+first. An interface is declared with `interface` and lists the signatures of its methods alone: a
+body of one is `syntax`, at the method (§4, the owner, 2026-11-02, #110, comment 6573113786, against a
+default body as Rust's trait methods and C# 8's default interface methods have)
+*(assumed, §4: the id, as for text no rule gives a meaning, E4)*. The methods are
 visible wherever the interface is, and a method that implements one is written `pub`, as C# demands
 `public` of an implicit implementation: a class that names an interface and lacks one of its methods is the compile error
 `missing-member`, at the class, with the message naming the method, and a method that is there
@@ -346,14 +362,20 @@ without `pub` is `interface-method-private`, at the method (the owner, 2026-10-0
 implied by the interface, under which a method that looks private is public, and against one id for
 both mistakes). A method implements an interface method when its name, its parameter types in their
 order and its return type are the interface's; a `pub` method inherited from the base class counts,
-as in C# (the owner, 2026-10-10, confirming the reading proposed after the review of round 13); one
+as in C# (the owner, 2026-10-10, confirming the reading proposed after the review of round 13). The
+parameters it marks `mut` are the interface's too: one whose `mut` parameters differ implements nothing,
+and the class is `missing-member` (§4, the owner, 2026-11-02, #110, comment 6573113786, against `mut`
+ignored, under which a call through the interface passes a value where the method takes a place, M7). One
 inherited without `pub` does not count, and the class is `missing-member` (the owner, 2026-10-10); it
 implements the interface with a `pub` method of its own, which hides nothing, since a base method the
-class cannot see is hidden by nothing (below).
+class cannot see is hidden by nothing (below). A property, the class's own or inherited, is no method and
+implements none, since a call of its name calls the value it gives (below), and the class is
+`missing-member` *(assumed, §4: as C# refuses a property for a method of an interface, CS0535)*.
 Between the braces of a class, a field is written `Type name`, with `mut` in front when it can be
 assigned and its first value after `=`, which may be any expression (the owner, 2026-10-10, against a constant, which F12 keeps for a
-parameter's default): it may read the parameters of the primary constructor, whose fields are set
-before the defaults of the body (§4, the owner, 2026-11-06, #39, comment 6682994925), the fields
+parameter's default): it may read the parameters its primary constructor lists, whose fields are set
+before the defaults of the body (§4, the owner, 2026-11-06, #39, comment 6682994925; a parameter that
+the short form takes for the base is none of them, its field being the base's, K10, *(assumed, §4)*), the fields
 declared above it and functions outside the class, and is evaluated in declaration order before the body of a
 constructor runs, as C# evaluates an initializer, which refuses an instance member there; a field
 declared below it, a method of its instance or `this` is `unknown-name` (V10), while a `static`
@@ -420,16 +442,16 @@ assigned as after, and the build says `not supported` to such a constructor (K14
 readings of the owner's choice of 2026-11-05, #39, comment 6657252447, marked assumed there: a property
 of a base class is read through an instance of a derived class and by its name alone in the derived
 class's methods, as C# reads an inherited property (K6), the nearest class up the chain that declares a
-member of the name giving it; a property of a base with none of `pub`, `prot` and `internal` is `not-visible` in the derived class,
-as a method of it is (F9); and `virtual`, `override` and `prot` on a property are `not supported`, as
+member of the name giving it; a property of a base with none of `pub`, `prot` and `internal`, or one marked `internal` read in a
+derived class outside the base's folder, is `not-visible` in the derived class, as such a method of it is (F9); and `virtual`, `override` and `prot` on a property are `not supported`, as
 §14 leaves them open)* A member of a derived class with the name of a property of a base, a property, a
 field or a method whatever its parameters, and a property with the name of a method of a base, are
 `hides-member`, since a property has no override and a method of a property's name is no overload of it
 (§4, the owner, 2026-11-05, #110, comment 6659026217, against an overload of a base property by a method
 with parameters and against C#'s hiding, CS0108, which `new` silences and Kurz has not; the cost is that
 a derived class reuses no such name while §14 leaves a `virtual` or `override` property open). A
-property or a method of a base that the class cannot see, one with none of `pub`, `prot` and `internal`, is hidden by nothing, as a
-method the class cannot see is (F9) *(assumed, §4: a reading of the answer, which names no visibility)*.
+property or a method of a base that the class cannot see, one with none of `pub`, `prot` and `internal`, or one marked `internal`
+where the class stands outside the base's folder, is hidden by nothing, as a method the class cannot see is (F9) *(assumed, §4: a reading of the answer, which names no visibility)*.
 A property with the name of a field of a base is `redeclared` (V9), since the base's fields are the
 class's *(assumed, §4: the id of that case)*. A `static`, `virtual`, `override` or `prot` property, one
 in an interface or in the body of a `data` type, and one of `void` or of a type that lists cases beside
@@ -716,6 +738,37 @@ class Dot : Shape {
 }
 
 print("dot")
+```
+
+Case: [classes/interface-method-mut-differs.kz](../corpus/classes/interface-method-mut-differs.kz)
+```kurz
+interface Bump {
+    void Go(mut int n)
+}
+
+class Step : Bump {
+    pub void Go(int n) {
+        print(n)
+    }
+}
+
+print(1)
+```
+
+Case: [classes/interface-method-body.kz](../corpus/classes/interface-method-body.kz)
+```kurz
+interface Shape {
+    int Area()
+    string Text() => "area {Area()}"
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+    pub string Text() => "dot"
+}
+
+Shape s = Dot()
+print(s.Area())
 ```
 
 Case: [classes/override-return-type.kz](../corpus/classes/override-return-type.kz)
@@ -1334,9 +1387,10 @@ in the same order, and then the parameters the class lists. The explicit one wri
 arguments of the base after its name, so that they can be computed:
 `class Guest(int Number) : User("guest {Number}")`. Its constructor takes only the parameters
 the class lists, and the arguments of the base are expressions over them. An instance of the class
-is built in C#'s order: the defaults of its fields of the body, then the arguments of the base,
-then the defaults of the base's fields of the body and the base's constructor, then its own
-constructor (§4, the owner, 2026-11-03, #39, comment 6600033456, and 2026-11-06, comment
+is built in C#'s order: the fields of the parameters it lists, then the defaults of its fields of the
+body, then the arguments of the base, then the base's part in the same order, the fields of the
+parameters the base lists, the defaults of the base's fields of the body and the base's constructor,
+then its own constructor (§4, the owner, 2026-11-03, #39, comment 6600033456, and 2026-11-06, comment
 6682994925); the build says `not supported` to a field in the body of a class with a base or with
 classes derived from it (K7). Whether a parameter
 can be passed on without becoming a field of the class is K11; the case computes the argument

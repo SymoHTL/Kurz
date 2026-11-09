@@ -83,13 +83,6 @@ f = (int n) => {
     }
 }
 
-int Once() {
-    while (true) {
-        return 5
-        break
-    }
-}
-
 string Pick(bool b) {
     if b {
         while true {
@@ -103,9 +96,90 @@ string Pick(bool b) {
 print(First([1, 2, 3, 4]))
 print(C(4).Get())
 print(f(1))
-print(Once())
 print(Pick(true))
 print(Pick(false))
+```
+
+Case: [functions/while-true-break-not-reached.kz](../corpus/functions/while-true-break-not-reached.kz)
+```kurz
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+print(Once())
+```
+
+Case: [functions/while-true-break-missing-return.kz](../corpus/functions/while-true-break-missing-return.kz)
+```kurz
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if i == xs.Count {
+            break
+        }
+
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4]))
+```
+
+Case: [functions/while-not-constant-missing-return.kz](../corpus/functions/while-not-constant-missing-return.kz)
+```kurz
+int First(List<int> xs, bool go) {
+    mut i = 0
+    while go {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4], true))
+```
+
+Case: [functions/constant-condition-end.kz](../corpus/functions/constant-condition-end.kz)
+```kurz
+int One() {
+    if true {
+        return 1
+    }
+}
+
+int Two() {
+    while !false {
+        return 2
+    }
+}
+
+int Three(List<int> xs) {
+    mut i = 0
+    while true {
+        if false {
+            break
+        }
+
+        if xs[i] == 3 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(One())
+print(Two())
+print(Three([1, 2, 3]))
 ```
 
 ### F4 (assumed, §8) `void`
@@ -118,7 +192,8 @@ of a function type, `(void) => int`, is read as it is (§8, the owner, 2026-11-0
 parameter, a lambda with no type on its parameter, `(v) => 1`, is a value of it, and no call of it
 can be written, since `f()` gives that parameter no argument (D11) and a call of a `void` function is
 no value to pass (E4). A lambda that writes `void` on its parameter, `(void v) => 2`, is read against
-the function type it is passed for (F11).
+the function type it is passed for (F11): it is a value of `(void) => int`, as `(v) => 1` is, and
+`type-mismatch` where the function type's parameter is no `void`, `(int) => int`.
 
 Case: [functions/void.kz](../corpus/functions/void.kz)
 ```kurz
@@ -288,14 +363,17 @@ reaches that package's folder: with a line `json` of `project.kz` and no folder 
 `use json/schema` reaches the folder `schema` of that package (§8, §13, the owner, 2026-11-04, "with only a
 `json` dependency line, `use json/schema` reaches that package's subfolder"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
-through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
+through the folder's name; a package's qualifier is the name of its line, and that of a longer path into it its last
+name, `schema` in `use json/schema`, as for a project's folder; `as` takes the place of
 the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
 nothing through that line and being `unknown-name` where no other `use` line of the file, and no
 declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
-the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
-which that package's line alone reaches, are `unknown-name` at the `use` line; a longer
+the project and no line of `project.kz`, a path longer than a package's line name whose folder the package lacks,
+`use json/nosuch`, and a path that passes through a folder, of the project or of a package, that holds a `project.kz`
+of its own, which that package's line alone reaches, are `unknown-name` at the `use` line; a space beside a `/` reads
+as one between any two tokens, `use a / util` being `use a/util`, and a line break ends the path; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
 folder of the project, so that `use json` beside it names the line)*
@@ -510,7 +588,7 @@ sight, as C# reads it: a field, a `static` field or a method of the class named 
 constant, so it is `default-not-constant`, as C# gives CS1736 for a `static readonly` field (§8, the owner,
 2026-11-04). *(assumed, §8: `this` in the default of an instance method is no constant either, and
 `this` or a member of an instance, a field or a method, in the default of a `static` method is K19's
-`static-mismatch`, as in its body)* A call of a `virtual` method or of its override
+`static-mismatch`, as in its body, in place of `default-not-constant`)* A call of a `virtual` method or of its override
 takes the default of the method its receiver's static type names, and runs the body the object's
 type gives, as C# does, so one object's call passes different values by the type of the variable it
 is read through; an override without a default has none of its own, and a call on the derived type
