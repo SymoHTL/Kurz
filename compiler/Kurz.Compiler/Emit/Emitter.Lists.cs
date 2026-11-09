@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when layout.IsBlock(d) => true,
         DataType d => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
@@ -161,6 +161,11 @@ public sealed partial class Emitter
     {
         for (var i = temporaries.Count - 1; i >= 0; i--)
         {
+            if (temporaries[i].Type is MapType && walkedMaps.Contains((fn, temporaries[i].Value)))
+            {
+                fn.Emit($"call void {StdFunction("MapWalk")}(ptr {temporaries[i].Value}, i32 -1)"); // the loop over the map ends: at its end, a `break`, a `return` or a case propagated out of its body
+            }
+
             Release(temporaries[i].Value, temporaries[i].Type);
         }
     }
@@ -215,6 +220,12 @@ public sealed partial class Emitter
             return;
         }
 
+        if (type is InterfaceType)
+        {
+            fn.Emit($"call void {RetainInstance()}(ptr {fn.Value($"extractvalue %kz.obj {value}, 0")})"); // K6: the instance's strong count
+            return;
+        }
+
         if (type is WeakRefType weak)
         {
             fn.Emit($"call void {RetainWeak()}(ptr {Address(value, weak.Target.Symbol)})"); // R3
@@ -256,9 +267,9 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is ClassType c && Layout.Fat(c.Symbol))
+        if ((type is ClassType c && Layout.Fat(c.Symbol)) || type is InterfaceType)
         {
-            ReleaseThroughTable(value); // K6: the release of the instance's class
+            ReleaseThroughTable(value); // K6: the release of the instance's class, which its table for the class or the interface holds
             return;
         }
 

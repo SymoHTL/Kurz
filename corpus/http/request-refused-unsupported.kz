@@ -12,7 +12,7 @@
 // | TooLarge: request line too long
 // | TooLarge: request header too large
 // | TooLarge: request header too large
-// rules: W5
+// rules: W5, W7
 
 // what the server answers `505`, `501` and `417` is an `HttpError` of the kind `Unsupported`, and what it answers `413`, `414` and
 // `431` one of the kind `TooLarge`, with the limits of `HttpLimits()`: a declared body of 30000000 bytes, a request line of 8192

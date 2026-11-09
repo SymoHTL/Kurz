@@ -310,13 +310,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // again; a slot of a key of a kind whose hash can read more than one word holds its hash first, as .NET keeps an entry's hash
         // code (issue 157, item 14, under the owner's "Allow, faster wins"): each key type the checker takes, with its layout
         const string program =
-            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\n\nlongduration far = 100000days\n" +
+            "enum Color { Red, Green }\ndata Pair(string A, string B)\nclass Cell(mut int N)\nclass Spot(int X, int Y)\ninterface Named {\n    string Name()\n}\n\n" +
+            "class Tag(string N) : Named {\n    pub string Name() => N\n}\n\nlongduration far = 100000days\n" +
             "mut a = Map<int, int>()\na[1] = 1\nmut b = Map<long, int>()\nb[1] = 1\nmut c = Map<char, int>()\nc['x'] = 1\n" +
             "mut d = Map<bool, int>()\nd[true] = 1\nmut e = Map<Color, int>()\ne[Color.Green] = 1\nmut f = Map<double, int>()\nf[1.5] = 1\n" +
             "mut g = Map<string, int>()\ng[\"x\"] = 1\nmut h = Map<Pair, int>()\nh[Pair(\"a\", \"b\")] = 1\nmut i = Map<List<int>, int>()\ni[[1, 2]] = 1\n" +
             "mut j = Map<duration, int>()\nj[90min] = 1\nmut k = Map<longduration, int>()\nk[far] = 1\nmut l = Map<int?, int>()\nl[null] = 1\n" +
             "mut m = Map<float, int>()\nm[1.5f] = 1\nmut n = Map<Cell, int>()\nn[Cell(1)] = 1\nmut o = Map<Spot, int>()\no[Spot(1, 2)] = 1\n" +
-            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count)\n";
+            "mut p = Map<Named, int>()\np[Tag(\"a\")] = 1\n" +
+            "print(a.Count + b.Count + c.Count + d.Count + e.Count + f.Count + g.Count + h.Count + i.Count + j.Count + k.Count + l.Count + m.Count + n.Count + o.Count + p.Count)\n";
         var compiled = Compile(program, Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
         Assert.True(compiled is not null, "no program");
         string[] layouts =
@@ -336,33 +338,82 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             "Map<longduration, int>\" = type { i64, i128, i32 }",
             "Map<int?, int>\" = type { i64, { i8, [1 x i32] }, i32 }",
             "Map<Spot, int>\" = type { i64, ptr, i32 }",
+            "Map<Named, int>\" = type { i64, %kz.obj, i32 }",
         ];
         Assert.All(layouts, layout => Assert.Contains($"\n%\"entry.{layout}", compiled.Ir, StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Remove_finds_the_slot_of_its_key_again_only_in_a_block_it_copied()
+    public void Remove_finds_the_slot_of_its_key_once_and_takes_the_slot_of_a_copy_at_its_offset()
     {
-        // hashbrown's `remove_entry` finds the key's slot once: the helper of `Remove` looks the key up a second time only on the branch
-        // where the block it found the slot in was shared and was copied (M3), so that the slot of the copy is taken
+        // hashbrown's `remove_entry` finds the key's slot once, and so does the helper of `Remove`: where the block it found the slot in
+        // was shared and was copied (M3), it takes the copy's slot at the offset the slot has in that block, since the copy holds the
+        // block's bytes (`MapCopy`)
         var program = Compile("mut m = Map<long, long>()\nm[1] = 2\nprint(m.Remove(1) ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program;
         Assert.True(program is not null, "no program");
         var lines = program.Ir.Split('\n').Select(l => l.TrimEnd('\r')).ToArray(); // the IR ends its lines in CR LF on Windows
         var first = Array.FindIndex(lines, l => l.StartsWith("define ", StringComparison.Ordinal) && l.Contains("@\"remove.", StringComparison.Ordinal));
         Assert.True(first >= 0, "no remove helper in the IR");
         var body = lines[first..Array.IndexOf(lines, "}", first)];
-        var finds = Enumerable.Range(0, body.Length).Where(i => body[i].Contains("call ptr @\"find.", StringComparison.Ordinal)).ToList();
-        Assert.Equal(2, finds.Count); // the lookup, and the lookup in the copy
-        var label = body.Take(finds[1]).Last(l => l.EndsWith(':') && !l.StartsWith(' '));
-        Assert.StartsWith("in.copy.", label, StringComparison.Ordinal);
+        var find = Assert.Single(body, l => l.Contains("call ptr @\"find.", StringComparison.Ordinal)); // the lookup alone
+        var found = Regex.Match(find, @"^\s*(%\S+) = call ptr @""find\.[^""]+""\(ptr (%[^,\s]+),");
+        Assert.True(found.Success, find);
+        var (slot, block) = (found.Groups[1].Value, found.Groups[2].Value);
 
-        // the branch into the second lookup is taken where the block the map holds after `OwnBlock` is not the block the slot was
-        // found in, and the slot found is taken where it is
+        // the branch into the copy's slot is taken where the block the map holds after `OwnBlock` is not the block the slot was found
+        // in, and the slot found is taken where it is
         var branch = Assert.Single(body, l => l.TrimStart().StartsWith("br i1 ", StringComparison.Ordinal) && l.Contains("label %in.copy.", StringComparison.Ordinal));
         Assert.Matches(@"label %take\.\d+, label %in\.copy\.", branch);
         var condition = branch.TrimStart()["br i1 ".Length..].Split(',')[0];
         var test = Assert.Single(body, l => l.TrimStart().StartsWith(condition + " = ", StringComparison.Ordinal));
-        Assert.Matches(@"= icmp eq ptr %[^,\s]+, %[^,\s]+", test);
+        var compared = Regex.Match(test, @"= icmp eq ptr (%[^,\s]+), (%[^,\s]+)$");
+        Assert.True(compared.Success, test);
+        Assert.Equal(block, compared.Groups[2].Value);
+        var current = compared.Groups[1].Value;
+
+        // in the copy: the slot's address less the address of the block it was found in, added to the address of the copy
+        var start = Array.FindIndex(body, l => l.StartsWith("in.copy.", StringComparison.Ordinal));
+        var end = Array.FindIndex(body, start + 1, l => l.EndsWith(':') && !l.StartsWith(' '));
+        var copy = string.Join("\n", body[(start + 1)..end]);
+        var from = Regex.Match(copy, $@"(%\S+) = ptrtoint ptr {Regex.Escape(slot)} to i64$", RegexOptions.Multiline);
+        var of = Regex.Match(copy, $@"(%\S+) = ptrtoint ptr {Regex.Escape(block)} to i64$", RegexOptions.Multiline);
+        Assert.True(from.Success && of.Success, copy);
+        var offset = Regex.Match(copy, $@"(%\S+) = sub i64 {Regex.Escape(from.Groups[1].Value)}, {Regex.Escape(of.Groups[1].Value)}$", RegexOptions.Multiline);
+        Assert.True(offset.Success, copy);
+        var stepped = Regex.Match(copy, $@"^\s*(%\S+) = getelementptr i8, ptr {Regex.Escape(current)}, i64 {Regex.Escape(offset.Groups[1].Value)}$", RegexOptions.Multiline);
+        Assert.True(stepped.Success, copy);
+
+        // the slot `take` erases: the found slot is kept in one place, the copy's slot is the one store there in the copy, and `take`
+        // loads that place and gives what it loads to `MapErase` with the block the map holds
+        var kept = Regex.Match(string.Join("\n", body), $@"^\s*store ptr {Regex.Escape(slot)}, ptr (%\S+)$", RegexOptions.Multiline);
+        Assert.True(kept.Success, "the found slot is kept nowhere");
+        var place = kept.Groups[1].Value;
+        var stored = $"store ptr {stepped.Groups[1].Value}, ptr {place}";
+        bool TakesTheCopy(string[] lines)
+        {
+            var inCopy = lines[(start + 1)..end].Select(l => l.Trim()).Where(l => l.Contains($"ptr {place}", StringComparison.Ordinal)).ToArray();
+            var takeStart = Array.FindIndex(lines, l => l.StartsWith("take.", StringComparison.Ordinal));
+            if (inCopy is not [var only] || only != stored || takeStart < 0)
+            {
+                return false;
+            }
+
+            var takeEnd = Array.FindIndex(lines, takeStart + 1, l => l.EndsWith(':') && !l.StartsWith(' '));
+            var taken = lines[(takeStart + 1)..(takeEnd < 0 ? lines.Length : takeEnd)];
+            var loaded = Regex.Match(string.Join("\n", taken), $@"^\s*(%\S+) = load ptr, ptr {Regex.Escape(place)}$", RegexOptions.Multiline);
+            return loaded.Success && taken.Any(l => l.Contains("MapErase", StringComparison.Ordinal) && l.Contains($"(ptr {current}, ptr {loaded.Groups[1].Value}, i64 ", StringComparison.Ordinal));
+        }
+
+        Assert.True(TakesTheCopy(body), string.Join("\n", body));
+
+        // the positive controls: the found slot stored again in the copy, which leaves the copy's slot unused, and a `take` that gives
+        // `MapErase` the found slot, not what it loaded, each fail the check
+        var unused = body.Select(l => l.Trim() == stored ? l.Replace($"store ptr {stepped.Groups[1].Value},", $"store ptr {slot},", StringComparison.Ordinal) : l).ToArray();
+        Assert.NotEqual(body, unused);
+        Assert.False(TakesTheCopy(unused));
+        var erasedFound = body.Select(l => l.Contains("MapErase", StringComparison.Ordinal) ? Regex.Replace(l, $@"\(ptr {Regex.Escape(current)}, ptr %[^,\s]+, i64 ", m => $"(ptr {current}, ptr {slot}, i64 ") : l).ToArray();
+        Assert.NotEqual(body, erasedFound);
+        Assert.False(TakesTheCopy(erasedFound));
     }
 
     [Fact]
@@ -443,6 +494,36 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var tagged = Assert.Single(arms, arm => arm.Contains(releaseList, StringComparison.Ordinal));
         Assert.True(tagged.Contains(release, StringComparison.Ordinal), "a `Tagged` block lets go of no string of its base");
         Assert.True(tagged.IndexOf(release, StringComparison.Ordinal) < tagged.IndexOf(releaseList, StringComparison.Ordinal), "a `Tagged` block lets go of its own list before its base's string");
+    }
+
+    [Fact]
+    public void The_lookup_of_a_map_hands_its_probe_past_the_bound_to_a_helper_out_of_line()
+    {
+        // the lookup is small enough for the optimiser to inline at every read, write and `Remove`, as before the bound of a lookup:
+        // the test of the bound's rehash, the rehash, the second hash and the probe again with no bound stay in a helper it never
+        // inlines, which it hands the block, the key and its hash alone and whose result it returns, and the lookup does not call itself
+        var ir = Compile("mut m = Map<int, int>()\nm[1] = 2\nprint(m[1] ?? 0)\n", Builder.CheckRuntime(Builder.HostTarget!.Value)).Program!.Ir;
+        string Body(string name)
+        {
+            var start = ir.IndexOf($"define internal ptr @\"{name}\"(", StringComparison.Ordinal);
+            Assert.True(start >= 0, $"no {name} in the IR");
+            return ir[start..ir.IndexOf("\n}", start, StringComparison.Ordinal)];
+        }
+
+        var find = Body("find.Map<int, int>");
+        var call = find.IndexOf("call ptr @\"far.Map<int, int>\"(ptr %a0, i32 %a1, i64 %a2)", StringComparison.Ordinal);
+        Assert.True(call >= 0, "the lookup hands no probe past the bound on");
+        Assert.StartsWith("ret ptr %", find[(find.IndexOf('\n', call) + 1)..].TrimStart(), StringComparison.Ordinal);
+        Assert.DoesNotContain("call ptr @\"find.Map<int, int>\"", find, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapLongLookup", find, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapHash", find, StringComparison.Ordinal);
+        var far = Body("far.Map<int, int>");
+        Assert.StartsWith("define internal ptr @\"far.Map<int, int>\"(ptr %a0, i32 %a1, i64 %a2)", far, StringComparison.Ordinal);
+        Assert.Contains(" noinline cold ", far.Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("MapLongLookup", far, StringComparison.Ordinal);
+        Assert.Contains("call void @\"rehash.Map<int, int>\"(ptr %a0)", far, StringComparison.Ordinal);
+        Assert.Contains("call ptr @\"find.Map<int, int>\"(ptr %a0, i32 %a1, i64 ", far, StringComparison.Ordinal);
+        Assert.DoesNotContain("call ptr @\"far.Map<int, int>\"", far, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -564,5 +645,51 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("%\"c.Holder\" = type { i64, i64, ptr, %kz.obj, ptr, %kz.obj }", program.Ir, StringComparison.Ordinal);
         Assert.Contains("%\"c.Mid\" = type { i64, i64, i32, i32 }", program.Ir, StringComparison.Ordinal); // the counts, the base's `N`, then `M`
         Ran(Toolchain.Run(toolchain.Build(program, "class-layout")), 0, ["1", "5", "3", "8", "3", "true"], string.Empty);
+    }
+
+    [Fact]
+    public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
+    {
+        // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for
+        // the interface, whose words are the class's release, its weak release, its equality and its hash where `==` or a key reads them,
+        // and a slot for each method of the interface in its order; its `null` is the pair of the address 0 (N1); a class nothing derives
+        // from has that table alone, and its own references stay the one word of the address
+        const string Program = """
+            interface Shape {
+                int Area()
+                int Twice(int k)
+            }
+
+            class Dot(int R) : Shape {
+                pub int Area() => R
+                pub int Twice(int k) => R * k
+            }
+
+            class Holder(Shape S, Shape? T)
+
+            int Both(Shape x, Shape? y) {
+                if y == null {
+                    return x.Area()
+                }
+
+                return x.Area() + y.Twice(2)
+            }
+
+            int Own(Dot d) => d.R
+
+            h = Holder(Dot(1), null)
+            print(Both(h.S, h.T))
+            print(Both(Dot(2), Dot(3)))
+            print(Own(Dot(4)))
+            """;
+        var program = Emit(Program);
+        string Parameters(string name) =>
+            Regex.Match(program.Ir, $@"^define [^@\n]*@""[^""]*\.{name}\.[0-9]+""\(([^)]*)\)", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal("%kz.obj %p0, %kz.obj %p1", Parameters("Both"));
+        Assert.Equal("ptr %p0", Parameters("Own"));
+        Assert.Contains("%\"c.Holder\" = type { i64, i64, %kz.obj, %kz.obj }", program.Ir, StringComparison.Ordinal);
+        Assert.Contains("@\"table.Dot.Shape\" = internal constant [7 x ptr] [", program.Ir, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"table.Dot\" =", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "interface-layout")), 0, ["1", "8", "4"], string.Empty);
     }
 }

@@ -231,8 +231,9 @@ parameter written `move` does. An argument of such a parameter without the word 
 `move-at-call` (§6, the owner, 2026-11-05, issue 156, comment 6657251688, Q3), and so is `move` at a
 call in front of an argument whose parameter is not written `move`, as `mut-at-call` is for `mut`
 (§6) *(assumed, §6: the name `move-at-call`, and the reading said back for the word in front of a
-parameter not written `move`)*. At a send, `move` at an argument is the send's word, however the
-method's parameter is written, and a `move` at a call that is both in front of a parameter not
+parameter not written `move`)*. At a send to an actor, `move` at an argument is the send's word, however
+the method's parameter is written, while `client.Send`, the client's method, is a call and no send
+(§12), and a `move` at a call that is both in front of a parameter not
 written `move` and of a value held as its caller's is `move-at-call`, the call's word checked
 first (§6) *(assumed, §6: those readings)*. A lambda given for the handler whose parameter is written without
 `move` fits the type and sends nothing of its request: its check holds the parameter as its
@@ -250,18 +251,37 @@ the server when the body ends, read to its end or drained when its last owner dr
 read or the drain closed the connection (below) (§12, the owner, 2026-11-05, issue 156, comment
 6657251688, Q5, and comment 6666386552, Q7). The response, the `408` and the close stay the
 server's, on the write half, and a read of the body that timed out is reported back to the server
-at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). A body's first
-read, in any actor, signals the server through the halves' pair of types, and `100 Continue` is
-written on the server's write half for a request that expects it while no response has begun, while a
-handler that returns with the body unread by every actor keeps the close of a body unread at its
-return (§12, the owner, 2026-11-05, issue 156, comment 6668914650, Q10). The write is made by
-`std/`'s code of that pair at the first read, in the actor that reads, under its flag of whether a
-response has begun, since the server is inside the handler's call (§12, the owner, 2026-11-05,
-issue 156, comment 6669908509, Q12). The response is
+at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). The one write on
+the write half that is not the server's is a body's `100 Continue`: a body's first read, in any
+actor, writes it through the halves' pair of types for a request that expects it while no response
+has begun, while a handler that returns with the body of a request that expects `100-continue`
+unread by every actor keeps the close of such a body unread at its return, and every other moved
+body that no read has reached counts the grace from that return (below) (§12, the owner,
+2026-11-05, issue 156, comment 6668914650, Q10, and 2026-11-06, issue 39, comment 6682072588). The
+write is made by `std/`'s code of that pair at the first read, in the actor that reads, under its
+flag (§6), since the server is inside the handler's call (§12, the owner, 2026-11-05, issue 156,
+comment 6669908509, Q12). The flag is taken by an atomic test-and-set before either write, the
+server's head of a response or that `100 Continue`, within the second of section 6's exceptions to
+its region check (§6, §12, the owner, 2026-11-06, issue 39, comment 6682072588), and it holds one of
+four states, free, `100 Continue` under way, `100 Continue` written and a response begun: the
+reading actor sets it to written when its write ends, a server that finds the write under way waits
+for written, at most one write of 25 bytes, and then writes its head, and a written `100 Continue`
+is no begun response, so that a `408` or a `413` can still go out after it (§6, §12, the owner,
+2026-11-07, issue 39, comment 6706852249) *(assumed, §6, §12: that the reading actor writes nothing
+when it finds a response begun)*. The exception covers the pair's state as a whole, the flag, the
+time of the body's last read and the server's end of the body, each part atomic and shared only
+between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249).
+The response is
 written when the handler returns, while the moved body stays the other actor's to read to its end:
-every read that keeps to the body's rate gives the body's bytes, then `0` at its end. A body left
+every read that keeps to the body's rate gives the body's bytes, then `0` at its end, but for the
+body of a request that expects `100-continue` that no actor had read at the return, whose connection
+closes there (above) and whose next read gives `request timed out`, as a body the server ended gives
+it (below) (§12) *(assumed, §12: that exception's read)*. A body left
 unread is drained when its last owner drops it, and the connection reads its next request only after
-that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306).
+that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306). A body
+that the server has ended (below), and one that its own read ended, past `MaxRequestBodySize` or
+under the body's rate (below), drains nothing at its drop, and its connection is closed and not
+read again (§12) *(assumed, §12: that exception)*.
 
 The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
 by `MaxDrainSize`, and where either ends it the connection closes, with no error to any reader, and
@@ -279,36 +299,58 @@ would pass it gives `HttpError(TooLarge, "request body over limit")` and none of
 later read the same error, and the connection closes, the `413` sent only while no response has
 begun, as Kestrel's `BadHttpRequestException` of 413 is (§12) *(assumed, §12: the count, which
 corrects the reading said back on issue 156, comment 6644555381, item 2, as the owner's choice of
-2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. A read
-of a moved body that falls under the body's rate gives `HttpError(Protocol, "request timed out")`,
-as a handler's read does, and the connection closes; the `408` is sent only while no response has
-begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error `request timed out`
-being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment 6657251329, which replaced
-the `IoError` with `IoKind.TimedOut` of 2026-11-03); the error is the server's own, in place of the
-`IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull request 347,
-comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at the report of
-that read, which ends the body)*, and after a `408` the
+2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. For a moved body
+that read ends the body and is reported back to the server at the body's end, which sends the `413`
+while no response has begun and closes the connection, a report made during the handler's call taken
+once the call has returned, as for the `408` (below), the `413` then sent in place of the handler's
+response, which is not written (§12) *(assumed, §12: that path)*. A read
+of a moved body that falls under the body's rate closes the connection, and the `408` is sent only
+while no response has begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error
+`request timed out` being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment
+6657251329, which replaced the `IoError` with `IoKind.TimedOut` of 2026-11-03); the read gives
+`HttpError(Protocol, "request timed out")`, the server's own error, as a handler's read does,
+in place of the `IoError` of the kind `TimedOut` of 2026-11-03 (§12, the owner, 2026-11-06, pull
+request 347, comment 6680238222) *(assumed, §12: the close and the `408` decided by the server at
+the report of that read, which ends the body, and a report made during the handler's call taken
+once the call has returned, the `408` then sent in place of the handler's response)*, and after a
+`408` the
 response the handler returns is not written, with no error to any program (§12) *(assumed, §12: that
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
 owner, 2026-11-05, issue 156, comment 6666386552, Q8). Only the server can close without a read:
-while the read half is away, the server times the grace from the body's last read, and at its end
+while the read half is away and the handler's call has returned, the server times the grace from the
+body's last read, or from the return for a moved body that no read has reached, other than the body
+of a request that expects `100-continue`, whose connection Q10's close ends at the return (above),
+and at its end
 it ends the body through the halves' pair of types, closes the connection and serves the next one,
 so that the body's next read gives `request timed out` and its drop drains nothing (§12)
 *(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
 runs, the server times nothing: it times the grace once the call has returned, and a read that
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
-2026-11-05, issue 156, comment 6669908509). The grace runs from the body's last read and does not
+2026-11-05, issue 156, comment 6669908509), from the time of the body's last read, which the pair
+holds in its shared state (§6, §12) *(assumed, §12: that check at the read, beside the server's
+timing after the return)*.
+The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
-(§12, the owner, 2026-11-06, pull request 347, P2). The time between
-reads counts in the body's rate as the time a read waits does, and a
-time past the grace since the last read ends the body at once; a body that the handler reads
-itself counts only the time a read waits, since Q8 was asked of a moved body (§12) *(assumed, §12:
-those readings)*. That a moved body's read under the rate ends the body and closes the connection
-is decided, as is its error (above), and the timing of a read's wait is open: how it is
+(§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), with P2 (the grace from the
+return, comment 6680351318) for every other moved body than the body of a request that expects
+`100-continue`, which keeps Q10's close at the return, above (§12, the owner, 2026-11-06, issue 39,
+comment 6682072588), so that a first read during
+the call is never past the grace for a body that no read had reached (§12) *(assumed, §12: that
+reading)*. The time between
+reads counts in the body's rate as the time a read waits does, and a time past the grace since the
+last read ends the body at the first of a read that finds it passed and the server's timing once the
+handler's call has returned, the first of the two measures to end the body ending it, the grace
+being that of the body's rate in `HttpLimits`, which Q8's answer takes as
+the longest time since the body's last read too; a body that the handler reads itself counts only
+the time a read waits, since Q8 was asked of a moved body, and a body the handler reads and then
+moves is a moved body, whose last read is the handler's until another actor reads it (§12)
+*(assumed, §12: those readings)*. That a moved body's read under the rate closes the connection is decided, as is
+its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
 wait or a deadline the scheduler reads at each switch, while the time between reads is the
-server's, timed from the body's last read (above) (§12).
+server's once the handler's call has returned, timed as the server times the grace, and during the
+call a read checks it itself (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
@@ -321,20 +363,26 @@ send of the request is (§12) *(assumed, §12: those readings)*. The request a c
 is, so that the error is a rule of the type (§12, the owner, 2026-11-04, issue 156, comment
 6643376941). It is a `data` type with a body of `Bytes`, and a body that streams is given to the
 call, `client.Send(request, move body)` (§12, the owner, 2026-11-05, issue 156, comment 6657251688,
-Q6, and comment 6668914650, Q11).
+Q6, and comment 6668914650, Q11) *(assumed, §12: the word `move` at the body, below)*.
 That body is an `HttpBody`, and a message whose `Bytes` body is not empty, sent with a body as well,
 gives `HttpError(Protocol, "request has two bodies")` before any byte is sent (§12, the owner,
 2026-11-05, issue 156, comment 6666386552, Q9) *(assumed, §12: the error's text)*, an error that
 shows only when the code runs (§12) *(assumed, §12: that cost)*. The call's body parameter is
-written `move`, since the call reads the body to its end, so that the call writes `move` at the
-body, as section 6 asks of a call (§6, §12) *(assumed, §12: the parameter's word)*, and an
+written `move`, since the call takes the body and reads it to its end when it sends it, so that the
+call writes `move` at the body, as section 6 asks of a call (§6, §12) *(assumed, §12: the
+parameter's word)*; a call that fails before it sends a byte, `request has two bodies` among them,
+drops the body, so that a retry makes a new one from its file or its chunks, while a relayed body of
+a server's request, which cannot be sent again, is drained at that drop as at any drop of its last
+owner (above), and a call that fails after it sent a byte drops the body too (§12) *(assumed, §12:
+those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
-2026-11-05, issue 156, comment 6668914650, Q11) *(assumed, §12: the makers' names and forms)*.
+2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
 
 No case: the compiler reads no `copy` and no `move`, at a send, on a parameter or at a call (§6), so
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
-server or client of §12, which the halves of the stream, the first read's `100 Continue`, the rate
+server or client of §12, which the halves of the stream, the first read's `100 Continue` and its
+test-and-set on a flag of four states, the pair's shared state, the rate
 between reads, the count of a body without a declared length, the two bodies of a client's call
 and the makers of an `HttpBody` need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
@@ -364,11 +412,12 @@ value often comes from outside input, and a CR or a LF in the name or the value 
 and Kestrel's header dictionary refuse it (§12, the owner, 2026-11-02, Q5, #110, comment
 6573113786, its form, comment 6573265513, and its text, 2026-11-03, comment 6613356831). `Add` and
 `Set` take an empty name and refuse a CR or a LF alone (§12, the owner, 2026-11-03, #110, comment
-6615254370). The class
-is made by `HttpHeaders()`, which holds no header; its members are `string? Get(string name)`,
-`List<string> GetAll(string name)`, `void | HttpError Add(string name, string value)`,
-`void | HttpError Set(string name, string value)` and `void Remove(string name)`; a refused `Add` or
-`Set` changes nothing, `Set` checking before it changes a header; an empty value is taken; a name is written back as it was spelled in the head that
+6615254370). Its members
+are `string? Get(string name)`, `List<string> GetAll(string name)`,
+`void | HttpError Add(string name, string value)`, `void | HttpError Set(string name, string value)`
+and `void Remove(string name)`, as above, `Remove` giving `void` (§12, the owner, 2026-11-02, the
+headers' pass at its defaults, #110, comment 6573113786). The class is made by `HttpHeaders()`, which holds no header;
+a refused `Add` or `Set` changes nothing, `Set` checking before it changes a header; an empty value is taken; a name is written back as it was spelled in the head that
 a writer of a request or a response writes; and `print(h)` gives the text of a class without a
 `Text()` (A5) *(assumed, §12: readings of `std/`'s class not put to the owner, the constructor's
 empty start among them)*. A program walks the headers by `h.Count`, `h.NameAt(i)` and
@@ -377,8 +426,8 @@ with `Count` read once (§4, the owner, 2026-11-04, "Index loop, Count once"); t
 (C6), as C#'s `foreach` takes any type with `GetEnumerator()`, so that any class with `Count`,
 `NameAt(i)` and `ValueAt(i)` is walked with two names (§12, the owner, 2026-11-02, #110, comment
 6573113786, and its form, comment 6573265513).
-The compiler does not build this walk: it refuses `for name, value in h` with `type-mismatch`, as
-two names over any class, so the cases walk the headers by `h.Count`, `h.NameAt(i)` and
+The checker refuses `for name, value in h`, as it refuses two names over any class, which is a
+defect of its C6 and not the rule, so the cases walk the headers by `h.Count`, `h.NameAt(i)` and
 `h.ValueAt(i)`.
 `h.Count` is the read-only property `int Count` (K7), and `h.NameAt(i)` and `h.ValueAt(i)` give a
 `string` and, with `i` outside 0 to `Count - 1`, stop the program with `index-out-of-range`, as a
@@ -541,15 +590,16 @@ split at its first `?`, with no decoding, and `r.Headers` each header as sent, i
 spaces and tabs around it (W4) (§12, assumed with the product passes of 2026-10-31 and 2026-11-03). A
 target in absolute form, `http://host/a?b`, gives its path alone, `/a` and `b`, and its authority
 stands as the `Host` in place of the client's (§12, the owner, 2026-11-05, Q2). A refusal
-is of the kind `Protocol` where the server answers `400`, `TooLarge` where it answers `413`, `414`
+is of the kind `Protocol` where the server answers `400`, or `408` for a request that ran out of its
+time (W10), `TooLarge` where it answers `413`, `414`
 or `431`, and `Unsupported` where it answers `501`, `505` or `417`, for the causes §12 lists with
 each status (the owner, 2026-10-31, "Status line only", and 2026-11-03, "`HttpKind` keeps the
 record's four kinds"), each with a text that names the cause and quotes no value of the request,
 `malformed request: header without a colon`, `request line too long` or `unsupported HTTP version`
 (§12, the owner, 2026-11-03, "The server's error texts mirror the client's" and "The refusals that
 had no text take the kind `Unsupported`"). A `Transfer-Encoding` whose last coding is not `chunked` is
-`malformed request: transfer encoding not ending in chunked`, and one that names another coding before
-its last `chunked` is `unsupported transfer encoding` (§12, the owner, 2026-11-05, Q1); a request of
+answered `400`, of the kind `Protocol`, and one that names another coding before its last `chunked` is
+answered `501`, of the kind `Unsupported` (§12, the owner, 2026-11-05, Q1); a request of
 HTTP/1.0 with a `Transfer-Encoding` is `malformed request: transfer encoding in HTTP/1.0` (Q7); and the
 method `CONNECT` is `unsupported method`, answered `501` (Q3). A target or a header value that is not UTF-8
 is `malformed request: target not UTF-8` or `malformed request: header not UTF-8`, since a `string` is
@@ -560,9 +610,24 @@ supported"). *(assumed, §12, not put to the owner: a stream that ends before it
 `malformed request: no request line`, which the server answers with nothing; a line ended by a LF
 alone is refused, as RFC 9112, section 2.2, lets a server refuse it; a valid `Host` is the host
 of RFC 3986 with an optional port; the lines of a `Transfer-Encoding` given more than once read as one
-list in their order, each coding without regard to ASCII case; a target is in absolute form where it
-starts with a scheme and `://`, its empty path `/`, and an authority that is no valid `Host` is
-`malformed request: bad Host`)*
+list in their order, each coding without regard to ASCII case, with the spaces and tabs around it taken
+off, and an empty item between two commas skipped, as RFC 9110, section 5.6.1, has a list read; the
+texts of Q1's two refusals, `malformed request: transfer encoding not ending in chunked` and
+`unsupported transfer encoding`; a `chunked` before the last one counted as another coding, so that
+`chunked, chunked` is `unsupported transfer encoding`, as RFC 9112, section 6.1, forbids `chunked`
+twice; a target is in absolute form where it starts with a scheme and `://`, the scheme of RFC 3986, a
+letter and then letters, digits, `+`, `-` and `.`, whatever it names, its empty path `/`; the
+client's own `Host` held to the rules of any other request, two of them, none in HTTP/1.1 and one that
+is no valid `Host` refused, before the authority takes its place; an authority that is empty, or that
+is no valid `Host`, one with a userinfo among them, since a `Host` holds no `@`, is
+`malformed request: bad Host`, as RFC 9110, section 4.2.1, refuses both; where a request meets more than
+one refusal, the first the reader meets answers it, in this order: a request line or headers over their
+limits as they are read, then the request line (its method, its target, its version, then `CONNECT`),
+each header, `Host`, `Content-Length`, a `Content-Length` beside a `Transfer-Encoding`, a
+`Transfer-Encoding` in HTTP/1.0, its last coding, a coding before its last `chunked`, a declared body
+over its limit, and `Expect`; and a NUL, a lone CR or any other control byte but a tab in a header's
+value is `malformed request: control byte in a header`, as RFC 9110, section 5.5, has a value of
+visible characters, spaces and tabs, a byte over 127 passing where the value is UTF-8)*
 
 Case: [http/request-read.kz](../corpus/http/request-read.kz)
 ```kurz
@@ -722,14 +787,26 @@ of a body whose client sent `Expect: 100-continue` sends `HTTP/1.1 100 Continue`
 a server that refuses the request without reading the body sends none (§12, "Status line only").
 A chunked body's trailer is read and dropped within what the head left of `MaxRequestHeadersTotalSize`
 and `MaxRequestHeaderCount`, past which a read gives `HttpError(TooLarge, "request header too large")`
-(§12, the owner, 2026-11-05, Q8).
-*(assumed, §12, not put to the owner: a chunk's extensions dropped, the trailer and the head one budget,
+(§12, the owner, 2026-11-05, Q8); where the server drops a body the handler did not read, such a trailer
+closes the connection as a chunked body malformed while it is dropped, and a handler whose read gave
+it has its response written with a close (W9, §12, assumed). `Read` gives `int | IoError | HttpError`, `ReadAll`
+`Bytes | IoError | HttpError` and `ReadAllText` `string | IoError | HttpError | InvalidUtf8`: a failure
+of the network is the stream's `IoError`, a body the stream ends inside
+`HttpError(Protocol, "malformed request: unexpected end of body")`, a chunk that is not well formed
+`malformed request: bad chunk` or `malformed request: bad chunk size`, of the same kind, and a body over
+`MaxRequestBodySize` or over the `max` of `ReadAll` `HttpError(TooLarge, "request body over limit")`
+(§12, the owner, 2026-11-03, "The server's error texts mirror the client's").
+*(assumed, §12, not put to the owner: a `Read` with a `max` of zero or below giving 0 and reading
+nothing, but after a failure of HTTP, which it gives again; a chunk's extensions dropped, the trailer and the head one budget,
 the empty line of each beside it, `ReadAll(max)` taking any `max` up to the largest `int` (a default the
 owner's answer of 2026-11-05 took), a chunk's size line of at most `MaxChunkSizeLine` bytes, `ReadAllText`'s `InvalidUtf8` for a body that is not
 UTF-8, chunks held to `MaxRequestBodySize` as they are read, as a declared length is held before,
-`ReadAll(max)` refusing a body over `max` with `request body over limit`, a failure of HTTP staying,
-every read after it giving it again, and `100 Continue` sent to a request of HTTP/1.1 alone, and to
-none whose body is empty)*
+`ReadAll(max)` refusing a body over `max` with `request body over limit`, every body where `max` is
+below zero, an empty one among them, a declared length before its first byte is read, so that the body
+stays in the stream for the reads after it, and a chunked body once more than `max` of its bytes were
+read, which are dropped; a failure of HTTP staying, every read after it giving it again; and
+`100 Continue` sent to a request of HTTP/1.1 alone, and to none whose body is absent or a declared
+length of 0)*
 
 Case: [http/request-body.kz](../corpus/http/request-body.kz)
 ```kurz
@@ -759,16 +836,17 @@ void | IoError | HttpError All() {
     client.Write("GET /none HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
     Body(server)
 
-    // a read appends at most what it was asked for, and gives 0 at the end, again and again
+    // a read appends at most what it was asked for, nothing where that is 0, and gives 0 at the end, again and again
     client.Write("POST /parts HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
     parts = HttpRequest.Read(server)
     mut got = Bytes()
+    p0 = parts.Body.Read(mut got, 0)
     p1 = parts.Body.Read(mut got, 2)
     p2 = parts.Body.Read(mut got, 2)
     p3 = parts.Body.Read(mut got, 2)
     p4 = parts.Body.Read(mut got, 2)
     p5 = parts.Body.Read(mut got, 2)
-    print("{p1} {p2} {p3} {p4} {p5}")
+    print("{p0} {p1} {p2} {p3} {p4} {p5}")
 
     // the whole body over the bound of `ReadAll`
     client.Write("POST /big HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
@@ -779,11 +857,15 @@ void | IoError | HttpError All() {
         HttpError e => print("{e.Kind}: {e.Detail}")
     }
 
+    // a declared length over the bound is refused before its first byte is read, so that the body stays for the reads after it
+    mut rest = Bytes()
+    print(big.Body.Read(mut rest, 100))
+
     // a bound of the largest `int`, which the read counts past without passing the range of an `int`
     client.Write("POST /most HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nhello".Bytes)
     most = HttpRequest.Read(server)
     match most.Body.ReadAll(2147483647) {
-        Bytes b => print(b.Count)
+        Bytes b => print("{most.Method} {b.Count}")
         IoError e => print(e)
         HttpError e => print("{e.Kind}: {e.Detail}")
     }
@@ -802,6 +884,15 @@ void | IoError | HttpError All() {
             InvalidUtf8 => print("not UTF-8")
         }
     }
+
+    // a bound below zero refuses every body, an empty chunked one among them, as it refuses every declared length
+    client.Write("POST /below HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n".Bytes)
+    below = HttpRequest.Read(server)
+    match below.Body.ReadAll(-1) {
+        Bytes b => print(b.Count)
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
 }
 
 All() else {
@@ -813,7 +904,9 @@ All() else {
 Case: [http/request-trailer.kz](../corpus/http/request-trailer.kz)
 ```kurz
 // the trailer of a chunked body is held to what its head left of the head's limits, 100 lines and 32768 bytes of them by
-// `HttpLimits()`: the head's 2 lines and 98 of the trailer pass and 99 do not, and so for the bytes
+// `HttpLimits()`: the head's 2 lines and 98 of the trailer pass and 99 do not; the head's 37 bytes, `Host: h` and
+// `Transfer-Encoding: chunked` each with its CR LF, and 32731 of the trailer, each line with its CR LF, pass, and a byte more does
+// not, so that a trailer given a budget of its own, or lines counted without their CR LF, would pass both
 void | IoError Show(string label, string trailer) {
     listener = TcpListener.Bind("127.0.0.1:0")
     client = TcpStream.Connect("127.0.0.1:{listener.Port}")
@@ -849,11 +942,22 @@ string Lines(int count, int size) {
     return lines
 }
 
+// the line `X-<i>: ` with `size` bytes of `v`, and its CR LF
+string Line(int i, int size) {
+    mut v = ""
+    while v.Bytes.Count < size {
+        v = "{v}v"
+    }
+
+    return "X-{i}: {v}\r\n"
+}
+
 void | IoError All() {
     Show("98 lines", Lines(98, 1))
     Show("99 lines", Lines(99, 1))
-    Show("7 lines of 4096", Lines(7, 4096))
-    Show("9 lines of 4096", Lines(9, 4096))
+    // 7 lines of 4103 bytes are 28721, and an eighth of 4010 makes 32731, what the head left
+    Show("32731 bytes", "{Lines(7, 4096)}{Line(7, 4003)}")
+    Show("32732 bytes", "{Lines(7, 4096)}{Line(7, 4004)}")
     Show("1 line of 65536", Lines(1, 65536))
 }
 
@@ -983,14 +1087,18 @@ All() else {
 
 ### W7 (decided, §12) `HttpLimits`
 
-The limits of a request are a `data HttpLimits` with the names and the defaults of Kestrel's
-`KestrelServerLimits`: a request line of at most 8192 bytes with its line end, header lines of at
-most 32768 bytes in all with theirs, at most 100 headers, a declared body of at most 30000000
+The limits of a request are a `data HttpLimits`, its first seven members with the names and the
+defaults of Kestrel's `KestrelServerLimits`: a request line of at most 8192 bytes, header lines of at
+most 32768 bytes in all, at most 100 headers, a declared body of at most 30000000
 bytes, a head that arrives within 30 seconds, and a body and a response taken at 240 bytes a second
 after a grace of 5 seconds, each rate an `HttpRate(int BytesPerSecond, duration Grace)` (§12, the
 owner, 2026-10-31, "HttpLimits data", 2026-11-01, "Kestrel's bounds" and "Add Kestrel's response
-rate", and 2026-11-03), and 100 requests to a connection, an idle connection closed after 5 seconds,
-64 KiB of a body drained and a chunk's size line of 4096 bytes (§12, the owner, 2026-11-03).
+rate", and 2026-11-03); and the four numbers the server held fixed made members,
+`MaxRequestsPerConnection`, 100 requests to a connection, `KeepAliveTimeout`, an idle connection
+closed after 5 seconds, Kestrel's name with the owner's number where Kestrel waits 130 seconds,
+`MaxDrainSize`, 64 KiB of a body drained, and `MaxChunkSizeLine`, a chunk's size line of 4096 bytes,
+the three without a limit of Kestrel's (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and
+2026-11-03).
 `HttpRequest.Read(stream)` reads with the limits of `HttpLimits()`, and the limits a server is given
 reach the parser through an entry inside `std/` that no program calls (§12, the owner, 2026-11-02,
 Q3, #110, comment 6573113786), so that a program holds a request to other limits by
@@ -1002,8 +1110,8 @@ theirs against `MaxRequestHeadersTotalSize` and 2 more bytes for the empty line,
 
 Case: [http/http-limits.kz](../corpus/http/http-limits.kz)
 ```kurz
-// the bounds a server holds a connection to, each with the default ASP.NET Core's Kestrel gives it, and a rate a slow client is
-// held to after its grace
+// the bounds a server holds a connection to, the first seven with the defaults ASP.NET Core's Kestrel gives them and the four after
+// them the server's own, an idle connection's 5 seconds where Kestrel waits 130, and a rate a slow client is held to after its grace
 d = HttpLimits()
 print("{d.MaxRequestLineSize} {d.MaxRequestHeadersTotalSize} {d.MaxRequestHeaderCount} {d.MaxRequestBodySize} {d.RequestHeadersTimeout}")
 print("{d.MinRequestBodyDataRate.BytesPerSecond} {d.MinRequestBodyDataRate.Grace} {d.MinResponseDataRate.BytesPerSecond} {d.MinResponseDataRate.Grace}")
@@ -1062,6 +1170,8 @@ All() else {
 }
 ```
 
+Case: [http/request-refused-unsupported.kz](../corpus/http/request-refused-unsupported.kz)
+
 ### W8 (decided, §12) Writing a response
 
 A response is made by a function for each kind of body, `HttpResponse.Text(200, "hi")`,
@@ -1071,18 +1181,20 @@ rest is set through `response.Headers` (W4) (§12, the owner, 2026-11-01, Q1 (a)
 `application/octet-stream` for `Bytes` and `File`, and none for `Empty`, which a handler replaces with
 `Set` (§12, the owner, 2026-11-03). A status outside 200 to 599 stops the program with a run-time
 error (§12, the owner, 2026-11-02, Q5, and 2026-11-05, S2: a `1xx` is interim, and the server alone sends
-`100 Continue`). `response.Write(stream)` writes the status line, the headers
-and the `Content-Length` of the body, which a `File` takes from its size when it is written, and then
+`100 Continue`), the error `thrown` of a `throw` in `std/` (O5), with the text
+`status <n> is outside 200 to 599` (§12, assumed). `response.Write(stream)` writes the status line, the
+headers and, where the body is not chunked, the `Content-Length` of the body, which a `File` takes from its size when it is written, and then
 the body, and gives `void | IoError`; `response.WriteHead(stream)` writes the same head without the
-body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date` or `Connection`,
-which the server's loop adds (§12, assumed). A `204` and a `304` get no body (§12, assumed),
+body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `Date`, nor `Connection` but on its own
+`500` (below), which the server's loop adds (§12, assumed). A `204` and a `304` get no body, no
+`Content-Length` of the writer's and no `Transfer-Encoding`, a handler's dropped (§12, assumed),
 and an empty `205` is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
 `HttpResponse.Text` and `HttpResponse.Bytes` given a `205` and a body that is not empty stop the
-program with the run-time error `status 205 takes no body`, as a status outside the range does,
+program with `thrown` and the text `status 205 takes no body`, as a status outside the range does,
 since they see the status and the body (§12, assumed: the reading said back with Q14). A response
 `Write` cannot write, a `File` of `205` whose file holds bytes or a `Content-Length` its body
-contradicts, is answered `500 Internal Server Error` with an empty body and `Connection: close`, raising nothing (§12, the
-owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
+contradicts, is answered `500 Internal Server Error` with an empty body and `Connection: close`, raising nothing but where
+the size of its file cannot be read (below) (§12, the owner, 2026-11-02, Q5 and Q14, and assumed). A `Transfer-Encoding` the handler sets is kept, `chunked`
 added as its last coding where it does not end in it, and the body is chunked, a coding it names
 being announced and not applied; beside a `Content-Length` it gets no answer (§12, the owner,
 2026-11-03). A status RFC 9110 and RFC 6585 name no reason phrase for is written with an empty one
@@ -1093,7 +1205,9 @@ the body after them where the handler set none; a handler's `Content-Length` con
 no number or another number than the body's length; a file whose
 size cannot be read answered with that `500`, `Write` giving the `IoError` of the read; a
 `Transfer-Encoding` beside a `Content-Length` giving an `IoError` of the kind `InvalidInput`, nothing
-written; and a file whose size changes while it is sent giving one of the kind `InvalidData`)*
+written, before the `Content-Length` is held against the body; a chunked `Text` or `Bytes` written as
+one chunk and the last, and a `File` as a chunk for each piece of 64 KiB it is read in; and a file
+whose size changes while it is sent giving one of the kind `InvalidData`)*
 
 Case: [http/response-write.kz](../corpus/http/response-write.kz)
 ```kurz
@@ -1381,32 +1495,47 @@ serves it so, one at a time (§12, the owner, 2026-10-30, "Handler function", an
 parser layer"). `ServeConnection` gives `void | IoError | HttpError`: `void` where the connection
 ended between two requests, the `IoError` of the network, or the `HttpError` of a request the server
 refused, whose detail `Serve` drops (§12, the owner, 2026-11-03, "The detail of a refused request
-goes to `ServeConnection`'s result"); `Serve` gives `void | IoError`, returning where an `Accept`
+goes to `ServeConnection`'s result"), and `void` too where the server closed the connection after a
+response, where the client reset it between two requests and where it stayed idle for
+`KeepAliveTimeout` (W10), while `Serve` drops each connection's result, its `IoError` among them, and
+accepts the next (§12, assumed); `Serve` gives `void | IoError`, returning where an `Accept`
 fails other than for one connection (§12, assumed). Each takes an `HttpLimits` (W7) in a second form,
 a limit of zero or below being an `IoError` of the kind `InvalidInput` that names the member, before a
 read or an accept (§12, the owner, 2026-11-02, Q14, and assumed). A connection of HTTP/1.1 stays open
-for its next request, and one of HTTP/1.0, one whose request or response says `Connection: close`,
+for its next request, and one of HTTP/1.0, one whose request or response says `Connection: close`, an option of a
+`Connection` header's comma-separated list that is `close` without regard to ASCII case and to the
+white space around it,
 one after a `500`, the writer's own among them, and one after the last request
 `MaxRequestsPerConnection` allows closes after the response (§12, the owner, 2026-10-31, "Persistent,
 100 req, 5 s", and 2026-11-02, Q11, and assumed). The server writes its `Date` where the handler set none and keeps the handler's (§12, the owner,
-2026-11-02, Q10), and before a close its own `Connection: close` beside a handler's `Connection` that
-does not say `close` (§12, the owner, 2026-11-05, Q6). A connection the server closes once it has
+2026-11-02, Q10), and before a close its own `Connection: close` where the handler set no `Connection`
+(Q10), and beside a handler's `Connection` that does not say `close`, read as the option above (§12, the
+owner, 2026-11-05, Q6). A connection the server closes once it has
 written a response or a refusal is closed in stages: its writes ended, then what the client still
 sends read and dropped, then the close, as RFC 9112, section 9.6, has it (§12, the owner, 2026-11-02,
 "a half-close on `TcpStream`"). A `HEAD` is answered with the head alone, as `WriteHead` writes it (§12, the owner, 2026-11-02,
 Q13). A body the handler did not read is read and dropped up to `MaxDrainSize`, past which the
 connection closes, a request that expects `100-continue` whose body the handler did not read closes it
-with no `100 Continue` sent, and a chunked body malformed while it is dropped closes it without an
-answer (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
+with no `100 Continue` sent, and a chunked body malformed while it is dropped, one whose trailer passes
+what the head left of its limits among them, closes it without an answer, the handler's response not
+written (§12, assumed). A request the server refuses is answered by its status line alone, with an empty
 body and `Connection: close`, and the connection closes (§12, the owner, 2026-10-31, "Status line
 only"). A handler that throws ends what runs the server, as an exception ends the actor it happens in
 (§12). In a build for Windows `Serve` and `ServeConnection` are `not supported` at the line of the
 program that calls them (§12, "Loop not supported"). *(assumed, §12, not put to the owner: the
-drop of the close in stages bounded by `MaxDrainSize` and `KeepAliveTimeout`, and no close in stages
-where the client ended the connection, where it stayed idle or where the network failed; the
+drop of the close in stages bounded by `MaxDrainSize` and `KeepAliveTimeout`, a drop of its own after
+a body whose drop passed `MaxDrainSize`, up to `MaxDrainSize` more, and after a body the handler left
+unread for `100-continue`; no close in stages where the client ended the connection, where it stayed
+idle, where the network failed, or where the write of a response failed, one that ran out of its time
+among them, the connection then closed at once and the failure the result of `ServeConnection`; a
+half-close the system refuses, or a read of the drop that fails, ending the close in stages at once;
+a handler whose read of a body gave an error, a trailer past what the head left among them, answered
+by its response with a close, as after any read of its body that failed; the
 `Date` written once a second, as hyper caches it; a refusal's status line with `Content-Length: 0` and
 the server's `Date`, as Kestrel writes it; a handler's `Transfer-Encoding` dropped for a request of
-HTTP/1.0 and the body framed by its length; the body the handler left read before the response is
+HTTP/1.0 and the body framed by its length, as hyper drops it, at the cost that a body the handler
+coded, as `gzip`, reaches such a client without the name of its coding; no `Connection` of the server's
+on a response after which it keeps the connection; the body the handler left read before the response is
 written, so that a body past `MaxDrainSize` is answered with `Connection: close`; the wait for the
 first byte of each request, the first of a connection among them, bounded by `KeepAliveTimeout`, and
 the reads of a request by the head's time and the body's rate alone (W10); a connection aborted, reset or refused before `Accept` took it
@@ -1421,8 +1550,7 @@ Case: [http/serve-keep-alive.kz](../corpus/http/serve-keep-alive.kz)
 // a connection of HTTP/1.1 serves its requests in their order and stays open, each response with the server's `Date`, until the
 // client ends it between two requests; a connection that ends before its first request is answered with nothing; and the server
 // writes its `Date` and its `Connection` beside the handler's response without changing it, so that a response a handler gives
-// again is written as it was made, and a `Date` the handler set is kept; a connection whose client is idle after a request closes
-// at `KeepAliveTimeout`
+// again is written as it was made, and a `Date` the handler set is kept
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -1460,8 +1588,8 @@ void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of the server's `Date` by its length, the handler's as it is, and
+// `reset` after it where the server closed the connection with a request of the client unread
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
@@ -1486,7 +1614,7 @@ string Wire(TcpStream client) {
     lines = text.Split("\r\n")
     for i in 0..<lines.Count {
         line = lines[i]
-        if line.StartsWith("Date: ") {
+        if line.StartsWith("Date: ") && line != "Date: Sun, 06 Nov 1994 08:49:37 GMT" {
             shown = "{shown}Date: <{line.Bytes.Count - 6}>"
         } else {
             shown = "{shown}{line}"
@@ -1518,37 +1646,6 @@ dated = (HttpRequest r) => {
 }
 
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", dated, HttpLimits())
-Idle()
-
-// a client that sends one request and then nothing is served, and its connection closes without an answer once it has been idle
-// for `KeepAliveTimeout`
-void Idle() {
-    listener = TcpListener.Bind("127.0.0.1:0") else {
-        IoError e => return
-    }
-
-    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
-        IoError e => return
-    }
-
-    server = listener.Accept() else {
-        IoError e => return
-    }
-
-    client.Write("GET /a HTTP/1.1\r\nHost: h\r\n\r\n".Bytes) else {
-        IoError e => return
-    }
-
-    start = timestamp.Now
-    HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "hi {r.Path}"), HttpLimits(KeepAliveTimeout: 100ms)) else {
-        IoError e => print(e)
-        HttpError e => print(e.Detail)
-    }
-
-    waited = timestamp.Now - start
-    print(waited >= 100ms && waited < 2s)
-    print(Wire(client))
-}
 ```
 
 Case: [http/serve-close.kz](../corpus/http/serve-close.kz)
@@ -1872,7 +1969,8 @@ Case: [http/serve-drain.kz](../corpus/http/serve-drain.kz)
 ```kurz
 // a body the handler did not read is read and dropped up to `MaxDrainSize`, and the next request served; a body past it closes the
 // connection, and so does a request that expects `100-continue` whose body the handler did not read, with no `100 Continue` sent;
-// a chunked body malformed while it is dropped closes the connection without an answer; and a response the server holds while the
+// a chunked body malformed while it is dropped closes the connection without an answer, and so does one whose trailer passes what
+// the head left of its limits, here one line of `MaxRequestHeaderCount` 3; and a response the server holds while the
 // next request stands in the buffer goes out before that request's `100 Continue`; a `MaxDrainSize` of the largest `int` drops a
 // body as any other does
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
@@ -1967,6 +2065,7 @@ Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nabcd{next}", h
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nabcde{next}", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n{next}", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", hello, small)
+Exchange("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-a: 1\r\nX-b: 2\r\n\r\n", hello, HttpLimits(MaxRequestHeaderCount: 3))
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n", hello, small)
 Exchange("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\nok", reading, small)
@@ -2061,12 +2160,14 @@ All() else {
 
 The server's loop holds a request's head to `RequestHeadersTimeout` from its first byte and its body
 to `MinRequestBodyDataRate` after that rate's grace, and a request that falls under either is answered
-`408 Request Timeout` and its connection closes, the handler's response unwritten (§12, the owner,
-2026-11-01, "Kestrel's bounds", and assumed), and `ServeConnection` gives the `HttpError` of that refused request,
+`408 Request Timeout` and its connection closes (§12, the owner, 2026-11-01, "Kestrel's bounds"), the
+handler's response unwritten (§12, assumed), and `ServeConnection` gives the `HttpError` of that refused request,
 `HttpError(Protocol, "request timed out")` (§12, the owner, 2026-11-03, "The server's error texts mirror the client's"); it holds a response to `MinResponseDataRate` after its
 grace, and under it the connection closes, since its status has gone out (§12, the owner, 2026-11-01,
-"Add Kestrel's response rate"); and an idle connection closes without an answer at `KeepAliveTimeout`
-(§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03). The server measures these
+"Add Kestrel's response rate"), and `ServeConnection` gives that write's `IoError` of the kind
+`TimedOut` (§12, assumed); and an idle connection closes without an answer at `KeepAliveTimeout`
+(§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03), `ServeConnection` giving
+`void` (W9). The server measures these
 bounds by `instant` and holds them by the socket's own times, `SO_RCVTIMEO` set before each refill to
 what remains of the bound that read is under (§12, the owner, 2026-11-04, the monotonic clock, Q9 (a));
 a read of a head waits what remains of the head's time alone, with no 5 seconds of a read on a socket
@@ -2078,8 +2179,9 @@ waited already (Q11 (a)); and a handler's read of a body that falls under its ra
 the first of a connection among them; a remainder of zero or below the timeout, with no call of the
 system; each write of a response, a refusal's among them, given the longer of the grace and its length
 at the rate, as Kestrel gives it, what remains of that bound set before each call of the system the
-write makes; and `HttpRequest.Read` and `Write`, the raw
-layer, setting no time on the stream, so that a program's own loop holds the times it sets itself)*
+write makes; and `HttpRequest.Read`, the reads of the body it gives,
+`Write` and `WriteHead`, the raw layer, setting no time on the stream and holding no rate, so that a
+program's own loop holds the times it sets itself)*
 
 Case: [http/serve-timeouts.kz](../corpus/http/serve-timeouts.kz)
 ```kurz
@@ -2087,7 +2189,8 @@ Case: [http/serve-timeouts.kz](../corpus/http/serve-timeouts.kz)
 // `MinRequestBodyDataRate` after its grace, are answered `408 Request Timeout` and close the connection in stages, which waits at
 // most `KeepAliveTimeout` for the end of a client that sends nothing more, the handler's response
 // unwritten, the handler's read of such a body giving `HttpError(Protocol, "request timed out")`, and the connection gives that error
-// too; a connection whose first request sends no byte within `KeepAliveTimeout` is closed with nothing written; a response whose
+// too; a connection whose first request, or whose next one after a response, sends no byte within `KeepAliveTimeout` is closed with
+// nothing more written; a response whose
 // write is not taken within the longer of the grace of `MinResponseDataRate` and its length at that rate closes it, since its status
 // has gone out
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -2114,7 +2217,7 @@ void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits
     }
 
     waited = timestamp.Now - start
-    print(waited >= 100ms && waited < 2s)
+    print(waited >= 100ms)
     print(Wire(client))
 }
 
@@ -2181,6 +2284,7 @@ Stall("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\nab", hello, Http
 
 // a client that sends nothing at all
 Stall("", hello, HttpLimits(KeepAliveTimeout: 100ms))
+Stall("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", hello, HttpLimits(KeepAliveTimeout: 100ms))
 Unread()
 
 // a response of 32 MiB to a client that reads none of it, which the buffers of the connection cannot hold
@@ -2219,53 +2323,70 @@ void Unread() {
     }
 
     waited = timestamp.Now - start
-    print(waited >= 100ms && waited < 2s)
+    print(waited >= 100ms)
 }
 ```
 
 ### W11 (decided, §12) A streamed response
 
 A handler streams a body by `HttpResponse.Stream(status, (HttpWriter w) => ...)`, a function of the
-type `(HttpWriter) => void | IoError`: the server writes the head and then calls the function
-*(assumed: in the system call of the function's first write, or at its return where it wrote nothing,
-as `Results.Stream` on Kestrel sends it; put to the owner, #110, comment 6645606334)*, each
-`w.Write` sends one chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body
-goes without chunks and the close of the connection ends it; and the writer lives only inside the
-call (§12, the owner, 2026-11-03, "A response can be streamed"). The function takes its writer
-without `mut`, since `HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of
-a streamed response takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and
-gives `void | IoError`, the function gives `void | IoError` too, and an `IoError` closes the
-connection, since no status can be sent after the head went out (§12, the owner, 2026-11-03).
-`Stream` sends `application/octet-stream`, which a handler replaces with `Set` (§12, the owner,
-2026-11-03). A status that has no body, 100 to 199, `204`, `205` or `304`, stops the program at
-`Stream` with `status <n> has no body to stream`, and a write after the function returned gives an
-`IoError` of the kind `InvalidInput`, `writer used after its response ended`, and writes nothing
-(§12, the owner, 2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585).
-*(assumed, §12, not put to the owner: a `HEAD` answered with the head,
-`Transfer-Encoding: chunked` in it, and the function not called; a `Content-Length` the handler set
-giving `InvalidInput` with nothing written; a write of no bytes writing nothing; each write held to
-`MinResponseDataRate` (W10); `response.Write(stream)` chunking always, and `WriteHead` writing the
-head alone; the function's `IoError` ending the body without its last chunk, the head written where
-no write sent it, and `Write` and `ServeConnection` giving that error; the function reading the
-request's body while it writes, what it left unread drained after it and the connection closing
-where that is past `MaxDrainSize` or the request still awaits `100 Continue`, a read before the head
-went out sending `100 Continue` and none after it; no bound on the stream's whole time; the CR LF
-that ends a chunk going out with the write after it; and the
-end of the body after the function's return held where the next request's head stands whole in the
-stream's buffer, as a response is held (W9), and written with the response after it)* The
+type `(HttpWriter) => void | IoError`: the server calls the function, the head goes out in the system
+call of its first write, or at its return where it wrote nothing, as `Results.Stream` on Kestrel
+sends it (§12, the owner, 2026-11-05, #110, comment 6657251329, H1 (a)), each `w.Write` sends one
+chunk, and the function's return ends the body; to a peer of HTTP/1.0 the body goes without chunks
+and the close of the connection ends it; and the writer lives only inside the call (§12, the owner,
+2026-11-03, "A response can be streamed"). The function takes its writer without `mut`, since
+`HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of a streamed response
+takes its writer without `mut`"). `w.Write` takes a `Bytes` or a `string` and gives
+`void | IoError`, the function gives `void | IoError` too, and an `IoError` the function gives while
+its response is written closes the connection, since no status can be sent after the head went out
+(§12, the owner, 2026-11-03). `Stream` sends `application/octet-stream`, which a handler replaces
+with `Set` (§12, the owner, 2026-11-03, #110, comment 6605621326, item 7). A `Transfer-Encoding`
+the handler set is kept, `chunked` added where it does not end in it, as on every response (§12, the
+owner, 2026-11-03, #110, comment 6613870327). A status that has no
+body, 100 to 199, `204`, `205` or `304`, stops the program at `Stream` with
+`status <n> has no body to stream`, and a write after the function returned gives an `IoError` of
+the kind `InvalidInput`, `writer used after its response ended`, and writes nothing (§12, the owner,
+2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585). *(assumed, §12: for 100 to
+199, which S2's range stops too, `Stream`'s own text, since its check comes first)*
+*(assumed, §12, not put to the owner: a `HEAD` answered with the head, `Transfer-Encoding: chunked`
+in it, and the function not called, and a `HEAD` of a peer of HTTP/1.0 with the head alone, without
+`Transfer-Encoding`, and `Connection: close`; a `Content-Length` the handler set giving
+`IoError(InvalidInput, 0, "")` from `Write` and `ServeConnection`, with nothing written, and a write
+after the function returned giving its `IoError` with the code 0; a write of no bytes writing nothing; each write held to `MinResponseDataRate`
+(W10); `response.Write(stream)` chunking always, a second `Write` of one response calling its
+function again with a writer of its own, and `WriteHead` writing the head alone; the function's
+`IoError` ending the body without its last chunk, the head written where no write sent it, and
+`Write` and `ServeConnection` giving that error; a write that failed leaving the writer failed,
+every later write and the end of the body giving its `IoError` again and writing nothing, so that
+the client sees the body cut; the `IoError` of a write after the function returned touching neither
+the connection nor the response after it; the function reading the request's body while it writes,
+what it left unread drained after it and the connection closing where that is past `MaxDrainSize`,
+a body under its rate there giving the server's `request timed out` and closing the connection with
+no `408`, since the head went out, as a read of the function under its rate gives that error too
+(W10); a head that goes out while the request's body still awaits `100 Continue` saying
+`Connection: close`, as RFC 9110, section 10.1.1, asks of a server that answers before it read the
+body, and the connection closing after the function; a read before the head went out sending
+`100 Continue` and none after it; no bound on the stream's whole time; the socket set to
+`TCP_NODELAY` at each streamed response, where it stays, as Kestrel sets every connection, and the CR LF that ends a chunk going out with the
+write after it, so that no write of a few bytes waits for the acknowledgement of the one before;
+and the end of the body after the function's return held where the next request's head stands whole
+in the stream's buffer, as a response is held (W9), and written with the response after it)* The
 response holds its function in a field of a function type, so that a function that reads a class
 that holds a `mut` response closes a ring through it (R9), which a handler that reads that class
 does not, by R9's reading of a field of a function type (§3, the owner, 2026-11-04, #110, comment
-6643368937), whose case `http/stream-cycle.kz` stands under R9.
+6643368937), whose cases `http/stream-cycle.kz` and `http/stream-handler-no-cycle.kz` stand under
+R9.
 
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
 // a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
 // `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
-// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept, `chunked`
-// added; a `Content-Length` the handler set is `InvalidInput` with nothing written; a function's `IoError` ends the body without its
-// last chunk, the head written where no write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no
-// function; and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
+// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
+// `chunked` added; a response written again calls its function again, with a writer of its own; a `Content-Length` the handler set
+// is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
+// write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
+// call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()
 
@@ -2344,6 +2465,9 @@ void | IoError | HttpError All() {
     coded = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     coded.Headers.Set("Transfer-Encoding", "gzip")
     Wire(coded, false)
+    twice = HttpResponse.Stream(200, (HttpWriter w) => w.Write("t"))
+    Wire(twice, false)
+    Wire(twice, false)
     sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     sized.Headers.Set("Content-Length", "1")
     Wire(sized, false)
@@ -2381,11 +2505,13 @@ All() else {
 Case: [http/serve-stream.kz](../corpus/http/serve-stream.kz)
 ```kurz
 // the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
-// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function; the function may read the
-// request's body while it writes, a read before its first write sending `100 Continue` and none after it, and what it left unread is
-// drained after it, the connection closing where that is past `MaxDrainSize` or the request still awaits `100 Continue`, and a body
-// malformed there closing it with that error; a function's `IoError` closes the connection, which gives it; and a `Content-Length`
-// the handler set is `InvalidInput` with nothing written, to HTTP/1.0 too
+// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function, to HTTP/1.0 without
+// `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
+// first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
+// that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
+// awaits `100 Continue` says `Connection: close`, and the connection closes after the function, whether it read the body after its
+// first write or not; a function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
+// `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -2423,8 +2549,8 @@ void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
@@ -2504,6 +2630,7 @@ get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
 Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", called, HttpLimits())
+Exchange("HEAD /h HTTP/1.0\r\n\r\n", called, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", echo, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits(MaxDrainSize: 2))
@@ -2517,12 +2644,13 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\
 
 Case: [http/serve-stream-timeouts.kz](../corpus/http/serve-stream-timeouts.kz)
 ```kurz
-// a streamed response's request body that falls under `MinRequestBodyDataRate` after the function returned closes the connection
-// after the whole response, with no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request
-// timed out")`: a body the function left unread, while it is drained, and one whose read in the function ran out of its time, that
-// read giving the same error (section 12, Q12 (b))
+// a streamed response's request body that falls under `MinRequestBodyDataRate` closes the connection after the whole response, with
+// no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request timed out")`: a body the function
+// left unread, while it is drained after the function returned, and one whose read in the function ran out of its time, that read
+// giving the same error (section 12, Q12 (b))
 // serves `sent`, which the client does not end, on one connection with `handler` within `limits`, and prints the loop's result,
-// whether it took 100 ms to 2 s, and what the client got
+// whether it took from the 100 ms of the grace the case sets to 2 s, under the 5 s of the default grace (W10), so that a server that
+// waited the default's time is told from one that held the case's, with 1.9 s of margin for a busy machine, and what the client got
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
     listener = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => return
@@ -2551,8 +2679,8 @@ void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
@@ -2697,8 +2825,8 @@ by `HttpClientOptions` (§12, the owner, 2026-11-01, Q5 (a)). A call that finds 
 connections to its host and port held by open bodies gives `HttpError(TooLarge, "too many connections to
 the host")` at once, since in a program of one actor no other actor gives one back (C3); a scheme other
 than `http` and `https` gives `HttpError(Unsupported, "unsupported scheme")`, before any connect (C4);
-and the reads of a connection are bounded by the call's time alone, and its writes and its connect by
-what remains of it, as W16 assumes, in the place of C1's reading, which bounded the reads and writes by no time and the connect by the 5
+and each read of a connection is bounded by what remains of the call's time, and its writes and its connect by
+what remains of it as W16 assumes, in the place of C1's reading, which bounded the reads and writes by no time and the connect by the 5
 seconds of `Connect` while `std/` held no bound of the call's 100 seconds (C1) (§12, the owner,
 2026-11-05, issue 110, comment 6657251329). A program of one actor keeps the pool in that actor, which
 it cannot tell from the pool's own actor (§12, assumed). *(assumed, §12: the options with .NET's names,
@@ -3353,7 +3481,8 @@ encoding")` for a coding other than `chunked`, and `HttpError(Status, "response 
 `EnsureSuccess()`, the status in it. *(assumed, §12: a status line of `HTTP/1.0` or `HTTP/1.1`, three digits from 100
 and a reason that may be left out, as httparse reads it; a `1xx` other than `101` read past, as hyper
 reads past it; a response's trailer read and dropped, each line held to `MaxChunkSizeLine` with its CR LF,
-as a chunk's size line is, `bad chunk` past it; no body for a `1xx`, a `204` and a `304`, chunks where
+as a chunk's size line is, `bad chunk` past it, the count of its lines held by nothing but the call's time (W16), where a
+request's trailer shares the budget of its head; no body for a `1xx`, a `204` and a `304`, chunks where
 `Transfer-Encoding` is
 `chunked`, the length of `Content-Length`, and otherwise the bytes up to the close (RFC 9112, section
 6.3); and a response's head held to the limits of a request's head in the client's `Limits`, the status
@@ -3703,8 +3832,8 @@ Against([
 ### W15 (decided, §12) Redirects
 
 The client follows up to 20 redirects: a `301`, `302` or `303` becomes a `GET`, a `307` or `308` keeps
-its method, a redirect to `https` is the error of an address of `https`, a chain past a count of 1
-or more `HttpError(Protocol, "too many redirects")`, and the options set the count, 0 for none (§12, the
+its method, a redirect to `https` is the error of an address of `https`, where the count is 1 or more
+a chain past it gives `HttpError(Protocol, "too many redirects")`, and the options set the count, 0 for none (§12, the
 owner, 2026-10-31, "Up to 5, as ureq", and 2026-11-06, issue 39, comment 6683103582, the count 20, as
 browsers allow). `Get` sends neither `Authorization` nor `Cookie`, so that their
 drop where the host changes (§12, the same answer) has nothing to drop in it. *(assumed, §12: the
@@ -3921,21 +4050,24 @@ options change it, as .NET's `HttpClient.Timeout` holds a send that reads the wh
 its default (§12, the owner, 2026-10-31, "100 s, as .NET"); each read on the client's sockets is bounded by what remains of the call's
 time, set before it, and a socket's 5 seconds do not apply inside the client (§12, the owner, 2026-11-01,
 "Reads use the 100 s budget"). The member `Timeout` of `HttpClientOptions`, a `duration`, sets the call's
-time, 100 seconds by default; a time of zero or below makes each call `TimedOut` at once, before any
+time, 100 seconds by default; a time of zero or below makes each call that passes the call's refusals `TimedOut` at once, before any
 lookup or connect, and no value turns the bound off; every end of the call's time is `IoError(TimedOut,
 0, "")`, as the bound of `Connect` gives it, a read that the system ended with its 11 among them, and a
 write so ended under the bound of the writes assumed below; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
 sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
-the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). Once the call's time has run out, every read of the call gives `TimedOut`, even where
+the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host is at `MaxConnectionsPerServer`, is refused as
+at any other time, before the time is read, so that `ftp://127.0.0.1/` at a time of zero gives `Unsupported`, as C#'s
+`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts (§12, the owner, 2026-11-07, issue
+39, comment 6711941714, "Refusals first"). Once the call's time has run out, every read of the call gives `TimedOut`, even where
 its bytes are already in the stream's buffer, where Rust's `tokio::time::timeout` polls the read first and gives a
 byte already there (§12, the owner, 2026-11-07, issue 39, comment 6710610814). *(assumed, §12: a `TimedOut` the system
 gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
-since the client does not tell it from its own; the client reading what remains before each step and
+since the client does not tell it from its own, and its request not sent once more, as one whose time ran
+out; the client reading what remains before each step and
 giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
-`Connect`, which refuse it (S9), a remainder under 1 microsecond set as 1 microsecond; the refusals that
-need no lookup, of a scheme other than `http`, of `https` and of a host whose connections reach
-`MaxConnectionsPerServer`, given before the time is read, so that a call whose time is zero or below and
-that meets one of them gives that refusal; each write bounded by what remains in the same way, and the connect
+`Connect`, which refuse it (S9), a remainder under 1 microsecond set as 1 microsecond; the address of `https`
+among the call's refusals, refused before the time is read as the two the owner named; the call's refusals
+given so at each address of a chain, as at its first, since `Get` sends each redirect as a request of its own (W15); each write bounded by what remains in the same way, and the connect
 through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
 `Read` held to the call's time as the helpers' reads are, as Go's `Client.Timeout` holds the reads of a
 body after its call returned, where .NET's `ResponseHeadersRead` ends the send at the head (checked
@@ -3945,7 +4077,7 @@ on a new connection, and its connection not given back to the pool, closed when 
 the response or, where the time ran out before a response, at once; the bound held by the socket's own
 times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
 server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
-name bounded by nothing and its time counted against the call's, how the call's time holds over it
+name bounded by no time of the call's, only by the resolver's own, and its time counted against the call's, how the call's time holds over it
 standing open (§14), so that a connect given what remains can end later than the call's time by the
 lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
 as the time passed against the bound, never as the sum of the start and the bound, which can overflow
@@ -4145,8 +4277,8 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 ```kurz
 // a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
 // to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
-// connection whose call ran out is used again, the next call opening a new one; a body whose bytes are all in the stream's buffer,
-// read after the call's time ran out, gives `TimedOut` and not its bytes; and a body whose
+// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came with its head,
+// read after the call's time ran out, gives `TimedOut` and not its bytes, which were there; and a body whose
 // bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
 // remains of it: a body of a length, one read to the close, and a chunk's size line
 extern "C" {
@@ -4332,8 +4464,8 @@ void Trickled(int port) {
     print(elapsed >= 300ms && elapsed < 900ms)
 }
 
-// one call of a time of 300 milliseconds whose body comes with its head, so that its every byte is in the stream's buffer,
-// read after the call's time ran out
+// one call of a time of 300 milliseconds whose body comes with its head, read 400 milliseconds later, after the call's time ran
+// out, when its every byte is there, in the stream's buffer or the system's, which the case does not tell apart
 string Late(HttpClient client, int port) {
     match client.Get(Address(port, "/")) {
         HttpResponseMessage r => {
@@ -4385,4 +4517,7 @@ does not have; of an actor's socket, since a program of the compiler runs in one
 of the redirects' bodies and of a request sent once more on a new connection, each under the call's one
 time (T3), which the cases' redirects, of no body, and their requests, each sent once, do not reach; and
 of a request whose time ran out not sent once more, since a second send under the one time finds nothing
-remaining and ends as `TimedOut` before any connect, which no output tells from none.
+remaining and ends as `TimedOut` before any connect, which no output tells from none; and of a `TimedOut` the system
+gives of its own, its 110, while time remains, whose request is not sent once more either, which a second send would
+show, since no run of the suite makes the system give it: it comes where the system's retries of a segment nobody
+answers run out.
