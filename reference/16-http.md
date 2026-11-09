@@ -2485,8 +2485,10 @@ type `(HttpWriter) => void | IoError`: the server calls the function, the head g
 system call of its first write, or at its return where it wrote nothing, as `Results.Stream` on
 Kestrel sends it (§12, the owner, 2026-11-05, #110, comment 6657251329, H1 (a))
 *(assumed, §12: a write of no bytes counting as no write, below)*, each `w.Write`
-sends one chunk, or its bytes as they are under a `Content-Length` (below), and the function's return ends the body, but where an `IoError` came first (below);
-to a peer of HTTP/1.0 the body goes without chunks and the close of the connection ends it; and the
+sends one chunk, or its bytes as they are under a `Content-Length` (below), and, where the handler
+set no `Content-Length`, the function's return ends the body, but where an `IoError` came first
+(below), and to a peer of HTTP/1.0 the body goes without chunks and the close of the connection
+ends it; and the
 writer writes only inside the call (§12, the owner, 2026-11-03, "A response can be streamed"), a
 write after it giving the `IoError` below. The function takes its writer without `mut`, since
 `HttpWriter` is a class of `std/` (§12, the owner, 2026-11-03, "The callback of a streamed response
@@ -2511,11 +2513,10 @@ request's body still awaits `100 Continue`, the head says `Connection: close`, b
 answers before it read the body (§12, the owner, 2026-11-05, #110, comment 6669908217, Q6).
 `Stream` sends `application/octet-stream`, which a handler replaces
 with `Set` (§12, the owner, 2026-11-03, #110, comment 6605621326, item 7). A `Content-Length` the
-handler sets makes the writer send the body as it is, not in chunks, and holds it to that count: a
-write that would pass it, and a body short of it at the function's return, give an `IoError` of the
-kind `InvalidData`, as a file of another size gives one (W8), so that a part of a file, which a seek
-reaches (S27), goes out as a `206` with its length (§12, the owner, 2026-11-08, #110, comment
-6721051459, G5 (a)). A `Transfer-Encoding` the
+handler sets makes the writer send the body as it is, not in chunks, and holds it to that count, a
+body of fewer bytes or more giving an `IoError` of the kind `InvalidData` where the function gives
+no `IoError` of its own, as a file of another size gives one (W8), so that a part of a file, which a seek reaches (S27), goes out as a `206` with its
+length (§12, the owner, 2026-11-08, #110, comment 6721051459, G5 (a)). A `Transfer-Encoding` the
 handler set is kept, `chunked` added where it does not end in it, and dropped to a peer of HTTP/1.0,
 as on every response (§12, the owner, 2026-11-03, #110, comment 6613870327). A status that has no
 body, 100 to 199, `204`, `205` or `304`, stops the program at `Stream` with
@@ -2524,18 +2525,23 @@ the kind `InvalidInput`, `writer used after its response ended`, and writes noth
 2026-11-04, #110, comment 6643368937, Q2 and Q8 of comment 6623201585). *(assumed, §12: which text a
 status of 100 to 199 stops with, since S2's range stops it too, the stop itself being the owner's:
 `Stream`'s own, since its check comes first)* *(assumed, §12, not put to the owner: a `HEAD`
-answered with the head, `Transfer-Encoding: chunked` in it, and the function not called, and a
+where the handler set no `Content-Length` answered with the head, `Transfer-Encoding: chunked` in
+it, and the function not called, and a
 `HEAD` of a peer of HTTP/1.0 with the head alone, without `Transfer-Encoding`, and
 `Connection: close`; a `Content-Length` the handler set that holds anything but digits, or differs
-from another, giving `IoError(InvalidInput, 0, "")` from
-`Write` and `ServeConnection`, with nothing written and the function not called; a write after the
+from another, or stands beside a `Transfer-Encoding`, as W8 has it, giving
+`IoError(InvalidInput, 0, "")` from
+`Write` and `ServeConnection`, with nothing written and the function not called, the white space
+`Trim` takes around the digits set aside (X4), as the writer reads a buffered response's, and an
+empty value and a number past 10^18 + 9 refused too, so that the count stays inside a `long`; a write after the
 function returned, by a writer the function kept, giving its `IoError` with the code 0; a write of
 no bytes writing nothing, not
 the head either, which goes out with the next write or at the return; each write held to
 `MinResponseDataRate` (W10); `response.Write(stream)` chunking always where the handler set no
 `Content-Length`, a second `Write` of one
 response writing it whole again, its head and the end of its body, its function called again with a
-writer of its own, and `WriteHead` writing the head alone; the function's `IoError` after its first
+writer of its own, and `WriteHead` writing the head alone, under a `Content-Length` the count in it
+and no `Transfer-Encoding`, as a `HEAD` gets it; the function's `IoError` after its first
 write ending the body without its last chunk, and `Write` and `ServeConnection` giving the
 function's `IoError`, after the `500` of one before its first write too, as they give the `IoError`
 of a file whose size cannot be read after its `500` (W8); a write that failed leaving the writer
@@ -2561,13 +2567,24 @@ a function that reads a class that holds a `mut` response closes a ring through 
 handler that reads that class does not, by R9's reading of a field of a function type (§3, the
 owner, 2026-11-04, #110, comment 6643368937), whose cases `http/stream-cycle.kz` and
 `http/stream-handler-no-cycle.kz` stand under R9. A write that would pass the count writes none of
-its bytes and leaves the writer failed, as a write that failed does, and a body short of it writes
-the head where no write sent it, each giving `IoError(InvalidData, 0, "")` from `Write` and
-`ServeConnection` and closing the connection, as Kestrel ends a response of another length (§12, the
-owner, 2026-11-09, #110, comment 6735258248, G5 Q5, "Kestrel's check"). A `HEAD` is answered with
+its bytes and leaves the writer failed, as a write that failed does, and a body short of it at a
+return without an `IoError` of the function's own fails too, each giving
+`IoError(InvalidData, 0, "")` from `Write` and `ServeConnection` and closing the connection, as
+Kestrel ends a response of another length where bytes of it went out (§12, the owner,
+2026-11-09, #110, comment 6735258248, G5 Q5, "Kestrel's check"). Where none went out, under a count
+above 0 with no write of bytes, the writer sends `500` with `Content-Length: 0` and `Connection: close` in
+place of the handler's head, after the responses held before it, as for a function's `IoError`
+before its first write (above), and the connection closes in stages, as after the writer's other
+`500` (§12, the owner, 2026-11-09, #412, comment 6740344904, "500 + close, as #411", and #411,
+comment 6737456858, "In stages"; the cost is the handler's status, which is lost); Kestrel
+answers `500` there too, and keeps the connection. A function's own `IoError` after its first
+write cuts a counted body short and closes the connection, as it ends a chunked one, since no
+status can be sent after the head went out (above). A `HEAD` is answered with
 the head, the count in it and no `Transfer-Encoding`, the function not called; a count of 0 sends no
 body; and a peer of HTTP/1.0 gets the count in the head and the body as it is, the close still
-ending it (§12, the owner, 2026-11-09, the same comment, G5 Q8, "Write them").
+ending it (§12, the owner, 2026-11-09, the same comment, G5 Q8, "Write them"), its head saying
+`Connection: close` before that close, as the server says it before every close it makes (W9; §12,
+the owner, 2026-11-05, #110, comment 6669908217, Q6).
 
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
@@ -2887,12 +2904,15 @@ Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-con
 Case: [http/serve-stream-length.kz](../corpus/http/serve-stream-length.kz)
 ```kurz
 // a response a function writes under a `Content-Length` the handler set goes as it is, not in chunks, and keeps its connection: a
-// part of a file, the range a seek reaches, as a `206`; a body written in two writes; a `HEAD` with the head alone, the count in
+// `206` of a range, its bytes written as they are; a body written in two writes; a `HEAD` with the head alone, the count in
 // it, and no function called; to HTTP/1.0 with the count and `Connection: close`; a count of 0 with no body; a write that would
 // pass the count writes none of its bytes and closes the connection with `InvalidData`, the body cut; a body short of its
 // count at the function's return closes it with that error too; and a function that returns after its first write passed the count,
 // nothing written yet, is answered `500` with `Connection: close` after the response held before it, the next request not served
-// (section 12, the owner, 2026-11-09, #411, comment 6737456858)
+// (section 12, the owner, 2026-11-09, #411, comment 6737456858), and so is one that returns short of its count having written
+// nothing (section 12, the owner, 2026-11-09, #412, comment 6740344904); a function's own `IoError` after its first write gives
+// that error, not `InvalidData`, and closes the connection, the body cut; and a `Content-Length` beside a `Transfer-Encoding` gets
+// nothing, `InvalidInput`, as W8 has it
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -2979,18 +2999,8 @@ HttpResponse Counted(HttpResponse response, string count) {
     return response
 }
 
-File.WriteAll("serve-stream-length.txt", "0123456789".Bytes) else {
-    IoError e => print(e)
-}
-
 ranged = (HttpRequest r) => {
-    response = HttpResponse.Stream(206, (HttpWriter w) => {
-        f = File.Open("serve-stream-length.txt")
-        f.Seek(3)
-        mut part = Bytes()
-        f.Read(mut part, 4)
-        w.Write(part)
-    })
+    response = HttpResponse.Stream(206, (HttpWriter w) => w.Write("3456"))
     response.Headers.Set("Content-Range", "bytes 3-6/10") else {
         HttpError e => return HttpResponse.Empty(500)
     }
@@ -3019,6 +3029,27 @@ swallowed = (HttpRequest r) => {
         }
     }), "1")
 }
+none = (HttpRequest r) => {
+    if r.Path == "/t" {
+        return HttpResponse.Text(200, "t")
+    }
+
+    return Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+        print("called {r.Path}")
+    }), "3")
+}
+cut = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("a")
+    return IoError(IoKind.NotFound, 0, "own")
+}), "3")
+both = (HttpRequest r) => {
+    response = Counted(HttpResponse.Stream(200, (HttpWriter w) => w.Write("b")), "1")
+    response.Headers.Set("Transfer-Encoding", "chunked") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /r HTTP/1.1\r\nHost: h\r\n\r\n", ranged, HttpLimits())
 Exchange("GET /c HTTP/1.1\r\nHost: h\r\n\r\n{get}", counted, HttpLimits())
@@ -3028,9 +3059,9 @@ Exchange("GET /e HTTP/1.1\r\nHost: h\r\n\r\n{get}", empty, HttpLimits())
 Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\n{get}", over, HttpLimits())
 Exchange("GET /u HTTP/1.1\r\nHost: h\r\n\r\n{get}", under, HttpLimits())
 Exchange("GET /t HTTP/1.1\r\nHost: h\r\n\r\nGET /s HTTP/1.1\r\nHost: h\r\n\r\n{get}", swallowed, HttpLimits())
-File.Delete("serve-stream-length.txt") else {
-    IoError e => print(e)
-}
+Exchange("GET /t HTTP/1.1\r\nHost: h\r\n\r\nGET /s HTTP/1.1\r\nHost: h\r\n\r\n{get}", none, HttpLimits())
+Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", cut, HttpLimits())
+Exchange("GET /b HTTP/1.1\r\nHost: h\r\n\r\n{get}", both, HttpLimits())
 ```
 
 Case: [http/serve-stream-timeouts.kz](../corpus/http/serve-stream-timeouts.kz)

@@ -2632,7 +2632,7 @@ public sealed class CheckerTests
     public void A_file_and_a_stream_seek_to_a_long_and_a_listener_does_not()
     {
         // S27: a file's and a stream's `Seek` take an offset that is a `long`, an `int` widened to it; a listener has no `Seek`, and an
-        // offset of another type fits no form
+        // offset of another type, a `string`, is `type-mismatch` against the `long` of `Seek`'s one form
         const string Program = "void | IoError Moved() {\n    f = File.Open(\"a\")\n    long at = 3\n    f.Seek(at)\n    f.Seek(1)\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Seek(0)\n}\n\nMoved() else {\n    IoError e => print(e)\n}";
         Clean(Program); // the positive control
         Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Program.Replace("c.Seek(0)", "c.Close()\n    l.Seek(0)", StringComparison.Ordinal)));

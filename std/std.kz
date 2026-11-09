@@ -7109,13 +7109,15 @@ pub class HttpResponse {
 // of HTTP/1.1 sees the body cut, never a chunk that a failed write left part of followed by another, while one of HTTP/1.0, whose
 // body the close ends, cannot tell it from a whole one. Under a `Content-Length` the handler set the body goes as it is, not in
 // chunks, held to that count, as Kestrel holds a body to `Response.ContentLength`: a write that would pass it writes none of its bytes
-// and gives `IoError(InvalidData)`, which leaves the writer failed, and a body short of it at the function's return gives that error
-// too, after the head where no write sent it (design record, section 12: G5). A function that gives an `IoError` before its first
-// write of bytes, when nothing was written yet, is answered `500` with no body and `Connection: close` in place of the head, as Kestrel
-// answers a handler that fails before its response started, whatever `Content-Length` the handler set (design record, section 12: the
-// owner, 2026-11-09, "500 + close"), and so is one that returns after a write that failed while nothing was written, a write that
-// would pass the `Content-Length` among them (the owner, 2026-11-09, "Fix in #411 FU"); the server's loop then closes the connection
-// in stages, as after its own `500` (the owner, 2026-11-09, "In stages").
+// and gives `IoError(InvalidData)`, which leaves the writer failed, and a body short of it at a return without an `IoError` of the
+// function's own gives that error too, the body cut where a write sent the head (design record, section 12: G5). A function that
+// gives an `IoError` before its first write of bytes, when nothing was written yet, is answered `500` with no body and
+// `Connection: close` in place of the head, as Kestrel answers a handler that fails before its response started, whatever
+// `Content-Length` the handler set (design record, section 12: the owner, 2026-11-09, "500 + close"), and so is one that returns
+// after a write that failed while nothing was written, a write that would pass the `Content-Length` among them (the owner,
+// 2026-11-09, "Fix in #411 FU"), and one that returns having written nothing under a `Content-Length` above 0 (the owner,
+// 2026-11-09, "500 + close, as #411"); the server's loop then closes the connection in stages, as after its own `500` (the owner,
+// 2026-11-09, "In stages").
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -7257,7 +7259,8 @@ pub class HttpWriter {
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
     // write that failed, its `IoError`, with nothing more written where the head went out, so that the loop closes the connection on a
     // body cut (F9), and the writer's own `500` where it did not, as for an `IoError` of the function (`Abort`), and for a body
-    // short of its `Content-Length`, the head where no write sent it and `IoError(InvalidData)`, a body cut the same way. A head that
+    // short of its `Content-Length`, `IoError(InvalidData)`, after the writer's own `500` where no write sent the head (design record,
+    // section 12: the owner, 2026-11-09, "500 + close, as #411"), and a body cut the same way where one did. A head that
     // says `Connection: close` is never held: the loop holds only where it keeps the connection and the request's body has no chunks
     // and a length of 0, while the loop's own close and a handler's `Connection: close` come only where it does not keep it, and the
     // writer announces its own only where that body, chunked or of a length above 0, still awaits `100 Continue`.
@@ -7274,17 +7277,14 @@ pub class HttpWriter {
             return
         }
 
-        Started()
-        mut out = ahead
-        ahead = Bytes()
         if left > 0 {
-            if out.Count > 0 {
-                HttpWrite(s, pace, out)
-            }
-
+            Abort()
             return IoError(IoKind.InvalidData, 0, "")
         }
 
+        Started()
+        mut out = ahead
+        ahead = Bytes()
         if chunked {
             out.AddRange("0\r\n\r\n".Bytes)
         }
@@ -7299,9 +7299,10 @@ pub class HttpWriter {
         }
     }
 
-    // The function gave an `IoError`, or returned after a write that failed: where no write sent the head, nothing of the response was
-    // written, so the responses held before it go out with a `500` in its place, with no body and a close, as a response the writer
-    // cannot write is answered (W8; design record, section 12: the owner, 2026-11-09, "500 + close" and "Fix in #411 FU"), marked
+    // The function gave an `IoError`, or returned after a write that failed or short of its `Content-Length`: where no write sent the
+    // head, nothing of the response was written, so the responses held before it go out with a `500` in its place, with no body and a
+    // close, as a response the writer cannot write is answered (W8; design record, section 12: the owner, 2026-11-09, "500 + close",
+    // "Fix in #411 FU" and "500 + close, as #411"), marked
     // `Refused` for the loop's close in stages; else no end of the body, so that a client of HTTP/1.1 sees it cut, while one of
     // HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
     internal void Abort() {
@@ -7404,7 +7405,9 @@ void | IoError HttpSendFile(TcpStream s, Bytes out, string path, long length, bo
     }
 }
 
-// The number a `Content-Length` of a handler's holds, or -1 where it holds anything but digits.
+// The number a `Content-Length` of a handler's holds, the white space `Trim` takes around its digits aside, or -1 where it holds
+// anything else but digits, where it is empty, and where its number passes 10^18 + 9, so that the count stays inside a `long` (design
+// record, section 12, assumed).
 long HttpLength(string text) {
     b = text.Trim().Bytes
     if b.Count == 0 {

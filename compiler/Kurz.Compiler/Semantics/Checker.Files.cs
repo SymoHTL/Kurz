@@ -67,7 +67,8 @@ public sealed partial class Checker
     /// S3, S4, S5: a file's and a stream's <c>Read(mut into, max)</c>, <c>Write(bytes)</c> and <c>Close()</c>; S24: their
     /// <c>Fill(mut into)</c>, whose success is the count it appended, as a <c>Read</c>'s is (section 12, assumed), and <c>Consume(n)</c>,
     /// as Rust's <c>BufRead::fill_buf</c> and <c>BufRead::consume</c> (section 12, the owner, 2026-11-03); S27: their <c>Seek(offset)</c>,
-    /// its offset a <c>long</c>, as Rust's <c>Seek::seek(SeekFrom::Start(n))</c> (section 12, the owner, 2026-11-08, G5); S9: a listener's
+    /// as Rust's <c>Seek::seek(SeekFrom::Start(n))</c> (section 12, the owner, 2026-11-08, G5), its offset a <c>long</c> (section 12,
+    /// assumed); S9: a listener's
     /// <c>Accept()</c> and <c>Close()</c>, a stream's <c>SetReadTimeout(timeout)</c> and <c>SetWriteTimeout(timeout)</c>, whose time is
     /// a <c>duration?</c> (section 12, assumed), <c>null</c> for no bound, as Rust's <c>set_read_timeout(Option&lt;Duration&gt;)</c> (the
     /// owner, 2026-11-01, Q8 (a)), and a listener's <c>SetAcceptTimeout(timeout)</c>, which takes its time as the stream's setters do

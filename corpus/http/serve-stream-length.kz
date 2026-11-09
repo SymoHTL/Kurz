@@ -20,15 +20,25 @@
 // | swallowed InvalidData
 // | io: invalid data
 // | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 1|Date: <29>||tHTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close|Date: <29>||]
+// | called /s
+// | io: invalid data
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Content-Length: 1|Date: <29>||tHTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close|Date: <29>||]
+// | io: not found: own
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Content-Length: 3|Date: <29>||a]
+// | io: invalid input
+// | []
 // rules: W11
 
 // a response a function writes under a `Content-Length` the handler set goes as it is, not in chunks, and keeps its connection: a
-// part of a file, the range a seek reaches, as a `206`; a body written in two writes; a `HEAD` with the head alone, the count in
+// `206` of a range, its bytes written as they are; a body written in two writes; a `HEAD` with the head alone, the count in
 // it, and no function called; to HTTP/1.0 with the count and `Connection: close`; a count of 0 with no body; a write that would
 // pass the count writes none of its bytes and closes the connection with `InvalidData`, the body cut; a body short of its
 // count at the function's return closes it with that error too; and a function that returns after its first write passed the count,
 // nothing written yet, is answered `500` with `Connection: close` after the response held before it, the next request not served
-// (section 12, the owner, 2026-11-09, #411, comment 6737456858)
+// (section 12, the owner, 2026-11-09, #411, comment 6737456858), and so is one that returns short of its count having written
+// nothing (section 12, the owner, 2026-11-09, #412, comment 6740344904); a function's own `IoError` after its first write gives
+// that error, not `InvalidData`, and closes the connection, the body cut; and a `Content-Length` beside a `Transfer-Encoding` gets
+// nothing, `InvalidInput`, as W8 has it
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -115,18 +125,8 @@ HttpResponse Counted(HttpResponse response, string count) {
     return response
 }
 
-File.WriteAll("serve-stream-length.txt", "0123456789".Bytes) else {
-    IoError e => print(e)
-}
-
 ranged = (HttpRequest r) => {
-    response = HttpResponse.Stream(206, (HttpWriter w) => {
-        f = File.Open("serve-stream-length.txt")
-        f.Seek(3)
-        mut part = Bytes()
-        f.Read(mut part, 4)
-        w.Write(part)
-    })
+    response = HttpResponse.Stream(206, (HttpWriter w) => w.Write("3456"))
     response.Headers.Set("Content-Range", "bytes 3-6/10") else {
         HttpError e => return HttpResponse.Empty(500)
     }
@@ -155,6 +155,27 @@ swallowed = (HttpRequest r) => {
         }
     }), "1")
 }
+none = (HttpRequest r) => {
+    if r.Path == "/t" {
+        return HttpResponse.Text(200, "t")
+    }
+
+    return Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+        print("called {r.Path}")
+    }), "3")
+}
+cut = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+    w.Write("a")
+    return IoError(IoKind.NotFound, 0, "own")
+}), "3")
+both = (HttpRequest r) => {
+    response = Counted(HttpResponse.Stream(200, (HttpWriter w) => w.Write("b")), "1")
+    response.Headers.Set("Transfer-Encoding", "chunked") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /r HTTP/1.1\r\nHost: h\r\n\r\n", ranged, HttpLimits())
 Exchange("GET /c HTTP/1.1\r\nHost: h\r\n\r\n{get}", counted, HttpLimits())
@@ -164,6 +185,6 @@ Exchange("GET /e HTTP/1.1\r\nHost: h\r\n\r\n{get}", empty, HttpLimits())
 Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\n{get}", over, HttpLimits())
 Exchange("GET /u HTTP/1.1\r\nHost: h\r\n\r\n{get}", under, HttpLimits())
 Exchange("GET /t HTTP/1.1\r\nHost: h\r\n\r\nGET /s HTTP/1.1\r\nHost: h\r\n\r\n{get}", swallowed, HttpLimits())
-File.Delete("serve-stream-length.txt") else {
-    IoError e => print(e)
-}
+Exchange("GET /t HTTP/1.1\r\nHost: h\r\n\r\nGET /s HTTP/1.1\r\nHost: h\r\n\r\n{get}", none, HttpLimits())
+Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", cut, HttpLimits())
+Exchange("GET /b HTTP/1.1\r\nHost: h\r\n\r\n{get}", both, HttpLimits())
