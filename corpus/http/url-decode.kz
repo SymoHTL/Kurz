@@ -1,0 +1,42 @@
+// expect: output
+// | [/docs/with space.txt]
+// | [plain]
+// | [a+b]
+// | [A/b/c]
+// | [100%]
+// | [%4]
+// | [%zz]
+// | [A%]
+// | [é]
+// | [../../etc]
+// | 2 0
+// | InvalidUtf8 0
+// | InvalidUtf8 1
+// rules: W17
+
+// `Url.Decode` reads each `%` and two hex digits, of either case, as the byte they name and the bytes as UTF-8: a `%` without
+// two hex digits after it stays as it is, a `+` stays a `+`, no path is checked, `%00` gives U+0000, and bytes that are no UTF-8
+// give `InvalidUtf8` with the count of the decoded bytes in front of them
+void Show(string text) {
+    match Url.Decode(text) {
+        string s => print("[{s}]")
+        InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+    }
+}
+
+Show("/docs/with%20space.txt")
+Show("plain")
+Show("a+b")
+Show("%41%2fb%2Fc")
+Show("100%")
+Show("%4")
+Show("%zz")
+Show("%41%")
+Show("%C3%A9")
+Show("..%2F..%2Fetc")
+match Url.Decode("%00x") {
+    string s => print("{s.Bytes.Count} {s.Bytes[0]}")
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}
+Show("%FF")
+Show("a%C3")

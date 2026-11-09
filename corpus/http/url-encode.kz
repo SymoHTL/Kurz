@@ -1,0 +1,21 @@
+// expect: output
+// | AZaz09-._~
+// | with%20space.txt
+// | a%2Fb%3Fc%3Dd%26e%2B
+// | %C3%A9%25
+// | 
+// | true
+// rules: W17
+
+// `Url.Encode` leaves RFC 3986's unreserved bytes, the ASCII letters, the digits and `-._~`, and writes each other byte of the
+// text's UTF-8 as `%` and two upper-case hex digits, `/` among them; `Url.Decode` gives the text back
+print(Url.Encode("AZaz09-._~"))
+print(Url.Encode("with space.txt"))
+print(Url.Encode("a/b?c=d&e+"))
+print(Url.Encode("é%"))
+print(Url.Encode(""))
+text = "key with/é and %41+"
+match Url.Decode(Url.Encode(text)) {
+    string s => print(s == text)
+    InvalidUtf8 e => print("InvalidUtf8 {e.At}")
+}

@@ -371,7 +371,7 @@ declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
 the project and no line of `project.kz`, a path longer than a package's line name whose folder the package lacks,
-`use json/nosuch`, and a path that, after its first name, reaches or passes through a folder, of the project or of a package, that holds a `project.kz`
+`use json/nosuch` where no folder `json` stands at the top (beside one, the sentence below), and a path that, after its first name, reaches or passes through a folder, of the project or of a package, that holds a `project.kz`
 of its own, which that package's line alone reaches, are `unknown-name` at the `use` line; a space beside a `/` reads
 as one between any two tokens, `use a / util` being `use a/util`, and a line break ends the path; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
