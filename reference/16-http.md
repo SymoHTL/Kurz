@@ -259,16 +259,28 @@ unread by every actor keeps the close of such a body unread at its return, and e
 body that no read has reached counts the grace from that return (below) (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q10, and 2026-11-06, issue 39, comment 6682072588). The
 write is made by `std/`'s code of that pair at the first read, in the actor that reads, under its
-flag of whether a response has begun, since the server is inside the handler's call (§12, the owner,
-2026-11-05, issue 156, comment 6669908509, Q12). The flag is taken by an atomic test-and-set before
-either write, the server's head of a response or that `100 Continue`, the second of section 6's
-exceptions to its region check (§6, §12, the owner, 2026-11-06, issue 39, comment 6682072588)
-*(assumed, §6, §12: the two sides of the test-and-set)*. The response is
+flag (§6), since the server is inside the handler's call (§12, the owner, 2026-11-05, issue 156,
+comment 6669908509, Q12). The flag is taken by an atomic test-and-set before either write, the
+server's head of a response or that `100 Continue`, within the second of section 6's exceptions to
+its region check (§6, §12, the owner, 2026-11-06, issue 39, comment 6682072588), and it holds one of
+four states, free, `100 Continue` under way, `100 Continue` written and a response begun: the
+reading actor sets it to written when its write ends, a server that finds the write under way waits
+for written, at most one write of 25 bytes, and then writes its head, and a written `100 Continue`
+is no begun response, so that a `408` or a `413` can still go out after it (§6, §12, the owner,
+2026-11-07, issue 39, comment 6706852249) *(assumed, §6, §12: that the reading actor writes nothing
+when it finds a response begun)*. The exception covers the pair's state as a whole, the flag, the
+time of the body's last read and the server's end of the body, each part atomic and shared only
+between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249).
+The response is
 written when the handler returns, while the moved body stays the other actor's to read to its end:
-every read that keeps to the body's rate gives the body's bytes, then `0` at its end. A body left
+every read that keeps to the body's rate gives the body's bytes, then `0` at its end, but for the
+body of a request that expects `100-continue` that no actor had read at the return, whose connection
+closes there (above) and whose next read gives `request timed out`, as a body the server ended gives
+it (below) (§12) *(assumed, §12: that exception's read)*. A body left
 unread is drained when its last owner drops it, and the connection reads its next request only after
 that, with no new kind of error (§12, the owner, 2026-11-03, issue 39, comment 6601737306). A body
-that the server has ended (below) drains nothing at its drop, and its connection is closed and not
+that the server has ended (below), and one that its own read ended, past `MaxRequestBodySize` or
+under the body's rate (below), drains nothing at its drop, and its connection is closed and not
 read again (§12) *(assumed, §12: that exception)*.
 
 The drain reads the read half where the body's last owner drops it, bounded by the body's rate and
@@ -289,7 +301,9 @@ begun, as Kestrel's `BadHttpRequestException` of 413 is (§12) *(assumed, §12: 
 corrects the reading said back on issue 156, comment 6644555381, item 2, as the owner's choice of
 2026-11-05 names, issue 39, comment 6666386984, and the read past the limit)*. For a moved body
 that read ends the body and is reported back to the server at the body's end, which sends the `413`
-while no response has begun and closes the connection (§12) *(assumed, §12: that path)*. A read
+while no response has begun and closes the connection, a report made during the handler's call taken
+once the call has returned, as for the `408` (below), the `413` then sent in place of the handler's
+response, which is not written (§12) *(assumed, §12: that path)*. A read
 of a moved body that falls under the body's rate closes the connection, and the `408` is sent only
 while no response has begun (§12, the owner, 2026-11-03, issue 156, comment 6603205575), the error
 `request timed out` being the owner's (§12, the owner, 2026-11-05, M1, issue 110, comment
@@ -304,23 +318,30 @@ response the handler returns is not written, with no error to any program (§12)
 reading)*. The rate also runs between reads: a moved body held unread past the
 rate's grace ends, its next read gives `request timed out`, and the connection closes (§12, the
 owner, 2026-11-05, issue 156, comment 6666386552, Q8). Only the server can close without a read:
-while the read half is away and the handler's call has returned, the server times the grace from
-the body's last read, and at its end
+while the read half is away and the handler's call has returned, the server times the grace from the
+body's last read, or from the return for a moved body that no read has reached, other than the body
+of a request that expects `100-continue`, whose connection Q10's close ends at the return (above),
+and at its end
 it ends the body through the halves' pair of types, closes the connection and serves the next one,
 so that the body's next read gives `request timed out` and its drop drains nothing (§12)
 *(assumed, §12: the reading said back on issue 156, comment 6668914650)*. While the handler's call
 runs, the server times nothing: it times the grace once the call has returned, and a read that
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
 2026-11-05, issue 156, comment 6669908509), from the time of the body's last read, which the pair
-holds (§12) *(assumed, §12: that check at the read, beside the server's timing after the return)*.
+holds in its shared state (§6, §12) *(assumed, §12: that check at the read, beside the server's
+timing after the return)*.
 The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
-(§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), so that a first read during
+(§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), with P2 (the grace from the
+return, comment 6680351318) for every other moved body than the body of a request that expects
+`100-continue`, which keeps Q10's close at the return, above (§12, the owner, 2026-11-06, issue 39,
+comment 6682072588), so that a first read during
 the call is never past the grace for a body that no read had reached (§12) *(assumed, §12: that
 reading)*. The time between
-reads counts in the body's rate as the time a read waits does, and a
-time past the grace since the last read ends the body at once, the first of the two to end the
-body ending it, the grace being that of the body's rate in `HttpLimits`, which Q8's answer takes as
+reads counts in the body's rate as the time a read waits does, and a time past the grace since the
+last read ends the body at the first of a read that finds it passed and the server's timing once the
+handler's call has returned, the first of the two measures to end the body ending it, the grace
+being that of the body's rate in `HttpLimits`, which Q8's answer takes as
 the longest time since the body's last read too; a body that the handler reads itself counts only
 the time a read waits, since Q8 was asked of a moved body, and a body the handler reads and then
 moves is a moved body, whose last read is the handler's until another actor reads it (§12)
@@ -328,8 +349,8 @@ moves is a moved body, whose last read is the handler's until another actor read
 its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
 timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
 wait or a deadline the scheduler reads at each switch, while the time between reads is the
-server's once the handler's call has returned, timed from the body's last read, and during the call
-a read checks it itself (above) (§12).
+server's once the handler's call has returned, timed as the server times the grace, and during the
+call a read checks it itself (above) (§12).
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
@@ -350,7 +371,10 @@ shows only when the code runs (§12) *(assumed, §12: that cost)*. The call's bo
 written `move`, since the call takes the body and reads it to its end when it sends it, so that the
 call writes `move` at the body, as section 6 asks of a call (§6, §12) *(assumed, §12: the
 parameter's word)*; a call that fails before it sends a byte, `request has two bodies` among them,
-drops the body, so that a retry makes a new one (§12) *(assumed, §12: that reading)*. An
+drops the body, so that a retry makes a new one from its file or its chunks, while a relayed body of
+a server's request, which cannot be sent again, is drained at that drop as at any drop of its last
+owner (above), and a call that fails after it sent a byte drops the body too (§12) *(assumed, §12:
+those readings)*. An
 `HttpBody` for an upload is made from a stream, a file or a series of chunks (§12, the owner,
 2026-11-05, issue 156, comment 6668914650, Q11), and the makers' names and forms stand open in §14.
 
@@ -358,7 +382,7 @@ No case: the compiler reads no `copy` and no `move`, at a send, on a parameter o
 that no case can expect the move, `copy-server-request`, `send-needs-word` or `move-at-call`, and a
 send to another actor needs two actors, which the compiler does not build, as it builds no HTTP
 server or client of §12, which the halves of the stream, the first read's `100 Continue` and its
-test-and-set, the rate
+test-and-set on a flag of four states, the pair's shared state, the rate
 between reads, the count of a body without a declared length, the two bodies of a client's call
 and the makers of an `HttpBody` need. The id
 `copy-server-request` stands in this rule, and `send-needs-word` and `move-at-call` in the record's
@@ -2820,7 +2844,8 @@ and each whose body was let go of unread, then closes each connection idle longe
 hyper-util's pool passes over expired connections at its checkout, and takes the connection of the
 host and port that went idle last, as hyper-util's `pop()` takes it; a request on a connection of the
 pool that cannot be written, or whose connection ends, closed or reset, before the first byte of a
-response, sent once more on a new connection, as .NET sends a request again on a connection the server shut down, and a
+response, sent once more on a new connection, as .NET sends a request again on a connection the server shut down, but for a
+write or a read that the system ends with its `TimedOut`, its 110, which ends the call as the end of its time does (W16), and a
 new connection given no second try; the request line `GET`, the path, with `?` and the query after it
 where the query is not empty, and `HTTP/1.1`, so that `http://h/p?` and `http://h/p` send `/p`, and the
 request with `Host`, the port in it where it is not 80, and no other header; the connect a call of `TcpStream.Connect`, so that a package on
@@ -4033,17 +4058,25 @@ write so ended under the bound of the writes assumed below; and one time bounds 
 sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
 the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host is at `MaxConnectionsPerServer`, is refused as
 at any other time, before the time is read, so that `ftp://127.0.0.1/` at a time of zero gives `Unsupported`, as C#'s
-`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts (§12, the owner, 2026-11-07, issue
-39, comment 6711941714, "Refusals first"). Once the call's time has run out, every read of the call gives `TimedOut`, even where
+`HttpClient` refuses a scheme it does not take in `SendAsync` before its timeout starts, in the owner's words (§12, the owner,
+2026-11-07, issue 39, comment 6711941714, "Refusals first"), where .NET's source starts the timeout first, `CancelAfter` in
+`PrepareCancellationTokenSource`, and its `SocketsHttpHandler` then refuses the scheme before anything waits, and its `Timeout`
+refuses a time of zero (§12, the author's note). Once the call's time has run out, every read of the call gives `TimedOut`, even where
 its bytes are already in the stream's buffer, where Rust's `tokio::time::timeout` polls the read first and gives a
 byte already there (§12, the owner, 2026-11-07, issue 39, comment 6710610814). *(assumed, §12: a `TimedOut` the system
 gives of its own while the call's time runs, its 110, in the form of every other end of the call's time,
 since the client does not tell it from its own, and its request not sent once more, as one whose time ran
-out; the client reading what remains before each step and
+out, the one end of a pooled connection that the pool's resend (W13) leaves out, at the cost of a call on a pooled
+connection that the system ends with its 110 failing where the resend would have sent it once more on a new connection; the
+client reading what remains before each step and
 giving `TimedOut` when nothing remains, so that it passes no time of zero or below to the setters and to
 `Connect`, which refuse it (S9), a remainder under 1 microsecond set as 1 microsecond; the address of `https`
-among the call's refusals, refused before the time is read as the two the owner named; the call's refusals
-given so at each address of a chain, as at its first, since `Get` sends each redirect as a request of its own (W15); each write bounded by what remains in the same way, and the connect
+among the call's refusals, refused before the time is read as the two the owner named; the refusals read in the
+order the address of `https`, a scheme other than `http`, a host and port at `MaxConnectionsPerServer`, by which the pool counts, so that under a
+`MaxConnectionsPerServer` at or below 0, which refuses every call (W13), `ftp://127.0.0.1/` gives `Unsupported`; the call's
+refusals given so at each address of a chain, as at its first: at a redirect the client drains its body, counts it against
+`MaxAutomaticRedirections` (W15), then meets the refusals of the address it follows and reads the time only after them, so that
+a redirect to `ftp://` after the call's time ran out gives `Unsupported` and not `TimedOut`; each write bounded by what remains in the same way, and the connect
 through the second form of `Connect`, given what remains, with no 5 seconds of its own; a body read with
 `Read` held to the call's time as the helpers' reads are, as Go's `Client.Timeout` holds the reads of a
 body after its call returned, where .NET's `ResponseHeadersRead` ends the send at the head (checked
@@ -4053,8 +4086,9 @@ on a new connection, and its connection not given back to the pool, closed when 
 the response or, where the time ran out before a response, at once; the bound held by the socket's own
 times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
 server holds its bounds (W10), how it holds on an actor's socket standing open (§14); the lookup of the
-name bounded by no time of the call's, only by the resolver's own, and its time counted against the call's, how the call's time holds over it
-standing open (§14), so that a connect given what remains can end later than the call's time by the
+name read as the third option of the open entry of §14 on it, which stays open: bounded by no time of the call's, but by the
+resolver's own or by a module of the name service that waits longer, and its time counted against the call's, so that the lookup
+can run past the call's time, a connect given what remains can end later than the call's time by the
 lookup's, and the step after it then finds nothing remaining; and the time read from `instant.Now` (S25)
 as the time passed against the bound, never as the sum of the start and the bound, which can overflow
 (T36))*
@@ -4066,7 +4100,8 @@ Case: [http/client-timeout.kz](../corpus/http/client-timeout.kz)
 // clock's range; a read waits what remains of the call's time and not a socket's 5 seconds; a chain of redirects has one
 // time in all; a server that does not answer in time ends the call with `TimedOut` after its time, and so does a connect that the
 // server's queue holds, the queue shown full before the call; and a call of a scheme the client does not serve, with a time
-// of zero, gives the scheme's refusal, which comes before the time is read
+// of zero, gives the scheme's refusal, which comes before the time is read; and under a `MaxConnectionsPerServer` of 0, which
+// refuses every call, the refusals of a scheme come before the pool's, and the pool's before the time
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -4193,13 +4228,13 @@ string Show(int port, string path, duration timeout) {
     }
 }
 
-// a `GET` of `text` with a call's time of zero, and its status or its failure
-string Refused(string text) {
+// a `GET` of `text` under `options`, each of a call's time of zero, and its status or its failure
+string Refused(string text, HttpClientOptions options) {
     at = Uri.Parse(text) else {
         UriError e => return "{e.Kind} {e.At}"
     }
 
-    match HttpClient(HttpClientOptions(Timeout: 0s)).Get(at) {
+    match HttpClient(options).Get(at) {
         HttpResponseMessage r => return "{r.Status}"
         IoError e => return "{e.Kind} {e.Code}"
         HttpError e => return "{e.Kind}: {e.Detail}"
@@ -4242,7 +4277,11 @@ void | IoError Queued() {
 }
 
 print(HttpClientOptions().Timeout == 100s)
-print(Refused("ftp://127.0.0.1/"))
+print(Refused("ftp://127.0.0.1/", HttpClientOptions(Timeout: 0s)))
+crowded = HttpClientOptions(MaxConnectionsPerServer: 0, Timeout: 0s)
+print(Refused("ftp://127.0.0.1/", crowded))
+print(Refused("https://127.0.0.1/", crowded))
+print(Refused("http://127.0.0.1:1/", crowded))
 Against((int port) => Calls(port))
 Queued() else {
     IoError e => print(e)
@@ -4253,8 +4292,8 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 ```kurz
 // a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
 // to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
-// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came with its head,
-// read after the call's time ran out, gives `TimedOut` and not its bytes, which were there; and a body whose
+// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came in the one write of
+// its head, read after the call's time ran out, gives `TimedOut` and not its bytes, which were in the stream's buffer; and a body whose
 // bytes come one at a time, each before a read's time would run out, still ends at the call's time, since each read waits only what
 // remains of it: a body of a length, one read to the close, and a chunk's size line
 extern "C" {
@@ -4440,8 +4479,8 @@ void Trickled(int port) {
     print(elapsed >= 300ms && elapsed < 900ms)
 }
 
-// one call of a time of 300 milliseconds whose body comes with its head, read 400 milliseconds later, after the call's time ran
-// out, when its every byte is there, in the stream's buffer or the system's, which the case does not tell apart
+// one call of a time of 300 milliseconds whose body comes in the one write of its head, which the head's read takes whole, so that
+// the body's bytes are in the stream's buffer, read 400 milliseconds later, after the call's time ran out
 string Late(HttpClient client, int port) {
     match client.Get(Address(port, "/")) {
         HttpResponseMessage r => {

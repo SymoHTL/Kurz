@@ -237,9 +237,14 @@ read it):
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
 `throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
 arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
-`while (true)`, the literal `true`, in parentheses or not, and nothing else; a `break` after a
-statement whose end cannot be reached is never reached, as in C#. The record marks that
-definition as *(assumed)*. Where the analysis proves
+`while (true)`; a `break` or a `continue` after a statement whose end cannot be reached is never
+reached, as in C#. The record marks that definition as *(assumed)*. A condition whose value is a
+constant, the constants a default takes (F12), is read as that value, in an `if` as in a `while`, as
+C# reads it (§4, the owner, 2026-11-08): the `then` of `if false` and the `else` of `if true` are
+never reached, nor the end of an `if true` whose block leaves, nor the body of `while false`, and a
+`while` whose condition is the constant `true`, `while (true)`, `while !false` or `while 1 == 1`
+among them, ends only through a `break` of its own that can be reached. A branch that is never
+reached adds nothing to what holds after it. Where the analysis proves
 nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
