@@ -248,7 +248,8 @@ Of the connection's stream, the body takes the read half with it for its life, a
 the write half, as tokio's `TcpStream::into_split` gives an `OwnedReadHalf` and an
 `OwnedWriteHalf`. The server's paths into the read half end at the call, and the half comes back to
 the server when the body ends, read to its end or drained when its last owner drops it, unless a
-read or the drain closed the connection (below) (§12, the owner, 2026-11-05, issue 156, comment
+read or the drain closed the connection, or Q10's close at the return did (below) *(assumed, §12:
+Q10's close among them)* (§12, the owner, 2026-11-05, issue 156, comment
 6657251688, Q5, and comment 6666386552, Q7). The response, the `408` and the close stay the
 server's, on the write half, and a read of the body that timed out is reported back to the server
 at the body's end (§12, the owner, 2026-11-05, issue 156, comment 6666386552, Q7). The one write on
@@ -278,11 +279,13 @@ unread by every actor and gets Q10's close at the return (below), and where it f
 under way or written, that close does not hold (§6, §12) *(assumed, §6, §12: those moves)*. The
 socket's write bound, 5 seconds for each call of the system by default, holds the server's wait,
 since the reading actor's write is a write on the connection's socket, held in that actor as the
-moved body's reads are, which stands open in §14; the write's end, failed or not, an end of the
-reading actor during it among them, sets the flag to written, so that the server's head meets a
-failed connection as any write on it does; and the wait is the server's read of the flag (§6,
-§12) *(assumed, §6, §12: those readings, which the owner's answer of 2026-11-08 took, issue 39,
-comment 6724695653, but for the end of the reading actor)*. The exception covers the pair's state
+moved body's reads are, which stands open in §14; the write's end, failed or not, sets the flag to
+written, so that the server's head meets a failed connection as any write on it does; and the wait
+is the server's read of the flag (§6, §12) *(assumed, §6, §12: those readings, which the owner's
+answer of 2026-11-08 took, issue 39, comment 6724695653, but for the bound's open dependency, a
+reading not put to the owner)*. What sets the flag where the reading actor ends during its write,
+as a stop at its supervisor's end without finishing its message would end it, stands open with that
+stop in §14. The exception covers the pair's state
 as a whole, the flag, the
 time of the body's last read and the server's end of the body, each part atomic and shared only
 between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249).
@@ -345,8 +348,8 @@ so that the body's next read gives `request timed out` and its drop drains nothi
 runs, the server times nothing: it times the grace once the call has returned, and a read that
 comes past the grace before then finds it passed and gives `request timed out` (§12, the owner,
 2026-11-05, issue 156, comment 6669908509), from the time of the body's last read, which the pair
-holds in its shared state (§6, §12) *(assumed, §12: that check at the read, beside the server's
-timing after the return)*.
+holds in its shared state (§6, §12) *(assumed, §12: that check at the read, during the call and
+after it, beside the server's timing after the return)*.
 The grace runs from the body's last read and does not
 start again when the call returns, and a body that no read has reached counts it from that return
 (§12, the owner, 2026-11-06, pull request 347, comment 6680351318, P2), with P2 (the grace from the
