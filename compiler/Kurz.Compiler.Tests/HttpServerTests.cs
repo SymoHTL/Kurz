@@ -20,16 +20,18 @@ namespace Kurz.Compiler.Tests;
 /// a request that wait more than 5 seconds where its bounds allow it, which a case could only show by a run of that length; and what needs a client beside the loop for its time or its
 /// socket: the bound of a write held across the calls of the system it makes, the close in stages after the server's answer, the
 /// time of a body's read set before each refill, and a file whose write fails closed, with the refusal of the bounded write to a
-/// program, which only std/ is given.
+/// program, which only std/ is given; and how long a bound of time waits at most, a bound of the wall's time that a corpus case,
+/// which shows each bound's outcome and that it waited at least its length, does not hold.
 /// </summary>
 public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private static Compilation Compile(string text, CheckedRuntime runtime) => Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true);
+    private static Compilation Compile(string text, CheckedRuntime runtime, IReadOnlyCollection<string>? grants = null) =>
+        Builder.Compile(SourceText.FromString("program.kz", text), grants ?? [], runtime, testBuild: true);
 
     /// <summary>std/ with <c>HttpServer.DateOf</c>, the <c>Date</c> the loop writes in the given second since 1970-01-01.</summary>
     private static readonly Lazy<CheckedRuntime> WithDate = new(() => ListTests.Edited(("std/std.kz", "pub class HttpServer {\n", """
         pub class HttpServer {
-            pub static string DateOf(long second) => HttpDate(second)
+            pub static string DateOf(long second) => HttpDateOf(second)
 
         """)));
 
@@ -251,6 +253,106 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     }
 
     [Fact]
+    public async Task A_write_that_failed_leaves_the_writer_failed_so_that_the_body_ends_cut()
+    {
+        // W11 (assumed, section 12): a client that reads nothing makes a write of 512 KiB time out, part of its chunk written; the
+        // function catches the `IoError`, waits for the byte of the request's body that the client sends once it reads again, and
+        // writes again: that write gives the `IoError` again and writes nothing, and the end of the body gives it to the loop, which
+        // closes the connection, so that the client gets the body cut and never a chunk of `x` after the part of the failed one
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
+                server = listener.Accept()
+                mut piece = Bytes()
+                while piece.Count < 524288 {
+                    piece.Add(122)
+                }
+
+                handler = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+                    mut failed = false
+                    while !failed {
+                        w.Write(piece) else {
+                            IoError e => {
+                                print("first {e.Kind}")
+                                failed = true
+                            }
+                        }
+                    }
+
+                    mut one = Bytes()
+                    n = r.Body.Read(mut one, 1) else {
+                        IoError e => return e
+                        HttpError e => return IoError(IoKind.InvalidData, 0, e.Detail)
+                    }
+
+                    print("read {n}")
+                    w.Write("x") else {
+                        IoError e => print("again {e.Kind}")
+                    }
+                })
+                HttpServer.ServeConnection(server, handler, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms))) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, "http-server-stream-failed-write");
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        var got = new MemoryStream();
+        using (var client = Connect(executable, run, receiveBuffer: 65536))
+        {
+            var stream = client.GetStream();
+            stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\n"u8);
+
+            // the write times out about 100 ms after the buffers of the connection are full
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            stream.Write("b"u8);
+            client.Client.Shutdown(SocketShutdown.Send);
+            var buffer = new byte[65536];
+            while (true)
+            {
+                int n;
+                try
+                {
+                    n = stream.Read(buffer);
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+
+                if (n == 0)
+                {
+                    break;
+                }
+
+                got.Write(buffer, 0, n);
+            }
+        }
+
+        var (code, output, error) = await run;
+        var bytes = got.ToArray();
+        Assert.Equal((0, "", "first TimedOut\nread 1\nagain TimedOut\nTimedOut\nserved\n", false, false),
+            (code, error, output, bytes.AsSpan().EndsWith("0\r\n\r\n"u8), bytes.AsSpan().IndexOf("\r\n1\r\nx"u8) >= 0));
+    }
+
+    [Fact]
     public async Task A_write_of_a_streamed_response_over_64_KiB_is_given_its_length_at_the_rate()
     {
         // W11 (assumed, section 12): a write over 64 KiB goes out on its own after its chunk's size line, and it is given the longer of
@@ -335,8 +437,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     [Fact]
     public async Task A_streamed_response_ends_without_waiting_for_the_acknowledgement_of_its_last_chunk()
     {
-        // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream, as Kestrel sets it on every connection, so that the
-        // chunk that ends a body goes out at once after the chunk before it; under Nagle's algorithm it waits for the client's
+        // W11 (assumed, section 12): the writer sets `TCP_NODELAY` on the stream at each streamed response, as Kestrel sets it on every
+        // connection, so that the chunk that ends a body goes out at once after the chunk before it; under Nagle's algorithm it waits for the client's
         // acknowledgement, which a client that sends its next request only after the whole response gives at its delayed-ACK timer,
         // about 40 ms on Linux, so that 100 requests one after the other take 4 seconds and not a few milliseconds
         const string text = """
@@ -573,6 +675,80 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         Assert.EndsWith("\r\n\r\nabcd", response);
     }
 
+    [Theory]
+    [InlineData("head", "RequestHeadersTimeout: 300ms, KeepAliveTimeout: 300ms", "GET /a HTTP/1.1\r\nHost: h\r\n", "request timed out\nserved\n")]
+    [InlineData("first", "KeepAliveTimeout: 300ms", "", "served\n")]
+    [InlineData("idle", "KeepAliveTimeout: 300ms", "GET /a HTTP/1.1\r\nHost: h\r\n\r\n", "served\n")]
+    [InlineData("response", "MinResponseDataRate: HttpRate(1_000_000_000, 300ms)", "GET /large HTTP/1.1\r\nHost: h\r\n\r\n", "TimedOut\nserved\n")]
+    public async Task A_bound_of_time_ends_its_connection_within_its_length(string name, string limits, string sent, string printed)
+    {
+        // W10 (section 12, the owner, 2026-11-01, "Kestrel's bounds" and "Add Kestrel's response rate", and 2026-10-31, "Persistent,
+        // 100 req, 5 s"): a head that stops coming is answered `408` at `RequestHeadersTimeout`, its close in stages waiting
+        // `KeepAliveTimeout` more for a client that sends nothing; a connection that sends no first byte, or none after a request, closes
+        // at `KeepAliveTimeout`; and a response the client does not take ends at the grace of `MinResponseDataRate`. Each bound is
+        // 300 ms against defaults of 5 or 30 seconds, and the connection ends, the program with it, within 2.5 seconds of the client's
+        // last byte; the cases `serve-timeouts` and `serve-keep-alive` show each outcome and that it waited at least its bound
+        const string text = """
+            void | IoError Main(string address) {
+                listener = TcpListener.Bind(address)
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
+                mut piece = Bytes()
+                while piece.Count < 65536 {
+                    piece.Add(122)
+                }
+
+                mut body = Bytes()
+                while body.Count < 33554432 {
+                    body.AddRange(piece)
+                }
+
+                large = HttpResponse.Bytes(200, body)
+                handler = (HttpRequest r) => {
+                    if r.Path == "/large" {
+                        return large
+                    }
+
+                    return HttpResponse.Text(200, "hi")
+                }
+
+                server = listener.Accept()
+                HttpServer.ServeConnection(server, handler, HttpLimits(LIMITS)) else {
+                    IoError e => print(e.Kind)
+                    HttpError e => print(e.Detail)
+                }
+
+                print("served")
+            }
+
+            Main(args[0]) else {
+                IoError e => print(e)
+            }
+            """;
+        var compilation = Compile(text.Replace("LIMITS", limits, StringComparison.Ordinal), toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, $"http-server-bound-{name}");
+        var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
+            new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
+        TimeSpan ended;
+        (int Code, string Output, string Error) result;
+        using (var client = Connect(executable, run))
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            client.GetStream().Write(System.Text.Encoding.ASCII.GetBytes(sent));
+            result = await run;
+            ended = watch.Elapsed;
+        }
+
+        Ran((0, "", printed), (result.Code, result.Error, result.Output));
+        Assert.InRange(ended, TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(2500));
+    }
+
     [Fact]
     public async Task A_write_of_a_response_is_held_to_its_bound_across_the_calls_of_the_system_it_makes()
     {
@@ -714,9 +890,11 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     public async Task A_read_of_a_body_sets_what_remains_of_its_time_before_each_refill()
     {
         // W10 (section 12, the owner, 2026-11-04, Q9 (a)): a read of a body may wait its grace, here 1 second, and each refill it makes
-        // inside, the size line of a chunk among them, waits what remains of that. A size line of which two bytes come, 600 ms apart,
-        // runs out at its second wait, and the request is answered `408` about 1 second after its head; a refill that waited for the
-        // rest of the line without that bound would answer only once the client sent it, which this client does after the answer
+        // inside, the size line of a chunk among them, waits what remains of that. A size line of which two bytes come, 800 ms apart,
+        // runs out at its second wait, and the request is answered `408` about 1 second after its head; a refill given the whole grace
+        // again would answer 1 second after the second byte, 1.8 seconds after the head at the earliest, past the window, and one that
+        // waited for the rest of the line without a bound would answer only once the client sent it, which this client does after the
+        // answer
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
@@ -762,7 +940,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             var stream = client.GetStream();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1"u8);
-            await Task.Delay(600);
+            await Task.Delay(800);
             stream.Write("0"u8);
             var buffer = new byte[65536];
             using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -777,7 +955,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var (code, output, error) = await run;
         Ran((0, "", "request timed out\nserved\n"), (code, error, output));
         Assert.StartsWith("HTTP/1.1 408 Request Timeout\r\n", System.Text.Encoding.ASCII.GetString(got.ToArray()));
-        Assert.InRange(answered, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(2500));
+        Assert.InRange(answered, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(1700));
     }
 
     [Fact]
@@ -856,7 +1034,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     {
         // section 12 (the default of the follow-up's product pass, Q10): `WriteWithin`, the write the server's responses take, is a
         // member of a stream that the checker admits in std/ alone; a program's call of it names no member, and the server that
-        // calls it builds (the positive control)
+        // calls it builds (the positive control); the refusal is pinned by its id and its line (E1, E2)
         const string text = """
             void | IoError Main(TcpStream s) {
                 s.WriteWithin("a".Bytes, 1s)
@@ -864,8 +1042,72 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
             """;
         var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
         Assert.Null(refused.Program);
-        Assert.Contains(refused.Diagnostics.Sorted, d => d.Message.Contains("has no member `WriteWithin`", StringComparison.Ordinal));
+        Assert.Contains(refused.Diagnostics.Sorted,
+            d => d.Id == ErrorIds.UnknownName && d.Line == 2 && d.Message.Contains("`WriteWithin`", StringComparison.Ordinal));
         Assert.NotNull(Compile("void | IoError | HttpError Main(TcpStream s) {\n    HttpServer.ServeConnection(s, (HttpRequest r) => HttpResponse.Text(200, \"\"))\n}\n", Builder.CheckRuntime(Target.Linux)).Program);
+    }
+
+    [Fact]
+    public void A_response_held_to_its_rate_leaves_the_stream_its_default_bound()
+    {
+        // W10 (section 12, the default of the follow-up's product pass, Q10): `WriteWithin` sets `SO_SNDTIMEO` (21) to what remains of
+        // a response's bound before each call of the system, and the stream's default bound of 5 seconds (S9) again before it returns,
+        // so that a later write that sets no time of its own, the `100 Continue` of the next request among them, is not held to a
+        // remainder; the handler reads the bound of the stream `Accept` gave, descriptor 5, at each request (as FileTests' `Bounds`),
+        // under the grants `raw` and `native`; the first request has a body, so that its response is written before the second is
+        // read and not held for it (W9)
+        const string text = """
+            extern "C" {
+                int getsockopt(int fd, int level, int name, void* value, int* length)
+                void* malloc(long size)
+                void free(void* p)
+            }
+
+            string Bound(int fd, int option) {
+                mut long seconds = -1
+                mut long micros = -1
+                raw {
+                    void* time = malloc(16)
+                    mut int length = 16
+                    if getsockopt(fd, 1, option, time, &length) == 0 {
+                        seconds = *Ptr<long>(time)
+                        micros = *Ptr<long>(Ptr<byte>(time) + 8)
+                    }
+
+                    free(time)
+                }
+
+                return "{seconds} {micros}"
+            }
+
+            void | IoError | HttpError All() {
+                listener = TcpListener.Bind("127.0.0.1:0")
+                client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+                server = listener.Accept()
+                client.Write("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\n\r\nxGET /b HTTP/1.1\r\nHost: h\r\n\r\n".Bytes)
+                client.ShutdownWrite()
+                HttpServer.ServeConnection(server, (HttpRequest r) => {
+                    print("{r.Path} {Bound(5, 21)}")
+                    return HttpResponse.Empty(204)
+                }, HttpLimits(MinResponseDataRate: HttpRate(10_000_000, 100ms)))
+            }
+
+            All() else {
+                IoError e => print(e)
+                HttpError e => print(e.Detail)
+            }
+            """;
+        var compilation = Compile(text, toolchain.Runtime, ["raw", "native"]);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "http-server-default-bound"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["/a 5 0", "/b 5 0"], output);
     }
 
     /// <summary>
@@ -881,7 +1123,9 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     // but the program's listener holds it: a port the test chose and freed for the program could be held by another socket before
     // the program bound it, and a client that reached that socket was reset while the program waited in its accept until the
     // test's time ended (`A_chunked_file_ends_its_body_in_the_write_of_its_last_piece`, twice on 2026-11-06, with the port
-    // chosen below the system's range for port 0); the newline that ends the number says that the write is whole
+    // chosen below the system's range for port 0); the newline that ends the number says that the write is whole. No file of an
+    // earlier run is read: each run of the class builds in a new temporary directory (`Toolchain`), which its end removes, and each
+    // test, and each row of a theory, builds under a name of its own, so the only `port` beside a program is the one it wrote
     private static TcpClient Connect(string executable, Task program, int receiveBuffer = 0)
     {
         var file = Path.Combine(Path.GetDirectoryName(executable)!, "port");

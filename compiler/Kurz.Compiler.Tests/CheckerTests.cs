@@ -784,18 +784,29 @@ public sealed class CheckerTests
     [Fact]
     public void The_end_of_a_while_true_is_reached_only_through_a_break_of_its_own()
     {
-        // F3, as in C#: the end point of a `while` whose condition is the literal `true`, in parentheses or not, is reached only through a
-        // `break` of that loop that can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after
-        // it; a `break` of the loop makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end
-        // cannot be reached; only the literal is read so, as the record narrows C#'s constant `true` (assumed), so `!false` and `true && true`
-        // are read as conditions that can be false
+        // F3, as in C#: the end point of a `while` whose condition is the constant `true` is reached only through a `break` of that loop that
+        // can be reached, so a function, a method or a lambda with a result that ends in one needs no `return` after it; a `break` of the loop
+        // makes its end reachable again, a `break` of a loop inside it does not, nor one after a statement whose end cannot be reached
         const string Search = "int First(List<int> xs) {\n    mut i = 0\n    while true {\n        if xs[i] > 2 {\n            return xs[i]\n        }\n\n        i = i + 1\n    }\n}\n\nprint(First([1, 2, 3, 4]))";
         Clean(Search);
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("        i = i + 1\n", "        if i == xs.Count {\n            break\n        }\n\n        i = i + 1\n")));
         Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    mut go = true\n    while go {")));
+        // every condition whose value is a constant is read as that value, as C# reads it (section 4, the owner, 2026-11-08, "C#'s rule"):
+        // in any number of parentheses, under `!`, `&&` and a comparison of constants; the branch it does not take is never reached
         Clean(Search.Replace("    while true {", "    while (true) {"));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while !false {")));
-        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors(Search.Replace("    while true {", "    while true && true {")));
+        Clean(Search.Replace("    while true {", "    while ((true)) {"));
+        Clean(Search.Replace("    while true {", "    while !false {"));
+        Clean(Search.Replace("    while true {", "    while true && true {"));
+        Clean(Search.Replace("    while true {", "    while 1 == 1 {"));
+        Clean(Search.Replace("        i = i + 1\n", "        if false {\n            break\n        }\n\n        i = i + 1\n")); // never reached
+        Clean("int One() {\n    if true {\n        return 1\n    }\n}\n\nprint(One())"); // its end never reached, as C#'s `if (true) return 1;`
+        Clean("int Two() {\n    if false {\n        print(0)\n    } else {\n        return 2\n    }\n}\n\nprint(Two())");
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int Zero() {\n    while false {\n        return 0\n    }\n}\n\nprint(Zero())")); // ends at once
+        Assert.Equal([(ErrorIds.MissingReturn, 1)], Errors("int One() {\n    if false {\n        return 1\n    }\n}\n\nprint(One())"));
+        // N3: the branch a constant condition does not take adds nothing to what holds after the `if`
+        const string Flip = "mut string? s = \"a\"\nif false {\n    s = null\n}\n\nprint(s.Bytes.Count)";
+        Clean(Flip);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 6)], Errors(Flip.Replace("if false", "if true")));
         Clean(Search.Replace("            return xs[i]\n", "            return xs[i]\n            break\n")); // after the `return`, never reached
         Clean("int Spin() {\n    while true {\n        while true {\n            return 1\n        }\n\n        break\n    }\n}\n\nprint(Spin())"); // after an endless loop
         Clean(Search.Replace("        i = i + 1\n", "        mut j = 0\n        while j < 3 {\n            if j == i {\n                break\n            }\n\n            j = j + 1\n        }\n\n        i = i + 1\n"));
@@ -808,6 +819,11 @@ public sealed class CheckerTests
         Clean(Size);
         Assert.Equal([(ErrorIds.NullableUnchecked, 8)], Errors(Size.Replace("            return 0\n", "            break\n")));
         Clean(Size.Replace("            return 0\n", "            return 0\n            break\n")); // a `break` never reached leaves `e` as it was
+        // N3: a `continue` after a statement whose end cannot be reached adds nothing to what holds at the loop's head, as a `break` adds
+        // nothing to what holds after the loop; one that is reached brings back the `null` it saw
+        const string Len = "int Len() {\n    mut string? s = \"abc\"\n    mut n = 0\n    while n < 3 {\n        n = n + 1\n        if n == 2 {\n            s = null\n            return 0\n            continue\n        }\n    }\n\n    return s.Bytes.Count\n}\n\nprint(Len())";
+        Clean(Len);
+        Assert.Equal([(ErrorIds.NullableUnchecked, 12)], Errors(Len.Replace("            return 0\n", "")));
     }
 
     [Fact]
@@ -4191,7 +4207,8 @@ public sealed class CheckerTests
     public void A_field_of_a_function_type_reaches_every_class_an_instance_of_which_a_lambda_of_the_program_captures()
     {
         // R9: a field whose type can hold a function value, `mut` or not, reaches every class an instance of which a lambda of the
-        // program captures, so the ring is judged after every body; the text names R9 beside R2 (assumed)
+        // program captures, of a lambda whose type it can hold (below), so the ring is judged after every body; the text names R9 beside
+        // R2 (assumed)
         const string button = "class Button(string Name, mut () => void OnClick)\n\n";
         var (ring, _) = Check(button + "b = Button(\"ok\", () => print(\"clicked\"))\nb.OnClick = () => print(b.Name)\nb.OnClick()");
         Assert.Equal(["1: `Button` can reach itself through strong fields, `Button.OnClick` (mut), one of them `mut`, and nothing would free such a ring (R2, R9)"], ring.Sorted.Select(d => $"{d.Line}: {d.Message}"));
@@ -4226,6 +4243,16 @@ public sealed class CheckerTests
         const string deep = "int Deep<T>(T x, int n) {\n    f = () => x\n    if n > 0 {\n        return Deep(f(), n - 1)\n    }\n\n    return 0\n}\n\n";
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + deep + made + "print(Deep(b, 2))"));
         Clean(button + deep + made + "print(Deep(1, 2))");
+        // the field counts only the lambdas whose type it can hold (the owner, 2026-11-04, #110, comment 6643368937), through a nullable
+        // type too: a `(int) => void` lambda reaches a nullable `(int) => void` field, a `() => void` one does not
+        const string keyed = "class Pad(string Name, mut ((int) => void)? OnKey)\n\np = Pad(\"k\", null)\n";
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(keyed + "p.OnKey = (int k) => print(\"{p.Name}{k}\")\nprint(p.OnKey == null)"));
+        Clean(keyed + "g = () => print(p.Name)\ng()");
+        // a lambda that captures a value of a nullable type parameter can be or hold a lambda of any type, so every lambda counts; a
+        // nullable `int` names none
+        const string wire = "void Wire<T>(Button t, T? x) {\n    t.OnClick = () => print(x == null)\n}\n\n" + made + "k = (int n) => print(\"{b.Name}{n}\")\nk(1)\n";
+        Assert.Equal([(ErrorIds.ReferenceCycle, 1)], Errors(button + wire + "Wire<int>(b, null)"));
+        Clean(button + wire.Replace("<T>", "", StringComparison.Ordinal).Replace("T? x", "int? x", StringComparison.Ordinal) + "Wire(b, null)");
     }
 
     [Fact]
@@ -4237,6 +4264,9 @@ public sealed class CheckerTests
         var runtime = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n"));
         var (alone, _) = CheckSeeingStd("h = HttpHeaders()\nf = () => h.OnChange()\nprint(f())\n", runtime);
         Assert.Equal(["2: `HttpHeaders` can reach itself through strong fields, `HttpHeaders.OnChange` (mut), one of them `mut`, and nothing would free such a ring (R2, R9)"], alone.Sorted.Select(d => $"{d.Line}: {d.Message}"));
+        // the line is that of the first lambda the field counts: an `(int) => int` lambda before it captures the class and closes nothing
+        var (later, _) = CheckSeeingStd("h = HttpHeaders()\ng = (int k) => h.OnChange() + k\nf = () => h.OnChange()\nprint(f() + g(1))\n", runtime);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 3)], later.Items.Select(d => (d.Id, d.Line)));
         var (through, _) = CheckSeeingStd("class App(mut HttpHeaders? H)\n\nint Zero(App app) => 0\n\na = App(null)\nh = HttpHeaders()\nh.OnChange = () => Zero(a)\na.H = h\n", runtime);
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
         // the positive control: no lambda of the file captures an instance
@@ -5584,6 +5614,30 @@ public sealed class CheckerTests
         Clean(string.Format(Deep, "Deep(Pair<f.Type, int>(f.Get(x), 1), n - 1)"));
         Assert.Equal([(ErrorIds.KindNotRead, 12)], Errors(string.Format(Deep, "Deep([f.Get(x)], n - 1)")));
         Assert.Equal([(ErrorIds.KindNotRead, 12)], Errors(string.Format(Deep, "Deep(f.Get(x), n - 1)")));
+    }
+
+    [Fact]
+    public void An_inference_where_the_field_s_type_meets_another_type_gives_the_walk_no_type_argument_and_reports_in_each_copy_at_its_line()
+    {
+        // T34 (assumed, the record's section 4): an inference on the text where the field's type meets another type reports no error
+        // there, and each copy infers the call with the field's real type and reports as any call does, at the call's own line (the walk
+        // at the cap of pull request 370, comment 6698323204 on issue 39); the walk reads no type argument where such an inference gives
+        // none, so the call takes no part (the walk at the cap of pull request 387, comment 6721393631 on issue 39, stated so, assumed, by
+        // the owner's answer of 2026-11-08, comment 6722257772 there)
+        const string Show = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Show<T>(T x) {{\n    for f in T.Fields {{\n"
+            + "        print({0})\n    }}\n}}\n\nShow(Point(1, 2))";
+        // the field is an `int` in the copy `Show<Point>`: an `int` beside it runs, a `string` is `type-mismatch` at the call's line, 7
+        Clean(string.Format(Show, "Choose(f.Get(x), 1)"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(string.Format(Show, "Choose(f.Get(x), \"s\")")));
+        const string Deep = "data Point(int X, int Y)\n\nA Choose<A>(A a, A b) => a\n\nvoid Deep<T>(T x, int n) {{\n    for f in T.Fields {{\n"
+            + "        if n > 0 {{\n            {0}\n        }}\n    }}\n}}\n\n{1}";
+        // the field's type beside `T` gives no type on the text, so a function no call reaches is not refused for its cycle, where the same
+        // call with `x` in place of the field's value is; called, the copy `Deep<Point>` infers it, where `int` meets `Point`, and is
+        // `cannot-infer` at the call's line, 8, not at the outer call, in the list as without it
+        Clean(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "print(1)"));
+        Assert.Equal([(ErrorIds.GrowingTypeArgument, 8)], Errors(string.Format(Deep, "Deep([Choose(x, x)], n - 1)", "print(1)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep([Choose(f.Get(x), x)], n - 1)", "Deep(Point(1, 2), 3)")));
+        Assert.Equal([(ErrorIds.CannotInfer, 8)], Errors(string.Format(Deep, "Deep(Choose(f.Get(x), x), n - 1)", "Deep(Point(1, 2), 3)")));
     }
 
     [Fact]
