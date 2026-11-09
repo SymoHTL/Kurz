@@ -1,6 +1,6 @@
 ---
 name: a-test-limit-ends-its-work-only-in-a-process-of-its-own
-description: A test whose limit is `Task.Run(...).WaitAsync(...)` stops waiting at its limit and leaves the work running in the test host; the test of a chain of copies that branches (T33) had that shape in pull request 307, and pull request 342 moved its check into a process of its own, `kurz exec` through `Processes.Capture`, which ends the process's tree at its limit, and on Linux alone a process outside the tree that holds its streams; the limit holds the start of `dotnet` and the load of the compiler beside the check, which pull request 369 gave the command's two minutes
+description: A test whose limit is `Task.Run(...).WaitAsync(...)` stops waiting at its limit and leaves the work running in the test host; the test of a chain of copies that branches (T33) had that shape in pull request 307, and pull request 342 moved its check into a process of its own, `kurz exec` through `Processes.Capture`, which ends the process's tree at its limit, and on Linux alone a process outside the tree that holds its streams (the code of `Processes.Capture`, which reads those processes from `/proc` on Linux alone, and the postmortem of 2026-11-05 that the entry links); the limit holds the start of `dotnet` and the load of the compiler beside the check, which pull request 369 gave the command's two minutes
 metadata:
   type: reference
 ---

@@ -7,6 +7,8 @@
 // | void
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|b|0||]
 // | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Date: <29>|Connection: close||]
+// | void
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
 // | void
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
@@ -15,23 +17,31 @@
 // | void
 // | [HTTP/1.1 100 Continue||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
 // | void
-// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|x|3|abc|0||HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||0||]
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>|Connection: close||1|x|3|abc|0||]
 // | void
-// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>|Connection: close||1|u|0||]
 // | io: not found: serve-stream-missing.txt
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|f]
 // | io: invalid input
 // | []
 // | http: malformed request: bad chunk size
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Date: <29>|Connection: close||g]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Connection: keep-alive|Transfer-Encoding: chunked|Date: <29>||1|k|0||]
 // rules: W11
 
 // the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
-// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function; the function may read the
-// request's body while it writes, a read before its first write sending `100 Continue` and none after it, and what it left unread is
-// drained after it, the connection closing where that is past `MaxDrainSize` or the request still awaits `100 Continue`, and a body
-// malformed there closing it with that error; a function's `IoError` closes the connection, which gives it; and a `Content-Length`
-// the handler set is `InvalidInput` with nothing written, to HTTP/1.0 too
+// `Connection: close`, the close ending the body, a `Transfer-Encoding` the handler set dropped; a `HEAD` gets the head alone and
+// calls no function, to HTTP/1.0 without
+// `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
+// first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
+// that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
+// awaits `100 Continue` says `Connection: close` where the handler set no `Connection`, and the connection closes after the
+// function, whether it read the body after its first write or not, and where the head says the handler's `Connection` instead; a
+// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
+// `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -69,8 +79,8 @@ void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""
@@ -146,10 +156,27 @@ sized = (HttpRequest r) => {
 
     return response
 }
+coded = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("g"))
+    response.Headers.Set("Transfer-Encoding", "gzip") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+kept = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("k"))
+    response.Headers.Set("Connection", "keep-alive") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
 Exchange("HEAD /h HTTP/1.1\r\nHost: h\r\n\r\n{get}", called, HttpLimits())
+Exchange("HEAD /h HTTP/1.0\r\n\r\n", called, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", echo, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc{get}", unread, HttpLimits(MaxDrainSize: 2))
@@ -159,3 +186,5 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-contin
 Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
 Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
+Exchange("GET /g HTTP/1.0\r\n\r\n", coded, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", kept, HttpLimits())

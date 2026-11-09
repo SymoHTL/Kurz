@@ -7,12 +7,13 @@
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||17|read: request timed out|0||]
 // rules: W11
 
-// a streamed response's request body that falls under `MinRequestBodyDataRate` after the function returned closes the connection
-// after the whole response, with no `408`, since its status has gone out, and the connection gives `HttpError(Protocol, "request
-// timed out")`: a body the function left unread, while it is drained, and one whose read in the function ran out of its time, that
-// read giving the same error (section 12, Q12 (b))
+// a streamed response's request body that falls under `MinRequestBodyDataRate` gives `HttpError(Protocol, "request timed out")`: a
+// read in the function that ran out of its time gives it (section 12, Q12 (b)), and so does a body the function left unread, while
+// it is drained after the function returned (W11, assumed); either way the connection gives it and closes after the whole response,
+// with no `408`, since its status has gone out (W11, assumed)
 // serves `sent`, which the client does not end, on one connection with `handler` within `limits`, and prints the loop's result,
-// whether it took 100 ms to 2 s, and what the client got
+// whether it took from the 100 ms of the grace the case sets to 2 s, under the 5 s of the default grace (W10), so that a server that
+// waited the default's time is told from one that held the case's, with 1.9 s of margin for a busy machine, and what the client got
 void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
     listener = TcpListener.Bind("127.0.0.1:0") else {
         IoError e => return
@@ -41,8 +42,8 @@ void Stall(string sent, (HttpRequest) => HttpResponse handler, HttpLimits limits
     print(Wire(client))
 }
 
-// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
-// closed the connection with a request of the client unread
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and after it the kind of an error that
+// ended the client's read, where one did
 string Wire(TcpStream client) {
     mut got = Bytes()
     mut after = ""

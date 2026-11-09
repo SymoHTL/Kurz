@@ -83,13 +83,6 @@ f = (int n) => {
     }
 }
 
-int Once() {
-    while (true) {
-        return 5
-        break
-    }
-}
-
 string Pick(bool b) {
     if b {
         while true {
@@ -103,9 +96,90 @@ string Pick(bool b) {
 print(First([1, 2, 3, 4]))
 print(C(4).Get())
 print(f(1))
-print(Once())
 print(Pick(true))
 print(Pick(false))
+```
+
+Case: [functions/while-true-break-not-reached.kz](../corpus/functions/while-true-break-not-reached.kz)
+```kurz
+int Once() {
+    while (true) {
+        return 5
+        break
+    }
+}
+
+print(Once())
+```
+
+Case: [functions/while-true-break-missing-return.kz](../corpus/functions/while-true-break-missing-return.kz)
+```kurz
+int First(List<int> xs) {
+    mut i = 0
+    while true {
+        if i == xs.Count {
+            break
+        }
+
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4]))
+```
+
+Case: [functions/while-not-constant-missing-return.kz](../corpus/functions/while-not-constant-missing-return.kz)
+```kurz
+int First(List<int> xs, bool go) {
+    mut i = 0
+    while go {
+        if xs[i] > 2 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(First([1, 2, 3, 4], true))
+```
+
+Case: [functions/constant-condition-end.kz](../corpus/functions/constant-condition-end.kz)
+```kurz
+int One() {
+    if true {
+        return 1
+    }
+}
+
+int Two() {
+    while !false {
+        return 2
+    }
+}
+
+int Three(List<int> xs) {
+    mut i = 0
+    while true {
+        if false {
+            break
+        }
+
+        if xs[i] == 3 {
+            return xs[i]
+        }
+
+        i = i + 1
+    }
+}
+
+print(One())
+print(Two())
+print(Three([1, 2, 3]))
 ```
 
 ### F4 (assumed, §8) `void`
@@ -289,17 +363,22 @@ reaches that package's folder: with a line `json` of `project.kz` and no folder 
 `use json/schema` reaches the folder `schema` of that package (§8, §13, the owner, 2026-11-04, "with only a
 `json` dependency line, `use json/schema` reaches that package's subfolder"). *(assumed, §8, §13: the two ids; a type of the file's own
 folder is the one its bare name means; every name at the top of a folder that is no type is reached
-through the folder's name; a package's qualifier is the name of its line; `as` takes the place of
-the folder's name, or of a package's line name, as its qualifier in the file, the old name reaching
+through the folder's name; a package's qualifier is the name of its line, and that of a longer path into it its last
+name, `schema` in `use json/schema`, as for a project's folder; `as` takes the place of
+the qualifier the path gives in the file, a path's last name or, for a package's line alone, the line's name, the old name reaching
 nothing through that line and being `unknown-name` where no other `use` line of the file, and no
 declaration the place sees, gives it;
 the names `redeclared` compares are the qualifiers the `use` lines give, and a qualifier that a name at the
 top of the file's own folder has is `redeclared` at the `use` line; a path that names no folder of
-the project and no line of `project.kz`, and a path to a folder that holds a `project.kz` of its own,
-which that package's line alone reaches, are `unknown-name` at the `use` line; a longer
+the project and no line of `project.kz`, a path longer than a package's line name whose folder the package lacks,
+`use json/nosuch`, and a path that, after its first name, reaches or passes through a folder, of the project or of a package, that holds a `project.kz`
+of its own, which that package's line alone reaches, are `unknown-name` at the `use` line; a space beside a `/` reads
+as one between any two tokens, `use a / util` being `use a/util`, and a line break ends the path; a longer
 path whose first name is both a folder at the top and a line of `project.kz`, `use json/schema`, is
 `ambiguous-name` at its `use` line too; a folder at the top that holds a `project.kz` of its own is no
-folder of the project, so that `use json` beside it names the line)*
+folder of the project, so that `use json` beside it names the line)* A longer path whose first name is both a folder at
+the top and a line of `project.kz`, and whose rest neither holds, `use json/nosuch`, is `ambiguous-name` at its `use`
+line too, not `unknown-name`: the path's first name is read before the rest (§8, the owner, 2026-11-08).
 
 Case: [functions/use-names-nothing.kz](../corpus/functions/use-names-nothing.kz)
 ```kurz

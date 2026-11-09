@@ -3,6 +3,8 @@
 // | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||0||]
 // | void [HTTP/1.1 201 Created|Content-Type: text/event-stream|Transfer-Encoding: chunked||7|data: 1|0||]
 // | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: gzip, chunked||1|x|0||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|t|0||]
+// | void [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|t|0||]
 // | InvalidInput []
 // | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||1|a]
 // | NotFound [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked||]
@@ -14,10 +16,12 @@
 
 // a response a function writes goes with `Transfer-Encoding: chunked` and no `Content-Length`, each `w.Write` of a `Bytes` or a
 // `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
-// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept, `chunked`
-// added; a `Content-Length` the handler set is `InvalidInput` with nothing written; a function's `IoError` ends the body without its
-// last chunk, the head written where no write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no
-// function; and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
+// `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
+// `chunked` added; a response written again is written whole again, its head and the end of its body, its function called again
+// with a writer of its own; a `Content-Length` the handler set
+// is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
+// write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
+// call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()
 
@@ -96,6 +100,9 @@ void | IoError | HttpError All() {
     coded = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     coded.Headers.Set("Transfer-Encoding", "gzip")
     Wire(coded, false)
+    twice = HttpResponse.Stream(200, (HttpWriter w) => w.Write("t"))
+    Wire(twice, false)
+    Wire(twice, false)
     sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
     sized.Headers.Set("Content-Length", "1")
     Wire(sized, false)
