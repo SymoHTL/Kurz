@@ -807,7 +807,9 @@ public sealed partial class Checker
         };
         if (!fits)
         {
-            Report(ErrorIds.ConstantOverflow, c.Arguments[0].Line, $"{form} of the constant does not fit {Types.A(result)} (T6, T38)");
+            // a `ulong` constant is refused for the double it rounds to, which the exact count may not show: the text names the rounding and `long(...)`
+            var rounded = real && own.Constant is IntegerConstant ? ", rounded to the nearest `double` first; `long(...)` keeps a count that fits a `long` exact" : "";
+            Report(ErrorIds.ConstantOverflow, c.Arguments[0].Line, $"{form} of the constant does not fit {Types.A(result)}{rounded} (T6, T38)");
             return Typed.Error;
         }
 
