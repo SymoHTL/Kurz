@@ -788,12 +788,14 @@ print(Negate(-9223372036854775808ns)) // one constant: the parameter's type take
 ### T38 (decided, §4) A time of a count
 
 `duration.FromSeconds(n)` is the duration of `n` seconds, as C#'s `TimeSpan.FromSeconds`, and there
-is one for each unit of a duration literal (L14): `FromNanoseconds`, `FromMicroseconds`,
-`FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours` and `FromDays`.
+is one for each unit.
 `timestamp.FromUnixSeconds(n)` and `timestamp.FromUnixMilliseconds(n)` are the timestamp `n` seconds
 or milliseconds after 1970-01-01 (T24), as C#'s `DateTimeOffset.FromUnixTimeSeconds` and
 `FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` under T18 (§4, the owner, 2026-11-08,
-issue 110, comment 6721051459, G4 (b)). The count is a `long` or a `double`, the double's value rounded to
+issue 110, comment 6721051459, G4 (b)). The units are those of a duration literal (L14):
+`FromNanoseconds`, `FromMicroseconds`, `FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours`
+and `FromDays` *(assumed, §4: the default of the product pass that the answer took, issue 110,
+comment 6723644046)*. The count is a `long` or a `double`, the double's value rounded to
 the nanosecond (§4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#" and
 "Seconds + milliseconds, as C#"). C#'s two Unix-time constructors take a `long` alone, so the `double`
 form of the timestamp's two is Kurz's own, which that comment states of every `timestamp.FromUnixX`
