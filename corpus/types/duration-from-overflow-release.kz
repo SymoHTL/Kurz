@@ -1,0 +1,9 @@
+// expect: throws overflow at 6
+// | 106751days
+// build: release
+// rules: T38
+
+duration Days(long n) => duration.FromDays(n)
+
+print(Days(106751))
+print(Days(106752))

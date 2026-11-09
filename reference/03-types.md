@@ -785,6 +785,95 @@ duration Negate(duration d) => -d
 print(Negate(-9223372036854775808ns)) // one constant: the parameter's type takes the literal with its sign (L17)
 ```
 
+### T38 (decided, §4) A time of a count
+
+`duration.FromSeconds(n)` is the duration of `n` seconds, as C#'s `TimeSpan.FromSeconds`, and there
+is one for each unit of a duration literal (L14): `FromNanoseconds`, `FromMicroseconds`,
+`FromMilliseconds`, `FromSeconds`, `FromMinutes`, `FromHours` and `FromDays`.
+`timestamp.FromUnixSeconds(n)` and `timestamp.FromUnixMilliseconds(n)` are the timestamp `n` seconds
+or milliseconds after 1970-01-01 (T24), as C#'s `DateTimeOffset.FromUnixTimeSeconds` and
+`FromUnixTimeMilliseconds`. `n * 1s` stays `type-mismatch` (T18). The count is a `long` or a `double`,
+the double's value rounded to the nanosecond (§4, the owner, 2026-11-08, G4 (b), "Also a double, as
+C#" and "Seconds + milliseconds, as C#"). *(assumed, §4: a count of an integer type that widens to
+`long` (T8) takes the `long` form, and any other number the `double` form, as C#'s better conversion
+picks `TimeSpan.FromSeconds(long)` for an integer; a type that widens to neither is `type-mismatch`.
+The double's exact value is rounded to the nearest nanosecond, ties to even, as Rust's
+`Duration::from_secs_f64` rounds.)* A time that leaves the range of its type raises `overflow` (E3)
+in every build, as T31's arithmetic does, NaN and an infinity among them, and a constant count whose
+time does not fit is `constant-overflow` (T6). *(assumed, §4: the defaults of the product pass that
+the answer took, and NaN and an infinity read as Rust's `try_from_secs_f64` reads them, one error with
+the overflow.)* No constructor stands on the wide pair (T29), into which the narrow value widens. How
+a program reads a count back from a time is open (§14).
+
+Case: [types/duration-from-count.kz](../corpus/types/duration-from-count.kz)
+```kurz
+int n = 90
+long big = 2
+print(duration.FromNanoseconds(1500))
+print(duration.FromMicroseconds(2000))
+print(duration.FromMilliseconds(1500))
+print(duration.FromSeconds(n))
+print(duration.FromMinutes(n))
+print(duration.FromHours(-3))
+print(duration.FromDays(big))
+print(duration.FromSeconds(n) == 90s)
+
+// a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
+long odd = 9007199254740993
+print(duration.FromNanoseconds(odd) - duration.FromNanoseconds(odd - 1))
+```
+
+Case: [types/duration-from-double.kz](../corpus/types/duration-from-double.kz)
+```kurz
+// each count is a `double`, its exact value rounded to the nearest nanosecond, ties to even; the sixth is a little under
+// 309170819.5 ns, and its product in a `double` is 309170819.5, so that a rounding of that product alone would give 820ns
+print(duration.FromSeconds(1.5))
+print(duration.FromMilliseconds(0.25))
+print(duration.FromSeconds(-0.25))
+print(duration.FromNanoseconds(2.5))
+print(duration.FromNanoseconds(3.5))
+print(duration.FromSeconds(0.30917081949999997))
+print(duration.FromSeconds(0.0000000001))
+```
+
+Case: [types/timestamp-from-unix.kz](../corpus/types/timestamp-from-unix.kz)
+```kurz
+long amzDate = 1369353600
+print(timestamp.FromUnixSeconds(0))
+print(timestamp.FromUnixSeconds(-1))
+print(timestamp.FromUnixSeconds(amzDate))
+print(timestamp.FromUnixMilliseconds(1793179801500))
+print(timestamp.FromUnixSeconds(1.5))
+print(timestamp.FromUnixSeconds(amzDate + 900) - timestamp.FromUnixSeconds(amzDate))
+```
+
+Case: [types/duration-from-overflow-release.kz](../corpus/types/duration-from-overflow-release.kz)
+```kurz
+duration Days(long n) => duration.FromDays(n)
+
+print(Days(106751))
+print(Days(106752))
+```
+
+Case: [types/duration-from-nan.kz](../corpus/types/duration-from-nan.kz)
+```kurz
+duration Seconds(double count) => duration.FromSeconds(count)
+
+double z = 0.0
+print(Seconds(1000000000.0))
+print(Seconds(z / z))
+```
+
+Case: [types/duration-from-constant-overflow.kz](../corpus/types/duration-from-constant-overflow.kz)
+```kurz
+print(duration.FromDays(106752))
+```
+
+Case: [types/duration-from-string.kz](../corpus/types/duration-from-string.kz)
+```kurz
+print(duration.FromSeconds("90"))
+```
+
 ### T36 (decided, §12) `instant`, a reading of the monotonic clock
 
 `instant` is the type of a reading of the monotonic clock, which `instant.Now` gives (S25), and a
@@ -1493,8 +1582,9 @@ refused, up to its language version 7.3, the three forms its later versions let 
 parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"): a parameter of the function, part of its
 signature, from its text in every case, where no call reaches the function too (§4, the owner, 2026-11-07, "Refused
-always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, so that `T.Make` in the body
-reports nothing more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
+always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, and the name reads it, not the type
+the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in `T.Kind` read as a value, so
+that none of them reports anything more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
 declaration where the body is checked (below): once from its text, or in each copy a call
 makes for a function checked in its copies alone, so not at all where no call reaches such a function. *(assumed, §4,
 with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
@@ -2029,7 +2119,8 @@ it is checked against the parameter's type as a parameter's default value is (F1
 `default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
 a type parameter that holds a type among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the function
 is still read, with the constant of no type, so that its body's own errors are reported while the constant's uses and the
-function's calls report nothing more, the `syntax` being the one error of its cause, E1)* *(assumed, §4, with the build: the name of an earlier
+type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and a call's count of
+type arguments (T19) and its arguments are read as for any call, E1)* *(assumed, §4, with the build: the name of an earlier
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each

@@ -237,15 +237,22 @@ read it):
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
 `throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
 arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
-`while (true)`; a `break` or a `continue` after a statement whose end cannot be reached is never
-reached, as in C#. The record marks that definition as *(assumed)*. A condition whose value is a
-constant, the constants a default takes (F12), is read as that value, in an `if` as in a `while`, as
-C# reads it (§4, the owner, 2026-11-08): the `then` of `if false` and the `else` of `if true` are
+`while (true)`, or in one of the forms of a constant condition below; a `break` or a `continue`
+after a statement whose end cannot be reached is never reached, as in C#. The record marks that
+definition as *(assumed)*. A condition whose value is a constant is read as that value, in an `if` as
+in a `while`, as C# reads it (§4, the owner, 2026-11-08): the `then` of `if false` and the `else` of `if true` are
 never reached, nor the end of an `if true` whose block leaves, nor the body of `while false`, and a
 `while` whose condition is the constant `true`, `while (true)`, `while !false` or `while 1 == 1`
-among them, ends only through a `break` of its own that can be reached. A branch that is never
-reached adds nothing to what holds after it. Where the analysis proves
-nothing, the variable is nullable, and N2 applies.
+among them, ends only through a `break` of its own that can be reached. *(assumed, §4: the constants
+are the ones the checker folds, the ones a default takes (F12), and in a copy of a function a `const`
+type parameter, the constant its call gave (T35), so that its condition is read per copy; a named
+constant, which C# also reads, Kurz does not have.)* A branch that is never reached adds nothing to
+what holds after it. *(assumed, §4: a `break` or a `continue` that is never reached, after a statement
+whose end cannot be reached or in a branch that is never reached, adds nothing to what holds after its
+loop or at its loop's head.)* A branch that is never reached is checked as any other code, with what
+held before the statement, as Rust checks code it never reaches, so that a use of a nullable value
+there is `nullable-unchecked`, where C# reports nothing (§4, the owner, 2026-11-09, "Check as any code"). Where
+the analysis proves nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
 result of a call are not, as in C#: they take `??` (N4), `?.` (N5) or a variable of their own.
@@ -488,6 +495,56 @@ Case: [null/nullable-union.kz](../corpus/null/nullable-union.kz)
 Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
 
 Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
+
+Case: [null/constant-false-adds-nothing.kz](../corpus/null/constant-false-adds-nothing.kz)
+```kurz
+// the `then` of `if false` is never reached, so the `null` it assigns adds nothing to what holds after it, and `s` stays not null
+mut string? s = "a"
+if false {
+    s = null
+}
+
+print(s.Bytes.Count)
+```
+
+Case: [null/unreached-continue-adds-nothing.kz](../corpus/null/unreached-continue-adds-nothing.kz)
+```kurz
+// the `continue` after the `return` is never reached, so the `null` it saw adds nothing at the loop's head, and `s` stays not
+// null after the loop
+int Length(int stop) {
+    mut string? s = "abc"
+    mut n = 0
+    while n < 3 {
+        n = n + 1
+        if n == stop {
+            s = null
+            return 0
+            continue
+        }
+    }
+
+    return s.Bytes.Count
+}
+
+print(Length(5))
+```
+
+Case: [null/constant-false-branch-checked.kz](../corpus/null/constant-false-branch-checked.kz)
+```kurz
+// the `then` of `if false` is never reached, and it is checked as any other code, with what held before the `if`, so the use
+// of the nullable `email` there is `nullable-unchecked`
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(2)
+if false {
+    print(email.Bytes.Count)
+}
+```
 
 ### N4 (decided, §4) `??`
 

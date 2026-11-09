@@ -116,6 +116,9 @@ public enum CallKind
     /// <summary><c>long.Parse(s)</c>, or the same call on another number type, the number or the case <c>ParseError</c> (X7).</summary>
     Parse,
 
+    /// <summary><c>duration.FromSeconds(n)</c> and its siblings, and <c>timestamp.FromUnixSeconds(n)</c> and <c>timestamp.FromUnixMilliseconds(n)</c>: the time of a count of <see cref="CallInfo.TimeScale"/> nanoseconds each, of a <c>long</c> or a <c>double</c>, which <see cref="CallInfo.Target"/> names (T38).</summary>
+    TimeFrom,
+
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
@@ -274,6 +277,9 @@ public sealed record CallInfo(
 {
     /// <summary>The intrinsic or lane operation a call of <see cref="CallKind.Intrinsic"/> calls (R18).</summary>
     public Intrinsic? Intrinsic { get; init; }
+
+    /// <summary>The nanoseconds of one unit of the count a call of <see cref="CallKind.TimeFrom"/> takes (T38).</summary>
+    public long TimeScale { get; init; }
 }
 
 /// <summary>

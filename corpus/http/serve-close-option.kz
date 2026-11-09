@@ -1,0 +1,109 @@
+// expect: output
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Connection: keep-alive, Close|Content-Length: 3|Date: <29>||bye]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: text/plain; charset=utf-8|Connection: keep-alive, upgrade|Content-Length: 4|Date: <29>|Connection: close||kept]
+// rules: W9
+
+// a handler's `Connection` is read as a list of options for the close and for the server's own `Connection: close` alike: one
+// that holds `close` among other options, without regard to ASCII case, closes the connection and gets no `Connection` of the
+// server's beside it, a request the client sent after it left unread; and one that holds no `close` gets the server's
+// `Connection: close` beside it before a close
+// serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
+// loop's result and what the client got
+void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
+    listener = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => return
+    }
+
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}") else {
+        IoError e => return
+    }
+
+    server = listener.Accept() else {
+        IoError e => return
+    }
+
+    client.Write(requests.Bytes) else {
+        IoError e => return
+    }
+
+    client.ShutdownWrite() else {
+        IoError e => return
+    }
+
+    mut result = "void"
+    HttpServer.ServeConnection(server, handler, limits) else {
+        IoError e => {
+            result = "io: {e}"
+        }
+        HttpError e => {
+            result = "http: {e.Detail}"
+        }
+    }
+
+    print(result)
+    print(Wire(client))
+}
+
+// what the client got, in brackets, each CR LF as `|` and the text of a `Date` by its length, and `reset` after it where the server
+// closed the connection with a request of the client unread
+string Wire(TcpStream client) {
+    mut got = Bytes()
+    mut after = ""
+    while true {
+        n = client.Read(mut got, 65536) else {
+            IoError e => {
+                after = " {e.Kind}"
+                break
+            }
+        }
+
+        if n == 0 {
+            break
+        }
+    }
+
+    text = string.FromUtf8(got) else {
+        InvalidUtf8 => "?"
+    }
+
+    mut shown = ""
+    lines = text.Split("\r\n")
+    for i in 0..<lines.Count {
+        line = lines[i]
+        if line.StartsWith("Date: ") {
+            shown = "{shown}Date: <{line.Bytes.Count - 6}>"
+        } else {
+            shown = "{shown}{line}"
+        }
+
+        if i < lines.Count - 1 {
+            shown = "{shown}|"
+        }
+    }
+
+    return "[{shown}]{after}"
+}
+
+
+listed = (HttpRequest r) => {
+    response = HttpResponse.Text(200, "bye")
+    response.Headers.Set("Connection", "keep-alive, Close") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+unlisted = (HttpRequest r) => {
+    response = HttpResponse.Text(200, "kept")
+    response.Headers.Set("Connection", "keep-alive, upgrade") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+
+Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n", listed, HttpLimits())
+Exchange("GET /a HTTP/1.0\r\n\r\n", unlisted, HttpLimits())

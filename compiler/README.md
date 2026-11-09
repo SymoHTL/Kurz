@@ -741,6 +741,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   result leaves its type's range in every build (T31), the comparisons, `==` also on a field (D3), a
   narrow value widened beside or into the wide pair (T29), a conversion between the two widths, which
   raises `overflow` in every build where the value does not fit (T31), and their text (A12, A16);
+- a time of a count (T38), `duration.FromSeconds(n)` and its siblings and `timestamp.FromUnixSeconds(n)`
+  and `timestamp.FromUnixMilliseconds(n)`: a `long` count multiplied, a `double` one split at its point,
+  its whole units multiplied and its fraction rounded to the nearest nanosecond, ties to even, with the
+  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, each raising
+  `overflow` in every build where the time leaves the range, NaN and an infinity among them;
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
@@ -1132,11 +1137,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
   lines dropped and the flag of a line cut short are plain `static mut`s, Kurz having no atomic form,
-  and the runtime runs one thread. The corpus's runner
+  and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
+  them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
   and its time against the test's, a string's quotes and the escapes, the category of a method, of a
   function, of a lambda, of a field's default, of a property and of the top level, a method named
-  `Log`, a member named `Log` beside a log call, the levels and
+  `Log`, a member named `Log` beside a log call in a method, in a property and in a field's default, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
   the lines dropped while standard error refused its writes, a line it took in part, the crash line
@@ -1839,8 +1845,8 @@ functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
-`HttpBody`, `HttpResponse`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
-`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, and W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time; the other names of W1 are no types of `std/`, and a
+`HttpBody`, `HttpResponse`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
+`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11, A12, A14 and A15, of a class's `Text()` the
