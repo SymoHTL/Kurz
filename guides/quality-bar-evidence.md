@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-11-09
-digest: 74fe046baea93de48df15c8e78fa4fa63c9ceb9d200757e9b9512f8bf4217b75
+digest: 2621a8a69939c13b12ea49b40b2264e1ea33095c112fb882eaf98ff82a16c00b
 ttl_days: 60
 metadata:
   type: reference
@@ -80,9 +80,9 @@ every run and has to turn its case red; a mutation that stops doing so fails the
 <!-- generated:store -->
 | Store | Count |
 |---|---|
-| Entries in INDEX.md | 92 |
+| Entries in INDEX.md | 93 |
 | tagged (untagged) | 2 |
-| tagged HARD | 33 |
+| tagged HARD | 34 |
 | tagged LIVING | 4 |
 | tagged POSTMORTEM | 16 |
 | tagged RECIPE | 9 |
@@ -105,7 +105,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 440 |
+| Occurrences of the marker *(assumed)* | 446 |
 | Bullets of the Open section | 65 |
 <!-- /generated:design -->
 
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 372 |
-| Pull requests merged | 347 |
-| Merged over red, with a recorded waiver | 193 |
+| Pull requests opened by a writer, or merged | 374 |
+| Pull requests merged | 351 |
+| Merged over red, with a recorded waiver | 197 |
 | Review findings posted: high | 327 |
-| Review findings posted: medium | 4648 |
-| Review findings posted: low | 4687 |
+| Review findings posted: medium | 4670 |
+| Review findings posted: low | 4705 |
 | Open HAZARD issues | 19 |
 <!-- /generated:forge -->
