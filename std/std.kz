@@ -6284,9 +6284,10 @@ pub class HttpHeaders {
 }
 
 // The parameters of a request's query, its names and values in their order, as `r.QueryValues()` reads them from `r.Query`, a type
-// every file sees (design record, section 12: the owner, 2026-11-06, G2 (a); W1, W19), read as ASP.NET Core's
-// `QueryHelpers.ParseQuery` and Rust's `url::form_urlencoded::parse` read them: a name compares exactly, byte for byte, where a
-// header's name compares without regard to ASCII case (W4), and a repeated name keeps each of its values apart, in their order.
+// every file sees (design record, section 12: the owner, 2026-11-06, G2 (a); W1, W19), read as Rust's `url::form_urlencoded::parse`
+// reads them: a name compares exactly, byte for byte, where a header's name compares without regard to ASCII case (W4), and a
+// repeated name keeps each of its values apart, in their order. ASP.NET Core's `QueryHelpers.ParseQuery` reads a `+` as a space
+// as the crate does, and differs in the rest: it compares names without regard to case and folds a repeated name into one value.
 pub class HttpQuery {
     mut List<string> names = List<string>()
     mut List<string> values = List<string>()
@@ -7729,9 +7730,10 @@ pub class Uri {
     }
 }
 
-// The escapes of RFC 3986, section 2.1, read and written as C#'s `Uri.UnescapeDataString` and `Uri.EscapeDataString` read and
-// write them, and made as Rust's `percent-encoding` crate makes them (design record, section 12; W17). `r.Path` stays as the
-// request gave it (W5), and a program decodes it where it wants the text.
+// The escapes of RFC 3986, section 2.1, read and written by functions shaped as C#'s `Uri.UnescapeDataString` and
+// `Uri.EscapeDataString`, and made as Rust's `percent-encoding` crate makes them (design record, section 12; W17): `Decode` refuses
+// decoded bytes that are no UTF-8, as the crate's `decode_utf8` does, where C# leaves their escapes as they are. `r.Path` stays
+// as the request gave it (W5), and a program decodes it where it wants the text.
 pub class Url {
     // The text with each `%` that has two hex digits after it, of either case, read as the byte they name, and the bytes then read
     // as UTF-8: the string, or `InvalidUtf8` at the first position of the decoded bytes that is no UTF-8, as `string.FromUtf8`
@@ -7832,7 +7834,7 @@ bool UrlUnreserved(byte c) => c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 
 // as Rust's `httpdate` crate, which hyper uses, writes and reads it (design record, section 12; W18).
 pub class HttpDate {
     // The IMF-fixdate of `at`, `Sun, 06 Nov 1994 08:49:37 GMT`, its second taken towards the past, as the crate drops the
-    // fraction; the server writes its own `Date` by the same function.
+    // fraction; the server writes its own `Date` by `HttpDateOf`, the function this one writes by.
     pub static string Format(timestamp at) => HttpDateOf(HttpSecondOf(at))
 
     // The instant of a date in one of the three forms RFC 9110 has a recipient read, after ASCII's whitespace is taken from
