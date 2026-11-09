@@ -294,7 +294,8 @@ its own, and none where the reading actor ends during its write (below) (§6) *(
 reading)*. The wait is the server's read of the flag, each read again a switch point at which the
 other actors of its thread run, the reading actor among them where it shares that thread, at the
 cost of the server held from its next connection for the write's time (§6, the owner, 2026-11-09,
-pull request 415, comment 6735589705, "Re-read yields"). What sets the flag where the reading
+pull request 415, comment 6735589705, "Re-read yields", against a wait that blocks the thread,
+which never ends where both actors share one thread). What sets the flag where the reading
 actor ends during its write, as a stop at its supervisor's end without finishing its message or at
 its bound would end it, stands open with that stop in §14, among the flag left under way, so that
 the server's wait has no end, the runtime's end of the actor setting it to failed, and the server
