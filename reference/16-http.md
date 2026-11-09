@@ -4299,7 +4299,7 @@ Case: [http/client-timeout-body.kz](../corpus/http/client-timeout-body.kz)
 // into the stream's buffer; a body whose bytes come one at a time, each before a read's time would run out, still ends at the
 // call's time, since each read waits only what remains of it: a body of a length, one read to the close, and a chunk's size line;
 // and a redirect to `ftp://` whose body does not come ends the drain of that body at the call's time, its `TimedOut` dropped with
-// its connection, so that the refusal of the scheme answers the call
+// its connection, so that the refusal of the scheme answers the call, at the call's time and not before it
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -4511,9 +4511,13 @@ void Buffered(int port) {
 }
 
 // one call of a time of 300 milliseconds that a `302` sends to `ftp://`, whose body does not come: the drain of that body ends at
-// the call's time, its `TimedOut` dropped with its connection, and the refusal of the next address's scheme answers the call
+// the call's time, its `TimedOut` dropped with its connection, and the refusal of the next address's scheme answers the call; and
+// whether it answered at the call's time and not before it, as a drain that did not wait would
 void Redirected(int port) {
+    start = instant.Now
     print(Show(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 900ms)
 }
 
 Against([
