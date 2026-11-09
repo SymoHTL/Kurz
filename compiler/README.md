@@ -744,8 +744,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - a time of a count (T38), `duration.FromSeconds(n)` and its siblings and `timestamp.FromUnixSeconds(n)`
   and `timestamp.FromUnixMilliseconds(n)`: a `long` count multiplied, a `double` one split at its point,
   its whole units multiplied and its fraction rounded to the nearest nanosecond, ties to even, with the
-  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, each raising
-  `overflow` in every build where the time leaves the range, NaN and an infinity among them;
+  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, but for a count
+  of nanoseconds, which is rounded whole, since a tie of its fraction, split off, would go to the even
+  fraction, 3.5 to 3, where ties to even give 4 (every other unit is an even count of nanoseconds, so
+  its whole units keep the parity the fraction's rounding picked), each raising `overflow` in every
+  build where the time leaves the range, NaN and an infinity among them;
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
@@ -1847,7 +1850,7 @@ functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
-`HttpBody`, `HttpResponse`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
+`HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
 `HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that

@@ -1,4 +1,5 @@
 using Kurz.Compiler.Build;
+using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
 using Xunit;
 
@@ -72,8 +73,11 @@ public sealed class HttpTests(Toolchain toolchain) : IClassFixture<Toolchain>
             """;
         if (Builder.HostTarget == Target.Windows)
         {
-            // S11: the program reads its request from a socket, which the runtime of Windows does not give
-            Assert.Null(Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true).Program);
+            // S11: the program reads its request from a socket, which the runtime of Windows does not give; the refusal names the
+            // program's first call on a socket, line 2, so that no other failure of the build passes for it
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true);
+            Assert.Null(compilation.Program);
+            Assert.Equal((2, Emitter.NotOnWindows), (Assert.Single(compilation.Diagnostics.Items).Line, Assert.Single(compilation.Diagnostics.Items).Message));
             return;
         }
 
