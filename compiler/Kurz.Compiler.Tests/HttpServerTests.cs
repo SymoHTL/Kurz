@@ -31,7 +31,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     /// <summary>std/ with <c>HttpServer.DateOf</c>, the <c>Date</c> the loop writes in the given second since 1970-01-01.</summary>
     private static readonly Lazy<CheckedRuntime> WithDate = new(() => ListTests.Edited(("std/std.kz", "pub class HttpServer {\n", """
         pub class HttpServer {
-            pub static string DateOf(long second) => HttpDate(second)
+            pub static string DateOf(long second) => HttpDateOf(second)
 
         """)));
 
@@ -256,10 +256,19 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     public async Task A_write_that_failed_leaves_the_writer_failed_so_that_the_body_ends_cut()
     {
         // W11 (assumed, section 12): a client that reads nothing makes a write of 512 KiB time out, part of its chunk written; the
-        // function catches the `IoError`, waits for the byte of the request's body that the client sends once it reads again, and
+        // function catches the `IoError`, waits for the byte of the request's body, which the client sends before it reads again, and
         // writes again: that write gives the `IoError` again and writes nothing, and the end of the body gives it to the loop, which
-        // closes the connection, so that the client gets the body cut and never a chunk of `x` after the part of the failed one
+        // closes the connection, so that the client gets the body cut and never a chunk of `x` after the part of the failed one; the
+        // writer, kept past the function, then gives `writer used after its response ended`, not the failed write's `IoError`
         const string text = """
+            class Keeper {
+                pub mut List<HttpWriter> Kept = List<HttpWriter>()
+
+                pub void Keep(HttpWriter w) {
+                    Kept.Add(w)
+                }
+            }
+
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
                 File.WriteAll("port", "{listener.Port}\n".Bytes)
@@ -269,7 +278,9 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
                     piece.Add(122)
                 }
 
+                keeper = Keeper()
                 handler = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+                    keeper.Keep(w)
                     mut failed = false
                     while !failed {
                         w.Write(piece) else {
@@ -297,6 +308,9 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
                 }
 
                 print("served")
+                keeper.Kept[0].Write("late") else {
+                    IoError e => print("late {e}")
+                }
             }
 
             Main(args[0]) else {
@@ -348,8 +362,8 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
 
         var (code, output, error) = await run;
         var bytes = got.ToArray();
-        Assert.Equal((0, "", "first TimedOut\nread 1\nagain TimedOut\nTimedOut\nserved\n", false, false),
-            (code, error, output, bytes.AsSpan().EndsWith("0\r\n\r\n"u8), bytes.AsSpan().IndexOf("\r\n1\r\nx"u8) >= 0));
+        Assert.Equal((0, "", "first TimedOut\nread 1\nagain TimedOut\nTimedOut\nserved\nlate invalid input: writer used after its response ended\n", false, false),
+            (code, error, output, bytes.AsSpan().EndsWith("0\r\n\r\n"u8), bytes.AsSpan().IndexOf("1\r\nx"u8) >= 0));
     }
 
     [Fact]

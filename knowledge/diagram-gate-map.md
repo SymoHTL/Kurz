@@ -94,6 +94,8 @@ flowchart TD
         a row that reads as an error id outside a table headed id, rules, meaning;
         an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
         read, missing or not UTF-8, named with what went unchecked;
+        a clause, reading, sentence or statement before this one or after this one in the record or a chapter,
+        outside a code block, a pointer by position;
         fewer rules or cases than the floors"]
         G10["compiler-tests: the compiler under compiler/ does not build, or a unit test fails;
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
