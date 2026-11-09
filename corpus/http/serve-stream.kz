@@ -26,15 +26,21 @@
 // | []
 // | http: malformed request: bad chunk size
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|u|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Date: <29>|Connection: close||g]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Connection: keep-alive|Transfer-Encoding: chunked|Date: <29>||1|k|0||]
 // rules: W11
 
 // the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
-// `Connection: close`, the close ending the body; a `HEAD` gets the head alone and calls no function, to HTTP/1.0 without
+// `Connection: close`, the close ending the body, a `Transfer-Encoding` the handler set dropped; a `HEAD` gets the head alone and
+// calls no function, to HTTP/1.0 without
 // `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
 // first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
 // that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
-// awaits `100 Continue` says `Connection: close`, and the connection closes after the function, whether it read the body after its
-// first write or not; a function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
+// awaits `100 Continue` says `Connection: close` where the handler set no `Connection`, and the connection closes after the
+// function, whether it read the body after its first write or not, and where the head says the handler's `Connection` instead; a
+// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set that is no number is
 // `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
@@ -144,7 +150,23 @@ failing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
 })
 sized = (HttpRequest r) => {
     response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("s"))
-    response.Headers.Set("Content-Length", "1") else {
+    response.Headers.Set("Content-Length", "one") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+coded = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("g"))
+    response.Headers.Set("Transfer-Encoding", "gzip") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+kept = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("k"))
+    response.Headers.Set("Connection", "keep-alive") else {
         HttpError e => return HttpResponse.Empty(500)
     }
 
@@ -164,3 +186,5 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-contin
 Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
 Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
+Exchange("GET /g HTTP/1.0\r\n\r\n", coded, HttpLimits())
+Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", kept, HttpLimits())

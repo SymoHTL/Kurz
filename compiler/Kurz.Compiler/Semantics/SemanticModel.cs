@@ -116,6 +116,9 @@ public enum CallKind
     /// <summary><c>long.Parse(s)</c>, or the same call on another number type, the number or the case <c>ParseError</c> (X7).</summary>
     Parse,
 
+    /// <summary><c>duration.FromSeconds(n)</c> and its siblings, and <c>timestamp.FromUnixSeconds(n)</c> and <c>timestamp.FromUnixMilliseconds(n)</c>: the time of a count of <see cref="CallInfo.TimeScale"/> nanoseconds each, of a <c>long</c> or a <c>double</c>, which <see cref="CallInfo.Target"/> names (T38).</summary>
+    TimeFrom,
+
     /// <summary><c>string.Join(separator, values)</c> of a list of any item type that has a text, with a <c>string</c> or a <c>char</c> separator, which the argument's type names (X6).</summary>
     StringJoin,
 
@@ -175,6 +178,9 @@ public enum CallKind
 
     /// <summary>A file's or a stream's <c>Consume(n)</c> (S24).</summary>
     FileConsume,
+
+    /// <summary>A file's or a stream's <c>Seek(offset)</c> (S27).</summary>
+    FileSeek,
 
     /// <summary>A file's or a stream's <c>Write(bytes)</c> (S4, S9).</summary>
     FileWrite,
@@ -274,6 +280,12 @@ public sealed record CallInfo(
 {
     /// <summary>The intrinsic or lane operation a call of <see cref="CallKind.Intrinsic"/> calls (R18).</summary>
     public Intrinsic? Intrinsic { get; init; }
+
+    /// <summary>K14: the constructor of a class's body a construction calls; null for the primary constructor and for the empty one of a class without one.</summary>
+    public ConstructorSymbol? Constructor { get; init; }
+
+    /// <summary>The nanoseconds of one unit of the count a call of <see cref="CallKind.TimeFrom"/> takes (T38).</summary>
+    public long TimeScale { get; init; }
 }
 
 /// <summary>
@@ -330,6 +342,8 @@ public sealed class SemanticModel
     private readonly Dictionary<TypeDeclaration, ClassSymbol> classes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionSymbol, VariableSymbol> receivers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ClassSymbol, VariableSymbol> buildReceivers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ConstructorSymbol, VariableSymbol> constructorReceivers = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<AssignOrDeclare> fieldInitializations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, (VariableSymbol This, FieldSymbol Field)> implicitFields = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
@@ -556,6 +570,12 @@ public sealed class SemanticModel
     /// <summary>The variable that holds a method's instance, <c>this</c> (K7).</summary>
     public VariableSymbol ThisOf(FunctionSymbol method) => receivers.TryGetValue(method, out var v) ? v : throw Missing($"`this` of `{method.Name}`", method.Line);
 
+    /// <summary>K14: the variable that holds the instance a constructor of a class's body builds, <c>this</c>.</summary>
+    public VariableSymbol ThisOf(ConstructorSymbol constructor) => constructorReceivers.TryGetValue(constructor, out var v) ? v : throw Missing($"`this` of the constructor of `{constructor.Owner.Name}`", constructor.Line);
+
+    /// <summary>K14: whether an assignment of a field in a constructor is its first, on every path, so that the field holds no value it lets go of.</summary>
+    public bool IsFieldInitialization(AssignOrDeclare assignment) => fieldInitializations.Contains(assignment);
+
     /// <summary>K7: the instance being built, through which the defaults of a class's body fields read the fields above them.</summary>
     public VariableSymbol FieldsThisOf(ClassSymbol symbol) => buildReceivers.TryGetValue(symbol, out var v) ? v : throw Missing($"the instance the defaults of `{symbol.Name}` read", symbol.Line);
 
@@ -576,6 +596,21 @@ public sealed class SemanticModel
     internal void RecordThis(FunctionSymbol method, VariableSymbol thisVariable) => receivers[method] = thisVariable;
 
     internal void RecordFieldsThis(ClassSymbol symbol, VariableSymbol thisVariable) => buildReceivers[symbol] = thisVariable;
+
+    internal void RecordThis(ConstructorSymbol constructor, VariableSymbol thisVariable) => constructorReceivers[constructor] = thisVariable;
+
+    /// <summary>K14: the last reading of a loop's body stands, so a reading that finds the assignment no first one takes the mark back.</summary>
+    internal void RecordFieldInitialization(AssignOrDeclare assignment, bool first)
+    {
+        if (first)
+        {
+            fieldInitializations.Add(assignment);
+        }
+        else
+        {
+            fieldInitializations.Remove(assignment);
+        }
+    }
 
     internal void RecordImplicitField(object node, VariableSymbol thisVariable, FieldSymbol? field) => implicitFields[node] = (thisVariable, field!);
 

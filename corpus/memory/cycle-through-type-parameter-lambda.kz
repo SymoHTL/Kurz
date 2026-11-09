@@ -1,9 +1,8 @@
-// expect: error reference-cycle at 7
+// expect: error reference-cycle at 6
 // rules: R9
 
-// a lambda whose type names a type parameter counts for a field of any function type, since a use can give that parameter any type:
-// a `(T) => void` lambda that reads the button through a panel closes the ring through a `() => void` field, though no use can make
-// it a `() => void` (R9, the owner, 2026-11-04, #110, comment 6643368937)
+// a lambda whose own type names a type parameter counts for a field of any function type: a `(T) => void` lambda that reads the
+// button through a panel closes the ring through a `() => void` field (R9, assumed)
 class Button(string Name, mut () => void OnClick)
 class Panel(Button B)
 

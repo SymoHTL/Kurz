@@ -61,6 +61,7 @@ public sealed partial class Emitter
             CallKind.StringCase => EmitStringCase(c),
             CallKind.StringSubstring => EmitStringSubstring(c, info),
             CallKind.Parse => EmitParse(c, info),
+            CallKind.TimeFrom => EmitTimeFrom(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
             CallKind.BlackBox => EmitBlackBox(c, info),
@@ -69,7 +70,7 @@ public sealed partial class Emitter
             CallKind.MapClear => EmitMapClear(c),
             CallKind.FileOpen or CallKind.FileCreate or CallKind.FileReadAll or CallKind.FileWriteAll or CallKind.FileDelete or CallKind.FileRename
                 or CallKind.FileSize or CallKind.FileExists or CallKind.FileModified or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
-                or CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+                or CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileSeek or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
                 or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),

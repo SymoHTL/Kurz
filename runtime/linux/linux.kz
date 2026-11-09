@@ -14,6 +14,7 @@ extern "C" {
     int* __errno_location()
     int open(byte* path, int mode, ...)
     long pread(int fd, byte* bytes, long count, long offset)
+    long lseek(int fd, long offset, int whence)
     byte* getenv(byte* name)
     ulong getauxval(ulong type)
     int mprotect(void* address, long length, int protection)
@@ -1794,6 +1795,21 @@ pub long ReadFile(int fd, byte* bytes, long count) {
     return Checked(result)
 }
 
+// The position of the file `fd` moved to `offset` bytes from its start, by `lseek` with `SEEK_SET` (0), as Rust's
+// `Seek::seek(SeekFrom::Start(n))` moves it (S27): 0, or the failure, `ESPIPE` (29) on a socket or a pipe, which the
+// kinds give as `NotSeekable`.
+pub long Seek(int fd, long offset) {
+    mut long result = 0
+    raw {
+        long moved = lseek(fd, offset, 0)
+        if moved < 0 {
+            result = Checked(moved)
+        }
+    }
+
+    return result
+}
+
 // The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202,
 // its number on x86-64, the one target of this runtime) with `FUTEX_WAIT_PRIVATE` (128) and no time
 // limit, where Rust's `futex_wait` always uses `FUTEX_WAIT_BITSET_PRIVATE` with a full mask, which
@@ -2342,7 +2358,8 @@ pub long SetTimeout(int fd, int option, long nanoseconds, bool bounded) {
 
 // The system's `TCP_NODELAY` (1), at the level `IPPROTO_TCP` (6), of the socket `fd` set to `on`, so that a small write goes out at
 // once and not after the acknowledgement of the one before, which std/'s writer of a streamed response sets (W11), as Kestrel sets it
-// on every connection: 0, or the system's failure as it gives it, or `ENOMEM` (12) where the thread's page cannot be mapped.
+// on every connection: 0, or the failure below 0, the system's error number negated, -12 (`ENOMEM`) where the thread's page cannot
+// be mapped.
 pub long SetNoDelay(int fd, bool on) {
     mut long result = -12
     raw {

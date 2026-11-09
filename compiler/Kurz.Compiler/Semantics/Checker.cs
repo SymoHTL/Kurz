@@ -180,6 +180,9 @@ public sealed partial class Checker
         /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
         public bool Static { get; init; }
 
+        /// <summary>K14: the constructor of <see cref="Class"/>'s body this frame checks, with the marks of the fields it assigns; a lambda inside it finds it through <see cref="Outer"/>.</summary>
+        public Building? Building { get; init; }
+
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
 
@@ -359,6 +362,7 @@ public sealed partial class Checker
         }
 
         CheckMethodBodies(); // K7
+        CheckConstructorBodies(); // K14
         JoinPassingReaders();
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
@@ -1375,7 +1379,8 @@ public sealed partial class Checker
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
     /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
     /// error of its own (the owner, 2026-11-03). A function whose constant has no type of the list, or a type that is no name it can read,
-    /// is read, with the constant of no type, whose uses and calls report nothing more, while its body's own errors are reported (E1).
+    /// is read, with the constant of no type, whose uses and the type argument a call gives it report nothing more, while its body's own
+    /// errors, and a call's count of type arguments and its arguments, are reported (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
@@ -1669,7 +1674,7 @@ public sealed partial class Checker
         else if (IsTypeParameterName(name))
         {
             Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
-            type = Types.Error; // T33, E1: the refused parameter stands with no type, so that `T.Make` in a copy reports nothing more
+            type = Types.Error; // T33, E1: the refused parameter stands with no type, and its name reads it in a copy, so that `T.Make`, `T.Fields` and `T.Kind` report nothing more
         }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
@@ -2687,6 +2692,7 @@ public sealed partial class Checker
 
     private void CheckReturn(ReturnStatement r)
     {
+        frame.Building?.Returns.Add(frame.Known); // K14: a path that leaves a constructor here assigns its fields first
         if (frame.IsTopLevel && r.Value is not null)
         {
             NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");

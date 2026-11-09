@@ -741,6 +741,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   result leaves its type's range in every build (T31), the comparisons, `==` also on a field (D3), a
   narrow value widened beside or into the wide pair (T29), a conversion between the two widths, which
   raises `overflow` in every build where the value does not fit (T31), and their text (A12, A16);
+- a time of a count (T38), `duration.FromSeconds(n)` and its siblings and `timestamp.FromUnixSeconds(n)`
+  and `timestamp.FromUnixMilliseconds(n)`: a `long` count multiplied, a `double` one split at its point,
+  its whole units multiplied and its fraction rounded to the nearest nanosecond, ties to even, with the
+  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, each raising
+  `overflow` in every build where the time leaves the range, NaN and an infinity among them;
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
@@ -1042,7 +1047,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Seek`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, each of a stream's `ShutdownWrite` and `SetNoDelay`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
@@ -1050,7 +1055,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Fill`, `Consume`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  freed with the block; each `Read`, `Fill`, `Consume`, `Seek`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
   compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
   takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
   second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
@@ -1069,6 +1074,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   left where it is, and where it holds none fills it as such a read does and takes all that read gave, the room in the list made for
   the bytes it appends, and a fill that finds the mark keeps none of them; `Consume` raises `index-out-of-range` for an `n` below 0
   before it enters and for one past the bytes the buffer holds under the lock, and else moves the position by `n` (S24);
+  `Seek` raises `index-out-of-range` for an offset below 0 before it enters, and under the lock calls the runtime's `Seek`, the
+  system's `lseek` from the start, whose failure leaves the buffer as it was and whose success sets its position and count to 0 (S27);
   `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
@@ -1132,11 +1139,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   line of the lines dropped before it in the same write; a refused write counts the line as dropped,
   and after a line the system took in part, the next write starts with a line feed. The count of the
   lines dropped and the flag of a line cut short are plain `static mut`s, Kurz having no atomic form,
-  and the runtime runs one thread. The corpus's runner
+  and the runtime starts no thread: two threads a program starts through C (R16) that log at once race on
+  them, as the runtime's comment on them says. The corpus's runner
   takes `KURZ_LOG` away from every case it runs. `LogTests` pins what no case can: the layout of a line
   and its time against the test's, a string's quotes and the escapes, the category of a method, of a
   function, of a lambda, of a field's default, of a property and of the top level, a method named
-  `Log`, a member named `Log` beside a log call, the levels and
+  `Log`, a member named `Log` beside a log call in a method, in a property and in a field's default, the levels and
   the default, a site that is off and one that is on, reached twice, a generic function emitted for two
   types, the entries of `KURZ_LOG`, its refusals and a program with no log call, which reads none, and
   the lines dropped while standard error refused its writes, a line it took in part, the crash line
@@ -1631,9 +1639,8 @@ ask about it.
   calls the method directly, one call more, which nothing measured *(assumed)*; `==` on two values of an
   interface, and a map's key of an
   interface's type, read the classes that implement it as K13 reads a base's derived classes, false where
-  the two classes differ *(assumed: K13 names a base and its derived classes, and no rule names an
-  interface)*; a field of an interface's type reaches every class of the program that implements it,
-  as R8 says of a `mut` one, and one without `mut` too, as R2 and R4 read a base's type *(assumed)*; and an
+  the two classes differ (K13, *assumed*); a field of an interface's type reaches every class of the
+  program that implements it, `mut` or not (R8, *assumed* for one without `mut`); and an
   arm of a class over a value of an interface or of a base class (C4) tests the class of the instance
   through the link each table holds, its base's in a class's table and the class's own in its table for an
   interface, as the CLR's method table holds its parent's and C#'s `is` walks them, and not through a list
@@ -1831,7 +1838,7 @@ type arguments a use names or leaves to be inferred, without the limit of a type
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
 a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
-M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none,
+M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
@@ -1895,9 +1902,10 @@ error of their own, a name no declaration has among them, is reported beside the
 which is the complete one: a `flags` type and a value of one (D13, D17, D19, and the A-rules of
 their text); of an interface, type parameters (T19, K6), and of a method of one a modifier, type
 parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
-of which leaves the interface and every value of it unread; `weak` before an interface, which R3 and R5
-do not name, and the name of an interface where a value, a member or a call stands (K6); of a class,
-type parameters (T19), a constructor or a type declared in its body (K7, K14), a field there without a written type
+of which leaves the interface and every value of it unread; `weak` before an interface (R3), and the
+name of an interface where a value, a member or a call stands (K6); of a class,
+type parameters (T19), a type declared in its body (K7), a constructor there with a modifier other than `pub` or a
+`mut` parameter (K14, F9, M7), a field there without a written type
 or with a modifier other than `pub`, `internal` and `mut` (K7, F9), a `static` field with a modifier
 other than `pub`, `internal` and `mut` (K18, R13), a method or a property that is `extern`, a method that has type
 parameters of its own (K7, section 4) and a property that is `static`, `virtual`, `override` or `prot`, which section 14
@@ -1905,8 +1913,14 @@ leaves open (K7), each of which leaves the class, every class derived from it an
 class it reads, a field in its body or a `static` member where the class has a base or classes derived from it
 (K6, K7, K18), a type after `:` that is neither a class nor an interface, or a class of `std/` the prelude brings (W1), a
 second base class, a base class after an interface, an interface named twice or with arguments, and a base that closes a cycle of
-bases (K6, K7, K10), the arguments of a base for a class without a primary constructor, which a constructor in its body
-passes (K10, K14), in the short form a parameter with the name of a base's field whose `mut` differs from the
+bases (K6, K7, K10), arguments after the name of the base of a class without a primary constructor, whose constructors pass
+them with `: base(...)` (K10, K14), in a constructor of the body a use of the instance,
+`this`, a method of it or a lambda that reaches it, before every field is assigned, as Swift refuses it, `this` and a method of the
+instance in a constructor of a class with derived classes, where an override could read a field of the derived class while the
+constructor runs, `: this(...)` calls that come back to their constructor, which C# refuses (CS0768), an assignment of a `mut`
+field that one path reaches with the field assigned and another without (K14), and a default that reads a field a constructor's body
+assigns, where K7 runs every default before that body (K7, K14; the owner, 2026-11-03, #110, comment 6600034158, against
+`field-unassigned` at the read), in the short form a parameter with the name of a base's field whose `mut` differs from the
 field's, or with a default, where the base's default is the field's (K11, K16), in the explicit form a
 parameter passed on as a base's field whose `mut` differs from the field's (K11, K17), an `equal by` on a class whose
 base has fields and no clause, where K13 does not say whether the base's fields count, `virtual` and
@@ -2470,6 +2484,19 @@ round can ask about it by the rule's id.
   A field of the body of the name of a field of
   the primary constructor is `redeclared`, as two fields of one name are, and a top-level variable
   is no name in a default, as it is none in a method (F16).
+- K14 with C#'s constructors (section 4): a construction picks among the primary constructor and the
+  constructors of the body as a call picks an overload (F13), and a class without a primary
+  constructor that declares one has no empty one, as C# makes none. The arguments of `: this(...)`
+  read the parameters and no instance, as C#'s initializer does. Of a class with no primary
+  constructor, no base and no derived classes, each field of the body without `=` is assigned on
+  every path of each constructor that calls no other, read as C#'s definite assignment reads a
+  `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
+  is read again until what it keeps holds, a `while true` leaves by its `break`s alone, and a `throw`
+  leaves no path. The base's constructor runs before the body, as C#, Java and Swift run it: the one
+  `: base(...)` picks, whose arguments read the parameters and no instance, else the one that takes
+  no arguments, as C#'s implied `base()`, and where the base has none the constructor that implies
+  it is `argument-mismatch`, as C#'s CS7036. `base` is read as that word right after a
+  constructor's `:` alone, as `as` in a `use` line, and is a name everywhere else (L18).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
   field first, so that every read is the constant its field holds. A read of a field whose check is
