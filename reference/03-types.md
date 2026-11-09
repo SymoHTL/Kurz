@@ -1491,8 +1491,9 @@ refused, up to its language version 7.3, the three forms its later versions let 
 parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"): a parameter of the function, part of its
 signature, from its text in every case, where no call reaches the function too (§4, the owner, 2026-11-07, "Refused
-always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, so that `T.Make` in the body
-reports nothing more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
+always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, and the name reads it, not the type
+the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in `T.Kind` read as a value, so
+that none of them reports anything more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
 declaration where the body is checked (below): once from its text, or in each copy a call
 makes for a function checked in its copies alone, so not at all where no call reaches such a function. *(assumed, §4,
 with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
@@ -1546,19 +1547,24 @@ for are made after its body is checked, in the order of those calls in its text,
 copies before the copy of the call after it, and the copies that calls outside every copy ask for
 are made after the code outside the copies is checked, the calls in the bodies of functions first,
 then those in the bodies of methods, then those of the top-level code, each body's calls in the
-order of its text, each call with its whole chain before the call after it makes a copy, so that which copies a
-build stopped at the bound made, and so which errors it shows, depends on the order of those calls,
-and a swap of two calls of a copy changes them; a later call that reads a copy already made (the
-assumed reading before this one) makes no chain of its own, so that the copy is in the chain of the
-outer call that made it first; the outer call of a
-chain of copies is the call outside every copy that made its first copy, and for a copy made inside
-another copy the call that made the copy, where the build stops, is that outer call; the bound
-stops the chains of one outer call alone: another outer call still makes its copies, and each outer
-call whose chain reaches the bound reports its own `not supported`, so that one build can report
-more than one; a build stopped at the bound of 64 copies on a
-chain of copies (the record, section 14) reports the errors outside the copies, the `not supported`
-of that bound and the errors of the copies made before it, while a copy of the same outer call that a chain asks
-for after the bound is not made, so that its errors show only in a build where the chain is ended)*
+order of its text, each call with its whole chain before the call after it makes a copy, so that
+which copies a build made where a chain stopped at the bound, and so which errors it shows,
+depends on the order of those calls, and a swap of two of those calls can change them, where their
+chains share a copy; a later call that reads a copy already made (the owner's reading of
+2026-11-06, §4, comment 6683085368 on issue 39) makes no chain of its own, so that the copy is in
+the chain of the outer call that made it first; the outer call of a chain of copies is the call
+outside every copy that made its first copy, and for a copy made inside another copy the build
+stops, and an error reported at the call shows, at the outer call of its chain, not at the call
+inside a copy that made it, so that for such a copy the first call of the owner's reading of
+2026-11-06 is read as that outer call; the bound stops the chains of one outer call alone: another
+outer call still makes its copies, and each outer call whose chain reaches the bound reports its own
+`not supported`, so that one build can report more than one; a build in which a
+chain of copies stopped at the bound of 64 copies (the record, section 14) reports the errors
+outside the copies, those of the copies that other outer calls make, before that chain or after
+it, the `not supported` of that bound and the errors of the copies made before it, while a copy of
+the same outer call that the chain asks for after the bound is not made, so that, where no other
+outer call asks for that copy, its errors show only in a build where the chain is ended, and
+another outer call that asks for it makes it and reports its errors in the same build)*
 
 Case: [types/type-fields.kz](../corpus/types/type-fields.kz)
 ```kurz
@@ -1821,9 +1827,20 @@ own, no type parameter of the function, and each copy reads the field's real typ
 not refuse such a call, and each copy checks it as any call, `Deep(f.Get(x), n - 1)` for a `Point`
 being `kind-not-read` at the outer call, where the copy `Deep<int>` walks the fields of an `int`;
 an inference on the text where the field's type meets another type reports no error there, and
-each copy infers the call with the field's real type and reports as any call does,
-`Choose(f.Get(x), "s")` for `A Choose<A>(A a, A b)` being `type-mismatch` (T1) where the field is
-an `int`; a call in a loop over `T.Fields` opened inside the
+each copy infers the call with the field's real type and reports as any call of its body does, at
+the call's own line, unlike an error reported at the call, which shows at the outer call of its
+chain (T33): `Choose(f.Get(x), "s")` for `A Choose<A>(A a, A b)` is `type-mismatch` (T1) where the
+field is an `int`, the literal taking the type the field fixes (T27); the walk reads no type
+argument where such an inference gives none on the text, which is where the field's type, a type
+of its own there, meets another type that is no literal in the positions of one type parameter
+(T27), as `T` does in `Choose(f.Get(x), x)`, so that the call takes no part, and neither does a
+call whose argument holds it, `Deep(Pair(Choose(f.Get(x), x), x), n - 1)` among them; each copy
+infers such a call, `Deep(Choose(f.Get(x), x), n - 1)` and `Deep([Choose(f.Get(x), x)], n - 1)`
+for a `Point` being `cannot-infer` (T27), where the field's `int` meets `Point`, no literal; and a
+function no call reaches is not refused for a cycle there where it holds such a call, as one that
+holds `Deep([Choose(f.Get(x), x)], n - 1)`, the walk not telling from the text whether such a call
+lies on a growing cycle, which narrows the owner's reading of 2026-11-02 that a growing cycle is
+refused whether or not a call reaches it (§4); a call in a loop over `T.Fields` opened inside the
 nearest arm of a `match` on `T.Kind` around it is read as a call of that loop;
 every call of the cycle where a type argument grows is
 refused, each one time, a written type argument as an inferred one, a call in a lambda of the body
@@ -2011,7 +2028,8 @@ it is checked against the parameter's type as a parameter's default value is (F1
 `default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
 a type parameter that holds a type among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the function
 is still read, with the constant of no type, so that its body's own errors are reported while the constant's uses and the
-function's calls report nothing more, the `syntax` being the one error of its cause, E1)* *(assumed, §4, with the build: the name of an earlier
+type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and a call's count of
+type arguments (T19) and its arguments are read as for any call, E1)* *(assumed, §4, with the build: the name of an earlier
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
