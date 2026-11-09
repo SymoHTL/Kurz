@@ -837,19 +837,38 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     [Theory]
     [InlineData("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 200 OK\r\n", "served\n")]
     [InlineData("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 60000\r\n\r\n", 10000, "HTTP/1.1 413 Content Too Large\r\n", "request body over limit\nserved\n")]
+    [InlineData("POST /f HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 500 Internal Server Error\r\n", "NotFound\nserved\n")]
+    [InlineData("POST /s HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 500 Internal Server Error\r\n", "NotFound\nserved\n")]
     public async Task A_connection_the_server_closes_after_its_answer_is_closed_in_stages(string head, int sent, string status, string printed)
     {
         // section 12 (the owner, 2026-11-02, "a half-close on `TcpStream`"), W9: once the server has written a response it closes the
         // connection, here for the request's `Connection: close`, or a refusal, here `413` for a body over its limit, it ends its
         // writes, reads and drops what the client still sends, and only then closes, as RFC 9112, section 9.6, has it. The body is
         // left unread either way; closed at once with bytes unread, the socket sends a reset in place of the end of the stream, and a
-        // client that reads its answer after that sees the reset
+        // client that reads its answer after that sees the reset. So does the writer's own `500` before the `IoError` that
+        // `ServeConnection` gives, for a file whose size cannot be read and for a streamed function's `IoError` before its first write
+        // (section 12, the owner, 2026-11-09, #411, comment 6737456858, "In stages")
         const string text = """
+            HttpResponse Answer(HttpRequest r) {
+                if r.Path == "/f" {
+                    return HttpResponse.File(200, "staged-missing.txt")
+                }
+
+                if r.Path == "/s" {
+                    return HttpResponse.Stream(200, (HttpWriter w) => {
+                        size = File.Size("staged-missing.txt")
+                        w.Write("{size}")
+                    })
+                }
+
+                return HttpResponse.Text(200, "ok")
+            }
+
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
                 File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
-                HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "ok"), HttpLimits(MaxRequestBodySize: 50000)) else {
+                HttpServer.ServeConnection(server, (HttpRequest r) => Answer(r), HttpLimits(MaxRequestBodySize: 50000)) else {
                     IoError e => print(e.Kind)
                     HttpError e => print(e.Detail)
                 }
@@ -869,7 +888,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var executable = toolchain.Build(compilation.Program, $"http-server-staged-close-{sent}");
+        var executable = toolchain.Build(compilation.Program, $"http-server-staged-close-{sent}-{head[6]}");
         var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();

@@ -2496,7 +2496,13 @@ its response is written closes the connection, since no status can be sent after
 (§12, the owner, 2026-11-03), and one it gives before its first write, when nothing was written yet,
 is answered `500` with no body and `Connection: close` in place of the head first, under a
 `Content-Length` the handler set too, as Kestrel answers a handler that fails before its response
-started (§12, the owner, 2026-11-09, #411, comment 6735967844, "500 + close"). A read of the
+started (§12, the owner, 2026-11-09, #411, comment 6735967844, "500 + close"), and so is a function
+that returns after a write that failed while nothing was written, a write that would pass a
+`Content-Length` among them, the responses held before it going out first (§12, the owner,
+2026-11-09, #411, comment 6737456858, "Fix in #411 FU"). After that `500`, and after the `500` for a
+file whose size cannot be read (W8), the connection closes in stages, as after the loop's own `500`,
+so that a client still sending its body reads the `500` and not a reset (§12, the owner,
+2026-11-09, #411, comment 6737456858, "In stages"). A read of the
 request's body in the function that falls under its rate gives
 `HttpError(Protocol, "request timed out")`, as a handler's read does (W10) (§12, the owner,
 2026-11-04, #110, comment 6643368937, Q12 (b)). Before the close that follows a head sent while the
@@ -2532,11 +2538,10 @@ response writing it whole again, its head and the end of its body, its function 
 writer of its own, and `WriteHead` writing the head alone; the function's `IoError` after its first
 write ending the body without its last chunk, and `Write` and `ServeConnection` giving the
 function's `IoError`, after the `500` of one before its first write too, as they give the `IoError`
-of a file whose size cannot be read after its `500` (W8), the connection closing at once, with no
-close in stages, so that a client that still sends may lose that `500` to the reset of a close with
-bytes unread; a write that failed leaving the writer failed, every later write while the
-function runs and the end of the body giving its `IoError` again and writing nothing, so that a
-client of HTTP/1.1 sees the body cut, while one of HTTP/1.0, whose body the close ends, cannot tell
+of a file whose size cannot be read after its `500` (W8); a write that failed leaving the writer
+failed, every later write while the function runs and the end of the body giving its `IoError` again
+and writing nothing more where the head went out, so that a client of HTTP/1.1 sees the body cut,
+while one of HTTP/1.0, whose body the close ends, cannot tell
 it from a whole one, and a write after the function returned giving
 `writer used after its response ended`, not that `IoError`; the `IoError` of a write after the
 function returned touching neither the connection nor the response after it; the function reading
@@ -2884,8 +2889,10 @@ Case: [http/serve-stream-length.kz](../corpus/http/serve-stream-length.kz)
 // a response a function writes under a `Content-Length` the handler set goes as it is, not in chunks, and keeps its connection: a
 // part of a file, the range a seek reaches, as a `206`; a body written in two writes; a `HEAD` with the head alone, the count in
 // it, and no function called; to HTTP/1.0 with the count and `Connection: close`; a count of 0 with no body; a write that would
-// pass the count writes none of its bytes and closes the connection with `InvalidData`, the body cut; and a body short of its
-// count at the function's return closes it with that error too
+// pass the count writes none of its bytes and closes the connection with `InvalidData`, the body cut; a body short of its
+// count at the function's return closes it with that error too; and a function that returns after its first write passed the count,
+// nothing written yet, is answered `500` with `Connection: close` after the response held before it, the next request not served
+// (section 12, the owner, 2026-11-09, #411, comment 6737456858)
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -3001,6 +3008,17 @@ over = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => {
     w.Write("bc")
 }), "2")
 under = (HttpRequest r) => Counted(HttpResponse.Stream(200, (HttpWriter w) => w.Write("ab")), "5")
+swallowed = (HttpRequest r) => {
+    if r.Path == "/t" {
+        return HttpResponse.Text(200, "t")
+    }
+
+    return Counted(HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("ab") else {
+            IoError e => print("swallowed {e.Kind}")
+        }
+    }), "1")
+}
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /r HTTP/1.1\r\nHost: h\r\n\r\n", ranged, HttpLimits())
 Exchange("GET /c HTTP/1.1\r\nHost: h\r\n\r\n{get}", counted, HttpLimits())
@@ -3009,6 +3027,7 @@ Exchange("GET /c HTTP/1.0\r\n\r\n", counted, HttpLimits())
 Exchange("GET /e HTTP/1.1\r\nHost: h\r\n\r\n{get}", empty, HttpLimits())
 Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\n{get}", over, HttpLimits())
 Exchange("GET /u HTTP/1.1\r\nHost: h\r\n\r\n{get}", under, HttpLimits())
+Exchange("GET /t HTTP/1.1\r\nHost: h\r\n\r\nGET /s HTTP/1.1\r\nHost: h\r\n\r\n{get}", swallowed, HttpLimits())
 File.Delete("serve-stream-length.txt") else {
     IoError e => print(e)
 }

@@ -6877,13 +6877,15 @@ pub class HttpResponse {
     // Writes the status line, the headers and the body to `stream` (W8).
     pub void | IoError Write(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, true, "", false, false, null, mut none, false, null)
+        mut refused = false
+        Send(stream, true, "", false, false, null, mut none, false, null, mut refused)
     }
 
     // Writes the status line and the headers alone, with the `Content-Length` the body would have, the answer to a `HEAD` (W8).
     pub void | IoError WriteHead(TcpStream stream) {
         mut none = HttpNoBytes()
-        Send(stream, false, "", false, false, null, mut none, false, null)
+        mut refused = false
+        Send(stream, false, "", false, false, null, mut none, false, null, mut refused)
     }
 
     // The response as the server's loop writes it: `date` its `Date` line or empty, a `Connection: close` where `close`, and to a
@@ -6892,8 +6894,10 @@ pub class HttpResponse {
     // awaited `100 Continue`, after which the loop closes the connection. The responses `pending` holds go out first, in the same
     // write, and where `hold` a response of 64 KiB or less, with them, or the end of a body a function writes, is held there in place
     // of a write; `request` the body of the request it answers, which sends no `100 Continue` once the head of a body a function
-    // writes has gone out (F9).
-    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold, HttpBody request) => Send(stream, withBody, date, close, plain, pace, mut pending, hold, request)
+    // writes has gone out (F9); and `refused` set where the writer wrote its own `500` in its place and then gives an `IoError`, that
+    // of a file whose size cannot be read or of a function before its first write, after which the loop closes the connection in
+    // stages (design record, section 12: the owner, 2026-11-09, "In stages").
+    internal bool | IoError Serve(TcpStream stream, bool withBody, string date, bool close, bool plain, HttpRate pace, mut Bytes pending, bool hold, HttpBody request, mut bool refused) => Send(stream, withBody, date, close, plain, pace, mut pending, hold, request, mut refused)
 
     // Whether a function writes the body, which the loop calls before it drains the request's body, since the function may read it (F9).
     internal bool Streams => streamer != null
@@ -6929,7 +6933,7 @@ pub class HttpResponse {
     // `Content-Length`, and a `Content-Length` beside a body a function writes that holds anything but digits, or differs from
     // another, are answered with nothing, `InvalidInput`, as hyper ends such a response. A body a function writes under a
     // `Content-Length` goes as it is, not in chunks, held to that count (W11).
-    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold, HttpBody? request) {
+    bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold, HttpBody? request, mut bool refused) {
         bodiless = code == 204 || code == 304
         body = streamer
         mut length = 0L
@@ -6937,6 +6941,7 @@ pub class HttpResponse {
             length = HttpFileSize(filePath) else {
                 IoError e => {
                     HttpUnwritable(s, mut pending, date, pace)
+                    refused = true
                     return e
                 }
             }
@@ -7041,11 +7046,18 @@ pub class HttpResponse {
             body(w) else {
                 IoError e => {
                     w.Abort()
+                    refused = w.Refused
                     return e
                 }
             }
 
-            w.End(mut pending, hold)
+            w.End(mut pending, hold) else {
+                IoError e => {
+                    refused = w.Refused
+                    return e
+                }
+            }
+
             return !w.Closes
         }
 
@@ -7101,7 +7113,9 @@ pub class HttpResponse {
 // too, after the head where no write sent it (design record, section 12: G5). A function that gives an `IoError` before its first
 // write of bytes, when nothing was written yet, is answered `500` with no body and `Connection: close` in place of the head, as Kestrel
 // answers a handler that fails before its response started, whatever `Content-Length` the handler set (design record, section 12: the
-// owner, 2026-11-09, "500 + close").
+// owner, 2026-11-09, "500 + close"), and so is one that returns after a write that failed while nothing was written, a write that
+// would pass the `Content-Length` among them (the owner, 2026-11-09, "Fix in #411 FU"); the server's loop then closes the connection
+// in stages, as after its own `500` (the owner, 2026-11-09, "In stages").
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
@@ -7115,6 +7129,7 @@ pub class HttpWriter {
     mut HttpBody? request = null
     mut bool announce = false
     mut bool closes = false
+    mut bool refused = false
     mut IoError? failure = null
 
     // The writer of a body on `s`, the head `head`, all but the empty line that ends it, going out with its first write, before which
@@ -7147,6 +7162,9 @@ pub class HttpWriter {
 
     // Whether the head announced a close the server's loop makes after the function (F9).
     internal bool Closes => closes
+
+    // Whether the writer wrote its own `500` in place of the response, after which the loop closes the connection in stages.
+    internal bool Refused => refused
 
     // The head on its way, once: its empty line, after a `Connection: close` where the request's body still awaits `100 Continue`,
     // since the server's loop closes such a connection after the function; no read of the request's body sends `100 Continue` after it.
@@ -7237,7 +7255,8 @@ pub class HttpWriter {
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
-    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9), and for a body
+    // write that failed, its `IoError`, with nothing more written where the head went out, so that the loop closes the connection on a
+    // body cut (F9), and the writer's own `500` where it did not, as for an `IoError` of the function (`Abort`), and for a body
     // short of its `Content-Length`, the head where no write sent it and `IoError(InvalidData)`, a body cut the same way. A head that
     // says `Connection: close` is never held: the loop holds only where it keeps the connection and the request's body has no chunks
     // and a length of 0, while the loop's own close and a handler's `Connection: close` come only where it does not keep it, and the
@@ -7246,6 +7265,7 @@ pub class HttpWriter {
         ended = true
         f = failure
         if f != null {
+            Abort()
             return f
         }
 
@@ -7279,10 +7299,11 @@ pub class HttpWriter {
         }
     }
 
-    // The function gave an `IoError`: where no write sent the head, nothing of the response was written, so the responses held before
-    // it go out with a `500` in its place, with no body and a close, as a response the writer cannot write is answered (W8; design
-    // record, section 12: the owner, 2026-11-09, "500 + close"); else no end of the body, so that a client of HTTP/1.1 sees it cut,
-    // while one of HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
+    // The function gave an `IoError`, or returned after a write that failed: where no write sent the head, nothing of the response was
+    // written, so the responses held before it go out with a `500` in its place, with no body and a close, as a response the writer
+    // cannot write is answered (W8; design record, section 12: the owner, 2026-11-09, "500 + close" and "Fix in #411 FU"), marked
+    // `Refused` for the loop's close in stages; else no end of the body, so that a client of HTTP/1.1 sees it cut, while one of
+    // HTTP/1.0, whose body the close ends, cannot tell it from a whole one (F9).
     internal void Abort() {
         ended = true
         s = stream
@@ -7295,6 +7316,8 @@ pub class HttpWriter {
         HttpUnwritable(s, mut out, date, pace) else {
             IoError e => return
         }
+
+        refused = true
     }
 }
 
@@ -8512,7 +8535,19 @@ void | IoError | HttpError HttpServeRequests(TcpStream s, (HttpRequest) => HttpR
                 // the server's own `Connection: close` before a close, beside a handler's `Connection` that does not say it (section
                 // 12, the owner, 2026-11-05, Q6)
                 close = !keep && !HttpCloses(headers)
-                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, pace, mut pending, keep && r.next, body)
+                mut refused = false
+                written = response.Serve(s, r.Method != "HEAD", dated, close, r.minor == 0, pace, mut pending, keep && r.next, body, mut refused) else {
+                    IoError e => {
+                        // the writer's own `500` before its `IoError` closes in stages, as the loop's own does (section 12, the owner,
+                        // 2026-11-09, "In stages")
+                        if refused {
+                            HttpLinger(s, limits)
+                        }
+
+                        return e
+                    }
+                }
+
                 if !keep || !written {
                     HttpLinger(s, limits)
                     return
