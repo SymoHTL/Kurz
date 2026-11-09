@@ -1,0 +1,10 @@
+// expect: error constructor-must-chain at 5
+// rules: K14
+
+class Animal(string Name) {
+    pub Animal(int legs) : base(legs) {
+        print(legs)
+    }
+}
+
+print(Animal("rex").Name)

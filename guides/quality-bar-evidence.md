@@ -2,7 +2,7 @@
 name: quality-bar-evidence
 description: The numbers behind the quality bar of this repository - gates, self-test cases and replayed red proofs per tool, the store, the design record and the forge; every number is generated and expires
 generated: 2026-11-10
-digest: 2d41c438466f2a69a3ac34d365de4185ae58be5e38c9ec391fa12befe6062b69
+digest: 7d7f0edf3c4888a3d83ddb56488bd1c565ae4f8b1bbec89be91b54195b26d416
 ttl_days: 60
 metadata:
   type: reference
@@ -105,7 +105,7 @@ counts as one ([a quoted marker counts as one](../knowledge/a-quoted-marker-coun
 | Design record | Count |
 |---|---|
 | Sections | 15 |
-| Occurrences of the marker *(assumed)* | 464 |
+| Occurrences of the marker *(assumed)* | 466 |
 | Bullets of the Open section | 65 |
 <!-- /generated:design -->
 
@@ -123,7 +123,7 @@ nothing in this repository executes Kurz.
 | of them assumed | 40 |
 | of them proposed | 0 |
 | of them open | 1 |
-| Corpus cases | 1027 |
+| Corpus cases | 1029 |
 | Compile-error ids | 75 |
 | Run-time error ids | 11 |
 <!-- /generated:reference -->
@@ -144,11 +144,11 @@ fork" says write access to the head branch is enough, which a fork gives).
 <!-- generated:forge -->
 | Forge | Count |
 |---|---|
-| Pull requests opened by a writer, or merged | 382 |
-| Pull requests merged | 369 |
-| Merged over red, with a recorded waiver | 214 |
+| Pull requests opened by a writer, or merged | 383 |
+| Pull requests merged | 371 |
+| Merged over red, with a recorded waiver | 216 |
 | Review findings posted: high | 329 |
-| Review findings posted: medium | 4745 |
-| Review findings posted: low | 4753 |
-| Open HAZARD issues | 19 |
+| Review findings posted: medium | 4747 |
+| Review findings posted: low | 4755 |
+| Open HAZARD issues | 20 |
 <!-- /generated:forge -->
