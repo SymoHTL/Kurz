@@ -2311,14 +2311,14 @@ with the response after it)* The response holds its function in a field of a fun
 a function that reads a class that holds a `mut` response closes a ring through it (R9), which a
 handler that reads that class does not, by R9's reading of a field of a function type (§3, the
 owner, 2026-11-04, #110, comment 6643368937), whose cases `http/stream-cycle.kz` and
-`http/stream-handler-no-cycle.kz` stand under R9. *(assumed, §12, the defaults of the product pass
-of G5 (#110, comment 6728933408), whose Q5 and Q8 are put to the owner there: a write that would
-pass the count writing none of its bytes and leaving the writer failed, as a write that failed does,
-and a body short of it writing the head where no write sent it, each giving
-`IoError(InvalidData, 0, "")` from `Write` and `ServeConnection` and closing the connection, as
-Kestrel ends a response of another length; a `HEAD` answered with the head, the count in it and no
-`Transfer-Encoding`, the function not called; a count of 0 sending no body; and to a peer of
-HTTP/1.0 the count in the head and the body as it is, the close still ending it)*
+`http/stream-handler-no-cycle.kz` stand under R9. A write that would pass the count writes none of
+its bytes and leaves the writer failed, as a write that failed does, and a body short of it writes
+the head where no write sent it, each giving `IoError(InvalidData, 0, "")` from `Write` and
+`ServeConnection` and closing the connection, as Kestrel ends a response of another length (§12, the
+owner, 2026-11-09, #110, comment 6735258248, G5 Q5, "Kestrel's check"). A `HEAD` is answered with
+the head, the count in it and no `Transfer-Encoding`, the function not called; a count of 0 sends no
+body; and a peer of HTTP/1.0 gets the count in the head and the body as it is, the close still
+ending it (§12, the owner, 2026-11-09, the same comment, G5 Q8, "Write them").
 
 Case: [http/response-stream.kz](../corpus/http/response-stream.kz)
 ```kurz
