@@ -86,7 +86,7 @@ public sealed partial class Emitter
 
         var union = (UnionType)Sub(info.Result);
         var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "io"), fn.Label("io.done"));
-        if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
+        if (info.Kind is CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileSeek or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
             or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin)
         {
             var target = ((MemberAccess)Unwrap(c.Callee)).Target;
@@ -103,6 +103,9 @@ public sealed partial class Emitter
                     break;
                 case CallKind.FileConsume:
                     EmitFileConsume(c, info, outcome, handle, kinds);
+                    break;
+                case CallKind.FileSeek:
+                    EmitFileSeek(c, info, outcome, handle, kinds);
                     break;
                 case CallKind.FileWrite:
                     EmitFileWrite(c, info, outcome, handle, kinds);
@@ -440,6 +443,37 @@ public sealed partial class Emitter
         Raise(ErrorIds.IndexOutOfRange, c.Line);
         fn.Block(within);
         fn.Emit($"store i32 {fn.Value($"add i32 {at}, {n}")}, ptr {position}");
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        Succeed(o, null);
+        Leave(o, outer, handle);
+    }
+
+    /// <summary>
+    /// S27: <c>f.Seek(offset)</c>: an <c>offset</c> below 0 raises <c>index-out-of-range</c> before the call enters the handle, as a
+    /// <c>Read</c>'s <c>max</c> below 0 does (section 12, assumed); then, under the lock of the handle's buffer, so that a fill through
+    /// another holder puts no bytes of the old position after it, the runtime's <c>Seek</c>, the system's <c>lseek</c> from the start,
+    /// whose failure keeps the buffer, as Rust's <c>BufReader::seek</c> keeps it where the inner seek fails, and whose success drops the
+    /// bytes the buffer holds, as <c>BufReader::seek</c> discards them (section 12, the owner, 2026-11-08, G5); a call in flight on the
+    /// handle (S5).
+    /// </summary>
+    private void EmitFileSeek(CallExpression c, CallInfo info, FileOutcome outer, string handle, string kinds)
+    {
+        var arguments = Arguments(c, info, _ => Types.Long, _ => false, _ => null, cConvention: false, owned: false);
+        var offset = arguments[0]["i64 ".Length..];
+        var negative = fn.Label("negative");
+        var counted = fn.Label("counted");
+        fn.CondBranch(fn.Value($"icmp slt i64 {offset}, 0"), negative, counted);
+        fn.Block(negative);
+        Raise(ErrorIds.IndexOutOfRange, c.Line);
+        fn.Block(counted);
+        var o = Enter(outer, handle, kinds);
+        var reader = HandleField(handle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var r = SysCall("Seek", $"i32 {HandleDescriptor(handle)}, i64 {offset}");
+        FailBelowZero(o, r, HandlePath(handle), () => fn.Emit($"call void {UnlockReader()}(ptr {word})"), kinds);
+        fn.Emit($"store i32 0, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Emit($"store i32 0, ptr {ReaderField(reader, ReaderCount)}");
         fn.Emit($"call void {UnlockReader()}(ptr {word})");
         Succeed(o, null);
         Leave(o, outer, handle);

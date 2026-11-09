@@ -40,7 +40,7 @@
 // that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
 // awaits `100 Continue` says `Connection: close` where the handler set no `Connection`, and the connection closes after the
 // function, whether it read the body after its first write or not, and where the head says the handler's `Connection` instead; a
-// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
+// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set that is no number is
 // `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
@@ -150,7 +150,7 @@ failing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
 })
 sized = (HttpRequest r) => {
     response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("s"))
-    response.Headers.Set("Content-Length", "1") else {
+    response.Headers.Set("Content-Length", "one") else {
         HttpError e => return HttpResponse.Empty(500)
     }
 

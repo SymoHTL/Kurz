@@ -496,8 +496,13 @@ Gate: review rule "rules for sessions".
       `compiler-windows` run holds. The bound is this rule's reading of the owner's approval of the
       floor (comment 6680659012), not the owner's own words, and the owner chose it on 2026-11-07
       (comment 6711916489): for a pull request that removes run cases, it lies below `main`'s floor;
+    - the numbers `tools/quality_evidence.py` generates in `guides/quality-bar-evidence.md`, and
+      nothing else of that file, resolved by running that tool on the merged tree, with the gate
+      `knowledge` green there (pull request 385, comment 6735260898);
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
-    the lines a conflict block joined and for the floor;
+    the lines a conflict block joined, for the floor and for the numbers that tool generates (this
+    rule's reading of comment 6735260898, which approved a take with the evidence guide generated
+    again, not the owner's own words);
   - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
     before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
@@ -520,7 +525,8 @@ Gate: review rule "rules for sessions".
   2026-11-06 to the floor of `RunTests` (comment 6680659012), by pull request 359, whose measured
   count pull request 362 bounded; and on 2026-11-07 by pull request 377, to the same-end append
   (comment 6694541027, of 2026-11-06) and the line verdicts (comment 6710283110), with the floor's
-  bound that the owner chose that day (comment 6711916489). The tool switches the whole ruleset off for the one merge and restores it; while it is off
+  bound that the owner chose that day (comment 6711916489); and on 2026-11-09 to the numbers the
+  evidence guide's tool generates (pull request 385, comment 6735260898). The tool switches the whole ruleset off for the one merge and restores it; while it is off
   nothing on the server holds any pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the

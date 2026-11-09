@@ -1392,7 +1392,9 @@ A generic function or type lists its type parameters between `<` and `>` after i
 parameter is limited to the types that implement an interface by naming the interface after a
 colon: `T Max<T: Comparable>(T a, T b)`. `where` keeps its one meaning, the constraint on a value
 (record, section 13). A use names the type arguments, or leaves them to be inferred (T27). An
-argument whose type does not meet the limit is the compile error `type-mismatch`.
+argument whose type does not meet the limit is the compile error `type-mismatch`. An interface
+may take type parameters too, and each list of type arguments gives each class that implements it
+a table of its own (§4, the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
 
 Case: [types/generic-function.kz](../corpus/types/generic-function.kz)
 ```kurz
@@ -1603,9 +1605,15 @@ refused, up to its language version 7.3, the three forms its later versions let 
 parameter, a variable inside a lambda and a local function's parameter (§4, the owner, 2026-11-03, "redeclared, as C#'s
 CS0412", and 2026-11-04 for a constant, "the same reading for both"): a parameter of the function, part of its
 signature, from its text in every case, where no call reaches the function too (§4, the owner, 2026-11-07, "Refused
-always") *(assumed, §4, with the build: in a copy such a parameter stands with no type, and the name reads it, not the type
-the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in `T.Kind` read as a value, so
-that none of them reports anything more, the parameter's `redeclared` being the one error of its cause, E1)*, and each other such
+always") *(assumed, §4, with the build: what follows reads only a program that the parameter's `redeclared` refused, so that
+`T.Kind`, `T.Fields` and `T.Make` always read the type a copy binds, and the name of a constant its value, in every
+program the checker accepts (§4, the owner, 2026-11-03 and 2026-11-04); in a copy such a parameter stands with no type, and the
+name reads it, not the type the copy binds, in `T.Make`, in a loop over `T.Fields`, in a `match` on `T.Kind` and in
+`T.Kind` read as a value, so that none of them reports anything more, the parameter's `redeclared` being the one error
+of its cause, E1, and the name of a constant reads such a parameter in the same way, not the constant's value,
+`void F<const int N>(int N)`; the name in a type position, `T r`, `Other<T>(x)` or `T?`, reads the type parameter, as
+it does in the same program without the parameter, and the body of that loop and the bodies of the `match`'s arms are
+checked as any block is, so that each reports the errors it reports without the parameter)*, and each other such
 declaration where the body is checked (below): once from its text, or in each copy a call
 makes for a function checked in its copies alone, so not at all where no call reaches such a function. *(assumed, §4,
 with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
@@ -2140,12 +2148,15 @@ it is checked against the parameter's type as a parameter's default value is (F1
 `default-not-constant` (F12); the name of an earlier parameter there is `unknown-name` (V10); a type outside the list,
 a type parameter that holds a type among them, `<T, const T N>`, is `syntax` *(assumed, §4, with the build: the function
 is still read, with the constant of no type, so that its body's own errors are reported while the constant's uses and the
-type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and a call's count of
-type arguments (T19) and its arguments are read as for any call, E1)* *(assumed, §4, with the build: the name of an earlier
+type argument a call gives it report nothing more, the `syntax` being the one error of its cause, and the type argument is not
+read at all, so that its own errors, `unknown-name` among them, are not reported either, `Name<Missing>()`; and a call's
+count of type arguments (T19) and its arguments are read as for any call, so that a call that writes none, `Name()`,
+takes the constant's default, and with none is `cannot-infer` (T27), E1)* *(assumed, §4, with the build: the name of an earlier
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
-count the call may write, while a call that writes none is read in the assumed clause below. The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+count the call may write, while a call that writes none infers them or takes their defaults, and is `cannot-infer` (T27) where it can do neither, as C# infers them (CS0411)
+(§4, the owner, 2026-11-09, "Confirm 'at least one'"). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
 `enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#

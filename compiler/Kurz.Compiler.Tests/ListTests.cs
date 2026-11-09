@@ -2950,6 +2950,21 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
         }
 
+        interface Greeter {
+            string Greet(int times)
+        }
+
+        class Hello(string N) : Greeter {
+            pub string Greet(int times) => "{N} {times}"
+        }
+
+        class Keep(mut Greeter Item) {
+            pub int Reset() {
+                Item = Hello("other")
+                return 1
+            }
+        }
+
         data Holder(Shape S, int K)
 
         int Total(List<Shape> all) {
@@ -3029,6 +3044,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(count)
         Shape shown = Shown()
         print("{shown.Area()} {Shown().Use()}")
+        mut j = 7
+        keep = Keep(Hello("first {j}"))
+        print(keep.Item.Greet(keep.Reset()))
         """;
 
     private static readonly string[] InterfacesPrint =
@@ -3055,6 +3073,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "9",
         "11", // a `mut` parameter through the second interface a base names, a leaf's method and a derived class's override among them
         "5 100", // K7: the class's own `pub` method implements the interface where its base has a private one of that signature
+        "first 7 1", // the receiver of a call through an interface, read from a field the argument assigns: its own count keeps it
     ];
 
     // arms of a class over a value of an interface, of a base class, of a `T?`, of a union and of a call's other cases (C4, O5, K6;
@@ -4505,6 +4524,20 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // released classes: the flag of a release at work is declared once all the same, with the function that works the lists off
         const string outer = "class Inner(int N)\n\nclass Outer(Inner? I, int N)\n\nvoid Show() {\n    o = Outer(null, 1)\n    print(o.N)\n}\n\nShow()\n";
         Ran(BuildAndRun(outer, toolchain.Runtime, "class-first-released-holds-a-class"), 0, ["1"], "");
+    }
+
+    [Fact]
+    public void A_constructor_of_a_class_body_fills_its_instance_after_the_base_and_before_its_body()
+    {
+        // K14 with C#'s constructors: the base's constructor runs before the body, the one that takes no arguments for a class without a
+        // primary constructor and the one the explicit form picks; `: this(...)` runs what it calls first, the primary constructor
+        // or another of the body; a field's first assignment stores into a field that holds nothing, and a later one lets go of the
+        // list or the string it held, after it read the string, which the fence holds; the defaults of the body run before the body, a
+        // lambda of the body reads a field once every field is assigned, a `return` leaves the body, and a private constructor is
+        // called from a `static` method of its class; `: base(...)` passes the base a string it builds, one its `: this(...)` builds
+        // and a parameter it borrows, and C#'s implied `base()` gives the base the default of its parameter
+        const string constructors = "class A {\n    pub A() {\n        print(\"A body\")\n    }\n}\n\nclass B : A {\n    pub B() {\n        print(\"B body\")\n    }\n}\n\nclass C : A\n\nclass D(int N) : A() {\n    pub D() : this(7) {\n        print(\"D further {N}\")\n    }\n}\n\nclass Animal(string Name) {\n    pub Animal(int legs) : this(\"legs {legs}\") {\n        print(\"Animal {legs}\")\n    }\n}\n\nclass Dog : Animal {\n    pub Dog(int legs) : base(legs) {\n        print(\"Dog {Name}\")\n    }\n\n    pub Dog(string name) : base(name) { }\n\n    pub Dog(string name, int n) : base(\"{name}{n}\") { }\n}\n\nclass Pet(string Name = \"pet\")\n\nclass Cat : Pet\n\nclass Named {\n    string name\n    mut string tag\n    mut List<int> items\n    int count = 3\n\n    pub Named(string n) {\n        name = \"{n}!\"\n        tag = \"t{n}\"\n        tag = \"{tag}+\"\n        items = [1, 2]\n        items = [count]\n        items.Add(4)\n        show = () => \"{name}?\"\n        print(show())\n    }\n\n    pub Named() : this(\"anon\") {\n        items.Add(5)\n        tag = \"{tag}-\"\n    }\n\n    pub string Text() => \"{name} {items} {tag}\"\n}\n\nclass Counter(int Start) {\n    pub Counter() : this(0) { }\n\n    Counter(string s) : this(9) {\n        if s == \"\" {\n            return\n        }\n\n        print(s)\n    }\n\n    pub static Counter Of(string s) => Counter(s)\n\n    pub int Value() => Start\n}\n\nB()\nC()\nd = D()\nprint(d.N)\nprint(D(2).N)\nprint(Named(\"x\"))\nprint(Named())\nprint(Counter().Value())\nprint(Counter(5).Value())\nprint(Counter.Of(\"abc\").Value())\nprint(Counter.Of(\"\").Value())\nbase = Dog(4)\nprint(base.Name)\nwho = \"rex\"\nprint(Dog(who).Name)\nprint(who)\nprint(Dog(\"kim\", 2).Name)\nprint(Cat().Name)\n";
+        Ran(BuildAndRun(constructors, Fenced, "class-constructors-fenced"), 0, ["A body", "B body", "A body", "A body", "D further 7", "7", "A body", "2", "x!?", "x! [3, 4] tx+", "anon!?", "anon! [3, 4, 5] tanon+-", "0", "5", "abc", "9", "9", "Animal 4", "Dog legs 4", "legs 4", "rex", "rex", "kim2", "pet"], "");
     }
 
     // lists of 70000 items made and dropped for 200 rounds, which grow through blocks of 262160 and 524304 bytes, and the same lists

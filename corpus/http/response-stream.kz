@@ -18,7 +18,7 @@
 // `string` one chunk and a write of no bytes none, and the function's return writes the chunk of no bytes that ends the body; its
 // `Content-Type` is `application/octet-stream`, which a handler replaces, and a `Transfer-Encoding` the handler set is kept,
 // `chunked` added; a response written again is written whole again, its head and the end of its body, its function called again
-// with a writer of its own; a `Content-Length` the handler set
+// with a writer of its own; a `Content-Length` the handler set that is no number
 // is `InvalidInput` with nothing written; a function's `IoError` ends the body without its last chunk, the head written where no
 // write sent it, and `Write` gives that error; `WriteHead` writes the head alone and calls no function; and a writer kept past its
 // call gives `IoError(InvalidInput)` and writes nothing
@@ -104,7 +104,7 @@ void | IoError | HttpError All() {
     Wire(twice, false)
     Wire(twice, false)
     sized = HttpResponse.Stream(200, (HttpWriter w) => w.Write("x"))
-    sized.Headers.Set("Content-Length", "1")
+    sized.Headers.Set("Content-Length", "one")
     Wire(sized, false)
     Wire(HttpResponse.Stream(200, (HttpWriter w) => {
         w.Write("a")
