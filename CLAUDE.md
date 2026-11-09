@@ -490,7 +490,9 @@ Gate: review rule "rules for sessions".
       nothing else of that file, resolved by running that tool on the merged tree, with the gate
       `knowledge` green there (pull request 385, comment 6735260898);
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
-    the lines a conflict block joined, for the floor and for the numbers that tool generates;
+    the lines a conflict block joined, for the floor and for the numbers that tool generates (this
+    rule's reading of comment 6735260898, which approved a take with the evidence guide generated
+    again, not the owner's own words);
   - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
     before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
