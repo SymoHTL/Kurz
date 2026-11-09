@@ -6088,7 +6088,8 @@ public sealed class CheckerTests
         // of its functions in the order of their declarations before the methods and the top-level code, so the error of a copy
         // shows at a call in a body below a call of the top-level code, in the body of the function declared first of two, at a call
         // in a method before one of the top-level code, at a call in a function before one in a method above it, in the method of the
-        // class declared first of two and in the method declared first of two in one class; with the build, a
+        // class declared first of two, in the method declared first of two in one class and in the second overload of a method's name
+        // before a method declared between the two overloads, as the overloads of one name are read at the first of them; with the build, a
         // fault of the function's text that two copies give is reported once, and one that differs between copies once for each
         const string bad = "void Bad<T>() {\n    match T.Kind {\n        TypeKind.Int => print(1)\n    }\n}\n\n";
         Assert.Equal([(ErrorIds.KindNotRead, 5)], Errors("Bad<long>()\nRun()\n\nvoid Run() {\n    Bad<long>()\n}\n\n" + bad));
@@ -6099,6 +6100,7 @@ public sealed class CheckerTests
         const string go = " {\n    pub void Go() {\n        Bad<long>()\n    }\n}\n\n";
         Assert.Equal([(ErrorIds.KindNotRead, 8)], Errors("c = C()\nc.Go()\nd = D()\nd.Go()\n\nclass D" + go + "class C" + go + bad));
         Assert.Equal([(ErrorIds.KindNotRead, 7)], Errors("c = C()\nc.A()\nc.B()\n\nclass C {\n    pub void B() {\n        Bad<long>()\n    }\n\n    pub void A() {\n        Bad<long>()\n    }\n}\n\n" + bad));
+        Assert.Equal([(ErrorIds.KindNotRead, 16)], Errors("c = C()\nc.A()\nc.B(1)\nc.B(\"x\")\n\nclass C {\n    pub void B(int n) {\n        print(n)\n    }\n\n    pub void A() {\n        Bad<long>()\n    }\n\n    pub void B(string s) {\n        Bad<long>()\n    }\n}\n\n" + bad));
         Assert.Equal([(ErrorIds.KindNotRead, 7), (ErrorIds.KindNotRead, 8)], Errors(bad + "Bad<long>()\nBad<string>()"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("void Show<T>() {\n    T = 1\n    print(T)\n}\n\nShow<long>()\nShow<int>()"));
     }
