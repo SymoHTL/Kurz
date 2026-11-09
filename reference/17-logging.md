@@ -21,9 +21,9 @@ properties, `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a 
 field's default, where K7 reads no `this` and no method or property of the instance, `Log` alone
 reaches a parameter of the primary constructor named `Log`, while `this.Log`, and `Log()` for a
 method named `Log`, are `unknown-name` (K7). A member of `Log` that names no level is `unknown-name`
-(V10), `Log.Foo("a")` in such a type too, though the member's type has a method `Foo`. So are `Log`
-alone where no member takes its name, and a log function used as a value, `f = Log.Information`, in
-such a type too. A log call gives
+(V10), `Log.Foo("a")` in such a type too, though the member's type has a method `Foo`. So is `Log`
+alone where no member takes its name; and so is a log function used as a value,
+`f = Log.Information`, in such a type too. A log call gives
 nothing: it is a statement, as a call of `print` is, and `x = Log.Information("a")` is `syntax`, a
 call with a `void` success used as a value (O10). *(proposed)*
 
