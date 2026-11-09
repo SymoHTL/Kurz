@@ -6970,6 +6970,13 @@ pub class HttpResponse {
         for i in 0..<headers.Count {
             name = headers.NameAt(i)
             value = headers.ValueAt(i)
+            // a `Content-Length` the handler set is dropped on a `204` and kept on a `304`, as RFC 9110, section 8.6, has it (design
+            // record, section 12: the owner, 2026-11-09, pull request 413, comment 6735967569), unchecked against the `304`'s empty
+            // body (assumed)
+            if code == 204 && name.ToLowerAscii() == "content-length" {
+                continue
+            }
+
             if name.ToLowerAscii() == "transfer-encoding" {
                 if bodiless || plain {
                     continue
