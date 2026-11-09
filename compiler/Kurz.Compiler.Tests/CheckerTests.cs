@@ -2629,6 +2629,17 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_file_and_a_stream_seek_to_a_long_and_a_listener_does_not()
+    {
+        // S27: a file's and a stream's `Seek` take an offset that is a `long`, an `int` widened to it; a listener has no `Seek`, and an
+        // offset of another type fits no form
+        const string Program = "void | IoError Moved() {\n    f = File.Open(\"a\")\n    long at = 3\n    f.Seek(at)\n    f.Seek(1)\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Seek(0)\n}\n\nMoved() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Program.Replace("c.Seek(0)", "c.Close()\n    l.Seek(0)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(Program.Replace("f.Seek(1)", "f.Seek(\"1\")", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
     {
         // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have

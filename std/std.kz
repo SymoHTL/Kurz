@@ -6926,8 +6926,9 @@ pub class HttpResponse {
 
     // The response written to `s`, its body with it where `withBody`. A response that cannot be written, a `205` whose file holds
     // bytes or a `Content-Length` its body contradicts, is answered `500` with no body and a close; a `Transfer-Encoding` beside a
-    // `Content-Length`, and a `Content-Length` beside a body a function writes, are answered with nothing, `InvalidInput`, as hyper
-    // ends such a response.
+    // `Content-Length`, and a `Content-Length` beside a body a function writes that holds anything but digits, or differs from
+    // another, are answered with nothing, `InvalidInput`, as hyper ends such a response. A body a function writes under a
+    // `Content-Length` goes as it is, not in chunks, held to that count (W11).
     bool | IoError Send(TcpStream s, bool withBody, string date, bool close, bool plain, HttpRate? pace, mut Bytes pending, bool hold, HttpBody? request) {
         bodiless = code == 204 || code == 304
         body = streamer
@@ -6945,8 +6946,18 @@ pub class HttpResponse {
 
         codings = headers.GetAll("Transfer-Encoding")
         lengths = headers.GetAll("Content-Length")
-        chunked = !bodiless && !plain && (codings.Count > 0 || body != null)
-        if (chunked || body != null) && lengths.Count > 0 {
+        mut count = -1L
+        if body != null && lengths.Count > 0 && codings.Count == 0 {
+            count = HttpLength(lengths[0])
+            for text in lengths {
+                if HttpLength(text) != count {
+                    count = -1
+                }
+            }
+        }
+
+        chunked = !bodiless && !plain && (codings.Count > 0 || (body != null && count < 0))
+        if (chunked || body != null) && lengths.Count > 0 && count < 0 {
             HttpFlush(s, mut pending, pace)
             return IoError(IoKind.InvalidInput, 0, "")
         }
@@ -6956,7 +6967,7 @@ pub class HttpResponse {
             return false
         }
 
-        if !bodiless {
+        if !bodiless && body == null {
             for text in lengths {
                 if HttpLength(text) != length {
                     HttpUnwritable(s, mut pending, date, pace)
@@ -7023,7 +7034,7 @@ pub class HttpResponse {
         if body != null {
             // the head goes out with the first chunk, in one write up to 64 KiB of it, so that the chunk does not wait for the
             // acknowledgement of the head, and the last chunk after the function's return, held as a response is where `hold`
-            w = HttpWriter.Make(s, out, chunked, pace, request, !close && headers.Get("Connection") == null)
+            w = HttpWriter.Make(s, out, chunked, count, pace, request, !close && headers.Get("Connection") == null)
             body(w) else {
                 IoError e => {
                     w.Abort()
@@ -7081,11 +7092,15 @@ pub class HttpResponse {
 // write gives `IoError(InvalidInput)` and writes nothing, that of a failed writer too. A write that failed leaves the writer failed:
 // every later write while the function runs, and the end of the body, gives its `IoError` again and writes nothing, so that a client
 // of HTTP/1.1 sees the body cut, never a chunk that a failed write left part of followed by another, while one of HTTP/1.0, whose
-// body the close ends, cannot tell it from a whole one.
+// body the close ends, cannot tell it from a whole one. Under a `Content-Length` the handler set the body goes as it is, not in
+// chunks, held to that count, as Kestrel holds a body to `Response.ContentLength`: a write that would pass it writes none of its bytes
+// and gives `IoError(InvalidData)`, which leaves the writer failed, and a body short of it at the function's return gives that error
+// too, after the head where no write sent it (design record, section 12: G5).
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()
     mut bool chunked = true
+    mut long left = -1
     mut bool ended = false
     mut bool sent = false
     mut HttpRate? pace = null
@@ -7101,7 +7116,8 @@ pub class HttpWriter {
     // Kestrel sets every connection, so that a chunk, and the end of the body after it, goes out at once and not after the client's
     // acknowledgement of the write before, which a client that waits for the whole body gives only at its delayed-ACK timer.
     // A stream the option cannot be set on is written as it is, the option only a matter of time.
-    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, HttpRate? rate, HttpBody? answered, bool mayClose) {
+    // `count` is the `Content-Length` the body is held to, or -1 where it has none.
+    internal static HttpWriter Make(TcpStream s, Bytes head, bool isChunked, long count, HttpRate? rate, HttpBody? answered, bool mayClose) {
         s.SetNoDelay(true) else {
             IoError e => {
             }
@@ -7111,6 +7127,7 @@ pub class HttpWriter {
         w.stream = s
         w.ahead = head
         w.chunked = isChunked
+        w.left = count
         w.pace = rate
         w.request = answered
         w.announce = mayClose
@@ -7157,6 +7174,16 @@ pub class HttpWriter {
             return
         }
 
+        if left >= 0 {
+            if bytes.Count > left {
+                e = IoError(IoKind.InvalidData, 0, "")
+                failure = e
+                return e
+            }
+
+            left = left - bytes.Count
+        }
+
         Put(s, bytes) else {
             IoError e => {
                 failure = e
@@ -7199,7 +7226,8 @@ pub class HttpWriter {
 
     // The function returned: what is left of the head, the end of the last chunk and the chunk of no bytes that ends the body,
     // written, or where `hold` held in `pending`, which the head emptied, up to 64 KiB, to go out with the next response; after a
-    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9). A head that
+    // write that failed, its `IoError` and nothing written, so that the loop closes the connection on a body cut (F9), and for a body
+    // short of its `Content-Length`, the head where no write sent it and `IoError(InvalidData)`, a body cut the same way. A head that
     // announced a close is never held: the loop holds only where the request's body has no chunks and a length of 0, and the head
     // announces a close only where that body, chunked or of a length above 0, still awaits `100 Continue`.
     internal void | IoError End(mut Bytes pending, bool hold) {
@@ -7217,6 +7245,14 @@ pub class HttpWriter {
         Started()
         mut out = ahead
         ahead = Bytes()
+        if left > 0 {
+            if out.Count > 0 {
+                HttpWrite(s, pace, out)
+            }
+
+            return IoError(IoKind.InvalidData, 0, "")
+        }
+
         if chunked {
             out.AddRange("0\r\n\r\n".Bytes)
         }
