@@ -5695,6 +5695,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // groups as before; after the rehash the map gives every entry left, and 1000 keys more grow it
         var removed = Enumerable.Range(100, 10).ToList();
         var (gone, goneAgain) = RunTwice(ReadPast(held, absent, removed), toolchain.Runtime, "map-read-past-removed");
+        Assert.Equal(gone[0], goneAgain[0]); // the removals rehashed nothing: the read did
         Assert.Equal("-1", gone[1]);
         Assert.NotEqual(gone[2], goneAgain[2]);
         Assert.Equal(held.Select((k, i) => (k, i)).Where(e => !removed.Contains(e.i)).Select(e => $"{e.k}: {e.i}").Order(), gone[2].Trim('[', ']').Split(", ").Order());
@@ -5818,6 +5819,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal("true", first[1]);
         Assert.NotEqual(first[2], second[2]);
         Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[2].Trim('[', ']').Split(", ").Order());
+    }
+
+    [Fact]
+    public void A_loop_over_a_map_that_a_case_propagates_out_of_lets_go_of_the_block()
+    {
+        // section 4 (the owner, 2026-11-03): a loop over a map lets go of its hold where a case propagates out of its body, as at its
+        // end, a `break` and a `return`: the loop of `Scan` propagates `NotFound` out of its first turn, so that the read past the bound
+        // after it, outside every loop, rehashes the block, and two runs print one order before it and two after it; the map gives every
+        // entry and takes one more. The program runs under the allocator that makes every freed block inaccessible.
+        var keys = SameGroupKeys(521);
+        Assert.Equal(521, keys.Count); // the floor: the keys the case takes
+        var held = keys.Take(520).ToList();
+        var absent = keys[520].ToString(CultureInfo.InvariantCulture);
+        var text = "data NotFound\n\nint | NotFound Find(int id) {\n    if id < 0 {\n        return NotFound\n    }\n\n    return id\n}\n\n" +
+            "int | NotFound Scan(Map<int, int> sm) {\n    mut total = 0\n    for k, v in sm {\n        x = Find(-1)\n        total = total + x\n    }\n\n    return total\n}\n\n" +
+            $"List<int> keys = [{string.Join(", ", held.Select(k => k.ToString(CultureInfo.InvariantCulture)))}]\nmut m = Map<int, int>()\n" +
+            "for i in 0..<keys.Count {\n    m[keys[i]] = i\n}\nprint(m)\nmatch Scan(m) {\n    int t => print(t)\n    NotFound => print(\"not found\")\n}\n" +
+            $"print(m[{absent}] ?? -1)\nprint(m)\nm[{absent}] = 5\nprint(m.Count)\n";
+        var (first, second) = RunTwice(text, Fenced, "map-loop-propagated-fenced");
+        Assert.Equal(5, first.Count);
+        Assert.Equal(first[0], second[0]);
+        Assert.Equal(["not found", "-1"], first.Skip(1).Take(2));
+        Assert.NotEqual(first[3], second[3]);
+        Assert.Equal(held.Select((k, i) => $"{k}: {i}").Order(), first[3].Trim('[', ']').Split(", ").Order());
+        Assert.Equal("521", first[4]);
+
+        // the positive control: with the loop's count never lowered, the same read rehashes nothing, one order in two runs
+        (string Path, string Old, string New) kept = ("std/std.kz", "            *Ptr<int>(block + 44) = *Ptr<int>(block + 44) + change", "            *Ptr<int>(block + 44) = 1");
+        var (still, stillAgain) = RunTwice(text, Edited([.. Fence, kept]), "map-loop-propagated-kept");
+        Assert.Equal(5, still.Count);
+        Assert.Equal(still[3], stillAgain[3]);
+    }
+
+    [Fact]
+    public void A_write_inside_the_text_of_a_map_copies_the_block_the_text_walks()
+    {
+        // section 4 with K2: the text of a map walks a value that holds the block with a count of its own besides the map a write
+        // reaches, a read of a field taking one (K2), so a write that a class's `Text()` makes inside the text, through a weak reference
+        // to the holder of the map, finds the block shared and copies it first (M3), 2000 keys that grow the copy, and the text walks
+        // the block it holds: its 520 entries, then the map's 2520. The text of the field, of a local copy and of a parameter, under the
+        // allocator that makes every freed block inaccessible
+        const string Classes = "class Holder(mut Map<int, Node> M, mut int Done)\n\nclass Node(int I, weak Holder? Back) {\n    pub string Text() {\n" +
+            "        back = Back\n        if back == null {\n            return \"{I}\"\n        }\n\n        Holder held = back\n" +
+            "        if held.Done == 0 {\n            held.Done = 1\n            for j in 0..<2000 {\n                held.M[3000000 + j] = Node(-1, null)\n            }\n        }\n\n" +
+            "        return \"{I}\"\n    }\n}\n\n";
+        const string Fill = "h = Holder(Map<int, Node>(), 0)\nfor i in 0..<520 {\n    h.M[i * 7 + 1] = Node(i, h)\n}\n\nprint(h.M.Count)\n";
+        var forms = new (string Name, string Functions, string Use)[]
+        {
+            ("field", "", "print(h.M)\n"),
+            ("local-copy", "", "m2 = h.M\nprint(m2)\n"),
+            ("parameter", "void Show(Map<int, Node> m) {\n    print(m)\n}\n\n", "Show(h.M)\n"),
+        };
+        foreach (var (name, functions, use) in forms)
+        {
+            var run = BuildAndRun(Classes + functions + Fill + use + "print(h.M.Count)\n", Fenced, $"map-write-in-text-{name}-fenced");
+            Assert.True(run.Code == 0, $"{name}: exit {run.Code}, {run.Error}");
+            Assert.Equal(3, run.Output.Count);
+            Assert.Equal(["520", "2520"], new[] { run.Output[0], run.Output[2] });
+            Assert.Equal(Enumerable.Range(0, 520).Select(i => $"{i * 7 + 1}: {i}").Order(), run.Output[1].Trim('[', ']').Split(", ").Order());
+        }
+
+        // the positive control: a write that never finds a block shared grows the block in place under the walk, which the fence ends
+        (string Path, string Old, string New) never = ("std/std.kz", "pub bool MapShared(byte* block) {\n    return ListShared(block)\n}", "pub bool MapShared(byte* block) {\n    return false\n}");
+        var bad = BuildAndRun(Classes + Fill + "print(h.M)\nprint(h.M.Count)\n", Edited([.. Fence, never]), "map-write-in-text-never-shared");
+        Assert.NotEqual(0, bad.Code);
+        Assert.Equal(["520"], bad.Output);
     }
 
     /// <summary>The lookup's rehash turned off, which leaves every map that no insert moved on the fast hash.</summary>

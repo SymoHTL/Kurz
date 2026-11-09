@@ -1,6 +1,9 @@
 // expect: output
 // | true
 // | Unsupported: unsupported scheme
+// | Unsupported: unsupported scheme
+// | Unsupported: https is not supported: no TLS
+// | TooLarge: too many connections to the host
 // | TimedOut 0
 // | TimedOut 0
 // | 200 [1 /n]
@@ -21,7 +24,8 @@
 // clock's range; a read waits what remains of the call's time and not a socket's 5 seconds; a chain of redirects has one
 // time in all; a server that does not answer in time ends the call with `TimedOut` after its time, and so does a connect that the
 // server's queue holds, the queue shown full before the call; and a call of a scheme the client does not serve, with a time
-// of zero, gives the scheme's refusal, which comes before the time is read
+// of zero, gives the scheme's refusal, which comes before the time is read; and under a `MaxConnectionsPerServer` of 0, which
+// refuses every call, the refusals of a scheme come before the pool's, and the pool's before the time
 extern "C" {
     int fork()
     int kill(int pid, int signal)
@@ -148,13 +152,13 @@ string Show(int port, string path, duration timeout) {
     }
 }
 
-// a `GET` of `text` with a call's time of zero, and its status or its failure
-string Refused(string text) {
+// a `GET` of `text` under `options`, each of a call's time of zero, and its status or its failure
+string Refused(string text, HttpClientOptions options) {
     at = Uri.Parse(text) else {
         UriError e => return "{e.Kind} {e.At}"
     }
 
-    match HttpClient(HttpClientOptions(Timeout: 0s)).Get(at) {
+    match HttpClient(options).Get(at) {
         HttpResponseMessage r => return "{r.Status}"
         IoError e => return "{e.Kind} {e.Code}"
         HttpError e => return "{e.Kind}: {e.Detail}"
@@ -197,7 +201,11 @@ void | IoError Queued() {
 }
 
 print(HttpClientOptions().Timeout == 100s)
-print(Refused("ftp://127.0.0.1/"))
+print(Refused("ftp://127.0.0.1/", HttpClientOptions(Timeout: 0s)))
+crowded = HttpClientOptions(MaxConnectionsPerServer: 0, Timeout: 0s)
+print(Refused("ftp://127.0.0.1/", crowded))
+print(Refused("https://127.0.0.1/", crowded))
+print(Refused("http://127.0.0.1:1/", crowded))
 Against((int port) => Calls(port))
 Queued() else {
     IoError e => print(e)
