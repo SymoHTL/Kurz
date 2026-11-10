@@ -1452,7 +1452,10 @@ positions have different types, or no argument stands in one of its positions, t
 compile error `cannot-infer`, and the type arguments are written. This is C#'s inference in Kurz's
 terms: C# would widen a `byte` to an `int` to make `Max(b, i)` an `int`, which T8 and T9 do not
 allow here, and C#'s inference has changed between its versions, so no version of it is named. The
-owner confirmed this reading on 2026-10-10, in round 14; round 13 had not asked it. A literal argument takes the type the other arguments in the
+owner confirmed this reading on 2026-10-10, in round 14; round 13 had not asked it. *(assumed, §4:
+T27 reads a type parameter that holds a type; one that holds a constant is never inferred from the
+arguments, and a call that writes no type arguments takes its default, or is `cannot-infer` where
+it has none (T35))* A literal argument takes the type the other arguments in the
 parameter's positions fix, so `Pick(small, 1)` with a `byte` infers `byte`; two instances of
 different classes with one base are `cannot-infer`, since no common base is searched for (the owner,
 2026-10-10). When literals alone stand in a parameter's positions they take the type a constant
@@ -2164,8 +2167,10 @@ reads it"). *(assumed, §4: `const` is that word before the type of a type param
 `assert(` (T37) and among the words of an `asm`, and a name elsewhere (L18); a
 type parameter with a default comes after every one without, and one without after one with is
 `syntax`; the parameter's name stands as a value of its type; a value of a type that does not widen to the
-constant's (T8), or a type, where the constant stands is `type-mismatch` (T1); a call that writes no type arguments takes each
-constant's default, and a parameter with none is `cannot-infer` (T27); a function with such a
+constant's (T8), or a type, where the constant stands is `type-mismatch` (T1); no argument's type carries a
+constant, so a constant is never inferred, and a call that writes no type arguments infers each parameter
+that holds a type and takes each constant's default, `F("a")` for `void F<T, const int N = 4>(T x)`, and a
+constant with none is `cannot-infer` (T27); a function with such a
 parameter is checked in each copy a call makes, as one that reads its type is (T33))* A variable, a parameter, a
 loop's variable, a binding of a `match` arm or a lambda's parameter named like that type parameter in the function is
 `redeclared`, as for any type parameter: a parameter of the function from its text in every case (§4, the owner,

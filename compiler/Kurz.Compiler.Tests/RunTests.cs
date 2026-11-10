@@ -113,7 +113,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 456 : 557;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 456 : 558;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -130,6 +130,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/read-buffer-limit.kz", "system/read-buffer-second.kz", "system/read-buffer-close-stream.kz", "system/consume-closed.kz",
         "system/consume-closed-negative.kz", "system/read-buffer-zero-closed.kz",
         "system/seek-read.kz", "system/seek-write.kz", "system/seek-fill.kz", "system/seek-negative.kz", "system/seek-stream.kz",
+        "system/seek-closed.kz",
         "http/request-read.kz", "http/request-refused.kz", "http/request-refused-unsupported.kz", "http/request-body.kz",
         "http/request-body-errors.kz", "http/request-continue.kz", "http/request-limits.kz", "http/request-trailer.kz",
         "http/response-write.kz", "http/response-head.kz", "http/response-bodiless.kz", "http/response-unwritable.kz",

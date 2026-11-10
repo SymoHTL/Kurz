@@ -21,8 +21,9 @@
 // kept, `chunked` added; a response written again is written whole again, its head and the end of its body, its function called
 // again with a writer of its own (W11, assumed); a `Content-Length` the handler set that is no number is `InvalidInput` with nothing
 // written (W11, assumed); a function's `IoError` after its first write ends the body without its last chunk (W11, assumed), and one
-// before it is answered `500` with `Connection: close` in place of the head, under a `Content-Length` the handler set too (section 12,
-// the owner, 2026-11-09, #411, comment 6735967844), `Write` giving that error either way (W11, assumed); `WriteHead` writes the head
+// before it is answered `500` with `Connection: close` in place of the head (section 12, the owner, 2026-11-09, #411, comment
+// 6735967844), under a `Content-Length` the handler set too (W11, assumed: a reading of #412, comment 6740344904, "500 + close,
+// as #411"), `Write` giving that error either way (W11, assumed); `WriteHead` writes the head
 // alone and calls no function (W11, assumed); and a writer kept past its call gives `IoError(InvalidInput)` and writes nothing
 class Keeper {
     pub mut List<HttpWriter> Kept = List<HttpWriter>()

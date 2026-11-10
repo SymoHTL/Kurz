@@ -1213,7 +1213,8 @@ program could use as a name). `: base(...)` picks among the constructors of the 
 construction does, and its arguments read the parameters and no instance, as those of `: this(...)`
 do, so that a field's name there is `unknown-name` (V10) *(assumed, §4: the build's reading)*. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
 `: this(...)` nor `: base(...)` runs the constructor of the base that a call with no arguments
-reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13) *(assumed,
+reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13), two that
+such a call reaches alike being `ambiguous-call` *(assumed,
 §4: the build's reading of "a call with no arguments reaches")*, as C#'s
 implied `base()` does, and so does the empty constructor of a class without one; where the base has
 no such constructor, that constructor is `argument-mismatch`, at its line or at the class's, as C#
@@ -1280,6 +1281,20 @@ class Dog : Animal {
 }
 
 print(Dog().Legs)
+```
+
+Case: [classes/base-constructor-ambiguous.kz](../corpus/classes/base-constructor-ambiguous.kz)
+```kurz
+class P {
+    pub P(int x = 1) { }
+    pub P(string s = "") { }
+}
+
+class Q : P {
+    pub Q() { }
+}
+
+print(Q() == Q())
 ```
 
 Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)

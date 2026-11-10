@@ -633,6 +633,32 @@ SizeOf = 1
 print(SizeOf)
 ```
 
+Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
+```kurz
+class Animal(string Name) {
+    pub Animal(int legs) : this("legs {legs}") {
+        print("Animal {legs}")
+    }
+}
+
+class Dog : Animal {
+    pub Dog(int legs) : base(legs) {
+        print("Dog {Name}")
+    }
+
+    pub Dog(string name) : base(name) { }
+}
+
+class Pet(string Name = "pet")
+
+class Cat : Pet
+
+base = Dog(4) // a name here: `base` is a word right after a constructor's `:` alone (L18)
+print(base.Name)
+print(Dog("rex").Name)
+print(Cat().Name)
+```
+
 ### L19 (decided, §8) The names of the built-in types are core words
 
 The names of the built-in types are core words beside L18's list: `sbyte`, `byte`, `short`,
