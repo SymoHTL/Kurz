@@ -440,12 +440,12 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>S17 to S21, A17: the names of processes and of standard error, which every file sees (section 12, the owner, 2026-11-01),
-    /// so that a file's own declaration of one is <c>redeclared</c> (V9).</summary>
+    /// <summary>S17 to S21: the names of processes, which every file sees (section 12, the owner, 2026-11-01), so that a file's own
+    /// declaration of one is <c>redeclared</c> (V9).</summary>
     private static bool IsProcessName(string name) =>
-        name is "Command" or "ChildProcess" or "ProcessOutput" or "ExitStatus" or "Stdio" or "ExitError" or "eprint";
+        name is "Command" or "ChildProcess" or "ProcessOutput" or "ExitStatus" or "Stdio" or "ExitError";
 
-    /// <summary>S17 to S21, A17: a name of <see cref="IsProcessName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    /// <summary>S17 to S21: a name of <see cref="IsProcessName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
     private bool UnreadProcessName(string name, int line)
     {
         if (!IsProcessName(name))
@@ -453,7 +453,7 @@ public sealed partial class Checker
             return false;
         }
 
-        NotSupported(line, $"processes and standard error, `{name}` (S17 to S21, A17)");
+        NotSupported(line, $"processes, `{name}` (S17 to S21)");
         return true;
     }
 
@@ -1745,13 +1745,13 @@ public sealed partial class Checker
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
-    /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
+    /// The names the reference gives: <c>print</c> (A1) and <c>eprint</c> (A17), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
     /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), <c>Stdin</c> (S22), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
     /// <c>Environment</c> (R18, the owner, 2026-11-01), <c>Hint</c> (F18), and <c>Log</c> (P1).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Stdin" or "Log" || IsHashName(name)
+        name is "print" or "eprint" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Stdin" or "Log" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
 
     /// <summary>
