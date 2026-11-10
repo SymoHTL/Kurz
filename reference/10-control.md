@@ -127,23 +127,31 @@ case (O8), and the `match` has `else` or the case's own arm after it (§5, the o
 comment 6573113786, against a compile error). An arm may also name an interface that cases of the union implement, or a class that
 cases derive from, directly or through a class between: it covers exactly those cases, which each case's class decides while the
 program compiles, takes them by the case the value holds, with no test of the instance's class at run time, and counts for O8 (§5, the owner, 2026-11-09, #408, comments 6737367326 and 6737634153, against the
-refusal as built). Such an arm is `unreachable-arm` only when every case it covers is taken by the arms above it, as C# reads a
+refusal as built). What such an arm does over a case whose type an `impl` block declares to implement the interface stands
+open (§14). Such an arm is `unreachable-arm` only when every case it covers is taken by the arms above it, as C# reads a
 pattern that earlier ones subsume, and an arm of such a case after it is `unreachable-arm` too (§5, the owner, 2026-11-09, #408,
 comment 6737634153, against any overlap being an error). An `else` arm after arms that cover every case, and a
 literal arm (C9) after the arm of its type, are `unreachable-arm` too (the owner, 2026-10-10). A literal
 arm after an arm with the same literal is `unreachable-arm` as well, as C# reports a pattern an
 earlier one handles; an arm that names a type that is no case of the union, derived from none and implementing none,
+that no case derives from or implements, and that tests no case at run time,
 `string s` in a `match` over `Yes | No`, is `type-mismatch` (T1) at the arm, as C# refuses a pattern
 of a type the value cannot have (the owner, 2026-10-11, confirming the reading proposed after the review of round 14),
-and so is an arm of an interface that no case implements or of a class that no case derives from (§5). An arm of a `data` type covers the cases
+and so is an arm of an interface that no case implements, or of a class that no case derives from, where it tests no case at
+run time (§5). An arm of a `data` type covers the cases
 whose `data` types derive from it (D6), as an arm of a base class does (§5, the owner, 2026-11-09, #408, comment 6748445211,
 "Cover, as a base class", against `type-mismatch` as built). An arm of an interface over a case that is another interface
 tests at run time whether the class of the instance implements the arm's interface too, as C#'s `is` does, and covers no case
 (O8), so the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-09, #408, comment 6748445211, "Test at run time, as C#", against
-`type-mismatch` as built; the cost is a search per such arm, one comparison of the instance's table for each class of the program
-that implements both); where no class of the program implements both, it is `type-mismatch` *(assumed, §5: the reading of
-2026-10-11 over the program compiled whole)*. Such an arm is `unreachable-arm` where the arms above take every case it tests,
-as an arm that can never run is (§5, the owner, 2026-10-09). Which classes
+`type-mismatch` as built; the cost is a search of the class's interface table per such arm), the search being one comparison of the
+instance's table for each class of the program that implements both *(assumed, §5: the build's search, which the answer
+does not name)*; where no class of the program implements both, it is `type-mismatch` *(assumed, §5: the reading of
+2026-10-11 over the program compiled whole)* where it covers no case either, while `Shape s` over `Dot | Named`, whose
+class `Dot` implements `Shape`, covers `Dot` and is no error (§5, the owner, 2026-11-10, issue 39, comment 6763339742,
+"As built"); how a package built without the program that uses it reads such an arm stands
+open (§14). Such an arm is `unreachable-arm` where the arms above take every case it tests,
+as an arm that can never run is, and so is an arm of a class that implements both after it, `Shape s` then `Dot d` over
+`Named | int`, since the earlier arm covers its type (§5, the owner, 2026-10-09). Which classes
 derive from a class and which implement an
 interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
 A value whose type is a type parameter is C10's.
@@ -393,6 +401,34 @@ print(Show(Tag("t")))
 print(Show(5))
 print(Area(Dot()))
 print(Area(Tag("u")))
+```
+
+Case: [control/match-interface-arm-covers-a-class.kz](../corpus/control/match-interface-arm-covers-a-class.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Tag(string Text) : Named {
+    pub string Name() => Text
+}
+
+// no class implements both `Shape` and `Named`: the arm of `Shape` covers the case `Dot`, and so is no `type-mismatch`
+string Show(Dot | Named v) => match v {
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+}
+
+print(Show(Dot()))
+print(Show(Tag("t")))
 ```
 
 Case: [control/match-arm-no-case.kz](../corpus/control/match-arm-no-case.kz)

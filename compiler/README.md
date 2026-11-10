@@ -1658,12 +1658,17 @@ ask about it.
   of the classes derived from the arm's, which a closed program would allow, since each table then holds
   one word more and no table the program would not name otherwise is laid out but a base's; the walk is a
   load and a comparison per base, which nothing measured *(assumed: the owner chose the test, #110, and
-  not its mechanism)*; an arm of an interface or of a base class over a union (C4) needs no such test,
+  not its mechanism)*; an arm of an interface or of a base class over a union (C4) needs no such test
+  for the cases that implement it or derive from it,
   since the checker decides which cases implement it or derive from it from the classes of the program,
   compiled whole, and the tag picks them (the owner, 2026-11-09, #408, comments 6737367326 and
-  6737634153). Pinned by `CheckerTests`, by `EmitterTests` for the layout, by the interface and class-arm
-  programs of `ListTests` and by the cases `control/match-interface-arm.kz` and
-  `control/match-base-class-arm.kz`.
+  6737634153), while an arm of an interface over a case that is another interface tests the class by a
+  search, one comparison of the instance's table for that interface with the one of each class of the
+  program that implements both *(assumed: the owner chose the test, #408, comment 6748445211, and not its
+  mechanism)*. Pinned by `CheckerTests`, by `EmitterTests` for the layout, by the interface and class-arm
+  programs of `ListTests` and by the cases `control/match-interface-arm.kz`,
+  `control/match-base-class-arm.kz`, `control/match-interface-test.kz`, `control/match-data-base-arm.kz`
+  and `outcomes/else-interface-arm.kz`.
 
 ## What the compiler says about a program
 
