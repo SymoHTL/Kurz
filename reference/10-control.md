@@ -121,10 +121,12 @@ a case (D6, K6), `Admin` where the case is `User`; and an arm that can never run
 arm covers its type, is the compile error `unreachable-arm` (the owner, 2026-10-09, against arms
 that name cases only, under which a `match` cannot tell an `Admin` from a `User`; the cost is a row
 in the table and a subtype check per arm). An arm may name a class that implements an interface that
-is a case as well, which tests the class of the instance at run time, as C#'s `is` does; no list of the
-classes that implement an interface, or that derive from a class, is closed, so such an arm covers no
-case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
-comment 6573113786, against a compile error). An arm may also name an interface that cases of the union implement, or a class that
+is a case as well, which tests the class of the instance at run time, as C#'s `is` does; such an arm
+covers no case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
+comment 6573113786, against a compile error). It covers no case where the arms take every class of
+the program that implements the interface or derives from the class, too, as arms of those classes never
+complete a C# `switch` over the interface or the class (§5, the owner, 2026-11-10, #430, comment
+6762143993). An arm may also name an interface that cases of the union implement, or a class that
 cases derive from, directly or through a class between: it covers exactly those cases, which each case's class decides while the
 program compiles, takes them by the case the value holds, with no test of the instance's class at run time, and counts for O8 (§5, the owner, 2026-11-09, #408, comments 6737367326 and 6737634153, against the
 refusal as built). What such an arm does over a case whose type an `impl` block declares to implement the interface stands
@@ -154,6 +156,9 @@ as an arm that can never run is, and so is an arm of a class that implements bot
 `Named | int`, since the earlier arm covers its type (§5, the owner, 2026-10-09). Which classes
 derive from a class and which implement an
 interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
+An arm that tests the class of the instance at run time makes no later such arm `unreachable-arm` by the classes the
+program has: `Dot d` then `Shape s` over `Named | int`, where `Dot` is the only class that implements both, compiles,
+and its `Shape s` arm never runs (§5, the owner, 2026-11-10, #430, comment 6762143993).
 A value whose type is a type parameter is C10's.
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
@@ -401,6 +406,32 @@ print(Show(Tag("t")))
 print(Show(5))
 print(Area(Dot()))
 print(Area(Tag("u")))
+```
+
+Case: [control/match-interface-test-after-class.kz](../corpus/control/match-interface-test-after-class.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+string Show(Named | int v) => match v {
+    Dot d => "dot"
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+print(Show(Dot()))
+print(Show(5))
 ```
 
 Case: [control/match-interface-arm-covers-a-class.kz](../corpus/control/match-interface-arm-covers-a-class.kz)
