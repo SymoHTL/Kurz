@@ -1034,6 +1034,15 @@ public sealed class ParserTests
         Assert.Equal((ErrorIds.Syntax, 1), Errors("const assert(int x)\n{\n    return const(x)\n}").First());
     }
 
+    [Fact]
+    public void An_arrow_on_the_next_line_decides_nothing()
+    {
+        // L4 with T37: nothing else continues a statement, so the end of the line after the `)` ends it, and an `=>` on the next line
+        // leaves the line a `const assert`, whose parentheses hold no condition and text, as a `{` there does (assumed: the reading
+        // of #346's walk, issue 39, comment 6749282432, item 3)
+        Assert.Equal((ErrorIds.Syntax, 1), Errors("const assert(int x)\n    => const(x)").First());
+    }
+
     [Theory]
     [InlineData("const assert(true, 5)")]
     [InlineData("const assert(true, n)")]
