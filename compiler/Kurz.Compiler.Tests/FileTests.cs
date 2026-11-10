@@ -471,6 +471,93 @@ public sealed class FileTests(Toolchain toolchain) : IClassFixture<Toolchain>
         RanWithCloseInFlight(LockAtRead, "lock-at-read", ["1", "1", "5", "-1", "0", "0"], ["raw"], WithTheLockAtEveryRead);
     }
 
+    private const string LockAtSeek = Armed + """
+        static mut int seen = 0
+
+        // the lock word of the handle the system's seek moves, as that call starts, which the IR of the fact writes into `seen`; -1 where
+        // no seek of the system was made since `Unseen`
+        int Seen() {
+            mut shown = 0
+            raw {
+                shown = seen
+            }
+
+            return shown
+        }
+
+        void Unseen() {
+            raw {
+                seen = -1
+            }
+        }
+
+        void | IoError Seeks() {
+            File.WriteAll("lock-at-seek.txt", "abcdef".Bytes)
+            f = File.Open("lock-at-seek.txt")
+            File.Delete("lock-at-seek.txt")
+            mut bytes = Bytes()
+            print(f.Read(mut bytes, 1))
+            Unseen()
+            f.Seek(2)
+            print(Seen())
+            print(f.Read(mut bytes, 10))
+            f.Close()
+        }
+
+        Seeks() else {
+            IoError e => print(e)
+        }
+
+        """;
+
+    /// <summary>
+    /// The IR of <paramref name="ir"/>, a program of <see cref="LockAtSeek"/>, in which every call of the runtime's <c>Seek</c> writes into
+    /// <c>seen</c>, as it starts, the lock word of the handle the last call in flight entered, as <see cref="WithTheLockAtEveryRead"/> writes it.
+    /// </summary>
+    private static string WithTheLockAtTheSeek(string ir)
+    {
+        var seen = SeenOf(ir);
+        const string Enter = "call i1 @\"test.enter.close\"(ptr ";
+        Assert.Contains(Enter, ir, StringComparison.Ordinal);
+        var seeks = new System.Text.RegularExpressions.Regex("call i64 (@\"[^\"]*\\.Seek\\.[^\"]*\")\\(i32 ");
+        Assert.Matches(seeks, ir);
+        ir = seeks.Replace(ir.Replace(Enter, "call i1 @\"test.enter.note\"(ptr ", StringComparison.Ordinal), "call i64 @\"test.seek\"(ptr $1, i32 ");
+        return ir + $$"""
+
+            @"test.handle" = internal global ptr null
+
+            define internal i1 @"test.enter.note"(ptr %handle) {
+              store ptr %handle, ptr @"test.handle"
+              %entered = call i1 @"test.enter.close"(ptr %handle)
+              ret i1 %entered
+            }
+
+            define internal i64 @"test.seek"(ptr %seek, i32 %fd, i64 %offset) {
+              %handle = load ptr, ptr @"test.handle"
+              %none = icmp eq ptr %handle, null
+              br i1 %none, label %go, label %note
+            note:
+              %field = getelementptr i8, ptr %handle, i64 48
+              %lock = load atomic i32, ptr %field monotonic, align 4
+              store i32 %lock, ptr {{seen}}
+              br label %go
+            go:
+              %r = call i64 %seek(i32 %fd, i64 %offset)
+              ret i64 %r
+            }
+
+            """;
+    }
+
+    [Fact]
+    public void A_seek_holds_the_lock_of_the_buffer_while_its_call_of_the_system_runs()
+    {
+        // S27: a read of 1 byte fills the buffer with the file's 6; the seek to 2 holds the buffer's lock while the system moves the
+        // position, so that no fill through another holder puts the bytes of the old position after it, and the read after it takes the
+        // 4 bytes from 2 on, the buffer dropped
+        RanWithCloseInFlight(LockAtSeek, "lock-at-seek", ["1", "1", "4"], ["raw"], WithTheLockAtTheSeek);
+    }
+
     private const string ReadsCounted = Armed + """
         static mut int seen = 0
 

@@ -1,0 +1,39 @@
+// expect: output
+// | NotSeekable
+// | 29
+// | hello
+// rules: S27
+
+string Text(Bytes bytes) {
+    text = string.FromUtf8(bytes) else {
+        InvalidUtf8 => "?"
+    }
+
+    return text
+}
+
+// a stream cannot seek: the system's `ESPIPE` is `NotSeekable`, and the failed seek keeps the bytes the buffer holds for the read
+// after it
+void | IoError Run() {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write("hello".Bytes)
+    client.ShutdownWrite()
+    mut seen = Bytes()
+    server.Fill(mut seen)
+    server.Seek(0) else {
+        IoError e => {
+            print(e.Kind)
+            print(e.Code)
+        }
+    }
+
+    mut read = Bytes()
+    server.Read(mut read, 100)
+    print(Text(read))
+}
+
+Run() else {
+    IoError e => print(e)
+}

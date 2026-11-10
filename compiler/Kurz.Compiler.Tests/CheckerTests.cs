@@ -505,8 +505,9 @@ public sealed class CheckerTests
     [Fact]
     public void A_time_of_a_count_takes_a_number_that_widens_to_long_or_double_and_a_constant_that_does_not_fit_is_constant_overflow()
     {
-        // T38 (section 4, the owner, 2026-11-08, G4 (b), "Also a double, as C#"): an integer type that widens to `long` takes the `long`
-        // form, any other number the `double` form, a `ulong` and a `float` among them, and a type that widens to neither is type-mismatch
+        // T38 (section 4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also a double, as C#"): an integer type that widens to
+        // `long` takes the `long` form, any other number the `double` form, a `ulong` and a `float` among them, and a type that widens to
+        // neither is type-mismatch
         Clean("int n = 5\nprint(duration.FromSeconds(n))\nprint(timestamp.FromUnixMilliseconds(n))");
         Clean("ulong u = 5\nprint(duration.FromMinutes(u))");
         Clean("float f = float(1.5)\nprint(duration.FromHours(f))");
@@ -514,10 +515,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 1)], Errors("print(timestamp.FromUnixSeconds(true))"));
 
         // T6: a constant count whose time does not fit is constant-overflow at the count's line, of a `long` and of a `double`; the
-        // largest counts that fit are clean
-        Clean("print(duration.FromDays(106751))\nprint(duration.FromSeconds(9223372036.854))");
+        // largest counts that fit are clean, and the next count of each is the error
+        Clean("print(duration.FromDays(106751))\nprint(duration.FromSeconds(9223372036.854774))");
         Assert.Equal([(ErrorIds.ConstantOverflow, 2)], Errors("print(1s)\nprint(duration.FromDays(106752))"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromSeconds(9223372036.854776))"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(timestamp.FromUnixSeconds(9223372037.0))"));
+
+        // a `ulong` constant takes the `double` form and is decided by the double the program computes of it: 2^63 - 1 is 2^63 there,
+        // which no duration holds, and 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
+        Clean("print(duration.FromNanoseconds(9223372036854775295UL))");
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromNanoseconds(9223372036854775807UL))"));
+        Assert.Contains("rounded to the nearest `double` first; `long(...)` keeps", ErrorText("print(duration.FromNanoseconds(9223372036854775807UL))"), StringComparison.Ordinal);
 
         // V10: the constructors of one type are no members of the other
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(timestamp.FromSeconds(5))"));
@@ -2629,6 +2637,17 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_file_and_a_stream_seek_to_a_long_and_a_listener_does_not()
+    {
+        // S27: a file's and a stream's `Seek` take an offset that is a `long`, an `int` widened to it; a listener has no `Seek`, and an
+        // offset of another type, a `string`, is `type-mismatch` against the `long` of `Seek`'s one form
+        const string Program = "void | IoError Moved() {\n    f = File.Open(\"a\")\n    long at = 3\n    f.Seek(at)\n    f.Seek(1)\n    l = TcpListener.Bind(\"127.0.0.1:0\")\n    c = TcpStream.Connect(\"127.0.0.1:{l.Port}\")\n    c.Seek(0)\n}\n\nMoved() else {\n    IoError e => print(e)\n}";
+        Clean(Program); // the positive control
+        Assert.Equal([(ErrorIds.UnknownName, 9)], Errors(Program.Replace("c.Seek(0)", "c.Close()\n    l.Seek(0)", StringComparison.Ordinal)));
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(Program.Replace("f.Seek(1)", "f.Seek(\"1\")", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void A_stream_sets_the_time_of_its_reads_and_writes_and_connect_has_a_second_form_with_a_time()
     {
         // S9: a stream's setters take a `duration?`, `null` for no bound, and `Connect`'s second form a `duration`; a listener and a file have
@@ -3680,6 +3699,17 @@ public sealed class CheckerTests
     }
 
     [Theory]
+    [InlineData("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = this.Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()", 8)] // `this.Log`
+    [InlineData("class Audit {\n    string Tag = Log()\n\n    string Log() {\n        return \"m\"\n    }\n\n    pub void Run() {\n        print(Tag)\n    }\n}\n\nAudit().Run()", 2)] // `Log()` for a method named `Log`
+    public void In_a_fields_default_of_a_type_with_a_member_named_log_this_log_and_a_method_log_are_unknown_name(string program, int line)
+    {
+        // P1 in a field's default, where K7 reads no `this` and no method of the instance
+        Assert.Equal([(ErrorIds.UnknownName, line)], Errors(program));
+        // the positive control: `Log` alone reaches a parameter of the primary constructor
+        Clean("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()");
+    }
+
+    [Theory]
     [InlineData("f = Log.Information\nprint(f)", ErrorIds.UnknownName)]
     [InlineData("y = Log\nprint(y)", ErrorIds.UnknownName)]
     [InlineData("x = Log.Information(\"a\")\nprint(x)", ErrorIds.Syntax)]
@@ -4406,6 +4436,19 @@ public sealed class CheckerTests
         var (via, _) = CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nf = () => w(1)\nprint(f())\n", watched);
         Assert.Equal([(ErrorIds.ReferenceCycle, 3)], via.Items.Select(d => (d.Id, d.Line)));
         Assert.Empty(CheckSeeingStd("h = HttpHeaders()\nw = h.Watch()\nprint(w(1))\n", watched).Diagnostics.Items);
+        // the least line of the file a lambda of std/ comes through, found in a later pass: `y` at line 4 is counted first and gives the
+        // `(string) => int` lambda of std/ its line, `x` at line 3 only in the pass after, through `y`'s `(int) => int`, and its own
+        // capture of that lambda lowers the line to 3
+        var named = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n\n    pub (string) => int Named() => (string k) => OnChange() + k.Bytes.Count\n"));
+        var (lower, _) = CheckSeeingStd("h = HttpHeaders()\ns = h.Named()\nx = (int n) => s(\"a\") + n\ny = () => x(1) + s(\"b\")\nprint(y())\n", named);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 3)], lower.Items.Select(d => (d.Id, d.Line)));
+        // a lambda of a generic function of the file that the field counts and that captures a value of its type parameter makes the
+        // field count every lambda (R9, the owner, 2026-11-04, #110, comment 6643368937, a captured value's type read as on the way, R9,
+        // assumed), so a lambda of std/ that captures the class closes the ring, reported at that lambda; without the type parameter
+        // nothing in the file closes it
+        var (open, _) = CheckSeeingStd("T Keep<T>(T x) {\n    f = () => x\n    return f()\n}\n\nprint(Keep(1))\n", named);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 2)], open.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd("int Keep(int x) {\n    f = () => x\n    return f()\n}\n\nprint(Keep(1))\n", named).Diagnostics.Items);
         var (through, _) = CheckSeeingStd("class App(mut HttpHeaders? H)\n\nint Zero(App app) => 0\n\na = App(null)\nh = HttpHeaders()\nh.OnChange = () => Zero(a)\na.H = h\n", runtime);
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
         // the positive control: no lambda of the file captures an instance
@@ -6054,6 +6097,10 @@ public sealed class CheckerTests
     [InlineData("void Name<const string S>() {\n    print(x)\n}\n\nName<1>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|5: unknown-name: no `x` is visible here (V10)")]
     [InlineData("void Name<const string S>() {\n}\n\nName<1, 2>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|7: syntax: `Name` takes 1 type arguments (T19; E4 for another count)")]
     [InlineData("void Name<const string S>(int a) {\n    print(a)\n}\n\nName<1>(\"x\")", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|8: type-mismatch: a `string` where an `int` is required (T1)")]
+    [InlineData("void Name<const string S>() {\n}\n\nName()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)|7: cannot-infer: the type arguments are neither written nor inferable from the arguments (T27)")]
+    [InlineData("void Name<const string S = \"a\">() {\n}\n\nName()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Name<const string S>() {\n}\n\nName<Missing>()", "4: syntax: `string` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
+    [InlineData("void Say<const Mode M>() {\n}\n\nSay<Missing>()", "7: unknown-name: no type named `Missing` is visible here (V10)")]
     [InlineData("void Real<const double D>() {\n}\n\nprint(1)", "4: syntax: `double` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)")]
     [InlineData("void Late<const Mode M = Mode.Plain, T>(T x) {\n    print(x)\n}", "4: syntax: the type parameter `T` without a default follows one with a default (T35)")]
     [InlineData("void Typed<const Mode M>(M x) {\n}", "4: unknown-name: no type named `M` is visible here: `M` holds a constant of `Mode` (V10, T35)")]
@@ -6094,7 +6141,9 @@ public sealed class CheckerTests
         // checked as a parameter's default value is, against the parameter's type (T1), its range (T6) and a constant (F12); a default, or a constant's type, that was not read gives the calls no second error, and the type of
         // a constant that names such a parameter none either, while a body whose constant's type was not read, or is outside the list, is read, and its own
         // error is reported, as before T35's refusals, and the uses of its constant none (E1); an argument past every type parameter, a
-        // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); the
+        // literal, an `enum`'s value, a constant's name or a type, carries the count alone (E1); a type argument at a constant whose type
+        // was not read is not read, so its own error, an unknown name, is not reported, while a call that writes none takes the default
+        // or is `cannot-infer` as for any call (T27, E1); the
         // constant is a value of its type in the body; `f(a < 64, c > (d))` is the call `a<64, c>(d)` (the owner, 2026-11-02)
         Assert.Equal(expected.Split('|'), Check(Modes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
     }
@@ -6242,6 +6291,38 @@ public sealed class CheckerTests
         {
             Assert.Equal(["7: redeclared: `T` is a type parameter of the function around it (V9)"], Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
             Assert.Equal(bound.Split('|'), Check(Shapes + control).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        }
+    }
+
+    [Fact]
+    public void A_parameter_named_like_a_type_parameter_leaves_the_rest_of_a_copy_as_it_reads_without_it()
+    {
+        // T33, E1 (section 4, assumed with the build): in a copy the name of a constant's refused parameter reads that parameter, not the
+        // constant's value, so that its `redeclared` is the one error, where the same program without the parameter reports the use
+        Assert.Equal(["7: redeclared: `N` is a type parameter of the function around it (V9)"],
+            Check(Shapes + "void F<const int N>(int N) {\n    string s = N\n    print(s)\n}\n\nF<1>(2)").Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+        Assert.Equal(["8: type-mismatch: an `int` where a `string` is required (T1)"],
+            Check(Shapes + "void F<const int N>() {\n    string s = N\n    print(s)\n}\n\nF<1>()").Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+
+        // the name in a type position reads the type parameter, the body of a loop over `T.Fields` and of a `match` arm on `T.Kind` are
+        // checked as any block, and the copy is still made and checked, so that a loop over another type parameter's fields reports what
+        // the type it binds gives: each program reports, beside the `redeclared`, what its control, the same program without the
+        // parameter, reports
+        (string Program, int Line, string Errors)[] rows =
+        [
+            ("void Zero<T>(int T) {\n    T r = 1\n    print(r)\n}\n\nZero<string>(1)", 7, "8: type-mismatch: an `int` where a `T` is required (T1)|9: no-text: a `T` has no text to print (A4, A7, A10)"),
+            ("void Other<U>(U u) {\n    print(1)\n}\n\nvoid Pass<T>(int T) {\n    Other<T>(\"x\")\n}\n\nPass<long>(1)", 11, "12: type-mismatch: a `string` where a `T` is required (T1)"),
+            ("void Opt<T>(int T) {\n    T? x = \"a\"\n    print(1)\n}\n\nOpt<long>(1)", 7, "8: type-mismatch: a `string` where a `T?` is required (T1)|8: unused-variable: `x` is never read (V5)"),
+            ("void Each<T>(int T) {\n    for f in T.Fields {\n        int bad = \"a\"\n        print(bad)\n    }\n}\n\nEach<Named>(1)", 7, "9: type-mismatch: a `string` where an `int` is required (T1)"),
+            ("void Kind<T>(int T) {\n    match T.Kind {\n        TypeKind.Data => {\n            int bad = \"a\"\n            print(bad)\n        }\n    }\n}\n\nKind<Named>(1)", 7, "10: type-mismatch: a `string` where an `int` is required (T1)"),
+            ("void Each<T, U>(int T) {\n    for f in U.Fields {\n        print(f.Name)\n    }\n}\n\nEach<long, long>(1)", 7, "13: kind-not-read: `Each<long, long>`: `long` is of the kind `TypeKind.Long`, and `U.Fields` in `Each` walks the fields of a `data` type alone (T33)"),
+        ];
+        foreach (var (program, line, errors) in rows)
+        {
+            var control = program.Replace("(int T)", "()").Replace(">(1)", ">()");
+            Assert.NotEqual(program, control);
+            Assert.Equal([$"{line}: redeclared: `T` is a type parameter of the function around it (V9)", .. errors.Split('|')], Check(Shapes + program).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
+            Assert.Equal(errors.Split('|'), Check(Shapes + control).Diagnostics.Sorted.Select(d => $"{d.Line}: {d.Id}: {d.Message}"));
         }
     }
 
