@@ -1240,6 +1240,8 @@ without a primary constructor and without a base class, `: base(...)` is `syntax
 constructor and no base class it is `constructor-must-chain`, since that constructor calls the
 primary one first (§4, the owner, 2026-11-09, #429, comment 6752598091), and in one of a class with
 a primary constructor and a base class too (§4, the owner, 2026-11-10, #435, comment 6762144386).
+Such a constructor reports `constructor-must-chain` alone: the arguments of its `: base(...)` are
+not read *(assumed, §4: the build's reading, which #441's walk names, issue 39, comment 6767149029)*.
 
 Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
 ```kurz
