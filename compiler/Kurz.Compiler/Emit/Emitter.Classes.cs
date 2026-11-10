@@ -441,6 +441,29 @@ public sealed partial class Emitter
     }
 
     /// <summary>
+    /// C4 with K6: whether the instance a value of the interface <paramref name="from"/> holds is of a class that implements the interface
+    /// <paramref name="arm"/> too, and that value as the arm's interface (section 5, the owner, 2026-11-09, #408, comment 6748445211, "Test at
+    /// run time, as C#"). The table a value of an interface carries is its instance's class's own for the interface, so the test is a search:
+    /// the table is compared with the one for <paramref name="from"/> of each class of the program that implements both, and the value takes
+    /// that class's table for <paramref name="arm"/>.
+    /// </summary>
+    private (string Holds, string Value) FaceArm(string value, InterfaceSymbol from, InterfaceSymbol arm)
+    {
+        var address = fn.Value($"extractvalue %kz.obj {value}, 0");
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var holds = "false";
+        var found = "null";
+        foreach (var symbol in Model.Classes.Where(c => c.Implements(from) && c.Implements(arm)))
+        {
+            var same = fn.Value($"icmp eq ptr {table}, {InterfaceTable(symbol, from)}");
+            holds = fn.Value($"or i1 {holds}, {same}");
+            found = fn.Value($"select i1 {same}, ptr {InterfaceTable(symbol, arm)}, ptr {found}");
+        }
+
+        return (holds, Pair(address, found));
+    }
+
+    /// <summary>
     /// C4 with K6: whether the class whose table <paramref name="table"/> is, null for none, is <paramref name="arm"/> or derives from
     /// it: one comparison where nothing derives from the arm's class, else a walk through the tables' links.
     /// </summary>
@@ -586,7 +609,9 @@ public sealed partial class Emitter
         if (c.Callee is MemberAccess { Target: var target } && TypeOf(target) is InterfaceType face)
         {
             // the receiver is borrowed past the arguments, as a class's is below: one read from a field holds a count of its own to the end
-            // of the statement (InstanceField), and one in a variable cannot change while they run (M7, F15, F16)
+            // of the statement (InstanceField), and one in a variable cannot change while they run (M7, F15, F16); one read from an item
+            // is kept by what keeps its list: a list read from a field holds a count of its own (InstanceField), and a call that takes a
+            // list in a variable as `mut` while its item is in use is `changed-while-held` (M7)
             var value = EmitExpression(target);
             var passed = Arguments(
                 c,
