@@ -203,7 +203,7 @@ public sealed partial class Checker
                     return Typed.Error;
                 }
 
-                return RealValue(d, target, line);
+                return RealValue(d, target, line, value.ToString(CultureInfo.InvariantCulture));
             }
 
             if (Types.IsDecimal(target))
@@ -258,15 +258,18 @@ public sealed partial class Checker
         }
 
         var type = literal.Suffix == "f" ? Types.Float : literal.Suffix.Length == 0 && target is not null && Types.IsFloating(target) ? target : Types.Double;
-        return RealValue(negative ? -d : d, type, line);
+        return RealValue(negative ? -d : d, type, line, negative ? "-" + literal.Text : literal.Text);
     }
 
-    /// <summary>A floating-point value in its type, rounded to <c>float</c> where that is the type; <c>constant-overflow</c> for a literal beyond the range (L11).</summary>
-    private Typed RealValue(double value, PrimitiveType type, int line)
+    /// <summary>
+    /// A floating-point value in its type, rounded to <c>float</c> from the <paramref name="digits"/> that write it where that is the
+    /// type (<see cref="FloatOf(string)"/>); <c>constant-overflow</c> for a literal beyond the range (L11).
+    /// </summary>
+    private Typed RealValue(double value, PrimitiveType type, int line, string digits)
     {
         if (type.Kind == Primitive.Float)
         {
-            var f = (float)value;
+            var f = FloatOf(digits);
             if (float.IsInfinity(f) && !double.IsInfinity(value))
             {
                 Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `float` (T6, L11)");
@@ -278,6 +281,17 @@ public sealed partial class Checker
 
         return new Typed(type, new RealConstant(value));
     }
+
+    /// <summary>
+    /// T23, L11: the <c>float</c> nearest the value the digits write, rounded once, from the digits, as C# folds a constant into
+    /// <c>float</c> and as its <c>float.Parse</c> reads digits since .NET Core 3.0; the <c>double</c> of the digits rounded again to
+    /// <c>float</c> is another value where that <c>double</c> lands on the midpoint of two <c>float</c> values, 2^53 + 2^29 + 1 among
+    /// them. Beyond the range it is an infinity.
+    /// </summary>
+    private static float FloatOf(string digits) => float.Parse(digits, NumberStyles.Float, CultureInfo.InvariantCulture);
+
+    /// <summary>The <c>float</c> nearest an integer, rounded once (<see cref="FloatOf(string)"/>).</summary>
+    private static float FloatOf(BigInteger value) => FloatOf(value.ToString(CultureInfo.InvariantCulture));
 
     private Typed CheckUnit(UnitLiteralValue literal, int line, KurzType? expected, bool negative)
     {

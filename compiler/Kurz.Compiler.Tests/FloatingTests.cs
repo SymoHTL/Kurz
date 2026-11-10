@@ -274,6 +274,36 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     }
 
     [Fact]
+    public void A_constant_typed_float_is_rounded_once_as_the_run_time_conversion_is()
+    {
+        // T23, L11: 2^53 + 2^29 + 1 and the digits just above 1 + 2^-24 each lie just above the midpoint of two floats, and their
+        // doubles lie on it, so a fold through `double` gave the lower float; the literal, the written conversion and a suffix give the
+        // nearest float, as the conversion of a `long` at run time does and as C# does; a written conversion reaches a literal without a
+        // suffix (T10), and folds the `long` of one with `L`; a tie goes to the even float, and `double` keeps its one rounding
+        var text = """
+            float a = 9007199791611905
+            print(a)
+            print(float(9007199791611905))
+            print(float(9007199791611905L))
+            print(9007199791611905f)
+            long n = 9007199791611905
+            float c = n
+            print(c)
+            float m = -9007199791611905
+            print(m)
+            float tie = 16777217
+            print(tie)
+            double b = 9007199791611905
+            print(b)
+            float r = 1.00000005960464477539062500001
+            print(r)
+            print(1.00000005960464477539062500001f)
+            """;
+        Ran(BuildAndRun(text, "float-rounded-once"), 0,
+            ["9.0072E+15", "9.0072E+15", "9.0072E+15", "9.0072E+15", "9.0072E+15", "-9.0072E+15", "16777216", "9007199791611904", "1.0000001", "1.0000001"], "");
+    }
+
+    [Fact]
     public void A_C_function_takes_and_gives_a_double_and_a_float()
     {
         // functions both C libraries export: Windows' C runtime on x64 has `fabsf` inline in its headers and in no library, and
