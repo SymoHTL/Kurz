@@ -85,10 +85,11 @@ public sealed partial class Checker
                                     : $"`{type}` is no case of `{subjectType}` and derived from none (C4, T1)");
                                 armWrong = true;
                             }
-                            else if (namesCase ? covered.Any(c => IsCaseOf(type, c)) : below.All(c => covered.Any(t => IsCaseOf(c, t))))
+                            else if (covered.Any(c => IsCaseOf(type, c)) || (!namesCase && below.All(c => covered.Any(t => IsCaseOf(c, t)))))
                             {
-                                // an arm that every case it covers reached above, as C# reads a pattern earlier ones subsume (the owner, 2026-11-09)
-                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase ? $"an earlier arm covers `{type}` (C4)"
+                                // an arm that every case it covers reached above, as C# reads a pattern earlier ones subsume (the owner, 2026-11-09),
+                                // or whose type an earlier arm's type subsumes, also where it tests a case at run time (the owner, 2026-10-09)
+                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase || !below.All(c => covered.Any(t => IsCaseOf(c, t))) ? $"an earlier arm covers `{type}` (C4)"
                                     : below.Any(c => c is InterfaceType) ? $"the arms above cover every case of `{subjectType}` that `{type}` covers or tests (C4, K6)"
                                     : $"the arms above cover every case of `{subjectType}` that {(type is InterfaceType ? "implements" : "derives from")} `{type}` (C4, K6)");
                             }
@@ -475,9 +476,10 @@ public sealed partial class Checker
                                 Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case {wrong}");
                                 armWrong = true;
                             }
-                            else if (namesCase ? handled.Any(h => IsCaseOf(type, h)) : below.All(c => handled.Any(h => IsCaseOf(c, h))))
+                            else if (handled.Any(h => IsCaseOf(type, h)) || (!namesCase && below.All(c => handled.Any(h => IsCaseOf(c, h)))))
                             {
-                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase ? $"an earlier arm handles `{type}` (O5, C4)"
+                                // as an arm of `match`: also an arm whose type an earlier arm's type subsumes (the owner, 2026-10-09)
+                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase || !below.All(c => handled.Any(h => IsCaseOf(c, h))) ? $"an earlier arm handles `{type}` (O5, C4)"
                                     : below.Any(c => c is InterfaceType) ? $"the arms above handle every case of the call that `{type}` covers or tests (O5, C4, K6)"
                                     : $"the arms above handle every case of the call that {(type is InterfaceType ? "implements" : "derives from")} `{type}` (O5, C4, K6)");
                             }
