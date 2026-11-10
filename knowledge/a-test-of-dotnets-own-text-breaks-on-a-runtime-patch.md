@@ -5,7 +5,7 @@ metadata:
   type: reference
 ---
 
-Seen on 2026-11-10. A head that changed only the checker of `match` went red twice on the
+Seen on 2026-11-10. A head whose diff touched only the checker of `match` and its tests went red twice on the
 Windows job, on `FloatingTests.A_double_shows_what_dotnet_writes_and_where_that_does_not_read_back_the_fewest_digits_that_do`:
 "Expected [292733975779082240, 4494592428115755008], Actual []", at the assertion of the misreads,
 which comes after the loop over every value. The two attempts started at 16:11 and 16:25 UTC. The
@@ -31,7 +31,8 @@ windows-2025-vs2026 20261103.298.1.
 What holds now:
 - The test accepts each run's misreads as a subset of the two it names.
 - It holds the program's text for both doubles by `Assert.Contains`, whatever the runtime writes.
-- The runtime the Windows job installs is pinned to no version (HAZARD #15). A test that holds what
-  a dependency itself does names the version where that changed, or accepts both.
+- The runtime the Windows job installs is pinned to no version: `CLAUDE.md` lists it with the tools
+  of HAZARD (#15). A test that holds what a dependency itself does names the version where that
+  changed, or accepts both.
 
 Gate: `compiler-tests` in `compiler-windows`, the test named above; the unpinned runtime: HAZARD (#15).
