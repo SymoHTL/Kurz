@@ -116,6 +116,13 @@ Each line names a trap; its evidence is in the entry it links.
   workflow-skip literal in the head commit
   ([knowledge/a-skipped-job-reports-success.md](knowledge/a-skipped-job-reports-success.md)).
   Gate: the pre-push hook refuses a skip literal in a commit message; HAZARD (#4) where it is off.
+- A pushed commit with no run at all, while the pull request shows the head before it with that
+  head's checks, green or not: a push the pull request did not take up. The sign is the branch on
+  the forge (`git ls-remote`) naming a commit the pull request's `headRefOid` does not. An empty
+  commit on the pushed one, pushed as any push, woke the pull request once (2026-11-09, pull
+  request 426; [knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md)).
+  HAZARD (#432): the merge tool refuses the old head only when it is given the pushed commit, or
+  when that head is behind `main`.
 - A run of a program that comes back at its limit with "an orphan holds its output": a child the
   program left running held its streams after the program ended, a forked server whose `kill` an
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05
@@ -346,6 +353,16 @@ Gate: review rule "rules for sessions".
   rule cites a section that exists); the order is a `judgment step`.
 - **Every Kurz sample in the reference is a corpus case**, shown under a `Case:` line that links
   its file. Gate: `reference`.
+- **A clause names another clause by its date and comment, its section or its rule, never by its
+  place.** On 2026-11-08 a take of `main` that kept every word of both sides left pull request
+  387's "(the assumed clause before this one)", in the record and in T33, naming the clause pull
+  request 378 had put between it and the clause it meant
+  ([knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md](knowledge/a-pointer-by-position-breaks-on-a-merge-that-keeps-every-word.md)).
+  Gate: `reference` for "the", "a" or "an", then at most "assumed" or "decided", then "clause",
+  "reading", "sentence" or "statement", then "before this one" or "after this one", in the record
+  and the reference. A pointer by place in other words is a `judgment step`: other words before
+  the noun ("the proposed clause", "the owner's sentence"), a plural, and the wider words of place,
+  "above" and "below".
 - **No case stands on an open rule**: it would bake in a pick nobody made. A rule that can have
   no case says why in a `No case:` line. Gate: `reference`.
 - **An error a case expects has an id in the error table** (`reference/12-errors.md`), and the
@@ -453,16 +470,71 @@ Gate: review rule "rules for sessions".
   tool's cases "delete:"); a deletion by hand or by a button skips the command, as a merge by the
   button skips the merge tool: HAZARD (#14).
 - **Merging over a red or missing check needs the owner's approval for that one pull request and
-  head**, passed as `--over-red`. An approval is never standing, but for one case: a pull request
+  head**, passed as `--over-red`. An approval is never standing, but for two cases. The first: a pull request
   at the review cap (the rule "A pull request gets at most one review round" below) carries the
   owner's approval of 2026-10-21, which holds for the cap of one since 2026-10-22, to merge over red
   at the head its round at the cap reviewed, when that round completed, for the check `review` and for `gates` when its table shows `pr-findings` as its
   one FAIL; a round at the cap that did not complete, any other red check or gate, and a head that took
-  `main` after that round need the owner's approval for that head as for any other. Whether those conditions hold is read by the caller, a `judgment step`: the merge tool
-  takes `--over-red` as the caller's statement (HAZARD #3). Retired on
-  2026-10-21 by that cap: "An approval is never standing" with no case. The tool switches the whole
-  ruleset off for the one merge and restores it; while it is off nothing on the server holds any
-  pull request or any push to `main`, so the tool reads the checks and the threads again once it
+  `main` after that round need the owner's approval for that head as for any other, but for the second
+  case. The second: a head that took `main` after the round at the cap carries the owner's approval of
+  2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
+  6680237539, for the floor comment 6680659012, and for an append at one end comment 6694541027) and on
+  2026-11-07 (for lines, comment 6710283110, and for the floor's bound comment 6711916489), to merge
+  over red for the check `review` at that head, when all of these hold:
+  - its round at the cap completed, as in the first case;
+  - the merge of `main` was made with rerere off (comment 6680237539), since a conflict that rerere
+    resolves is still a conflict
+    ([knowledge/rerere-replays-a-resolution-in-every-worktree.md](knowledge/rerere-replays-a-resolution-in-every-worktree.md)),
+    and it had no conflict, or its only conflicts are of these kinds:
+    - text in which the two sides changed different words, and the merge keeps every word of both;
+    - text in which both sides only appended, at the same end of an id list or of a table row, and
+      the merge keeps every word of both; two appends of prose at the end of a line that is neither
+      an id list nor a table row are no such append (comments 6694541027 and 6710283110);
+    - a block whose sides have different line counts, read line by line (comment 6710283110), in
+      which the two sides changed different lines, one side's whole lines standing between lines the
+      other side changed, or only added items or table rows, both at the end of one list, in either
+      order, and the merge keeps every line of both;
+    - the floor of `RunTests` (`RunFloor`), held on each system to a bound: `main`'s floor plus the
+      pull request's own change to it, its floor less the merge base's, so that a merge that lost the
+      cases either side added is caught. On Linux the floor is the count of cases measured on the
+      merged tree in the image the `gates` job runs in (the floor set to 999 for that one run only,
+      so that the test fails and names the count), and a Linux count below its bound needs the
+      owner. On Windows, where nothing here measures a count, the floor is its bound, which the
+      `compiler-windows` run holds. The bound is this rule's reading of the owner's approval of the
+      floor (comment 6680659012), not the owner's own words, and the owner chose it on 2026-11-07
+      (comment 6711916489): for a pull request that removes run cases, it lies below `main`'s floor;
+    - the numbers `tools/quality_evidence.py` generates in `guides/quality-bar-evidence.md`, and
+      nothing else of that file, resolved by running that tool on the merged tree, with the gate
+      `knowledge` green there (pull request 385, comment 6735260898);
+  - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
+    the lines a conflict block joined, for the floor and for the numbers that tool generates (this
+    rule's reading of comment 6735260898, which approved a take with the evidence guide generated
+    again, not the owner's own words);
+  - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
+    before its push: every word kept does not keep every test
+    ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
+  - `gates` and `compiler-windows` are green on that head, read after the walk at the cap (the rule
+    "A pull request gets at most one review round" below), which resolves every thread of the round;
+  - every defect its round found is named on issue 39, and no high finding of it holds.
+
+  The round need not have converged (the owner, 2026-11-06, issue 39, comment 6680905808): for a
+  round that did not, this case is the owner's choice that the refusal of a branch behind `main` at
+  the cap (the rule below) asks for. Any other conflict, any
+  other change to its own diff, a round at the cap that did not complete, a high finding that holds
+  and a red gate need the owner's approval for that head. Whether the conditions of either case hold
+  is read by the caller, a `judgment step`: the merge tool takes `--over-red` as the caller's
+  statement (HAZARD #3). Retired on 2026-10-21 by the cap of the first case: "An approval is never
+  standing" with no case. Narrowed on 2026-11-06 by pull request 358, which wrote down the owner's
+  approval of 2026-11-02 (issue 39, comments 6577407245 and 6577439799) and its widening of
+  2026-11-06 to text in which the two sides changed different words (comment 6680237539): "a head
+  that took `main` after that round" needs the owner's approval as any other, but for the second
+  case. The conflicts the second case names were widened since, each by the owner's answer: on
+  2026-11-06 to the floor of `RunTests` (comment 6680659012), by pull request 359, whose measured
+  count pull request 362 bounded; and on 2026-11-07 by pull request 377, to the same-end append
+  (comment 6694541027, of 2026-11-06) and the line verdicts (comment 6710283110), with the floor's
+  bound that the owner chose that day (comment 6711916489); and on 2026-11-09 to the numbers the
+  evidence guide's tool generates (pull request 385, comment 6735260898). The tool switches the whole ruleset off for the one merge and restores it; while it is off
+  nothing on the server holds any pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
   moment the tool restores the ruleset is caught by nobody, and nothing stops another merge or
@@ -611,7 +683,7 @@ Gate: review rule "rules for sessions".
 | store shape, expiring numbers, generated numbers that match their digest, and the sections of the design record the research findings cite (`knowledge`) | the bypass list and the auto-merge switch, in CI (#7) |
 | the compiler builds and its unit tests pass, with the SDK `compiler/global.json` pins and a restore inside the lock files, every corpus case the compiler emits builds and runs as its header says, and `kurz --version` names the clang of the pinned LLVM major it found, printed by the gate (`compiler-tests`, in `gates`; on Windows in `compiler-windows`) | the Windows job is not a required check (#30) |
 | the case tables of X3 are what the pinned version of the Unicode Character Database gives (`unicode-tables`) | that the pinned version is still the one Rust's stable release pins (#143) |
-| the reference and the corpus agree in shape (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`) |
+| the reference and the corpus agree in shape, and no clause of the record or the reference names another as "the clause before this one" or "the reading after this one" does, with at most "assumed" or "decided" before the noun (`reference`) | a reference rule saying no more than the record section it cites (review rule "reference": `judgment step`); a pointer by place in other words, "above" and "below" among them (`judgment step`) |
 | title, description and commit messages of a pull request; breadth; answered findings (`pr-*`) | record samples, and the expectations of the corpus cases the compiler does not emit, being right: nothing runs them (#1) |
 | the reviewer's pinned model, the environment of its call, what a failed run keeps, and the merge tool's read of a status from the endpoint that names its creator (`self-tests`) | that the `review` status came from a completed review (#11), and that the ruleset still accepts the status: seen once on 2026-10-07, re-checked by nothing, failing closed (#24) |
 | low findings collected on one issue instead of threads (`self-tests`) | that GitHub starts the review workflow: the event policy for `pull_request_target` (#10) |

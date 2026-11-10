@@ -8,14 +8,15 @@ metadata:
 # What developers dislike about C#, and where Kurz stands
 
 Sources read on 2026-10-30. Each verdict was read against the design record (`kurz-design.md`) and the
-reference that day, and is written as it stands after the owner's answers of the same day.
+reference that day, and is written as it stands after the owner's answers of the same day. Finding 24
+was read on 2026-11-05, with the owner's answer of that day.
 
 Surveys: the JetBrains page "The State of .NET 2025" (https://lp.jetbrains.com/the-state-of-dotnet-2025/)
 names no complaint about the C# language by topic, and no other survey read gives one. The Stack
 Overflow survey was not read. So the order below rests on how much space the language team's own
 pages give a pitfall, not on survey numbers, and no finding carries a survey figure.
 
-Summary: 23 findings: 11 avoided; 12 answered and recorded.
+Summary: 24 findings: 11 avoided; 13 answered and recorded.
 
 Verdicts: AVOIDED, REPEATED (Kurz has the problem too), OPEN, NOT APPLICABLE; an answered finding names
 the owner's choice and the section of the record whose trace holds each option with its cost.
@@ -61,7 +62,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 8. Shared collections race between threads
 
 - Evidence: "Thread-Safe collections - .NET" (https://learn.microsoft.com/en-us/dotnet/standard/collections/thread-safe/): "However, the System.Collections.Generic classes don't provide any thread synchronization; user code must provide all synchronization when items are added or removed on multiple threads concurrently."
-- Kurz: AVOIDED. §6: "An actor handles one message at a time, so there are no locks and no data races inside it." and "Two actors can never reach the same mutable object."
+- Kurz: AVOIDED. §6: "An actor handles one message at a time, so there are no locks and no data races inside it." and "The region check below holds that two actors never reach the same mutable object, but for two exceptions of a server's stream that it does not see (section 12)", both exceptions resting on `std/`'s code, which the compiler does not check. The first hands the read half back, so that two actors never hold it at once. In the second, the pair's flag, the time of the body's last read and the server's end of the body are atomic, while the write half, which two actors reach, is kept to one writer at a time by the flag's handshake alone: the server waits while the reading actor's `100 Continue` is under way, and writes no head where it failed. The flag's moves and the write half's one writer are readings of §6 marked assumed beside the owner's five states, and what sets the flag where the reading actor ends during its write stands open in §14.
 
 ## 9. `==` and `Equals` give two answers
 
@@ -137,3 +138,8 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence (an article, the last resort): "What’s coming in C# 12? Devs debate whether it's too much or not enough" (https://www.devclass.com/development/2023/05/30/whats-coming-in-c-12-devs-debate-whether-its-too-much-or-not-enough/1630606): "Another common complaint is that C# risks becoming too complex, or may already be."
 - Kurz: answered: "Printed counts", section 1 of the record, and "Grant for keywords", section 9. Before the answers: OPEN.
+
+## 24. A virtual method's default comes from the variable's type
+
+- Evidence: "Optional argument corner cases, part four" (a post of 2011-05-19 on the C# compiler team's archived blog, found by its title in "Archived MSDN and TechNet Blogs", https://learn.microsoft.com/en-us/archive/blogs/): "In fact, the default value is baked in to the caller; the code on the callee side is untouched". "Optional argument corner cases, part one", of 2011-05-09 in the same archive: "The optional parameters on the interface implementation only come into effect when calling via the interface". "Code inspection: Mismatch of optional parameter value in overridden method" (ReSharper, https://www.jetbrains.com/help/resharper/OptionalParameterHierarchyMismatch.html): "This inspection reports a method override or implementation whose optional parameter does not match the base member."
+- Kurz: answered: "as C#, as built" (the owner, 2026-11-05, issue 156, comment 6659240390), section 8 of the record. A call of a `virtual` method or of its override takes the default of the method its receiver's static type names, so Kurz repeats the trap, and the record names it as the cost: one object's call passes different values by the type of the variable it is read through. Before the answer: REPEATED, as built and not yet decided.

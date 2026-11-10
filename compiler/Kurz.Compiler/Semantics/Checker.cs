@@ -83,9 +83,10 @@ public sealed partial class Checker
     /// <summary>
     /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, a list held in the compiler where Rust
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
-    /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there).
+    /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there, but
+    /// <c>Url</c>, <c>HttpDate</c> and <c>HttpQuery</c>, which the owner's answer of 2026-11-06, G1 (a) to G3 (a), added).
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -155,7 +156,7 @@ public sealed partial class Checker
         /// <summary>The statement can end and the next one run.</summary>
         Completes,
 
-        /// <summary>Every path leaves the block: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, or branches that all do.</summary>
+        /// <summary>The end of the statement cannot be reached: <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c>, branches that all leave, the branch a constant condition takes where it leaves, or a <c>while</c> whose condition is the constant <c>true</c> with no <c>break</c> of its own that can be reached.</summary>
         Ends,
     }
 
@@ -178,6 +179,9 @@ public sealed partial class Checker
 
         /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
         public bool Static { get; init; }
+
+        /// <summary>K14: the constructor of <see cref="Class"/>'s body this frame checks, with the marks of the fields it assigns; a lambda inside it finds it through <see cref="Outer"/>.</summary>
+        public Building? Building { get; init; }
 
         /// <summary>The result the body has to produce; null while a lambda's is still to be inferred from its first <c>return</c>.</summary>
         public KurzType? ReturnType { get; set; }
@@ -202,8 +206,11 @@ public sealed partial class Checker
         /// <summary>N3, N7: the variables and paths of fields that the flow of the code shows are not null where the checker reads; a lambda starts with what held where it was made (F15).</summary>
         public ImmutableHashSet<NullPath> Known { get; set; } = [];
 
-        /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs.</summary>
+        /// <summary>N3: the loops around the code being read, innermost last, with what held at each <c>break</c> and <c>continue</c> of theirs that can be reached.</summary>
         public List<LoopExits> Loops { get; } = [];
+
+        /// <summary>F3, N3: set while the statement being read follows, in a block around it, a statement whose end cannot be reached, or stands in a branch that a constant condition never takes, so that a <c>break</c> or a <c>continue</c> there is never reached and counts for no loop, as C# reads reachability.</summary>
+        public bool Unreached { get; set; }
     }
 
     private sealed class Scope
@@ -318,7 +325,6 @@ public sealed partial class Checker
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
-        CheckReferenceCycles(); // R2, R4
         JudgePendingPointees();
         ResolveCFunctions();
         foreach (var f in functions.Values.SelectMany(list => list).Concat(refused))
@@ -333,8 +339,10 @@ public sealed partial class Checker
         CheckEnumNumbers();
         CheckDefaults();
         CheckClassDefaults();
+        CheckMethodDefaults(); // F12, K7
         CheckStaticFields(); // K18: before every body, which reads their types
         CollectReserved(program.Statements);
+        RefuseReservedTypeParameters(); // F16
         CheckFieldDefaults(); // K7
 
         FindReaders();
@@ -343,14 +351,18 @@ public sealed partial class Checker
             if (!readers.Contains(f))
             {
                 CheckBody(f); // T33: a function that reads its type is checked in its copies alone (section 4, "Only per copy, as Zig")
+                continue;
             }
-            else if (ReadsFields(f))
+
+            Unread(f, () => RefuseParametersNamedLikeTypeParameters(f));
+            if (ReadsFields(f))
             {
                 ReadForCycles(f); // T34: its calls in a loop over `T.Fields`, for the walk alone, where its text reads `T.Fields`
             }
         }
 
         CheckMethodBodies(); // K7
+        CheckConstructorBodies(); // K14
         JoinPassingReaders();
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
@@ -372,6 +384,7 @@ public sealed partial class Checker
 
         ReportUnused(frame.Scope);
         MakeCopies();
+        CheckReferenceCycles(); // R2, R4, R9: after every body, the copies' among them, when the lambdas of the file are known
     }
 
     /// <summary>
@@ -504,6 +517,38 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// V9, T33: a parameter of a function that reads its type, named like one of its type parameters, is refused from the text, whether
+    /// or not a call makes a copy, as a function's parameters are part of its signature (section 4, the owner, 2026-11-07, "Refused
+    /// always"); a copy that declares it again reports nothing more, the refusal being kept among the faults of the text.
+    /// </summary>
+    private void RefuseParametersNamedLikeTypeParameters(FunctionSymbol f)
+    {
+        foreach (var p in f.Declaration?.Parameters.Where(p => f.TypeParameters.Any(t => t.Name == p.Name)) ?? [])
+        {
+            var d = Diagnostic.Error(ErrorIds.Redeclared, p.Line, TypeParameterClash(p.Name));
+            copyReported.Add((d.Id, d.Line, d.Message));
+            Add(d);
+        }
+    }
+
+    /// <summary>
+    /// F16 with S13: a type parameter of a function, one that holds a constant among them (T35), takes no name a variable at the
+    /// outermost level of the top-level code reserves, as a variable of the function takes none (section 4, the owner, 2026-11-05),
+    /// so that a body never chooses which of the two it reads. The refusal is of the declaration, whether or not a call makes a copy
+    /// (T33), and the parameter stands for the rest of the function, so that its uses report nothing more (E1).
+    /// </summary>
+    private void RefuseReservedTypeParameters()
+    {
+        foreach (var f in functions.Values.SelectMany(list => list).Concat(duplicates).Concat(refused).Concat(unreadOverloads))
+        {
+            foreach (var p in f.TypeParameters.Where(p => reservedTopLevel.Contains(p.Name)))
+            {
+                Report(ErrorIds.Redeclared, p.Line, $"`{p.Name}` is a top-level variable, whose name a type or constant parameter of a function cannot take (S13, F16)");
+            }
+        }
+    }
+
     // ---- types and data --------------------------------------------------------------------------
 
     private void DeclareType(TypeDeclaration d)
@@ -532,6 +577,12 @@ public sealed partial class Checker
         if (d.Kind == TypeDeclarationKind.Class && !clash)
         {
             DeclareClass(d); // K1: chapter 7
+            return;
+        }
+
+        if (d.Kind == TypeDeclarationKind.Interface && !clash)
+        {
+            DeclareInterface(d); // K6, K7
             return;
         }
 
@@ -573,16 +624,26 @@ public sealed partial class Checker
             return;
         }
 
+        if (d.TypeParameters.FirstOrDefault(p => p.Constant is not null) is { } holding)
+        {
+            if (!clash)
+            {
+                // T35: a `data` type's copies are no part of the build, so the type is not read, and a use of it carries no error of its
+                // own (E1)
+                NotSupported(holding.Line, "a type parameter that holds a constant, of a `data` type (T35)");
+                unsupportedTypes.Add(d.Name);
+                unsupportedBases[d.Name] = "a data type with a type parameter that holds a constant, which a data type names (T35)";
+            }
+
+            return;
+        }
+
         var symbol = new DataSymbol(d.Name, d);
         model.RecordDataType(d, symbol);
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
-            if (p.Constant is not null)
-            {
-                NotSupported(p.Line, "a type parameter that holds a constant, of a `data` type (T35)");
-            }
         }
 
         if (clash)
@@ -606,6 +667,20 @@ public sealed partial class Checker
         if (std is null)
         {
             return;
+        }
+
+        // W1, S1: the types every file sees without a declaration are one set of symbols across std/ and the file, so that the
+        // `IoError` a function of std/ gives, `HttpRequest.Read`'s among them, is the file's `IoError`
+        foreach (var t in BuiltInTypes.Statements.OfType<TypeDeclaration>())
+        {
+            if (std.dataTypes.TryGetValue(t.Name, out var builtIn))
+            {
+                dataTypes[t.Name] = builtIn;
+            }
+            else if (std.enums.TryGetValue(t.Name, out var builtInEnum))
+            {
+                enums[t.Name] = builtInEnum;
+            }
         }
 
         foreach (var name in Prelude)
@@ -1097,6 +1172,11 @@ public sealed partial class Checker
         var parameter = TypeParameter(n.Name);
         if ((parameter?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
         {
+            if (Types.IsError(constant))
+            {
+                return Types.Error; // T35: its constant's type has its diagnostic already (E1)
+            }
+
             // T35: it holds a value, and names no type, as a variable's name names none (V10); in a copy, the constant it is bound to
             Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here: `{n.Name}` holds a constant of `{constant.Text}` (V10, T35)");
             return Types.Error;
@@ -1141,6 +1221,17 @@ public sealed partial class Checker
             return new ClassType(classSymbol); // K1
         }
 
+        if (interfaces.TryGetValue(n.Name, out var face))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (K6, T19)");
+                return Types.Error;
+            }
+
+            return new InterfaceType(face); // K6
+        }
+
         if (enums.TryGetValue(n.Name, out var enumSymbol))
         {
             if (n.TypeArguments.Count > 0)
@@ -1177,6 +1268,15 @@ public sealed partial class Checker
     /// </summary>
     private KurzType ResolveTypeArgument(TypeSyntax argument, string of)
     {
+        if (argument is NamedType { TypeArguments.Count: 0 } n && BoundType(n.Name) is null
+            && (TypeParameter(n.Name)?.Constant ?? BoundConstant(n.Name)?.Of) is { } constant)
+        {
+            // T35: the name of a type parameter that holds a constant, among type arguments where a type stands, is a constant there, as
+            // a literal and an enum's value are, and rustc refuses the three alike (E0747) (the owner, 2026-11-03)
+            Report(ErrorIds.TypeMismatch, n.Line, $"`{n.Name}` holds a value of `{constant.Text}`, where a type stands (T35, T1)");
+            return Types.Error;
+        }
+
         var type = Resolve(argument);
         if (Types.IsVoid(type))
         {
@@ -1216,10 +1316,10 @@ public sealed partial class Checker
         foreach (var p in d.TypeParameters)
         {
             RefusePreludeTypeParameter(p);
-            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null });
+            symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1277,20 +1377,21 @@ public sealed partial class Checker
 
     /// <summary>
     /// T35: the type of the constant a type parameter holds: an integer type, <c>bool</c> or <c>char</c>, whose value a call writes as a
-    /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. The record's list holds no other type, and a
-    /// function with a parameter of one is not read (E1).
+    /// literal among its type arguments, or an <c>enum</c>, whose value it writes by name. Another type is <c>syntax</c>, where rustc gives an
+    /// error of its own (the owner, 2026-11-03). A function whose constant has no type of the list, or a type that is no name it can read,
+    /// is read, with the constant of no type, whose uses and the type argument a call gives it report nothing more, while its body's own
+    /// errors, and a call's count of type arguments and its arguments, are reported (E1).
     /// </summary>
     private KurzType ResolveConstantParameter(FunctionSymbol symbol, TypeParameter p)
     {
         var type = Resolve(p.Constant!);
         if (Types.IsError(type) || HoldsConstant(type))
         {
-            return type;
+            return type; // a type that was not read has its diagnostic, and the function is read, the uses of its constant reporting nothing more (E1)
         }
 
-        NotSupported(p.Line, $"a type parameter that holds a constant of the type `{type.Text}`, where an integer type, `bool`, `char` or an `enum` is read (T35)");
-        modifiedFunctions.Add(symbol); // not read: its signature, defaults and body are read with their diagnostics dropped, and its calls are not read (E1)
-        return Types.Error;
+        Report(ErrorIds.Syntax, p.Line, $"`{type.Text}` is no type of a constant type parameter, whose type is an integer type, `bool`, `char` or an `enum` (T35)");
+        return Types.Error; // the function is read, as for a type that was not read, the constant of no type (E1)
     }
 
     /// <summary>T35: the types a type parameter's constant can have, as the record lists them.</summary>
@@ -1570,6 +1671,11 @@ public sealed partial class Checker
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is a top-level variable, whose name a top-level function cannot declare (F16)");
         }
+        else if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+            type = Types.Error; // T33, E1: the refused parameter stands with no type, and its name reads it in a copy, so that `T.Make`, `T.Fields` and `T.Kind` report nothing more
+        }
         else if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)"); // a function's, a type's or `print`'s name, as for a local
@@ -1617,19 +1723,29 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// V9 with T19: a type parameter of the function around the code, in its body and in a copy of it, one that holds a constant among
+    /// them (T35), whose name no variable, parameter, loop's variable, binding of a <c>match</c> arm or lambda's parameter takes, as C#
+    /// refuses a method's parameter, local and <c>foreach</c> variable so named (CS0412), and a lambda's parameter as C# did up to its
+    /// language version 7.3 (section 4, the owner, 2026-11-03, and 2026-11-04 for a constant).
+    /// </summary>
+    private bool IsTypeParameterName(string name) => TypeParameter(name) is not null || Binding(name) is not null;
+
+    private static string TypeParameterClash(string name) => $"`{name}` is a type parameter of the function around it (V9)";
+
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
     /// The names the reference gives: <c>print</c> (A1), the built-in types (T2, L19), <c>List</c>, <c>Map</c> and <c>Bytes</c>
     /// (M9), the types of files and sockets and their functions (S2, S8, S9), <c>Environment</c> (S13, S14), the hashes' (H1 to H4),
     /// <c>X86</c>, <c>Arm</c>, <c>Vector128</c> and <c>Vector256</c>, which a file's own declaration cannot take, as it cannot take
-    /// <c>Environment</c> (R18, the owner, 2026-11-01), and <c>Hint</c> (F18).
+    /// <c>Environment</c> (R18, the owner, 2026-11-01), <c>Hint</c> (F18), and <c>Log</c> (P1).
     /// </summary>
     private static bool IsBuiltInName(string name) =>
-        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" || IsHashName(name)
+        name == "print" || Types.ByName.ContainsKey(name) || name is "List" or "Map" or "Bytes" or "File" or "Directory" or "TcpListener" or "TcpStream" or "Environment" or "Log" || IsHashName(name)
         || name is "X86" or "Arm" or "Vector128" or "Vector256" or "Hint";
 
     /// <summary>
@@ -1756,6 +1872,12 @@ public sealed partial class Checker
             return true;
         }
 
+        if (IsTypeParameterName(name))
+        {
+            Report(ErrorIds.Redeclared, line, TypeParameterClash(name));
+            return true;
+        }
+
         if (Lookup(name).Variable is not null || IsDeclaredName(name))
         {
             Report(ErrorIds.Redeclared, line, $"`{name}` is visible already (V9)");
@@ -1773,14 +1895,17 @@ public sealed partial class Checker
         PushNested(block.Statements);
         blockDepth++;
         var flow = Flow.Completes;
+        var unreached = frame.Unreached;
         foreach (var s in block.Statements)
         {
             if (CheckStatement(s) == Flow.Ends)
             {
                 flow = Flow.Ends;
+                frame.Unreached = true; // F3, N3: the statements after it are never reached
             }
         }
 
+        frame.Unreached = unreached;
         blockDepth--;
         PopNested();
         PopScope();
@@ -1818,33 +1943,43 @@ public sealed partial class Checker
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
+                    // F3, N3: a condition whose value is a constant takes one branch alone, as C# reads it; the other is never reached
                     var calls = callsRun;
                     CheckCondition(i.Condition);
+                    var constant = ConstantCondition(i.Condition);
                     var start = frame.Known;
+                    var unreached = frame.Unreached;
                     var (whenTrue, whenFalse) = ConditionTests(i.Condition, calls);
                     frame.Known = start.Union(whenTrue);
+                    frame.Unreached = unreached || constant == false;
                     var then = CheckBlock(i.Then);
                     var afterThen = frame.Known;
                     frame.Known = start.Union(whenFalse);
+                    frame.Unreached = unreached || constant == true;
                     var other = i.Else is null ? Flow.Completes : CheckStatement(i.Else);
+                    frame.Unreached = unreached;
                     var reaching = new List<ImmutableHashSet<NullPath>>();
-                    if (then == Flow.Completes)
+                    if (then == Flow.Completes && constant != false)
                     {
                         reaching.Add(afterThen);
                     }
 
-                    if (other == Flow.Completes)
+                    if (other == Flow.Completes && constant != true)
                     {
                         reaching.Add(frame.Known);
                     }
 
                     frame.Known = Join(reaching, start);
-                    return then == Flow.Ends && i.Else is not null && other == Flow.Ends ? Flow.Ends : Flow.Completes;
+                    return constant switch
+                    {
+                        true => then,
+                        false => other,
+                        null => then == Flow.Ends && i.Else is not null && other == Flow.Ends ? Flow.Ends : Flow.Completes,
+                    };
                 }
 
             case WhileStatement w:
-                CheckLoop(w.Condition, w.Body);
-                return Flow.Completes;
+                return CheckLoop(w.Condition, w.Body) ? Flow.Completes : Flow.Ends;
             case ForInStatement f:
                 CheckForIn(f);
                 return Flow.Completes;
@@ -1863,9 +1998,9 @@ public sealed partial class Checker
                 {
                     NotSupported(b.Line, "`break` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
-                else
+                else if (!frame.Unreached)
                 {
-                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop
+                    frame.Loops[^1].Breaks.Add(frame.Known); // N3: what holds after the loop; F3: a `break` that is reached lets the loop end
                 }
 
                 return Flow.Ends;
@@ -1878,9 +2013,9 @@ public sealed partial class Checker
                 {
                     NotSupported(c.Line, "`continue` in a loop over `T.Fields`, which is unrolled (T33)");
                 }
-                else
+                else if (!frame.Unreached)
                 {
-                    frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head
+                    frame.Loops[^1].Continues.Add(frame.Known); // N3: what holds at the loop's head, from a `continue` that is reached
                 }
 
                 return Flow.Ends;
@@ -2055,6 +2190,14 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>
+    /// F3, N3: the value of a condition that is a constant, as a default's constant folds (literals under the operators of T18, T22 and
+    /// T12), which decides the branch of an <c>if</c> that is reached and whether the body and the end of a <c>while</c> are, as C# reads a
+    /// constant condition (section 4, the owner, 2026-11-08, "C#'s rule"); null for any other condition.
+    /// </summary>
+    private bool? ConstantCondition(Expression condition) =>
+        model.HasType(condition) && model.TypeOf(condition).Constant is BoolConstant b ? b.Value : null;
+
     private void CheckVariableDeclaration(VariableDeclaration v)
     {
         if (IsState(v) && frame.IsTopLevel && frame.Scope.Parent is null)
@@ -2127,7 +2270,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (variable is null && ImplicitMethods(a.Name)?.Find(f => f.IsProperty) is { Owner: { } owner })
+        if (variable is null && ImplicitPropertyOf(a.Name) is { Owner: { } owner })
         {
             AssignProperty(owner, a.Name, a.Line); // K7: the property of `this`, which has no setter
             CheckExpression(a.Value, Untyped(a.Value));
@@ -2189,10 +2332,10 @@ public sealed partial class Checker
             return;
         }
 
-        if (IsDeclaredName(a.Name))
+        if (IsTypeParameterName(a.Name) || IsDeclaredName(a.Name))
         {
             // E1: the declaration is the one error, and a read of the name after it reports nothing more, as F16's branch above
-            Report(ErrorIds.Redeclared, a.Line, $"`{a.Name}` is visible already (V9)");
+            Report(ErrorIds.Redeclared, a.Line, IsTypeParameterName(a.Name) ? TypeParameterClash(a.Name) : $"`{a.Name}` is visible already (V9)");
             DeclareUnreadable(a.Name, VariableKind.Local, a.Line, a);
             CheckExpression(a.Value, null);
             return;
@@ -2491,6 +2634,11 @@ public sealed partial class Checker
         }
 
         var fields = WalksFieldsOfTypeParameter(f); // T34: a loop over `T.Fields` read on a function's text, outside a copy
+        if (fields)
+        {
+            KeepFieldTypeOfText(f);
+        }
+
         fieldsLoopDepth += fields ? 1 : 0;
         CheckLoop(null, f.Body);
         fieldsLoopDepth -= fields ? 1 : 0;
@@ -2503,8 +2651,8 @@ public sealed partial class Checker
         {
             // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
             // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
-            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : Types.A(model.TypeOf(f.Collection).Type);
-            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)");
+            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : failures is not null ? "a file's lines" : Types.A(model.TypeOf(f.Collection).Type);
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)", $"a loop over {over} fails with (S16, T1)");
         }
 
         KurzType Report(int line, KurzType type)
@@ -2525,9 +2673,10 @@ public sealed partial class Checker
     /// (section 4, the owner, 2026-11-04, "Index loop, Count once"; section 12, the owner, 2026-11-02, "any class with <c>Count</c>,
     /// <c>NameAt(i)</c> and <c>ValueAt(i)</c>"), each member found and visible at the loop's place as a member access there finds it
     /// (K6, K7, F9): <c>h.Count</c>, read with no call, a field or a property of the instance, and <c>h.NameAt(i)</c> and
-    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance of one <c>int</c> (proposed, C6: a <c>Count</c> of an
-    /// <c>int</c>, the <c>int</c> of the index and a result of each method, which the two names take); a class of <c>std/</c> is read
-    /// through its symbol, as one of the file.
+    /// <c>h.ValueAt(i)</c>, called on the instance, methods of the instance that the call with one <c>int</c> fits, weighed as a call
+    /// is, so that a default for a second parameter, a widening of the <c>int</c> and one overload among others count (section 4, the
+    /// owner, 2026-11-06, #39, comment 6681669642), each with a result (proposed, C6: a <c>Count</c> of an <c>int</c> and a result of
+    /// each method, which the two names take); a class of <c>std/</c> is read through its symbol, as one of the file.
     /// </summary>
     private bool WalkedByIndex(ClassSymbol c)
     {
@@ -2538,12 +2687,12 @@ public sealed partial class Checker
 
         bool TakesAnIndex(string name) =>
             MethodsOf(c, name) is { } methods
-            && methods.Any(m => !m.IsStatic && !m.IsProperty && m.TypeParameters.Count == 0 && m.Parameters.Count == 1
-                && m.Parameters[0].Type is PrimitiveType { Kind: Primitive.Int } && !Types.IsVoid(m.ReturnType) && Visible(m));
+            && methods.Any(m => !m.IsStatic && !m.IsProperty && !Types.IsVoid(m.ReturnType) && Visible(m) && FitsAnIndex(m));
     }
 
     private void CheckReturn(ReturnStatement r)
     {
+        frame.Building?.Returns.Add(frame.Known); // K14: a path that leaves a constructor here assigns its fields first
         if (frame.IsTopLevel && r.Value is not null)
         {
             NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");

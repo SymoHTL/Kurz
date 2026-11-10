@@ -53,6 +53,9 @@ public sealed class TypeParameterSymbol(string name, int line)
 
     /// <summary>T35: the constant a call that leaves the parameter out gives it, <c>= Mode.Plain</c>; null where none is written or it is wrong.</summary>
     public ConstantArgument? Default { get; set; }
+
+    /// <summary>T35: a default is written, read or not, so that a call may leave the parameter out; one that was not read binds the error type.</summary>
+    public bool HasDefault { get; init; }
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
@@ -92,6 +95,9 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     /// <summary>K7: a read-only property, <c>pub int Count => names.Count</c>, a method without parameters that a read calls, <c>h.Count</c>.</summary>
     public bool IsProperty => Declaration is { Property: true };
+
+    /// <summary>K6, K7: the interface whose method this is, a signature with no body; null for any other function.</summary>
+    public InterfaceSymbol? Interface { get; init; }
 
     /// <summary>K7: the method of a base class this <c>override</c> overrides; null for any other function.</summary>
     public FunctionSymbol? Overridden { get; set; }
@@ -175,8 +181,16 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
     /// <summary>K10, K11, K16: the parameters of the primary constructor in the order a construction binds them, each with the field it gives.</summary>
     public List<ConstructorSlot> Constructor { get; } = [];
 
-    /// <summary>K10: the explicit form's arguments of the base, read as a construction of the base; null for the short form and for a class without a base.</summary>
+    /// <summary>
+    /// K10: the explicit form's arguments of the base, read as a construction of the base; K14: for a class with a base, no primary
+    /// constructor and no constructor in its body, the construction of the base with no arguments, which its empty constructor runs, as
+    /// C#'s implied <c>base()</c>, where the base has a constructor to run (a constructor of a body holds its own,
+    /// <see cref="ConstructorSymbol.BaseCall"/>); null for the short form and for a class without a base.
+    /// </summary>
     public CallExpression? BaseCall { get; set; }
+
+    /// <summary>K14: the constructors declared in the body of the class, in their order.</summary>
+    public List<ConstructorSymbol> Constructors { get; } = [];
 
     /// <summary>The class and its bases, the class first.</summary>
     public IEnumerable<ClassSymbol> Chain
@@ -192,6 +206,15 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     /// <summary>K6: whether the class is <paramref name="other"/> or derives from it.</summary>
     public bool HasBaseOrIs(ClassSymbol other) => Chain.Any(c => ReferenceEquals(c, other));
+
+    /// <summary>K6: the interfaces the class names after <c>:</c>, in their order.</summary>
+    public List<InterfaceSymbol> Interfaces { get; } = [];
+
+    /// <summary>K6: the interfaces the class implements: those it names and those its bases name, the base's first, each once.</summary>
+    public IEnumerable<InterfaceSymbol> AllInterfaces => Chain.Reverse().SelectMany(c => c.Interfaces).Distinct();
+
+    /// <summary>K6: whether the class implements the interface, naming it or through a base that does.</summary>
+    public bool Implements(InterfaceSymbol face) => Chain.Any(c => c.Interfaces.Contains(face));
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
 
@@ -245,8 +268,57 @@ public sealed class StaticFieldSymbol(FieldDeclaration declaration, ClassSymbol 
     public bool IsInternal => (Declaration.Modifiers & Modifiers.Internal) != 0;
 }
 
+/// <summary>
+/// K6, K7: an <c>interface</c>, the signatures of its methods in the order written, which a class that names it implements with
+/// <c>pub</c> methods of the same names, parameter types and return types.
+/// </summary>
+public sealed class InterfaceSymbol(string name, TypeDeclaration declaration)
+{
+    public string Name { get; } = name;
+
+    public TypeDeclaration Declaration { get; } = declaration;
+
+    public int Line => Declaration.Line;
+
+    /// <summary>The methods in the order written, each a <see cref="FunctionSymbol"/> with no body.</summary>
+    public List<FunctionSymbol> Methods { get; } = [];
+
+    /// <summary>A10: the <c>string Text()</c> the interface declares, which gives a value of it its text; null where it declares none.</summary>
+    public FunctionSymbol? TextMethod => Methods.FirstOrDefault(f => f.Name == "Text" && f.Parameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String });
+}
+
 /// <summary>K10, K11, K16: a parameter of a class's primary constructor: the field it gives, own or the base's, the class whose declaration writes it, and that parameter.</summary>
 public sealed record ConstructorSlot(FieldSymbol Field, ClassSymbol Owner, Parameter Declaration);
+
+/// <summary>
+/// K14: a constructor declared in the body of a class, private to it without <c>pub</c> (F9): its parameters and the call its
+/// <c>: this(...)</c> makes, of the primary constructor or of another constructor of the body, read as a construction of the class.
+/// </summary>
+public sealed class ConstructorSymbol(ConstructorDeclaration declaration, ClassSymbol owner)
+{
+    public ConstructorDeclaration Declaration { get; } = declaration;
+
+    public ClassSymbol Owner { get; } = owner;
+
+    public List<ParameterSymbol> Parameters { get; } = [];
+
+    public int Line => Declaration.Line;
+
+    public bool IsPub => (Declaration.Modifiers & Modifiers.Pub) != 0;
+
+    /// <summary>The call of <c>: this(...)</c>; null for a constructor without one.</summary>
+    public CallExpression? ThisCall { get; set; }
+
+    /// <summary>
+    /// The construction of the base this constructor runs before its body: <c>: base(...)</c>, or C#'s implied <c>base()</c> where it
+    /// calls no other constructor and the base has one to run; null where it calls another with <c>: this(...)</c>, and in a class
+    /// without a base.
+    /// </summary>
+    public CallExpression? BaseCall { get; set; }
+
+    /// <summary>The parameters as the variables the arguments of <c>: this(...)</c> or <c>: base(...)</c> read, which no instance is visible to.</summary>
+    public List<VariableSymbol> InitializerParameters { get; } = [];
+}
 
 /// <summary>
 /// An <c>enum</c> (D12) with its values in the order written, each name once, and their numbers where the declaration writes them

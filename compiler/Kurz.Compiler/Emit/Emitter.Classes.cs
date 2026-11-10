@@ -6,18 +6,23 @@ namespace Kurz.Compiler.Emit;
 /// <summary>
 /// Chapter 7: an instance of a class is the address of its block, as Rust's <c>Rc&lt;T&gt;</c> is the address of its <c>RcBox</c>
 /// (section 3): the count of the references that hold it, the count of the weak ones, one for all the strong ones together, then its
-/// fields in their order, a base's first (<see cref="Layout.ClassBlock"/>); a nullable instance is the address alone, null its
-/// <c>null</c>. A value of a class that another class derives from is the pair of the address and the table of the instance's class,
-/// as Rust's <c>Rc&lt;dyn Trait&gt;</c> is the address and its vtable (K6, <see cref="Layout.Fat"/>): the table holds the helpers that
-/// end the instance and free its block, its equality and its hash where the program uses them, and its <c>virtual</c> methods, the
-/// base's first (<see cref="EmitTables"/>). The instance is counted as a list is (K2): every place that holds one holds a count, a
+/// fields in their order, a base's first (<see cref="Layout.ClassBlock"/>); a nullable instance of a class that nothing derives from
+/// is the address alone, null its <c>null</c>. A value of a class that another class derives from is the pair of the address and the
+/// table of the instance's class, as Rust's <c>Rc&lt;dyn Trait&gt;</c> is the address and its vtable (K6, <see cref="Layout.Fat"/>),
+/// and a nullable one is the pair too, its <c>null</c> the pair of zeros (N1): the table holds the helpers that end the instance and
+/// free its block, its equality and its hash where the program uses them, and its <c>virtual</c> methods, the base's first
+/// (<see cref="EmitTables"/>). The instance is counted as a list is (K2): every place that holds one holds a count, a
 /// variable lets go of it at the end of its block, and the last count lets go of the fields in their order, as Rust drops them, and
 /// then of the weak count the strong ones held; the last weak count frees the block. An instance whose last count a release lets go of
 /// waits on a work list until that release ends (<see cref="ReleaseInstance"/>). No count is elided. A method is a function of the
 /// module whose first parameter is the instance, <c>this</c>, which it borrows from the caller as a function borrows its arguments
 /// (K7), with its table where its class has a base or derived classes. A read of a counted field through an instance takes a count of
 /// its own, a temporary of the region, since a call can assign the field through another reference while the value is still in use
-/// (K2, K9).
+/// (K2, K9). A constructor of a class's body is a function of the module that fills the block it takes, as C#'s <c>.ctor</c> fills
+/// the object <c>new</c> allocated: first what its <c>: this(...)</c> calls, or the base's construction, or for a class without a base
+/// the defaults of the body, then its body, whose first assignment of a field stores into a field that holds nothing yet (K14). A class
+/// with a base has no field in its body (<c>not supported</c>), whose defaults section 4 puts before the base's construction, as C#
+/// runs the field initializers of a derived class first.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -33,31 +38,63 @@ public sealed partial class Emitter
     private readonly HashSet<ClassSymbol> comparedThroughTable = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<ClassSymbol> hashedThroughTable = new(ReferenceEqualityComparer.Instance);
 
-    // K6: the slots of a table before its `virtual` methods: the release, the weak release, the equality and the hash
-    private const int MethodSlots = 4;
+    // K6: the pairs of a class and an interface it implements whose tables the program names, in the order first named, and the
+    // interfaces whose values `==` and a map's hash read through those tables (K13)
+    private readonly List<(ClassSymbol Class, InterfaceSymbol Face)> interfaceTabled = [];
+    private readonly HashSet<InterfaceSymbol> comparedThroughInterface = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<InterfaceSymbol> hashedThroughInterface = new(ReferenceEqualityComparer.Instance);
+
+    // K6: the slots of a table before its methods: the release, the weak release, the equality, the hash and the link, which in a
+    // class's table is its base's table and in a class's table for an interface the class's own table, where it has one
+    private const int MethodSlots = 5;
+    private const int LinkSlot = 4;
 
     // each class whose body's defaults are queued for their function, with its name (K7)
     private readonly Queue<(ClassSymbol Class, string Name)> defaultsPending = new();
 
+    // each constructor of a class's body queued for its function, with its name (K14)
+    private readonly Queue<(ConstructorSymbol Constructor, string Name)> constructorsPending = new();
+
     /// <summary>
-    /// K1, K7, K10: an instance with both counts at one, each field of the primary constructor holding the argument bound to it or its
-    /// default; where a class of the chain writes the explicit form, the fields of each class from its constructor's arguments
-    /// (<see cref="FillFields"/>); then each field of the body its default, in their order, read in the class's file through the
-    /// instance being built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7,
-    /// K18). A class with derived classes gives the pair of the address and its table.
+    /// K1, K7, K10, K14: an instance with both counts at one, filled as <see cref="Construct"/> fills it. A class with derived classes
+    /// gives the pair of the address and its table.
     /// </summary>
     private string EmitClassNew(CallExpression c, CallInfo info)
     {
         var symbol = ((ClassType)info.Target!).Symbol;
         var block = layout.ClassBlock(symbol);
+        var p = Construct(symbol, c, info, () =>
+        {
+            var allocated = Allocate(block);
+            fn.Emit($"store i64 1, ptr {allocated}");
+            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {allocated}, i32 0, i32 1")}");
+            return allocated;
+        });
+        return Layout.Fat(symbol) ? Pair(p, Table(symbol)) : p;
+    }
+
+    /// <summary>
+    /// K1, K7, K10, K14: the arguments of the construction read, then the block <paramref name="block"/> gives filled. A constructor
+    /// of the body fills it by its function (<see cref="EmitConstructor"/>). The primary constructor, and the empty one of a class
+    /// without one, store each field of the primary constructor, which owns the argument bound to it or its default; where a class
+    /// of the chain has a call of its base, the fields of each class from its constructor's arguments (<see cref="FillFields"/>);
+    /// then each field of the body with an <c>=</c> its default, in their order, read in the class's file through the instance being
+    /// built, as C# runs a field's initializer before the constructor's body; a class in a chain declares none (K6, K7, K18).
+    /// </summary>
+    private string Construct(ClassSymbol symbol, CallExpression c, CallInfo info, Func<string> block)
+    {
         string p;
-        if (symbol.Chain.All(x => x.BaseCall is null))
+        if (info.Constructor is { } made)
+        {
+            var arguments = Arguments(c, info, j => made.Parameters[j].Type, _ => false, j => Default(made.Declaration.Parameters[j].Default, classOwners[symbol]), cConvention: false, owned: false);
+            p = block();
+            fn.Emit($"call void {Constructor(made)}({string.Join(", ", arguments.Prepend($"ptr {p}"))})");
+        }
+        else if (symbol.Chain.All(x => x.BaseCall is null))
         {
             // each parameter of the constructor is a field, which owns the argument bound to it
             var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: true);
-            p = Allocate(block);
-            fn.Emit($"store i64 1, ptr {p}");
-            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            p = block();
             for (var i = 0; i < arguments.Count; i++)
             {
                 fn.Emit($"store {arguments[i]}, ptr {InstanceFieldPointer(symbol, p, symbol.Fields.IndexOf(symbol.Constructor[i].Field))}");
@@ -65,7 +102,7 @@ public sealed partial class Emitter
 
             // K7: the fields of the body follow the primary constructor's, each given its default by the class's function of
             // them (ClassDefaults); a class in a chain declares none
-            if (symbol.Fields.Any(f => f.Body is not null))
+            if (symbol.Fields.Any(f => f.Body?.Value is not null))
             {
                 fn.Emit($"call void {ClassDefaults(symbol)}(ptr {p})");
             }
@@ -73,19 +110,18 @@ public sealed partial class Emitter
         else
         {
             var arguments = Arguments(c, info, j => symbol.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(symbol, j), cConvention: false, owned: false);
-            p = Allocate(block);
-            fn.Emit($"store i64 1, ptr {p}");
-            fn.Emit($"store i64 1, ptr {fn.Value($"getelementptr {block}, ptr {p}, i32 0, i32 1")}");
+            p = block();
             FillFields(symbol, arguments, p);
         }
 
-        return Layout.Fat(symbol) ? Pair(p, Table(symbol)) : p;
+        return p;
     }
 
     /// <summary>
     /// K10, K11: the fields of class <paramref name="x"/> in the block <paramref name="p"/> of an instance being made, from the arguments
     /// bound to its constructor, which it borrows: the base's first, from the arguments the explicit form computes over the parameters
-    /// or from those the short form passes on, then the class's own, each with a count of its own.
+    /// or from those the short form passes on, or by the base's constructor that takes no arguments, for a class without a primary
+    /// constructor (K14), then the class's own, each with a count of its own.
     /// </summary>
     private void FillFields(ClassSymbol x, List<string> arguments, string p)
     {
@@ -100,7 +136,17 @@ public sealed partial class Emitter
                 slots[Model.DeclarationOf(x.Constructor[i].Declaration)] = slot;
             }
 
-            FillFields(b, Arguments(call, Model.CallOf(call), j => b.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(b, j), cConvention: false, owned: false), p);
+            var info = Model.CallOf(call);
+            if (info.Constructor is not null)
+            {
+                // K14: a constructor of the base's body, before the class's own fields take theirs, which it cannot read: the checker
+                // refuses `this` and a method of the instance in a constructor of a class with derived classes
+                Construct(b, call, info, () => p);
+            }
+            else
+            {
+                FillFields(b, Arguments(call, info, j => b.Constructor[j].Field.Type, _ => false, j => ClassFieldDefault(b, j), cConvention: false, owned: false), p);
+            }
         }
         else if (x.Base is { } shortBase)
         {
@@ -160,13 +206,101 @@ public sealed partial class Emitter
             for (var i = symbol.Fields.Count(f => f.Body is null); i < symbol.Fields.Count; i++)
             {
                 var field = symbol.Fields[i];
-                var d = field.Body!.Value!;
+                if (field.Body!.Value is not { } d)
+                {
+                    continue; // K14: a field a constructor's body assigns
+                }
+
                 var index = i;
                 At(d.Line);
                 InRegion(() => fn.Emit($"store {Ir(field.Type)} {EmitDefault(unit, d, field.Type, owned: true)}, ptr {InstanceFieldPointer(symbol, "%this", index)}"));
             }
 
             fn.Return(null);
+            End();
+        }
+        finally
+        {
+            unit = caller;
+        }
+    }
+
+    /// <summary>K14: the function of a constructor of a class's body, queued on first use and emitted once (<see cref="EmitConstructor"/>).</summary>
+    private string Constructor(ConstructorSymbol made)
+    {
+        var key = $"{classOwners[made.Owner].Prefix}.{made.Owner.Name}.new.{Number(made.Line)}";
+        if (!instances.TryGetValue(key, out var name))
+        {
+            name = $"@\"{key}\"";
+            instances[key] = name;
+            constructorsPending.Enqueue((made, name));
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// K14: the function <see cref="Constructor"/> names, which takes the block of the instance and the parameters, which it borrows:
+    /// what its <c>: this(...)</c> calls, a construction into the same block; without one the base's construction into that block,
+    /// the one <c>: base(...)</c> picks or C#'s implied <c>base()</c>, or for a class without a base the defaults of the body
+    /// (<see cref="ClassDefaults"/>), since a class with a base has no field in its body (<c>not supported</c>); then
+    /// its body, with the instance as <c>this</c>, whose table no code there reads, since the checker refuses <c>this</c> and a method
+    /// of it in a class with derived classes. A trace names its frame by the class, as the construction is written.
+    /// </summary>
+    private void EmitConstructor(ConstructorSymbol made, string name)
+    {
+        var caller = unit;
+        var symbol = made.Owner;
+        unit = classOwners[symbol];
+        try
+        {
+            features = NoFeatures; // one function serves every construction, so what it calls is compiled for the CPU alone (R18)
+            var d = made.Declaration;
+            foreach (var p in made.Parameters)
+            {
+                RequireSupported(p.Type, p.Line);
+            }
+
+            var parameters = made.Parameters.Select((p, i) => $"{Ir(p.Type)} %p{i}").Prepend("ptr %this");
+            Begin(new IrFunction($"internal void {name}({string.Join(", ", parameters)})", FeatureAttributes(features)), NoMap, Types.Void);
+            Trace(symbol.Name, Symbol(name), d.Line);
+            var type = Ir(new ClassType(symbol));
+            var self = fn.Alloca(type, "this");
+            fn.Emit($"store {type} {(Layout.Fat(symbol) ? Pair("%this", "null") : "%this")}, ptr {self}");
+            slots[Model.ThisOf(made)] = self;
+            for (var i = 0; i < made.Parameters.Count; i++)
+            {
+                var p = made.Parameters[i];
+                var slot = fn.Alloca(Ir(p.Type), p.Name);
+                fn.Emit($"store {Ir(p.Type)} %p{i}, ptr {slot}");
+                slots[Model.DeclarationOf(d.Parameters[i])] = slot;
+                if (i < made.InitializerParameters.Count)
+                {
+                    slots[made.InitializerParameters[i]] = slot; // the same parameter, as the arguments of `: this(...)` read it
+                }
+            }
+
+            At(d.Line);
+            if (made.ThisCall is { } call)
+            {
+                InRegion(() => Construct(symbol, call, Model.CallOf(call), () => "%this"));
+            }
+            else
+            {
+                if (made.BaseCall is { } baseCall)
+                {
+                    // `: base(...)` or C#'s implied `base()`: the base's part of the block, before the body; the class has no defaults of
+                    // its body to run, a field there being `not supported` where a base is, whose defaults section 4 puts first (K14)
+                    InRegion(() => Construct(symbol.Base!, baseCall, Model.CallOf(baseCall), () => "%this"));
+                }
+
+                if (symbol.Fields.Any(f => f.Body?.Value is not null))
+                {
+                    fn.Emit($"call void {ClassDefaults(symbol)}(ptr %this)");
+                }
+            }
+
+            EmitBody(null, d.Body, d.Line);
             End();
         }
         finally
@@ -198,15 +332,156 @@ public sealed partial class Emitter
         return $"@\"table.{symbol.Name}\"";
     }
 
+    /// <summary>
+    /// K6: the table of the class for an interface it implements, emitted after the last function (<see cref="EmitTables"/>): the
+    /// release, the weak release, the equality and the hash of the class, as its own table holds them, then the method of the class
+    /// that implements each method of the interface, in the order the interface writes them, as Rust's vtable of a type for a trait.
+    /// </summary>
+    private string InterfaceTable(ClassSymbol symbol, InterfaceSymbol face)
+    {
+        if (!interfaceTabled.Contains((symbol, face)))
+        {
+            interfaceTabled.Add((symbol, face));
+        }
+
+        layout.Pair();
+        return $"@\"table.{symbol.Name}.{face.Name}\"";
+    }
+
+    /// <summary>
+    /// K6: the slots of a class's table after the release, the weak release, the equality and the hash: its base's first, then the
+    /// methods it marks <c>virtual</c>, in the order written, then the table for each interface it names that its bases do not, so
+    /// that a base's slot has one place in every derived class's table.
+    /// </summary>
+    private static List<object> Slots(ClassSymbol symbol) =>
+        [
+            .. symbol.Base is { } b ? Slots(b) : [],
+            .. symbol.Methods.Values.SelectMany(list => list).Where(m => (m.Declaration!.Modifiers & Modifiers.Virtual) != 0).OrderBy(m => m.Line),
+            .. symbol.Interfaces.Where(face => symbol.Base is not { } b || !b.Implements(face)),
+        ];
+
+    /// <summary>
+    /// K6: an instance of the class, held by a value of its type, as a value of an interface it implements: the pair of its address and
+    /// its class's table for the interface, which a class with derived classes reads from the table of the instance's class.
+    /// </summary>
+    private string AsInterface(string value, ClassSymbol symbol, InterfaceSymbol face)
+    {
+        if (!Layout.Fat(symbol))
+        {
+            return Pair(value, InterfaceTable(symbol, face));
+        }
+
+        var owner = symbol.Chain.Last(c => c.Interfaces.Contains(face));
+        var slot = MethodSlots + Slots(owner).IndexOf(face);
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var faceTable = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(slot)}")}");
+        return Pair(fn.Value($"extractvalue %kz.obj {value}, 0"), faceTable);
+    }
+
+    /// <summary>K6, K7: the method of the class that implements the interface's method: the nearest of its chain with the method's name, parameter types and <c>mut</c> marks, which a call on an instance of the class runs.</summary>
+    private static FunctionSymbol Implementing(ClassSymbol symbol, FunctionSymbol method) =>
+        symbol.Chain.SelectMany(c => c.Methods.TryGetValue(method.Name, out var list) ? list : [])
+            .First(m => m.Parameters.Count == method.Parameters.Count && m.Parameters.Zip(method.Parameters).All(p => Types.Same(p.First.Type, p.Second.Type)) && Checker.SameMut(m, method));
+
+    /// <summary>
+    /// K6, K7: what the slot of the interface's method in the class's table for it holds: the method itself, whose instance is its
+    /// address, or, for a class whose methods take the instance with its table, a function that takes the address and calls the
+    /// method with the class's own table, which is the instance's, since the table for the interface is the class's own.
+    /// </summary>
+    private string InterfaceSlot(ClassSymbol symbol, InterfaceSymbol face, FunctionSymbol method)
+    {
+        var implementation = Implementing(symbol, method);
+        var name = Instance(implementation, NoMap);
+        if (!Related(implementation.Owner!))
+        {
+            return name;
+        }
+
+        var result = Ir(method.ReturnType);
+        var parameters = method.Parameters.Select(p => p.Mut ? "ptr" : Ir(p.Type)).ToList();
+        return Helper($"face.{symbol.Name}.{face.Name}.{Number(face.Methods.IndexOf(method))}", result, ["ptr", .. parameters], () =>
+        {
+            var self = Pair("%a0", Table(symbol));
+            var arguments = parameters.Select((type, i) => $"{type} %a{Number(i + 1)}").Prepend($"%kz.obj {self}");
+            var call = $"call {result} {name}({string.Join(", ", arguments)})";
+            if (Types.IsVoid(method.ReturnType))
+            {
+                fn.Emit(call);
+                fn.Return(null);
+            }
+            else
+            {
+                fn.Return($"{result} {fn.Value(call)}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// C4 with K6: whether the instance a value of <paramref name="from"/> holds, a class some class derives from or an interface, is
+    /// of the arm's class or of a class derived from it, and that value as the arm's type (the owner, 2026-11-02, #110, as C#'s
+    /// <c>is</c>). A class's table links its base's, as the CLR's method table its parent, and the test walks from the table of the
+    /// instance's class to the arm's (<see cref="Descends"/>); through an interface it reads that table from the class's table for the
+    /// interface, and a class with no base and no derived class is that table for the interface itself, one comparison.
+    /// </summary>
+    private (string Holds, string Value) ClassArm(string value, KurzType from, ClassSymbol arm)
+    {
+        var address = fn.Value($"extractvalue %kz.obj {value}, 0");
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        if (from is InterfaceType face)
+        {
+            if (!Related(arm))
+            {
+                return (fn.Value($"icmp eq ptr {table}, {InterfaceTable(arm, face.Symbol)}"), address);
+            }
+
+            table = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(LinkSlot)}")}");
+        }
+
+        return (Descends(table, arm), Layout.Fat(arm) ? Pair(address, table) : address);
+    }
+
+    /// <summary>
+    /// C4 with K6: whether the class whose table <paramref name="table"/> is, null for none, is <paramref name="arm"/> or derives from
+    /// it: one comparison where nothing derives from the arm's class, else a walk through the tables' links.
+    /// </summary>
+    private string Descends(string table, ClassSymbol arm)
+    {
+        if (!arm.Derived)
+        {
+            return fn.Value($"icmp eq ptr {table}, {Table(arm)}");
+        }
+
+        var walk = Helper("class.descends", "i1", ["ptr", "ptr"], () =>
+        {
+            var at = fn.Alloca("ptr", "table");
+            fn.Emit($"store ptr %a0, ptr {at}");
+            var loop = fn.Label("loop");
+            var check = fn.Label("check");
+            var up = fn.Label("up");
+            var yes = fn.Label("yes");
+            var no = fn.Label("no");
+            fn.Branch(loop);
+            fn.Block(loop);
+            var current = fn.Value($"load ptr, ptr {at}");
+            fn.CondBranch(fn.Value($"icmp eq ptr {current}, %a1"), yes, check);
+            fn.Block(check);
+            fn.CondBranch(fn.Value($"icmp eq ptr {current}, null"), no, up);
+            fn.Block(up);
+            fn.Emit($"store ptr {fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {current}, i64 {Number(LinkSlot)}")}")}, ptr {at}");
+            fn.Branch(loop);
+            fn.Block(yes);
+            fn.Return("i1 true");
+            fn.Block(no);
+            fn.Return("i1 false");
+        });
+        return fn.Value($"call i1 {walk}(ptr {table}, ptr {Table(arm)})");
+    }
+
     /// <summary>K6, K7: whether the methods of the class take the instance with its table: a class with a base or with derived classes.</summary>
     private static bool Related(ClassSymbol symbol) => symbol.Base is not null || symbol.Derived;
 
     /// <summary>K7: the method a chain of overrides starts from, the one marked <c>virtual</c>, whose slot each override fills.</summary>
     private static FunctionSymbol Root(FunctionSymbol method) => method.Overridden is { } overridden ? Root(overridden) : method;
-
-    /// <summary>K7: the <c>virtual</c> methods of a class in the order of their slots: its base's first, then those it marks <c>virtual</c>, in the order written.</summary>
-    private static List<FunctionSymbol> VirtualMethods(ClassSymbol symbol) =>
-        [.. symbol.Base is { } b ? VirtualMethods(b) : [], .. symbol.Methods.Values.SelectMany(list => list).Where(m => (m.Declaration!.Modifiers & Modifiers.Virtual) != 0).OrderBy(m => m.Line)];
 
     /// <summary>K7: what a call of the <c>virtual</c> method runs on an instance of the class: the override nearest the class, or the method itself.</summary>
     private static FunctionSymbol Implementation(ClassSymbol symbol, FunctionSymbol root) =>
@@ -262,12 +537,20 @@ public sealed partial class Emitter
     /// K2, K9, M4: an assignment into a <c>mut</c> field of an instance, the value read first (the owner, 2026-10-24, "Value first"),
     /// then the instance the field is in, then the field, which lets go of its old value after it holds the new one.
     /// </summary>
-    private void EmitFieldAssignment(Expression value, KurzType targetType, Func<(string Pointer, ClassSymbol Symbol)> instance, string field)
+    private void EmitFieldAssignment(Expression value, KurzType targetType, Func<(string Pointer, ClassSymbol Symbol)> instance, string field, bool first = false)
     {
         var owned = Convert(Owned(value), TypeOf(value), targetType, value.Line);
         var (pointer, symbol) = instance();
         var index = symbol.FieldIndex(field);
-        Store(owned, symbol.Fields[index].Type, InstanceFieldPointer(symbol, Address(pointer, symbol), index));
+        var place = InstanceFieldPointer(symbol, Address(pointer, symbol), index);
+        if (first)
+        {
+            fn.Emit($"store {Ir(symbol.Fields[index].Type)} {owned}, ptr {place}"); // K14: a constructor's first assignment, into a field that holds nothing
+        }
+        else
+        {
+            Store(owned, symbol.Fields[index].Type, place);
+        }
     }
 
     /// <summary>M5, M9: the place of a list, a map or a hasher held by a field of an instance, for a <c>mut</c> member; null for any other receiver.</summary>
@@ -300,6 +583,22 @@ public sealed partial class Emitter
     private string EmitMethodCall(CallExpression c, CallInfo info)
     {
         var f = info.Function!;
+        if (c.Callee is MemberAccess { Target: var target } && TypeOf(target) is InterfaceType face)
+        {
+            // the receiver is borrowed past the arguments, as a class's is below: one read from a field holds a count of its own to the end
+            // of the statement (InstanceField), and one in a variable cannot change while they run (M7, F15, F16)
+            var value = EmitExpression(target);
+            var passed = Arguments(
+                c,
+                info,
+                j => Sub(f.Parameters[j].Type),
+                j => f.Parameters[j].Mut,
+                j => throw new InvalidOperationException($"a default of the method `{f.Name}` of an interface at line {c.Line}"),
+                cConvention: false,
+                owned: false);
+            return CallThrough(f, value, face.Symbol, passed);
+        }
+
         var (receiver, receiverType) = c.Callee switch
         {
             MemberAccess m => (EmitExpression(m.Target), (ClassType)TypeOf(m.Target)),
@@ -333,13 +632,29 @@ public sealed partial class Emitter
             if (f.IsVirtual && Layout.Fat(receiverType.Symbol))
             {
                 var root = Root(f);
-                var slot = MethodSlots + VirtualMethods(root.Owner!).IndexOf(root);
+                var slot = MethodSlots + Slots(root.Owner!).IndexOf(root);
                 var table = fn.Value($"extractvalue %kz.obj {pair}, 1");
                 callee = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(slot)}")}");
             }
         }
 
         var result = Sub(f.ReturnType);
+        var call = $"call {Ir(result)} {callee}({string.Join(", ", arguments.Prepend(self))})";
+        return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
+    }
+
+    /// <summary>
+    /// K6, K7: a call of the interface's method on a value of it: the instance's address first, then the arguments, to what the slot of
+    /// the method holds in the instance's class's table for the interface (<see cref="InterfaceSlot"/>), as Rust calls through a
+    /// <c>dyn Trait</c>'s vtable.
+    /// </summary>
+    private string CallThrough(FunctionSymbol method, string value, InterfaceSymbol face, IEnumerable<string> arguments)
+    {
+        var slot = MethodSlots + face.Methods.IndexOf(method);
+        var table = fn.Value($"extractvalue %kz.obj {value}, 1");
+        var callee = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {table}, i64 {Number(slot)}")}");
+        var self = $"ptr {fn.Value($"extractvalue %kz.obj {value}, 0")}";
+        var result = Sub(method.ReturnType);
         var call = $"call {Ir(result)} {callee}({string.Join(", ", arguments.Prepend(self))})";
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
     }
@@ -544,6 +859,12 @@ public sealed partial class Emitter
     private string EqualThroughTable(string left, string right, ClassSymbol symbol)
     {
         comparedThroughTable.Add(symbol);
+        return EqualPairs(left, right);
+    }
+
+    /// <summary>K13: <c>==</c> on two pairs of an instance and its class's table, for the class or for an interface: false where the tables differ, else the equality in the table.</summary>
+    private string EqualPairs(string left, string right)
+    {
         var name = Helper("equal.instance", "i1", ["%kz.obj", "%kz.obj"], () =>
         {
             var table = fn.Value("extractvalue %kz.obj %a0, 1");
@@ -563,6 +884,12 @@ public sealed partial class Emitter
     private string HashThroughTable(string block, string key, ClassSymbol symbol)
     {
         hashedThroughTable.Add(symbol);
+        return HashPair(block, key);
+    }
+
+    /// <summary>K13 with M9: the hash of a key that is a pair of an instance and its class's table, for the class or for an interface, by the hash in the table.</summary>
+    private string HashPair(string block, string key)
+    {
         var name = Helper("hash.instance", "i64", ["ptr", "%kz.obj"], () =>
         {
             var slot = fn.Value($"load ptr, ptr {fn.Value($"getelementptr ptr, ptr {fn.Value("extractvalue %kz.obj %a1, 1")}, i64 3")}");
@@ -579,9 +906,30 @@ public sealed partial class Emitter
     {
         ReleaseInstance(symbol);
         ReleaseWeak(symbol);
-        foreach (var root in VirtualMethods(symbol))
+        if (symbol.Base is { } b)
         {
-            Instance(Implementation(symbol, root), NoMap);
+            Table(b); // the link: a class test walks from the instance's class through its bases (C4, K6)
+        }
+
+        foreach (var slot in Slots(symbol))
+        {
+            _ = slot is FunctionSymbol root ? Instance(Implementation(symbol, root), NoMap) : InterfaceTable(symbol, (InterfaceSymbol)slot);
+        }
+    }
+
+    /// <summary>K6: the helpers and methods the class's table for the interface holds, made while functions are still emitted.</summary>
+    private void PrepareInterfaceTable(ClassSymbol symbol, InterfaceSymbol face)
+    {
+        ReleaseInstance(symbol);
+        ReleaseWeak(symbol);
+        if (Related(symbol))
+        {
+            Table(symbol); // the link: a class test reads the instance's class from the table for the interface (C4, K6)
+        }
+
+        foreach (var method in face.Methods)
+        {
+            InterfaceSlot(symbol, face, method);
         }
     }
 
@@ -607,14 +955,31 @@ public sealed partial class Emitter
             }
         }
 
+        foreach (var (symbol, face) in interfaceTabled.ToList())
+        {
+            if (comparedThroughInterface.Contains(face) && made.Add($"equal {symbol.Name}"))
+            {
+                ClassEqual(symbol);
+                more = true;
+            }
+
+            if (hashedThroughInterface.Contains(face) && made.Add($"hash {symbol.Name}"))
+            {
+                ClassHash(symbol);
+                more = true;
+            }
+        }
+
         return more;
     }
 
     /// <summary>
     /// K6, K13: the table of each class the program names, a constant array of addresses: the release of an instance, its weak
     /// release, its equality where `==` reads a base of the class through the table and its hash where a map's key does, else null,
-    /// and the method each <c>virtual</c> slot runs, the base's slots first, so that a base's slot has one place in every derived
-    /// class's table. Emitted after the last function, when every use is known.
+    /// the table of its base, null for a class with none, and the method each <c>virtual</c> slot runs, the base's slots first, so
+    /// that a base's slot has one place in every derived class's table; and of each class's table for an interface, the same four,
+    /// the class's own table where the class has a base or derived classes, else null, then its methods. Emitted after the last
+    /// function, when every use is known.
     /// </summary>
     private void EmitTables()
     {
@@ -628,9 +993,24 @@ public sealed partial class Emitter
                 ReleaseWeak(symbol),
                 compared ? ClassEqual(symbol) : "null",
                 hashed ? ClassHash(symbol) : "null",
+                symbol.Base is { } b ? Table(b) : "null",
             };
-            entries.AddRange(VirtualMethods(symbol).Select(root => Instance(Implementation(symbol, root), NoMap)));
+            entries.AddRange(Slots(symbol).Select(slot => slot is FunctionSymbol root ? Instance(Implementation(symbol, root), NoMap) : InterfaceTable(symbol, (InterfaceSymbol)slot)));
             module.Global($"{Table(symbol)} = internal constant [{Number(entries.Count)} x ptr] [{string.Join(", ", entries.Select(e => "ptr " + e))}]");
+        }
+
+        foreach (var (symbol, face) in interfaceTabled)
+        {
+            var entries = new List<string>
+            {
+                ReleaseInstance(symbol),
+                ReleaseWeak(symbol),
+                comparedThroughInterface.Contains(face) ? ClassEqual(symbol) : "null",
+                hashedThroughInterface.Contains(face) ? ClassHash(symbol) : "null",
+                Related(symbol) ? Table(symbol) : "null",
+            };
+            entries.AddRange(face.Methods.Select(method => InterfaceSlot(symbol, face, method)));
+            module.Global($"{InterfaceTable(symbol, face)} = internal constant [{Number(entries.Count)} x ptr] [{string.Join(", ", entries.Select(e => "ptr " + e))}]");
         }
     }
 

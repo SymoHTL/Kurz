@@ -11,7 +11,7 @@ internal readonly record struct NullPath(VariableSymbol Root, string Fields)
         ReferenceEquals(Root, other.Root) && (other.Fields.Length == 0 || Fields == other.Fields || Fields.StartsWith(other.Fields + ".", StringComparison.Ordinal));
 }
 
-/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop.</summary>
+/// <summary>N3: what held at each <c>break</c> and <c>continue</c> of one loop, where that <c>break</c> or <c>continue</c> can be reached.</summary>
 internal sealed class LoopExits
 {
     public List<ImmutableHashSet<NullPath>> Breaks { get; } = [];
@@ -293,10 +293,15 @@ public sealed partial class Checker
     /// what a round leaves nullable at the end of its body or at a <c>continue</c>, the join C# makes where the paths around a loop meet
     /// (section 4, an assumption there). Where a reading ends with less known than it began with, it is read again from that, its
     /// diagnostics dropped, until a reading keeps what it began with; that reading's diagnostics are the loop's. After the loop holds
-    /// what the condition leaves where it is false, joined with what held at each <c>break</c>, and a <c>while true</c> what held at its
-    /// <c>break</c>s alone; a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
+    /// what the condition leaves where it is false, joined with what held at each <c>break</c> that can be reached, and a <c>while true</c>
+    /// what held at those <c>break</c>s alone; a <c>break</c> or a <c>continue</c> that is never reached adds nothing, one after a statement
+    /// whose end cannot be reached, in the branch a constant condition never takes or in the body of <c>while false</c> (the frame's
+    /// <c>Unreached</c>); a <c>for</c> (C8), which has no condition and can run no round, leaves with what the head holds as well.
+    /// Returns whether the loop can end: a <c>while</c> whose condition is the constant <c>true</c> ends only through a <c>break</c> of its
+    /// own that can be reached, as the end point of C#'s <c>while (true)</c> is reached only through one (F3), and the same constant decides
+    /// both; the body of one whose condition is the constant <c>false</c> is never reached, as in C#.
     /// </summary>
-    private void CheckLoop(Expression? condition, Block body)
+    private bool CheckLoop(Expression? condition, Block body)
     {
         var head = frame.Known;
         while (true)
@@ -306,10 +311,12 @@ public sealed partial class Checker
             Push();
             var tested = head;
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
+            bool? constant = null;
             if (condition is not null)
             {
                 var calls = callsRun;
                 CheckCondition(condition);
+                constant = ConstantCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
                 (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
@@ -318,11 +325,14 @@ public sealed partial class Checker
             frame.Loops.Add(exits);
             frame.Known = tested.Union(whenTrue);
             frame.LoopDepth++;
+            var unreached = frame.Unreached;
+            frame.Unreached = unreached || constant == false;
             var flow = CheckBlock(body);
+            frame.Unreached = unreached;
             frame.LoopDepth--;
             frame.Loops.RemoveAt(frame.Loops.Count - 1);
             var rounds = exits.Continues.ToList();
-            if (flow == Flow.Completes)
+            if (flow == Flow.Completes && constant != false)
             {
                 rounds.Add(frame.Known);
             }
@@ -331,9 +341,10 @@ public sealed partial class Checker
             if (next.Count == head.Count)
             {
                 Pop(commit: true);
-                var leaves = condition is not null && Unwrap(condition) is BoolLiteral { Value: true } ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
+                var forever = constant == true;
+                var leaves = forever ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
                 frame.Known = Join(leaves, tested);
-                return;
+                return !forever || exits.Breaks.Count > 0;
             }
 
             Pop(commit: false);

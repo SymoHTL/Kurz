@@ -40,8 +40,8 @@ item 16 found the regression after the merge.
   or `1` chosen by a test (above). Where two words differ, the `Order` of pull request 232 took
   49.65 ms on 50 rounds of 200k sorted neighbours with a `-1` or `1` chosen by a test of which word
   is the lower, against 52.99 with a value made from the words' bits, the best of five runs of two
-  builds that differ in that line alone (the pull request's `vFG-1.txt`, 2026-11-02). LLVM can turn
-  constants that branches choose into a branch at the caller, and that branch mispredicts where the
-  data is random.
+  builds that differ in that line alone (the pull request's `vFG-1.txt`, 2026-11-02, clang 23.1.4).
+  LLVM can turn constants that branches choose into a branch at the caller, and that branch
+  mispredicts where the data is random.
 
 No CI job runs a benchmark, so nothing goes red when a change skips this: `judgment step`.

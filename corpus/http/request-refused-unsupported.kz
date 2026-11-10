@@ -1,0 +1,67 @@
+// expect: output
+// | Unsupported: unsupported HTTP version
+// | Unsupported: unsupported HTTP version
+// | Unsupported: unsupported transfer encoding
+// | Unsupported: unsupported transfer encoding
+// | Unsupported: unsupported transfer encoding
+// | read POST /
+// | Unsupported: unsupported method
+// | Unsupported: unsupported expectation
+// | TooLarge: request body over limit
+// | TooLarge: request body over limit
+// | TooLarge: request line too long
+// | TooLarge: request header too large
+// | TooLarge: request header too large
+// rules: W5, W7
+
+// what the server answers `505`, `501` and `417` is an `HttpError` of the kind `Unsupported`, and what it answers `413`, `414` and
+// `431` one of the kind `TooLarge`, with the limits of `HttpLimits()`: a declared body of 30000000 bytes, a request line of 8192
+// bytes with its line end, 100 headers and 32768 bytes of them
+void | IoError Show(string request) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(request.Bytes)
+    client.ShutdownWrite()
+    match HttpRequest.Read(server) {
+        HttpRequest r => print("read {r.Method} {r.Path}")
+        IoError e => print(e)
+        HttpError e => print("{e.Kind}: {e.Detail}")
+    }
+}
+
+void | IoError All() {
+    Show("GET / HTTP/2.0\r\nHost: h\r\n\r\n")
+    Show("GET / HTTP/1.2\r\nHost: h\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip, chunked\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: \t CHUNKED \t\r\n\r\n0\r\n\r\n")
+    Show("CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nExpect: 200-ok\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 30000001\r\n\r\n")
+    Show("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 99999999999999999999999\r\n\r\n")
+    mut line = "GET /"
+    while line.Bytes.Count < 8180 {
+        line = "{line}aaaaaaaaaa"
+    }
+
+    Show("{line} HTTP/1.1\r\nHost: h\r\n\r\n")
+    mut many = "GET / HTTP/1.1\r\nHost: h\r\n"
+    for i in 0..<100 {
+        many = "{many}X-{i}: v\r\n"
+    }
+
+    Show("{many}\r\n")
+    // over the size with 4 headers, far under the count
+    mut v = "v"
+    while v.Bytes.Count < 12000 {
+        v = "{v}{v}"
+    }
+
+    Show("GET / HTTP/1.1\r\nHost: h\r\nX-A: {v}\r\nX-B: {v}\r\nX-C: {v}\r\n\r\n")
+}
+
+All() else {
+    IoError e => print(e)
+}

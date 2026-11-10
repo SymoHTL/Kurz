@@ -235,9 +235,24 @@ read it):
 
 `!` turns a test around, and a test of `a?.b != null` shows that `a` is not null either. A block
 always leaves when its end cannot be reached, as C# decides reachability: it ends in `return` or
-`throw`, in `break` or `continue` inside a loop, or in an `if` with `else` or a `match` whose
-every arm leaves; the record marks that definition as *(assumed)*. Where the analysis proves
-nothing, the variable is nullable, and N2 applies.
+`throw`, in `break` or `continue` inside a loop, in an `if` with `else` or a `match` whose every
+arm leaves, or in a `while true` with no `break` of its own that can be reached, as C#'s
+`while (true)`, or in one of the forms of a constant condition below; a `break` or a `continue`
+after a statement whose end cannot be reached is never reached, as in C#. The record marks that
+definition as *(assumed)*. A condition whose value is a constant is read as that value, in an `if` as
+in a `while`, as C# reads it (§4, the owner, 2026-11-08): the `then` of `if false` and the `else` of `if true` are
+never reached, nor the end of an `if true` whose block leaves, nor the body of `while false`, and a
+`while` whose condition is the constant `true`, `while (true)`, `while !false` or `while 1 == 1`
+among them, ends only through a `break` of its own that can be reached. *(assumed, §4: the constants
+are the ones the checker folds, the ones a default takes (F12), and in a copy of a function a `const`
+type parameter, the constant its call gave (T35), so that its condition is read per copy; a named
+constant, which C# also reads, Kurz does not have.)* A branch that is never reached adds nothing to
+what holds after it. *(assumed, §4: a `break` or a `continue` that is never reached, after a statement
+whose end cannot be reached or in a branch that is never reached, adds nothing to what holds after its
+loop or at its loop's head.)* A branch that is never reached is checked as any other code, with what
+held before the statement, as Rust checks code it never reaches, so that a use of a nullable value
+there is `nullable-unchecked`, where C# reports nothing (§4, the owner, 2026-11-09, "Check as any code"). Where
+the analysis proves nothing, the variable is nullable, and N2 applies.
 
 A path of fields such as `u.Email` is narrowed as a variable is. An index (`map[key]`) and the
 result of a call are not, as in C#: they take `??` (N4), `?.` (N5) or a variable of their own.
@@ -481,6 +496,56 @@ Case: [null/nullable-function.kz](../corpus/null/nullable-function.kz)
 
 Case: [values/map-function-value.kz](../corpus/values/map-function-value.kz)
 
+Case: [null/constant-false-adds-nothing.kz](../corpus/null/constant-false-adds-nothing.kz)
+```kurz
+// the `then` of `if false` is never reached, so the `null` it assigns adds nothing to what holds after it, and `s` stays not null
+mut string? s = "a"
+if false {
+    s = null
+}
+
+print(s.Bytes.Count)
+```
+
+Case: [null/unreached-continue-adds-nothing.kz](../corpus/null/unreached-continue-adds-nothing.kz)
+```kurz
+// the `continue` after the `return` is never reached, so the `null` it saw adds nothing at the loop's head, and `s` stays not
+// null after the loop
+int Length(int stop) {
+    mut string? s = "abc"
+    mut n = 0
+    while n < 3 {
+        n = n + 1
+        if n == stop {
+            s = null
+            return 0
+            continue
+        }
+    }
+
+    return s.Bytes.Count
+}
+
+print(Length(5))
+```
+
+Case: [null/constant-false-branch-checked.kz](../corpus/null/constant-false-branch-checked.kz)
+```kurz
+// the `then` of `if false` is never reached, and it is checked as any other code, with what held before the `if`, so the use
+// of the nullable `email` there is `nullable-unchecked`
+string? Email(int id) {
+    if id == 1 {
+        return "a@example.com"
+    }
+    return null
+}
+
+email = Email(2)
+if false {
+    print(email.Bytes.Count)
+}
+```
+
 ### N4 (decided, §4) `??`
 
 `a ?? b` is `a` when `a` is not null, and `b` otherwise, as in C#. `??` on a value whose type is
@@ -710,8 +775,9 @@ variable holds, itself or through fields of `data` values, `xs[0] = 2` and `m[k]
 narrowing, since the write runs no code of the program and the count it lets go of frees nothing that a
 path of strong references holds; a path with a `weak` reference in it is narrowed no more after such a
 write, since that count can be the target's last; a write into what a field of an instance holds,
-`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). A
-write into a list's item keeps it whatever the item. The write into a map's entry that this exception keeps,
+`h.Xs[0] = 2`, ends the narrowing of both (§4, the owner, 2026-11-02, #156, comment 6573114335). On a
+path with no `weak` reference in it, a write into an item of a list a variable holds keeps it whatever
+the item's type. The write into a map's entry that this exception keeps,
 `m[k] = 2` into a map a variable holds, keeps it only where the key's `==` runs no clause: a key that
 compares as a value, by its content (K4) or by identity, and holds no instance of a class that names its
 fields. A key whose type compares by an `equal by` clause, or that holds an instance of such a class,
@@ -755,14 +821,14 @@ Case: [null/narrowed-field-after-unrelated-call.kz](../corpus/null/narrowed-fiel
 ```kurz
 class Account(mut string? Email)
 
-void Log() {
+void Note() {
     print("log")
 }
 
 acc = Account("a")
 if acc.Email != null {
     n = acc.Email.Bytes.Count
-    Log()
+    Note()
     m = acc.Email.Bytes.Count
     print(n + m)
 }

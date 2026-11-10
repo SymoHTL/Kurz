@@ -16,13 +16,25 @@ A probe with the compiler of `main` at fcc948e, run before the text was written,
 - `Deep(Map<f.Type, T>(), n - 1)` gives no `growing-type-argument`; the copy is `kind-not-read` at
   the outer call.
 - `Deep(Pair<f.Type, T>(f.Get(x), x), n - 1)` gives no `growing-type-argument` either, and its
-  check does not end within 30 seconds.
+  check does not end within 30 seconds. That is the defect of T33's bound recorded on issue 156,
+  comment 6623885460: at fcc948e the bound is checked per chain, and a copy that makes one call for
+  each of its two fields makes about 2^64 copies.
 - The controls, `Deep(Map<int, T>(), n - 1)` and `Deep(Pair<int, T>(1, x), n - 1)`, are
   `growing-type-argument` at the call.
 
 The reading missed what happens before `Grows`. On the function's text `f.Type` has no type
-(`ResolveDotted` finds no pass outside a copy), so such a call has an error of its own there, and
-the walk takes no such call at all. The text was held, and the case went to the owner as a question.
+(`ResolveDotted` finds no pass outside a copy): there it is the error type, with a `not supported`
+for a dotted name as a type that the build of fcc948e does not print, and the walk takes no such
+call at all. The text was held, and the case went to the owner as a question. The owner answered
+it on 2026-11-04 (comment 6643376941, item 4, answer (a)): `T` grows, and the call is refused at
+its line, since the walk types `f.Type` on the text. What the probe showed is a defect of the
+checker of fcc948e: with a type of its own for `f.Type` on the text, the walk of 1e7b262 (pull
+request 352, 2026-11-06) refuses such a call at its line, and its chain of copies stops there. A
+chain that branches with no such call was the defect of the bound that comment 6623885460 records,
+and pull request 307, merged on 2026-11-05 as 3c870b9, ends it at the outer call with the bound's
+`not supported`. The text of pull request 352 read an inferred type argument as a written one, and
+a probe after its walk at the cap, on 1e7b262 on 2026-11-06, found that `Deep(Pair(f.Get(x), x), n - 1)` took no part: `f.Get(x)` had no type on the text, so
+the inferred `Pair` held no field's type (pull request 352, comment 6681585779).
 
 **Why:** a reading of code follows the function it looks at, and what comes before that function
 decides whether it runs. A sentence of the reference or the record that says what the compiler

@@ -1150,6 +1150,25 @@ match Find(2) {
 }
 ```
 
+Case: [outcomes/match-implementing-arm-no-else.kz](../corpus/outcomes/match-implementing-arm-no-else.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+void Show(Shape s) {
+    match s {
+        Square q => print("square {q.Side}")
+    }
+}
+
+Show(Square(3))
+```
+
 ### O9 (decided, §5) Top-level code has no caller
 
 Top-level code has no signature to list a case in, so a call there has to handle every case that

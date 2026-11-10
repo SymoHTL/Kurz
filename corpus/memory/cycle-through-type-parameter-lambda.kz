@@ -1,0 +1,15 @@
+// expect: error reference-cycle at 6
+// rules: R9
+
+// a lambda whose own type names a type parameter counts for a field of any function type: a `(T) => void` lambda that reads the
+// button through a panel closes the ring through a `() => void` field (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+class Panel(Button B)
+
+(T) => void Show<T>(Panel panel) => (T t) => print(panel.B.Name)
+
+b = Button("ok", () => print("x"))
+p = Panel(b)
+f = Show<int>(p)
+f(1)
+b.OnClick()

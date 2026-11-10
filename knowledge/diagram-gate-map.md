@@ -94,6 +94,8 @@ flowchart TD
         a row that reads as an error id outside a table headed id, rules, meaning;
         an error-table row that does not read as one; a design record, a chapter or a corpus file that cannot be
         read, missing or not UTF-8, named with what went unchecked;
+        a clause, reading, sentence or statement before this one or after this one in the record or a chapter,
+        outside a code block, a pointer by position;
         fewer rules or cases than the floors"]
         G10["compiler-tests: the compiler under compiler/ does not build, or a unit test fails;
         no test summary line at all, fewer passed tests than the floor, a skipped test, a non-zero exit with no failed test;
@@ -339,8 +341,9 @@ flowchart TD
         approval of 2026-10-21, which holds for the cap of one since 2026-10-22, is given for the head the round at the cap reviewed, when that round completed,
         for review and for gates when pr-findings is its one FAIL, conditions the caller reads (judgment
         step). The tool refuses a branch behind its base (M2), so when main moves after the round at the cap
-        the branch is brought up to date as a new head, which only the owner's approval of that head merges
-        over red; a new head the replay cache answers whole is green and needs none (R7)"]
+        the branch is brought up to date as a new head, which the owner's approval of that head merges
+        over red, or the standing approval for such a head under the conditions the over-red rule of
+        CLAUDE.md names; a new head the replay cache answers whole is green and needs none (R7)"]
         M4["title or description edited after the review: the status stays green on text
         the review never read. HAZARD issue 13"]
     end

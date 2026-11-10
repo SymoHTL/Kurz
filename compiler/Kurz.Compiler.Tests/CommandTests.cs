@@ -16,16 +16,16 @@ namespace Kurz.Compiler.Tests;
 /// </summary>
 public sealed class CommandTests : IDisposable
 {
-    private static readonly string Dll = Path.Combine(AppContext.BaseDirectory, "kurz.dll");
+    internal static readonly string Dll = Path.Combine(AppContext.BaseDirectory, "kurz.dll");
 
-    private static readonly string Host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+    internal static readonly string Host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
 
     private readonly string root = Directory.CreateTempSubdirectory("kurz-command-").FullName;
 
     public void Dispose() => Directory.Delete(root, recursive: true);
 
     /// <summary>Runs <c>kurz</c> with the arguments given; its exit code and both streams.</summary>
-    private static (int Code, string Output, string Error) Kurz(params string[] arguments)
+    internal static (int Code, string Output, string Error) Kurz(params string[] arguments)
     {
         Assert.True(File.Exists(Dll), $"the command is not built beside the suite: {Dll}");
         return Processes.Capture(Host, [Dll, .. arguments], null, TimeSpan.FromMinutes(2));

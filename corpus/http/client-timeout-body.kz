@@ -1,0 +1,269 @@
+// expect: output
+// | 200 1 TimedOut 0
+// | 200 2 TimedOut 0
+// | 200 3 TimedOut 0
+// | TimedOut 0
+// | 200 5 [ok]
+// | TimedOut 0
+// | 200 6 [next]
+// | 200 1 TimedOut 0
+// | true
+// | 200 1 TimedOut 0
+// | true
+// | 200 1 TimedOut 0
+// | true
+// | 200 1 TimedOut 0
+// | Unsupported: unsupported scheme
+// | true
+// allow: raw native
+// rules: W16
+
+// a call's time holds to the last byte read of its response: a body of a length, a chunked body between its chunks and a body read
+// to the close each give `TimedOut` with the number 0 once the time has passed, and so does a head that stops halfway; no
+// connection whose call ran out is used again, the next call opening a new one; a body whose bytes all came in the one write of
+// its head, read after the call's time ran out, gives `TimedOut` and not its bytes, which a head's read on loopback usually takes
+// into the stream's buffer; a body whose bytes come one at a time, each before a read's time would run out, still ends at the
+// call's time, since each read waits only what remains of it: a body of a length, one read to the close, and a chunk's size line;
+// and a redirect to `ftp://` whose body does not come ends the drain of that body at the call's time, its `TimedOut` dropped with
+// its connection, so that the refusal of the scheme answers the call, at the call's time and not before it
+extern "C" {
+    int fork()
+    int kill(int pid, int signal)
+    int waitpid(int pid, long status, int options)
+    int usleep(int microseconds)
+    void _exit(int code)
+}
+
+// the server, in a child of the program's process: each connection in turn, each request on it read and answered with the next of
+// `answers`, each `#` in it the number of the connection, followed by each next that begins with `~`, written a byte at a time, the
+// connection held where the next is `hold` until the client ends it, and closed then
+void Serve(TcpListener on, List<string> answers) {
+    mut next = 0
+    mut number = 0
+    while next < answers.Count {
+        stream = on.Accept() else {
+            IoError e => return
+        }
+
+        number = number + 1
+        mut open = true
+        while open && next < answers.Count {
+            match HttpRequest.Read(stream) {
+                HttpRequest r => {
+                    stream.Write(answers[next].Replace("#", "{number}").Bytes) else {
+                        IoError e => {
+                            open = false
+                        }
+                    }
+
+                    next = next + 1
+                    while next < answers.Count && answers[next].StartsWith("~") {
+                        Trickle(stream, answers[next])
+                        next = next + 1
+                    }
+
+                    if next < answers.Count && answers[next] == "hold" {
+                        next = next + 1
+                        Hold(stream)
+                        open = false
+                    }
+                }
+                IoError e => {
+                    open = false
+                }
+                HttpError e => {
+                    open = false
+                }
+            }
+        }
+
+        stream.Close() else {
+            IoError e => {
+            }
+        }
+    }
+
+    // a connection past the answers, a request the client should not have sent, closed at once, so that it shows as a line of the
+    // output and not as a call that waits on a connection nobody serves
+    while true {
+        extra = on.Accept() else {
+            IoError e => return
+        }
+
+        extra.Close() else {
+            IoError e => {
+            }
+        }
+    }
+}
+
+// the bytes of `text` after its `~` written one at a time, 100 milliseconds apart, until a write fails
+void Trickle(TcpStream stream, string text) {
+    for i in 1..<text.Bytes.Count {
+        raw {
+            usleep(100000)
+        }
+
+        stream.Write(text.Substring(i, 1).Bytes) else {
+            IoError e => return
+        }
+    }
+}
+
+// the stream read until the client ends it
+void Hold(TcpStream stream) {
+    mut sink = Bytes()
+    while true {
+        n = stream.Read(mut sink, 4096) else {
+            IoError e => return
+        }
+
+        if n == 0 {
+            return
+        }
+    }
+}
+
+// the server started in a child, the client's part run against it, and the child ended; the listener's `Accept` waits at most 10
+// seconds, so that a child whose program ended before it could end the child ends by itself and does not hold the output the suite
+// reads
+void Against(List<string> answers, (int) => void part) {
+    on = TcpListener.Bind("127.0.0.1:0") else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    on.SetAcceptTimeout(10s) else {
+        IoError e => {
+            print(e)
+            return
+        }
+    }
+
+    mut child = 0
+    raw {
+        child = fork()
+    }
+
+    // a fork that failed ends the case before the client, so that no `kill` or `waitpid` takes a pid of 0 or below
+    if child < 0 {
+        print("fork failed")
+        return
+    }
+
+    if child == 0 {
+        Serve(on, answers)
+        raw {
+            _exit(0)
+        }
+    }
+
+    part(on.Port)
+    raw {
+        kill(child, 9)
+        waitpid(child, 0, 0)
+    }
+}
+
+// the address of `path` on the server
+Uri Address(int port, string path) {
+    u = Uri.Parse("http://127.0.0.1:{port}{path}") else {
+        UriError e => return Uri()
+    }
+
+    return u
+}
+
+// a `GET` of `/` and its status, the server's number of the connection and the body read as text, or the failure
+string Show(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            number = r.Headers.Get("X-Connection") ?? "-"
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} {number} [{text}]"
+                IoError e => return "{r.Status} {number} {e.Kind} {e.Code}"
+                HttpError e => return "{r.Status} {number} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} {number} not UTF-8"
+            }
+        }
+        IoError e => return "{e.Kind} {e.Code}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Responses(int port) {
+    client = HttpClient(HttpClientOptions(Timeout: 300ms))
+    for i in 0..<7 {
+        print(Show(client, port))
+    }
+}
+
+// one call of a time of 300 milliseconds whose body comes a byte at a time, and whether it ended at its time and not at the body's
+// last byte, a second later
+void Trickled(int port) {
+    start = instant.Now
+    print(Show(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 900ms)
+}
+
+// one call of a time of 300 milliseconds whose body comes in the one write of its head, six bytes, which the head's read on
+// loopback usually takes whole, the body's bytes then in the stream's buffer, though TCP does not promise that one read takes one
+// write; the body read 400 milliseconds later, after the call's time ran out, gives `TimedOut` either way
+string Late(HttpClient client, int port) {
+    match client.Get(Address(port, "/")) {
+        HttpResponseMessage r => {
+            number = r.Headers.Get("X-Connection") ?? "-"
+            raw {
+                usleep(400000)
+            }
+
+            match r.Body.ReadAllText(100) {
+                string text => return "{r.Status} {number} [{text}]"
+                IoError e => return "{r.Status} {number} {e.Kind} {e.Code}"
+                HttpError e => return "{r.Status} {number} {e.Kind}: {e.Detail}"
+                InvalidUtf8 => return "{r.Status} {number} not UTF-8"
+            }
+        }
+        IoError e => return "{e.Kind} {e.Code}"
+        HttpError e => return "{e.Kind}: {e.Detail}"
+    }
+}
+
+void Buffered(int port) {
+    print(Late(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+}
+
+// one call of a time of 300 milliseconds that a `302` sends to `ftp://`, whose body does not come: the drain of that body ends at
+// the call's time, its `TimedOut` dropped with its connection, and the refusal of the next address's scheme answers the call; and
+// whether it answered at the call's time and not before it, as a drain that did not wait would
+void Redirected(int port) {
+    start = instant.Now
+    print(Show(HttpClient(HttpClientOptions(Timeout: 300ms)), port))
+    elapsed = instant.Now - start
+    print(elapsed >= 300ms && elapsed < 900ms)
+}
+
+Against([
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\nabc",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\nabc",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Conn",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 2\r\n\r\nok",
+    "",
+    "hold",
+    "HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 4\r\n\r\nnext",
+], (int port) => Responses(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 10\r\n\r\n", "~abcdefghij"], (int port) => Trickled(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\n\r\n", "~abcdefghij"], (int port) => Trickled(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nTransfer-Encoding: chunked\r\n\r\n", "~3;abcdefghij\r\nabc\r\n0\r\n\r\n"],
+    (int port) => Trickled(port))
+Against(["HTTP/1.1 200 OK\r\nX-Connection: #\r\nContent-Length: 6\r\n\r\nbuffer", "hold"], (int port) => Buffered(port))
+Against(["HTTP/1.1 302 Found\r\nX-Connection: #\r\nLocation: ftp://127.0.0.1/\r\nContent-Length: 10\r\n\r\n", "hold"],
+    (int port) => Redirected(port))

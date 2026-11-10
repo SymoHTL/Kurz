@@ -1,0 +1,6 @@
+// expect: error syntax at 4
+// rules: F10
+
+use ../util
+
+print(1)

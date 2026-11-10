@@ -80,6 +80,9 @@ public sealed partial class Checker
     /// <summary>The loops over <c>T.Fields</c> of a function's text around the statement the checker reads, outside a copy.</summary>
     private int fieldsLoopDepth;
 
+    /// <summary>T34: the type <c>f.Type</c> stands for on a function's text, for the variable of each loop over <c>T.Fields</c> there.</summary>
+    private readonly Dictionary<VariableSymbol, KurzType> textFieldTypes = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>T34: the calls of a function's text it refused, at which the chain of copies stops, so that the bound of T33 does not report the cycle a second time.</summary>
     private readonly HashSet<CallExpression> refusedCalls = new(ReferenceEqualityComparer.Instance);
 
@@ -228,6 +231,36 @@ public sealed partial class Checker
     /// <summary>A loop over <c>T.Fields</c> of a type parameter, as the text of a generic function writes it.</summary>
     private bool WalksFieldsOfTypeParameter(ForInStatement f) =>
         Unwrap(f.Collection) is MemberAccess { Target: NameExpression n, Member: "Fields", Conditional: false } && TypeParameter(n.Name) is not null;
+
+    /// <summary>
+    /// T34: <c>f.Type</c> of a loop over <c>T.Fields</c> on a function's text, a type of its own that is no type parameter of the function, so
+    /// that a type argument that holds it beside one holds that one and grows by it, and the field's type alone takes no part (the owner,
+    /// 2026-11-04, comment 6643376941 on issue 156: "The walk types `f.Type` on the text").
+    /// </summary>
+    private void KeepFieldTypeOfText(ForInStatement f)
+    {
+        if (frame.Scope is { } scope && scope.Variables.TryGetValue(f.Variable, out var variable))
+        {
+            textFieldTypes[variable] = new TypeParameterType(new TypeParameterSymbol($"{f.Variable}.Type", f.VariableLine));
+        }
+    }
+
+    /// <summary>
+    /// T34: <c>f.Get(value)</c> of a loop over <c>T.Fields</c> on a function's text, a value of the type of its own that <c>f.Type</c> has
+    /// there (<see cref="KeepFieldTypeOfText"/>), so that a type argument inferred from it holds the field's type as a written one does, a
+    /// written type argument as an inferred one; null for any other call.
+    /// </summary>
+    private Typed? FieldGetOfText(CallExpression c)
+    {
+        if (c is not { Callee: MemberAccess { Target: NameExpression target, Member: "Get", Conditional: false }, TypeArguments.Count: 0, Arguments: [{ Name: null, Mut: false } argument] }
+            || Lookup(target.Name, capture: false).Variable is not { } variable || !textFieldTypes.TryGetValue(variable, out var onText))
+        {
+            return null;
+        }
+
+        CheckExpression(argument.Value, null);
+        return new Typed(onText);
+    }
 
     /// <summary>
     /// T34: the subject <c>T.Kind</c> of a type parameter, as the text of a generic function writes it: a call in one of its arms is read in
@@ -412,7 +445,10 @@ public sealed partial class Checker
     /// <summary>
     /// Every call of a function that reads its type from code that is checked, the top-level code, a function that reads none and a copy,
     /// calls a copy for its type arguments: made at the first such call and checked once, the calls of a copy's body before the calls
-    /// that follow the call that made the copy, so that the first call in the order of the source that needs a copy makes it.
+    /// that follow the call that made the copy, so that the first call that needs a copy in the order the checker reads the file makes
+    /// it: the bodies of its functions, in the order of their declarations, the overloads of one name at the first of them, then the methods of its
+    /// classes, class by class and method by method in the order of their declarations, the overloads of one name at the first of them,
+    /// then the top-level code, which is not always the first call in the text (section 4, the owner, 2026-11-06, as built).
     /// </summary>
     private void MakeCopies() => MakeCopies(0, genericCalls.Count);
 
@@ -607,7 +643,7 @@ public sealed partial class Checker
         if (f.Arms is not null)
         {
             // S16: the fields fail with no case, as a list's items, so the `else` after the loop is read as after a list's
-            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)");
+            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)", $"a loop over `{n.Name}.Fields` fails with (S16, T1)");
         }
 
         model.RecordPasses(f, passes);
@@ -751,6 +787,12 @@ public sealed partial class Checker
         if (n.Name[(dot + 1)..] == "Type" && n.TypeArguments.Count == 0 && PassOf(n.Name[..dot]) is { } pass)
         {
             return pass.Type;
+        }
+
+        if (n.Name[(dot + 1)..] == "Type" && n.TypeArguments.Count == 0 && Lookup(n.Name[..dot], capture: false).Variable is { } v
+            && textFieldTypes.TryGetValue(v, out var onText))
+        {
+            return onText; // T34: the field's type on the function's text, which the walk reads (KeepFieldTypeOfText)
         }
 
         var last = n.Name.LastIndexOf('.');

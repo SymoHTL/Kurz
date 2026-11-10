@@ -47,7 +47,7 @@ public sealed partial class Emitter
     private readonly Dictionary<FunctionSymbol, string?> cLibraries = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<VariableSymbol, string> statics = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> instances = new(StringComparer.Ordinal);
-    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, System.Collections.Immutable.ImmutableSortedSet<string> Features)> pending = new();
+    private readonly Queue<(FunctionSymbol Function, IReadOnlyDictionary<TypeParameterSymbol, KurzType> Map, string Name, System.Collections.Immutable.ImmutableSortedSet<string> Features, int Origin)> pending = new();
     private readonly List<IrFunction> emitted = [];
     private readonly SortedSet<string> libraries = new(StringComparer.Ordinal);
     private readonly Dictionary<DataSymbol, Unit> dataOwners = new(ReferenceEqualityComparer.Instance);
@@ -57,6 +57,10 @@ public sealed partial class Emitter
 
     // the function being emitted, and the file it is in
     private Unit unit;
+
+    // S11, W1: the line of the program's statement whose call led to the function being emitted, 0 where none did, so that a function of
+    // the standard library that reaches a call on a file or a socket is `not supported` in a build for Windows at the program's call
+    private int origin;
     private IrFunction fn = null!;
     private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
     private string? guardedDisplay; // the guarded block being emitted as a trace names it, which names a guarded block in it
@@ -171,6 +175,7 @@ public sealed partial class Emitter
                 Declare(slot, arguments.Type);
             }
 
+            EmitLogStart(); // P4: `KURZ_LOG`, read before the first statement of a program that logs
             EmitStatements(program.Tree.Statements);
         });
 
@@ -183,19 +188,26 @@ public sealed partial class Emitter
         var start = RuntimeFunction("Start");
         var finish = RuntimeFunction("Finish");
         var prepared = 0;
+        var preparedFaces = 0;
         var facets = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             if (pending.Count > 0)
             {
-                var (function, instanceMap, name, compiled) = pending.Dequeue();
+                var (function, instanceMap, name, compiled, from) = pending.Dequeue();
                 features = compiled;
+                origin = from;
                 EmitFunction(function, instanceMap, name);
             }
             else if (defaultsPending.Count > 0)
             {
                 var (symbol, name) = defaultsPending.Dequeue();
                 EmitClassDefaults(symbol, name);
+            }
+            else if (constructorsPending.Count > 0)
+            {
+                var (made, name) = constructorsPending.Dequeue();
+                EmitConstructor(made, name);
             }
             else if (lambdas.Count > 0)
             {
@@ -204,6 +216,11 @@ public sealed partial class Emitter
             else if (prepared < tabled.Count)
             {
                 PrepareTable(tabled[prepared++]); // K6: what a table holds, which can name more functions
+            }
+            else if (preparedFaces < interfaceTabled.Count)
+            {
+                var (symbol, face) = interfaceTabled[preparedFaces++];
+                PrepareInterfaceTable(symbol, face); // K6: what a class's table for an interface holds
             }
             else if (!TableFacets(facets))
             {
@@ -389,7 +406,7 @@ public sealed partial class Emitter
         {
             name = $"@\"{key}\"";
             instances[key] = name;
-            pending.Enqueue((f, instanceMap, name, sets));
+            pending.Enqueue((f, instanceMap, name, sets, origin));
         }
 
         return name;
@@ -412,6 +429,12 @@ public sealed partial class Emitter
         try
         {
             EmitFunctionCore(f, d, instanceMap, name);
+        }
+        catch (UnsupportedException e) when (unit.Runtime && origin > 0 && e.Construct is NotOnWindows or ProcessNotOnWindows)
+        {
+            // S11, W1: a function of the standard library that reaches a call on a file or a socket, the command line, the environment or
+            // the clock, `HttpRequest.Read` among them, is `not supported` in a build for Windows at the program's statement that called it
+            throw Unsupported(origin, e.Construct);
         }
         catch (UnsupportedException e) when (unit.Runtime)
         {
@@ -571,6 +594,12 @@ public sealed partial class Emitter
 
         var f = fn;
         var around = f.Location;
+        var outer = origin;
+        if (!unit.Runtime)
+        {
+            origin = statement.Line;
+        }
+
         At(statement.Line);
         try
         {
@@ -583,6 +612,7 @@ public sealed partial class Emitter
         finally
         {
             f.Location = around;
+            origin = outer;
         }
     }
 
@@ -611,7 +641,7 @@ public sealed partial class Emitter
                 }
 
             case AssignOrDeclare a when Model.IsImplicitField(a, out _, out var field):
-                EmitFieldAssignment(a.Value, field!.Type, () => (This(a, a.Line), ClassOfThis(a, a.Line).Symbol), field.Name); // K7
+                EmitFieldAssignment(a.Value, field!.Type, () => (This(a, a.Line), ClassOfThis(a, a.Line).Symbol), field.Name, Model.IsFieldInitialization(a)); // K7, K14
                 break;
             case AssignOrDeclare a when Model.Declares(a):
                 {

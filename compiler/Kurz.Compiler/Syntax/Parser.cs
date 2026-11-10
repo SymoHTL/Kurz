@@ -633,17 +633,23 @@ public sealed class Parser
         return ok;
     }
 
-    /// <summary><c>use</c> brings in another folder or a package (F10), named by a dotted path as the record's <c>use net.http</c> is; a core word in the path is <c>reserved-word</c> (L12).</summary>
+    /// <summary><c>use</c> brings in another folder or a package (F10), named by its path with <c>/</c> between its names, <c>use a/util</c>
+    /// (section 8); a core word in the path is <c>reserved-word</c> (L12), and a <c>.</c> or <c>..</c> where a name stands is <c>syntax</c>.</summary>
     private UseStatement ParseUse()
     {
         var use = Advance();
         var parts = new List<string> { ExpectName("a folder or package name").Text };
-        while (Match(TokenKind.Dot))
+        while (Match(TokenKind.Slash))
         {
             parts.Add(ExpectName("a name").Text);
         }
 
-        return new UseStatement(use.Line, string.Join('.', parts));
+        if (At(TokenKind.Dot))
+        {
+            throw new ParseError(ErrorLine(), $"a `use` path has `/` between its names, found {Current}");
+        }
+
+        return new UseStatement(use.Line, string.Join('/', parts));
     }
 
     /// <summary>The string after <c>extern</c>: the C calling convention, <c>"C"</c>, the one R16 and R17 write; another is text no rule gives a meaning (E4).</summary>
@@ -1336,18 +1342,27 @@ public sealed class Parser
             var name = Advance();
             var parameters = ParseParameters(typesOptional: false);
             IReadOnlyList<Argument>? thisArguments = null;
+            IReadOnlyList<Argument>? baseArguments = null;
             if (Match(TokenKind.Colon))
             {
-                if (!MatchKeyword("this"))
+                if (MatchKeyword("this"))
                 {
-                    throw Fail("`this`");
+                    thisArguments = ParseArguments();
                 }
-
-                thisArguments = ParseArguments();
+                else if (At(TokenKind.Name) && Current.Text == "base")
+                {
+                    // K14, L18: `base` is a word right after a constructor's `:` and a name everywhere else, as `as` in a `use` line (F10)
+                    Advance();
+                    baseArguments = ParseArguments();
+                }
+                else
+                {
+                    throw Fail("`this` or `base`");
+                }
             }
 
             var body = ParseBlockAfter(name.Line, "the constructor");
-            return new ConstructorDeclaration(start.Line, modifiers, name.Text, parameters, thisArguments, body);
+            return new ConstructorDeclaration(start.Line, modifiers, name.Text, parameters, thisArguments, baseArguments, body);
         }
 
         var type = ParseType();
@@ -2253,7 +2268,7 @@ public sealed class Parser
                 throw new ParseError(inner.Current.Line, $"an interpolation holds one expression; found {inner.Current}"); // E1: the line of that token
             }
 
-            segments.Add(new HoleSegment(expression));
+            segments.Add(new HoleSegment(expression, hole.Source));
         }
 
         return new StringLiteral(token.Line, segments);

@@ -1,0 +1,20 @@
+// expect: output
+// | ok
+// | clicked
+// rules: R9
+
+// a lambda whose type the field cannot hold, `(int) => void` beside a `() => void` field, closes no ring through it in this program,
+// though it reads the button: the field does not count it by its type, and no lambda the field counts captures a function value that
+// can be it (R9, the owner, 2026-11-04, #110, comment 6643368937); its own type names no type parameter, and no lambda the field
+// counts captures a value whose type names one (R9, assumed)
+class Button(string Name, mut () => void OnClick)
+
+void Each(List<int> xs, (int) => void f) {
+    for x in xs {
+        f(x)
+    }
+}
+
+b = Button("ok", () => print("clicked"))
+Each([1], (int n) => print(b.Name))
+b.OnClick()

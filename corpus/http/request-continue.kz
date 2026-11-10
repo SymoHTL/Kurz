@@ -1,0 +1,65 @@
+// expect: output
+// | before: TimedOut
+// | hi
+// | after: HTTP/1.1 100 Continue
+// | hi
+// | 1.0: TimedOut
+// | no body: TimedOut
+// rules: W6
+
+// a client that sends `Expect: 100-continue` waits for the server's `100 Continue` before it sends the body; the body's first read
+// sends it, so a server that refuses the request without reading its body sends none; HTTP/1.0 and a body of no bytes get none
+string | IoError Waiting(TcpStream client) {
+    client.SetReadTimeout(50ms)
+    mut got = Bytes()
+    match client.Read(mut got, 100) {
+        int n => {
+            text = string.FromUtf8(got) else {
+                InvalidUtf8 => "?"
+            }
+
+            return text.Trim()
+        }
+
+        IoError e => return "{e.Kind}"
+    }
+}
+
+void | IoError | HttpError Expecting(string label, string request) {
+    listener = TcpListener.Bind("127.0.0.1:0")
+    client = TcpStream.Connect("127.0.0.1:{listener.Port}")
+    server = listener.Accept()
+    client.Write(request.Bytes)
+    r = HttpRequest.Read(server)
+    if label == "1.1" {
+        before = Waiting(client)
+        print("before: {before}")
+    }
+
+    body = r.Body.ReadAll(100)
+    if body.Count > 0 {
+        text = string.FromUtf8(body) else {
+            InvalidUtf8 => "?"
+        }
+
+        print(text)
+    }
+
+    after = Waiting(client)
+    if label == "1.1" {
+        print("after: {after}")
+    } else {
+        print("{label}: {after}")
+    }
+}
+
+void | IoError | HttpError All() {
+    Expecting("1.1", "POST / HTTP/1.1\r\nHost: h\r\nExpect: 100-Continue\r\nContent-Length: 2\r\n\r\nhi")
+    Expecting("1.0", "POST / HTTP/1.0\r\nExpect: 100-continue\r\nContent-Length: 2\r\n\r\nhi")
+    Expecting("no body", "POST / HTTP/1.1\r\nHost: h\r\nExpect: 100-continue\r\nContent-Length: 0\r\n\r\n")
+}
+
+All() else {
+    IoError e => print(e)
+    HttpError e => print("{e.Kind}: {e.Detail}")
+}

@@ -1,0 +1,11 @@
+// expect: error reference-cycle at 6
+// rules: R9
+
+// a lambda of another type that reads the button, which a `() => void` lambda that the field can hold captures, closes the ring
+// through the field as the handler that reads the button itself does (R9, the owner, 2026-11-04, #110, comment 6643368937)
+class Button(string Name, mut () => void OnClick)
+
+b = Button("ok", () => print("x"))
+inner = (int n) => print(b.Name)
+b.OnClick = () => inner(1)
+b.OnClick()
