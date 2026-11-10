@@ -3965,11 +3965,11 @@ public sealed class CheckerTests
         // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
-        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, without a base
-        // class (the owner, 2026-11-09, #429, comment 6752598091) and with one (assumed, the same reading), and in a class without a
-        // primary constructor and without a base class `syntax`; its arguments read no field of the instance, a field of the base's
-        // among them, which is `static-mismatch` (that comment), take the types of the base's parameters, and reach no constructor
-        // of the base without `pub` (F9)
+        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, without a
+        // base class (the owner, 2026-11-09, #429, comment 6752598091) and with one (the owner, 2026-11-10, #435, comment
+        // 6762144386), and in a class without a primary constructor and without a base class `syntax`; its arguments read no
+        // field of the instance, a field of the base's among them, which is `static-mismatch` (#429, comment 6752598091), take
+        // the types of the base's parameters, and reach no constructor of the base without `pub` (F9)
         Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class B(int M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
