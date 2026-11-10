@@ -1235,8 +1235,7 @@ without a primary constructor and without a base class, `: base(...)` is `syntax
 2026-11-09, #409, comment 6737367678). In a further constructor of a class with a primary
 constructor and no base class it is `constructor-must-chain`, since that constructor calls the
 primary one first (§4, the owner, 2026-11-09, #429, comment 6752598091), and in one of a class with
-a primary constructor and a base class too *(assumed, §4: the same reading; the answer names a class
-without a base)*.
+a primary constructor and a base class too (§4, the owner, 2026-11-10, #435, comment 6762144386).
 
 Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
 ```kurz
