@@ -92,6 +92,36 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_read_of_stdin_appends_to_its_list_as_a_files_read_does()
+    {
+        // S22 with S3: `Read` appends to the bytes `into` holds; a `max` of 0 takes nothing, before a fill and with bytes in the buffer,
+        // and keeps them for the next read; a `max` below 0 raises `index-out-of-range` at its line
+        const string text = """
+            void | IoError | InvalidUtf8 Run() {
+                mut into = "ab".Bytes
+                print(Stdin.Read(mut into, 0))
+                print(Stdin.Read(mut into, 3))
+                print(string.FromUtf8(into))
+                print(Stdin.Read(mut into, 0))
+                print(Stdin.ReadAll().Count)
+                int max = -1
+                Stdin.Read(mut into, max)
+            }
+
+            Run() else {
+                IoError e => print(e)
+                InvalidUtf8 e => print(e)
+            }
+            """;
+        if (Ran(text, "stdin-read", "printf 'xyz\\nw'") is { } run)
+        {
+            Assert.Equal(["0", "3", "abxyz", "0", "2"], run.Output);
+            Assert.Equal(1, run.Code);
+            Assert.StartsWith("error: index-out-of-range at program.kz:9", run.Error, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void A_line_that_is_not_utf8_is_taken_and_the_next_read_gives_the_line_after_it()
     {
         // S22 with T15: a loop ends at such a line with `InvalidUtf8`, whose `At` is the position in the line, and so does a
@@ -218,10 +248,11 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("x = Stdin.Peek()\nprint(1)\n", "unknown-name", 1, "`Stdin` has no function `Peek` (S22, V10)")]
     [InlineData("x = Stdin\nprint(1)\n", "unknown-name", 1, "no `Stdin` is visible here (V10)")]
     [InlineData("void Stdin() {\n}\n\nprint(1)\n", "redeclared", 1, null)]
+    [InlineData("void | IoError Some() {\n    mut into = Bytes()\n    print(Stdin.Read(into, 4))\n}\n\nSome() else {\n    IoError e => print(e)\n}\n", "mut-at-call", 3, null)] // M7, as of `f.Read`; the same program with `mut` is the Windows theory's row, built clean here
     public void A_use_of_stdin_outside_its_members_is_refused_where_it_stands(string text, string id, int line, string? message)
     {
         // S22, S16, V9, V10: `Lines()` stands as a loop's collection alone, `Stdin` has its four members and is no value, and a file's
-        // own declaration of the name is `redeclared`
+        // own declaration of the name is `redeclared`; M7: the bytes `Read` appends to are a `mut` argument, written so at the call
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
