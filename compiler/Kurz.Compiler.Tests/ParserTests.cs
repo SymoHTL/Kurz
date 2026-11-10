@@ -1009,6 +1009,32 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("const assert(int x) => const(x)", "(function const assert(int x) => (call const x))")]
+    [InlineData("const assert(int x) {\n    return const(x)\n}", "(function const assert(int x) {(return (call const x))})")]
+    public void A_function_named_assert_whose_type_is_named_const_is_declared(string program, string tree)
+    {
+        // L18 with T37: `const assert(` whose `)` is followed by `=>` or `{`, a function's body, declares a function named `assert`
+        // whose type is named `const`, as before `const assert` was a statement (§4, the owner, 2026-11-06)
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void An_arrow_inside_the_parentheses_decides_nothing()
+    {
+        // L18 with T37: the `=>` of a lambda in the condition, or of a parameter's function type, stands inside the parentheses
+        Assert.StartsWith("(const-assert ", Tree("const assert(Check((int x) => x > 0), \"a\")"));
+        Assert.StartsWith("(function const assert(", Tree("const assert(int x, (int) => int f) => f(x)"));
+    }
+
+    [Fact]
+    public void A_brace_on_the_next_line_decides_nothing()
+    {
+        // L18 with T37: a function's body opens on the line of its signature (C1), so a `{` on the next line leaves the line a
+        // `const assert`, whose parentheses hold no condition and text
+        Assert.Equal((ErrorIds.Syntax, 1), Errors("const assert(int x)\n{\n    return const(x)\n}").First());
+    }
+
+    [Theory]
     [InlineData("const assert(true, 5)")]
     [InlineData("const assert(true, n)")]
     [InlineData("const assert(true)")]

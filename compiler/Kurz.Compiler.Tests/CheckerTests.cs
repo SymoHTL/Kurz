@@ -6259,6 +6259,13 @@ public sealed class CheckerTests
     // ---- const assert (T37) -----------------------------------------------------------------------
 
     [Fact]
+    public void A_function_named_assert_whose_type_is_named_const_is_clean()
+    {
+        // L18 with T37: `=>` after the `)` makes the line a function's declaration, which a call reads as any other
+        Clean("data const(int A)\n\nconst assert(int x) => const(x)\n\nprint(assert(1).A)");
+    }
+
+    [Fact]
     public void A_const_assert_that_holds_is_clean()
     {
         // T37: a copy's `T.Kind`, its constant type argument and `f.Name` of a pass are known in each copy, and literals and operators
