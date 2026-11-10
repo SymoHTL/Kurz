@@ -283,10 +283,11 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T23, L11: the <c>float</c> nearest the value the digits write, rounded once, from the digits, as C# folds a constant into
-    /// <c>float</c> and as its <c>float.Parse</c> reads digits since .NET Core 3.0; the <c>double</c> of the digits rounded again to
-    /// <c>float</c> is another value where that <c>double</c> lands on the midpoint of two <c>float</c> values, 2^53 + 2^29 + 1 among
-    /// them. Beyond the range it is an infinity.
+    /// T23, L11, L17: the <c>float</c> nearest the value the digits write, rounded once, from the digits, as C# folds an integer
+    /// constant or a literal with <c>f</c> into <c>float</c> and as its <c>float.Parse</c> reads digits since .NET Core 3.0; a fraction
+    /// literal without a suffix that a <c>float</c> reaches takes that type first (L17), as one with <c>f</c>, where C# refuses it
+    /// (CS0664). The <c>double</c> of the digits rounded again to <c>float</c> is another value where that <c>double</c> lands on the
+    /// midpoint of two <c>float</c> values, 2^53 + 2^29 + 1 among them. Beyond the range it is an infinity.
     /// </summary>
     private static float FloatOf(string digits) => float.Parse(digits, NumberStyles.Float, CultureInfo.InvariantCulture);
 

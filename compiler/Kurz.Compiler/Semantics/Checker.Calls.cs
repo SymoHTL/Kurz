@@ -584,7 +584,7 @@ public sealed partial class Checker
                     return new Typed(target, new DecimalConstant((decimal)k.Value));
                 }
 
-                return new Typed(target, new RealConstant(target.Kind == Primitive.Float ? FloatOf(k.Value) : (double)k.Value)); // T23: rounded once; T26: beyond the range it is an infinity, no error
+                return new Typed(target, new RealConstant(target.Kind == Primitive.Float ? FloatOf(k.Value) : (double)k.Value)); // T23: rounded once; an integer constant of its own type lies inside the range of both
             case RealConstant r:
                 if (Types.IsInteger(target))
                 {

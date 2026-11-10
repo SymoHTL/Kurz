@@ -1667,11 +1667,18 @@ public sealed class CheckerTests
     {
         // S16: an arm of a type the loop's collection does not fail with is `type-mismatch` at the arm, in the words of the loop's
         // `unreachable-arm` text, over a file's lines, a list and a type's fields; after a call the text stays the call's (O5)
-        Assert.Equal("`HexError` is no case a loop over a file's lines fails with (S16, T1)", ErrorText("void | IoError Show(File f) {\n    for line in f.Lines() {\n        print(line)\n    } else {\n        HexError h => print(h)\n    }\n}\n\nprint(1)"));
-        Assert.Equal("`IoError` is no case a loop over a `List<int>` fails with (S16, T1)", ErrorText("void Show(List<int> xs) {\n    for x in xs {\n        print(x)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow([1])"));
-        Assert.Equal("`IoError` is no case a loop over `T.Fields` fails with (S16, T1)", ErrorText(Fields + "void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow(Order(\"a\", 1))"));
-        var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
-        Assert.Equal("`string` is no case the call can return beside its success (O5, T1)", ErrorText(find + "int OrZero(int id) {\n    value = Find(id) else {\n        string s => 0\n    }\n    return value\n}\n\nprint(OrZero(1))"));
+        var lines = "void | IoError Show(File f) {\n    for line in f.Lines() {\n        print(line)\n    } else {\n        HexError h => print(h)\n    }\n}\n\nprint(1)";
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(lines));
+        Assert.Equal("`HexError` is no case a loop over a file's lines fails with (S16, T1)", ErrorText(lines));
+        var list = "void Show(List<int> xs) {\n    for x in xs {\n        print(x)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow([1])";
+        Assert.Equal([(ErrorIds.TypeMismatch, 5)], Errors(list));
+        Assert.Equal("`IoError` is no case a loop over a `List<int>` fails with (S16, T1)", ErrorText(list));
+        var fields = Fields + "void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow(Order(\"a\", 1))";
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(fields));
+        Assert.Equal("`IoError` is no case a loop over `T.Fields` fails with (S16, T1)", ErrorText(fields));
+        var call = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\nint OrZero(int id) {\n    value = Find(id) else {\n        string s => 0\n    }\n    return value\n}\n\nprint(OrZero(1))";
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors(call));
+        Assert.Equal("`string` is no case the call can return beside its success (O5, T1)", ErrorText(call));
     }
 
     [Fact]
