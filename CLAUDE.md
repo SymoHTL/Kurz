@@ -88,9 +88,11 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   the gates image python3, git and the point release of the pinned LLVM major, which the
   distribution's and LLVM's packages give on the day the image is built, and the .NET runtime that
   `actions/setup-dotnet` installs in the Windows job beside the SDK `compiler/global.json` pins,
-  10.0.15 from the day that patch was released
+  10.0.15 on 2026-11-10, the day that patch was released
   ([knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md](knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md)):
-  none of them pinned to a version, HAZARD (#15). The Windows job installs the release `LLVM_VERSION` names, of the major the
+  none of them pinned to a version, HAZARD (#15). The runtime stays open because `kurz` is a .NET 10
+  command that does not carry its runtime: .NET runs it on the newest patch a machine has, and the
+  job installs the newest patch too. The Windows job installs the release `LLVM_VERSION` names, of the major the
   compiler pins, from a cache of LLVM's archive for Windows, which it checks by the SHA-256 in
   `LLVM_SHA256` before it unpacks it.
   Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner labels, the
