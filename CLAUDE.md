@@ -116,6 +116,11 @@ Each line names a trap; its evidence is in the entry it links.
   workflow-skip literal in the head commit
   ([knowledge/a-skipped-job-reports-success.md](knowledge/a-skipped-job-reports-success.md)).
   Gate: the pre-push hook refuses a skip literal in a commit message; HAZARD (#4) where it is off.
+  Or a push the pull request did not take up, its head still the one before: an empty commit on
+  the pushed one, pushed as any push, wakes it
+  ([knowledge/the-pull-request-shows-the-old-head-after-a-push.md](knowledge/the-pull-request-shows-the-old-head-after-a-push.md)).
+  HAZARD (no gate: nothing watches for it; the merge tool refuses a head the pull request does
+  not show).
 - A run of a program that comes back at its limit with "an orphan holds its output": a child the
   program left running held its streams after the program ended, a forked server whose `kill` an
   error skipped among them. A run of the suite waited on such a child for 80 minutes on 2026-11-05

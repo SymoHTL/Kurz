@@ -57,7 +57,9 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
    event (the `pull_request` types in `gates.yml`). Red: open
    the log, read the `=== gates` table at its end, fix the first row that is FAIL, BROKEN or
    NOT RUN, or PARTLY on a gate other than `merge-checks`. No run at all on a head: a merge
-   conflict, or a skip literal in the head commit. Gate: the required check `gates`.
+   conflict, a skip literal in the head commit, or a push the pull request did not take up, its
+   head still the one before (`knowledge/the-pull-request-shows-the-old-head-after-a-push.md`).
+   Gate: the required check `gates`.
 
 ## 3. Review
 
