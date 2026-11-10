@@ -1,0 +1,46 @@
+// expect: output
+// | 1
+// | 9
+// | 0
+// | 7
+// rules: O5
+
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+data NotFound
+
+int | Dot | Square | NotFound Find(int id) {
+    if id == 1 {
+        return Dot()
+    }
+    if id == 2 {
+        return Square(3)
+    }
+    if id == 3 {
+        return NotFound
+    }
+    return id
+}
+
+int Size(int id) {
+    value = Find(id) else {
+        Shape s => s.Area()
+        NotFound => 0
+    }
+    return value
+}
+
+print(Size(1))
+print(Size(2))
+print(Size(3))
+print(Size(7))
