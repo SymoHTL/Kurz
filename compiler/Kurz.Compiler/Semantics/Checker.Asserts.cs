@@ -103,6 +103,7 @@ public sealed partial class Checker
         StringConstant s => s.Value,
         CharConstant c => char.ConvertFromUtf32(c.Value),
         EnumConstant e when t.Type is EnumType type => type.Symbol.Values[e.Index],
+        FlagsConstant f when t.Type is FlagsType type => type.Symbol.Text(f.Bits), // A13
         _ => null,
     };
 

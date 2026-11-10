@@ -736,6 +736,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case TypeDeclaration { Kind: TypeDeclarationKind.Enum }:
                     break; // D12: its values are constants, which the expressions that name them carry
+                case TypeDeclaration { Kind: TypeDeclarationKind.Flags }:
+                    break; // D13, D19: its names are constant sets, which the expressions that name them carry
                 case TypeDeclaration { Kind: TypeDeclarationKind.Interface }:
                     break; // K6, K7: the signatures of its methods, which the calls through it and the classes that implement it carry
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
@@ -871,6 +873,8 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break;
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is EnumConstant:
                     break; // D12: a value of an enum, a constant a code generator reads whole
+                case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is FlagsConstant:
+                    break; // D13, D19: a name of a flags type or its `None`, a constant set a code generator reads whole
                 case MemberAccess when model.HasType(e) && model.TypeOf(e).Constant is StringConstant:
                     break; // T33: `f.Name` in a pass of a loop over `T.Fields`, a constant a code generator reads whole
                 case MemberAccess m when model.IsClockRead(m):

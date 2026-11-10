@@ -44,6 +44,7 @@ internal static class Lower
         VoidType => "void",
         NullType => "{}", // N1: one value, of no size
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
+        FlagsType => "i32", // D13, D19: the bits of its names, 31 at most, below the sign of an `int`
         PointerType or CFunctionType or ListType or MapType or HandleType or HasherType => "ptr",
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
         UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
@@ -69,13 +70,13 @@ internal static class Lower
     /// <summary>The alignment of a value of the type in memory, as LLVM lays out its IR type: 16 for an <c>i128</c> (T29), a vector's size (R18), 1 for a type of no size, <c>null</c>'s <c>{}</c> (N1), else its size up to 8.</summary>
     public static int Align(KurzType type) => type is VectorType v ? v.Bits / 8 : IrType(type) == "i128" ? 16 : Math.Clamp(Size(type), 1, 8);
 
-    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, <c>null</c>, of no size (N1), an enum's value (D12, D18), a file or a socket, a hasher, a vector (R18), pointers to them and C function types over them.</summary>
+    /// <summary>Whether the type is one the emitter lays out: the integers, <c>float</c>, <c>double</c>, <c>decimal</c>, the time types, <c>bool</c>, <c>char</c>, <c>string</c>, <c>void</c>, <c>null</c>, of no size (N1), an enum's value (D12, D18), a set of a <c>flags</c> type (D13), a file or a socket, a hasher, a vector (R18), pointers to them and C function types over them.</summary>
     public static bool Supported(KurzType type) => type switch
     {
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
             or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
             or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp or Primitive.Instant,
-        VoidType or NullType or EnumType or HandleType or HasherType or VectorType => true,
+        VoidType or NullType or EnumType or FlagsType or HandleType or HasherType or VectorType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
         _ => false,

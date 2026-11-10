@@ -560,6 +560,24 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_set_of_flags_is_an_int_of_its_bits_with_its_names_as_its_text()
+    {
+        // D19: a set is stored in an `int`, the bits of its names, whose `Number` it is; `From` gives the set of a number with no other
+        // bit and `Invalid` otherwise, a negative number among them; D17: `~` of a set that is not a constant keeps the type's bits alone;
+        // A13: the names in the order of their declaration, whatever their bits, and `None` for the empty set, in a hole too
+        const string Program = "flags Access { Read, Write, Run }\nflags Mode { Read = 4, Write = 2, Exec = 1 }\n\n"
+            + "Access Flip(Access a) => ~a\n\nstring Show(Access a) => \"[{a}]\"\n\n"
+            + "void Look(int n) {\n    match Access.From(n) {\n        Access a => print(a)\n        Invalid => print(\"invalid\")\n    }\n}\n\n"
+            + "Look(0)\nLook(6)\nLook(8)\nLook(-1)\nprint(Flip(Access.Read))\nprint(Flip(Access.Read).Number)\nprint(Flip(Access.None))\n"
+            + "print(Mode.Exec | Mode.Read)\nprint((Mode.Exec | Mode.Read).Number)\nprint(Show(Access.Run | Access.Read))\nprint(Access.Read.Has(Access.None))\n"
+            + "mut q = Access.None\nq = q | Access.Write\nprint(q)\nprint(q.Has(Access.Write | Access.Run))\nprint(~Access.Write)";
+        var program = Emit(Program);
+        Assert.Contains("@\"text.Access\"(i32 %a0)", program.Ir, StringComparison.Ordinal);
+        Ran(Toolchain.Run(toolchain.Build(program, "flags-layout")), 0,
+            ["None", "Write | Run", "invalid", "invalid", "Write | Run", "6", "Read | Write | Run", "Read | Exec", "5", "[Read | Run]", "true", "Write", "false", "Read | Run"], string.Empty);
+    }
+
+    [Fact]
     public void A_nullable_value_is_a_union_and_the_address_of_one_known_not_null_is_the_address_of_its_value()
     {
         // N1 with section 5, a reading of this directory: the tag beside the room of a `long`; N3, R10: where the checker reads a nullable

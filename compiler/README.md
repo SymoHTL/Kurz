@@ -678,6 +678,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   data type every file sees, and the text of a value is a literal of its name (A4); a value named
   `From` or `Number` is the value where no call follows `Plan.From` and where `Number` follows the
   type's name (D20);
+- `flags` (D13, D17, D19): a set is an `i32` that holds the bits of its names, each name's bit 1, 2, 4
+  and so on in their order or the number its declaration writes, the 31 bits below the sign at most;
+  `|`, `&` and `^` are the bit operations, `~` flips the bits and keeps those of the type's names (D17,
+  assumed there), `Has(flag)` tests that the set holds every bit of `flag`, `.Number` is the set
+  itself, `Access.From(n)` is the set where `n` holds no bit that no name has, the sign's among them,
+  so that `From(0)` is `Access.None`, and the case `Invalid` where it holds one; the text of a set is
+  its names in the order of the declaration with ` | ` between them, written in one block as an
+  interpolation writes its pieces, or `None` (A13). No rule gives two sets `==` or an order, so `==`,
+  `!=`, `<`, `<=`, `>` and `>=` on two sets and a sort of them are `type-mismatch`, and a set in the
+  key of a map or in a `data` value that `==` compares is `not supported`; a `flags` type's kind for
+  `T.Kind` is `TypeKind.Enum`, as a file's is `TypeKind.Class` (T33, assumed there), since C#'s
+  `[Flags]` type is an enum;
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27); a call in a generic function's body whose type argument holds a type
@@ -1691,9 +1703,8 @@ reads as the section below says. The checker produces it for the constructs its 
 says nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
 is the front end's when the front end reports an error on it, and the checker's when the front end
 reads it clean. One such case, `data/flags-match.kz`, expects a `syntax` that depends on the type
-of the matched value (D13), which the front end cannot see and the checker does not read; the
-corpus theories check that it parses with no diagnostic and that the checker says `not supported`
-on its `flags` type, and no test holds its expected error.
+of the matched value (D13), which the front end cannot see; the corpus theories check that it parses
+with no diagnostic and that the checker reports that `syntax` at the line of the `match`.
 
 The third kind, a lint, is a warning with an id of its own, outside the table, and builds the program: the checker
 raises `md5-insecure` at every call of a function of `Md5` (H5), once for each call in the source, and the command
@@ -1858,7 +1869,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
-a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D15 and D17 to D20), 6 (values: M1 to M5, M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
@@ -1872,7 +1883,7 @@ types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, 
 `HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
-these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11, A12, A14 and A15, of a class's `Text()` the
+these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1920,8 +1931,7 @@ comes from the construct (E1), but where the construct holds an error of its own
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
-which is the complete one: a `flags` type and a value of one (D13, D17, D19, and the A-rules of
-their text); of an interface, type parameters (T19, K6), and of a method of one a modifier, type
+which is the complete one: of an interface, type parameters (T19, K6), and of a method of one a modifier, type
 parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
 of which leaves the interface and every value of it unread; `weak` before an interface (R3), and the
 name of an interface where a value, a member or a call stands (K6); of a class,
@@ -2035,8 +2045,8 @@ generic, whose fields of a type parameter it does not read, and such a base as a
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
 type and its members, after a value of the type or of one derived from it and after the type's
-name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
-flags type (chapter 7, K10, D13), the explicit form of inheritance (K17) and a
+name (D16), and `equal by` (K8); among the bases of a `data` type a class or an interface
+(chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no

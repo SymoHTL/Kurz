@@ -45,11 +45,10 @@ public sealed class CorpusTests
 
     /// <summary>
     /// The rules the checker does not read: the null chapter's paths through class instances (N9), the
-    /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>flags</c>
-    /// (D13, D17, D19), the body of a data type (D16),
+    /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), the body of a data type (D16),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), <c>mut</c> methods
-    /// (M6), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
-    /// A10, A13, A15), the grants of files and sockets (S12), processes, standard input and the exit code
+    /// (M6), collections between actors (M8), the texts of class instances (A5, A7, A9,
+    /// A10, A15), the grants of files and sockets (S12), processes, standard input and the exit code
     /// (S17 to S23), standard error (A17), a top-level <c>return</c> with a value (F17), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
     /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
@@ -58,8 +57,8 @@ public sealed class CorpusTests
     private static bool OutsideTheChecker(string rule) =>
         rule is "N9"
         || rule is "R1" or "R2" or "R3" or "R4" or "R5" or "R6" or "R8" or "R9"
-        || rule is "D13" or "D16" or "D17" or "D19" or "F9" or "F10" or "T19" or "M6" or "M8"
-        || rule is "A5" or "A7" or "A9" or "A10" or "A13" or "A15"
+        || rule is "D16" or "F9" or "F10" or "T19" or "M6" or "M8"
+        || rule is "A5" or "A7" or "A9" or "A10" or "A15"
         || rule is "S12"
         || rule is "S17" or "S18" or "S19" or "S20" or "S21" or "S22" or "S23" or "A17" or "F17"
         || rule is "T33"
@@ -71,7 +70,6 @@ public sealed class CorpusTests
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
         ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
         ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
-        ["values/text-more.kz"] = "a flags type (D13)",
     };
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
@@ -134,9 +132,8 @@ public sealed class CorpusTests
     /// a value on its own as a statement, a <c>void</c> call where a value stands, D13's <c>match</c> on a set of
     /// flags and the rest of that list). So a case that expects <c>syntax</c> is the front end's when the front end
     /// reports an error on it, and the checker's when the front end reads it clean: the checker's theory then holds
-    /// it to its id and line, or, where the checker does not read the construct, to <c>not supported</c> and no
-    /// error, as for <c>data/flags-match.kz</c>, whose flags type it does not read and whose expectation no test
-    /// holds; no floor counts such a case.
+    /// it to its id and line, as <c>data/flags-match.kz</c> is held to its <c>match</c> on a set, or, where the checker
+    /// does not read the construct, to <c>not supported</c> and no error; no floor counts such a case.
     /// </summary>
     private static bool ExpectsFrontEndError(CaseHeader header, DiagnosticBag frontEnd) =>
         header.Expectation == Expectation.Error && FrontEndIds.Contains(header.ErrorId!) && (header.ErrorId != ErrorIds.Syntax || frontEnd.HasErrors);
