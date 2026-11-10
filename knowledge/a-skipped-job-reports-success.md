@@ -1,6 +1,6 @@
 ---
 name: a-skipped-job-reports-success
-description: On GitHub a job skipped by `if:` reports success to a required check, while a workflow that never starts leaves the check pending; a head with no gates run at all has a merge conflict or a skip literal in its head commit, or is a push the pull request did not take up (the-pull-request-shows-the-old-head-after-a-push); how the two workflows here are built around that
+description: On GitHub a job skipped by `if:` reports success to a required check, while a workflow that never starts leaves the check pending; a head with no gates run at all, its check pending, has a merge conflict or a skip literal in its head commit, while a pushed commit with no run whose pull request shows the old head and its checks is a push the pull request did not take up (the-pull-request-shows-the-old-head-after-a-push, HAZARD #432); how the two workflows here are built around that
 metadata:
   type: reference
 ---
