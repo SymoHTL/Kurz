@@ -1,0 +1,13 @@
+// expect: error type-mismatch at 9
+// rules: C4, D6
+
+data Beast(string Name)
+data Stray(string Name)
+data Gone
+
+string Say(Stray | Gone v) => match v {
+    Beast b => b.Name
+    else => "gone"
+}
+
+print(Say(Gone))

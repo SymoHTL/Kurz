@@ -9,8 +9,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// C4, C9, O8: a <c>match</c> over a union or a single type: each arm names a case type, a
-    /// literal or <c>else</c>; an arm an earlier one covers is <c>unreachable-arm</c>, a type that is
-    /// no case is <c>type-mismatch</c>, and a <c>match</c> that lists neither every case nor <c>else</c>
+    /// literal or <c>else</c>, or an interface that cases implement or a class they derive from, which covers those cases; an arm an earlier one covers is
+    /// <c>unreachable-arm</c>, a type that is no case is <c>type-mismatch</c>, and a <c>match</c> that lists neither every case nor <c>else</c>
     /// is <c>match-not-exhaustive</c>. As an expression its arms share one type. An arm after
     /// <c>else</c> never reaches the checker: C9 puts <c>else</c> last, and the parser reports one
     /// as <c>syntax</c> (the test <c>An_arm_after_else_is_syntax_at_its_line</c> of the parser's suite).
@@ -67,17 +67,30 @@ public sealed partial class Checker
                         model.RecordPattern(tp, type);
                         if (known && !Types.IsError(type))
                         {
-                            if (!cases.Any(c => IsCaseOf(type, c)))
+                            var (namesCase, below) = ArmOver(type, cases);
+                            if (!namesCase && below.Count == 0)
                             {
-                                // over an interface case, an arm's class can also implement it (I6)
-                                Report(ErrorIds.TypeMismatch, arm.Line, cases.Any(c => c is InterfaceType)
-                                    ? $"`{type}` is no case of `{subjectType}`, derives from none and implements none (C4, K6, T1)"
+                                // over an interface case, an arm's class can also implement it (I6); an arm of an interface, of a class or of a
+                                // `data` type takes the cases that implement it or derive from it, and an arm of an interface tests an interface case
+                                Report(ErrorIds.TypeMismatch, arm.Line, type is InterfaceType && cases.Any(c => c is InterfaceType)
+                                    ? $"`{type}` is no case of `{subjectType}`, no case implements it, and no class implements both it and an interface that is a case (C4, K6, T1)"
+                                    : type is InterfaceType
+                                    ? $"`{type}` is no case of `{subjectType}`, and no case implements it (C4, K6, T1)"
+                                    : type is ClassType && cases.Any(c => c is InterfaceType)
+                                    ? $"`{type}` is no case of `{subjectType}`, derives from none and implements none, and no case derives from it (C4, K6, T1)"
+                                    : type is ClassType
+                                    ? $"`{type}` is no case of `{subjectType}` and derived from none, and no case derives from it (C4, K6, T1)"
+                                    : type is DataType
+                                    ? $"`{type}` is no case of `{subjectType}` and derived from none, and no case derives from it (C4, D6, T1)"
                                     : $"`{type}` is no case of `{subjectType}` and derived from none (C4, T1)");
                                 armWrong = true;
                             }
-                            else if (covered.Any(c => IsCaseOf(type, c)))
+                            else if (namesCase ? covered.Any(c => IsCaseOf(type, c)) : below.All(c => covered.Any(t => IsCaseOf(c, t))))
                             {
-                                Report(ErrorIds.UnreachableArm, arm.Line, $"an earlier arm covers `{type}` (C4)");
+                                // an arm that every case it covers reached above, as C# reads a pattern earlier ones subsume (the owner, 2026-11-09)
+                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase ? $"an earlier arm covers `{type}` (C4)"
+                                    : below.Any(c => c is InterfaceType) ? $"the arms above cover every case of `{subjectType}` that `{type}` covers or tests (C4, K6)"
+                                    : $"the arms above cover every case of `{subjectType}` that {(type is InterfaceType ? "implements" : "derives from")} `{type}` (C4, K6)");
                             }
                             else if (type is EnumType e && EveryValueNamed(e, literals))
                             {
@@ -281,10 +294,40 @@ public sealed partial class Checker
     /// C4: whether an arm's type names a case: the case itself, a data type derived from it (D6), or a class derived from the case's
     /// class or that implements the case's interface, whose arm tests the instance's class at run time, as C#'s <c>is</c> (K6; the
     /// owner, 2026-11-02, #110); no widening (T8) makes a case. No list of the classes derived from a class or of those that implement
-    /// an interface is closed, so such an arm covers no case (O8), and one after an arm of its case's type is <c>unreachable-arm</c>.
+    /// an interface is closed, so such an arm covers no case (O8), and one after an arm of its case's type, or of an interface its class
+    /// implements or a class it derives from, is <c>unreachable-arm</c>. Read the other way round, a case is covered by an arm of its type,
+    /// of an interface its class implements or of a class it derives from (<see cref="Covers"/>).
     /// </summary>
     private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c))
-        || (type is ClassType arm && ((c is ClassType b && arm.Symbol.HasBaseOrIs(b.Symbol)) || (c is InterfaceType face && arm.Symbol.Implements(face.Symbol))));
+        || BelowArm(type, c) || (type is ClassType arm && c is ClassType b && arm.Symbol.HasBaseOrIs(b.Symbol));
+
+    /// <summary>
+    /// K6 with C4: whether <paramref name="type"/> is a class that implements the interface <paramref name="arm"/>, naming it or through a
+    /// base, or that derives from the class <paramref name="arm"/>, which it is not, or a <c>data</c> type derived from the <c>data</c> type
+    /// <paramref name="arm"/> (D6). An arm of the interface or of the base takes every value of such a case, which the program compiled whole
+    /// decides, and counts for completeness (O8) (the owner, 2026-11-09, #408, comments 6737367326, "Accept, as C#", 6737634153, "Same as
+    /// interface", and 6748445211, "Cover, as a base class"); an arm of such a class over the interface or the base tests the instance.
+    /// </summary>
+    private static bool BelowArm(KurzType type, KurzType arm) => (type is ClassType k
+        && ((arm is InterfaceType i && k.Symbol.Implements(i.Symbol)) || (arm is ClassType b && !ReferenceEquals(k.Symbol, b.Symbol) && k.Symbol.HasBaseOrIs(b.Symbol))))
+        || (type is DataType && arm is DataType && !Types.Same(type, arm) && Types.Assignable(type, arm));
+
+    /// <summary>
+    /// C4 with K6: whether an arm of the interface <paramref name="type"/> tests the instance of a case that is another interface, whose
+    /// class can implement both, at run time, as C#'s <c>is</c> (section 5, the owner, 2026-11-09, #408, comment 6748445211, "Test at run
+    /// time, as C#"): a class of the program implements both. Such an arm covers no case (O8), as an arm of a class over an interface case.
+    /// </summary>
+    private bool TestsFace(KurzType type, KurzType c) => type is InterfaceType arm && c is InterfaceType face && !Types.Same(type, c)
+        && classDeclared.Any(k => k.Implements(arm.Symbol) && k.Implements(face.Symbol));
+
+    /// <summary>
+    /// C4, O5: what an arm of <paramref name="type"/> does over <paramref name="cases"/>: whether it names a case or narrows one
+    /// (<see cref="IsCaseOf"/>), and the cases it covers below it (<see cref="BelowArm"/>) or tests as another interface
+    /// (<see cref="TestsFace"/>), the same for an arm of a postfix <c>else</c> (section 5, the owner, 2026-11-09, #408, comment
+    /// 6748445211, "Cover, as match does").
+    /// </summary>
+    private (bool Names, List<KurzType> Below) ArmOver(KurzType type, IReadOnlyList<KurzType> cases) =>
+        (cases.Any(c => IsCaseOf(type, c)), cases.Where(c => BelowArm(c, type) || TestsFace(type, c)).ToList());
 
     /// <summary>C9: what an arm may name beside a type and <c>else</c>: a literal, with its sign where it is a number (L17), and <c>null</c>, the case of a nullable value (N1, C9; section 4, the owner, 2026-10-30, "Allow, as C#").</summary>
     private static bool IsLiteralPattern(Expression e) => Unwrap(e) switch
@@ -370,7 +413,7 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
-        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)"); // `e.Line` is the `else` keyword's
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)", "the call can return beside its success (O5, T1)"); // `e.Line` is the `else` keyword's
 
         if (!isStatement && Types.IsVoid(success))
         {
@@ -385,9 +428,10 @@ public sealed partial class Checker
     /// O5: the arms of an <c>else</c> over the cases of <paramref name="rest"/>, beside the success, of a call or of a loop's collection
     /// (S16); a case no arm handles leaves the function at <paramref name="line"/> (O2, O3, O9). An <c>else</c> with no arms where there
     /// is no case, after what <paramref name="after"/> names, is <c>unreachable-arm</c> at <paramref name="elseLine"/>, as an
-    /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02).
+    /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02). An arm of a type that is none of the cases is
+    /// <c>type-mismatch</c>, "is no case" followed by <paramref name="wrong"/>, which names the call (O5) or the loop (S16).
     /// </summary>
-    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after)
+    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong)
     {
         if (arms.Count == 0 && rest.Count == 0)
         {
@@ -424,14 +468,17 @@ public sealed partial class Checker
                         }
                         else
                         {
-                            if (!rest.Any(c => IsCaseOf(type, c)))
+                            var (namesCase, below) = ArmOver(type, rest); // read as an arm of `match` (section 5, the owner, 2026-11-09, #408, comment 6748445211)
+                            if (!namesCase && below.Count == 0)
                             {
-                                Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case the call can return beside its success (O5, T1)");
+                                Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case {wrong}");
                                 armWrong = true;
                             }
-                            else if (handled.Any(h => IsCaseOf(type, h)))
+                            else if (namesCase ? handled.Any(h => IsCaseOf(type, h)) : below.All(c => handled.Any(h => IsCaseOf(c, h))))
                             {
-                                Report(ErrorIds.UnreachableArm, arm.Line, $"an earlier arm handles `{type}` (O5, C4)");
+                                Report(ErrorIds.UnreachableArm, arm.Line, namesCase ? $"an earlier arm handles `{type}` (O5, C4)"
+                                    : below.Any(c => c is InterfaceType) ? $"the arms above handle every case of the call that `{type}` covers or tests (O5, C4, K6)"
+                                    : $"the arms above handle every case of the call that {(type is InterfaceType ? "implements" : "derives from")} `{type}` (O5, C4, K6)");
                             }
                             else
                             {

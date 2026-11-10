@@ -643,7 +643,7 @@ public sealed partial class Checker
         if (f.Arms is not null)
         {
             // S16: the fields fail with no case, as a list's items, so the `else` after the loop is read as after a list's
-            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)");
+            CheckElseArms(f.Arms, Types.Void, [], f.Line, f.ElseLine, $"a loop over `{n.Name}.Fields`, whose collection fails with no case (S16, C4)", $"a loop over `{n.Name}.Fields` fails with (S16, T1)");
         }
 
         model.RecordPasses(f, passes);

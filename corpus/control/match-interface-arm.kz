@@ -1,0 +1,31 @@
+// expect: output
+// | square 3
+// | area 1
+// | empty
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+data Empty
+
+void Show(Dot | Square | Empty v) {
+    match v {
+        Square q => print("square {q.Side}")
+        Shape s => print("area {s.Area()}")
+        Empty => print("empty")
+    }
+}
+
+Show(Square(3))
+Show(Dot())
+Show(Empty)

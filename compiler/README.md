@@ -812,7 +812,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   for the interface with the arm's class's where that class has no base and no derived class, else of the
   table of the instance's class, read from the table for the interface, with the arm's class's where
   nothing derives from it, and else a walk from it through the tables of its bases, and the arm's name
-  holds the address, or the pair where something derives from the arm's class. The
+  holds the address, or the pair where something derives from the arm's class; an arm of an interface
+  or of a base class over a union some of whose cases implement it or derive from it takes those cases
+  by the tag alone, with no test of the class, and its name holds the instance converted to the arm's
+  type, as where the interface or the base is expected (C4, the owner, 2026-11-09, #408, comments
+  6737367326 and 6737634153), an arm of a base `data` type and an arm of a postfix `else` the same way
+  (comment 6748445211); an arm of an interface over a case that is another interface compares the
+  instance's table for that interface with the one of each class of the program that implements both,
+  and its name holds the pair of the address and that class's table for the arm's interface (C4, O5, comment
+  6748445211, "Test at run time, as C#"). The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), their text, the text of the case's value
@@ -1650,8 +1658,12 @@ ask about it.
   of the classes derived from the arm's, which a closed program would allow, since each table then holds
   one word more and no table the program would not name otherwise is laid out but a base's; the walk is a
   load and a comparison per base, which nothing measured *(assumed: the owner chose the test, #110, and
-  not its mechanism)*. Pinned by `CheckerTests`, by `EmitterTests` for the layout and by the interface and
-  class-arm programs of `ListTests`.
+  not its mechanism)*; an arm of an interface or of a base class over a union (C4) needs no such test,
+  since the checker decides which cases implement it or derive from it from the classes of the program,
+  compiled whole, and the tag picks them (the owner, 2026-11-09, #408, comments 6737367326 and
+  6737634153). Pinned by `CheckerTests`, by `EmitterTests` for the layout, by the interface and class-arm
+  programs of `ListTests` and by the cases `control/match-interface-arm.kz` and
+  `control/match-base-class-arm.kz`.
 
 ## What the compiler says about a program
 

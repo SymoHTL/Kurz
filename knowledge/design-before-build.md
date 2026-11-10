@@ -24,10 +24,14 @@ readme, licence, git, session and skill files, and nothing else; the owner said 
 `tools/tree_gate.py`, and its allowlist is a rule about paths. It runs in three places, and only the first always holds:
 
 - In CI (`tree`), on every push that starts the workflow. That is after the push has published.
-  Two heads start no run at all: one whose head commit carries a workflow-skip literal, and a
-  pull request with a merge conflict ([a-skipped-job-reports-success](a-skipped-job-reports-success.md)).
-  There only the pending required check holds the merge; the pushed paths and strings were read
-  by nothing unless the pre-push hook was on.
+  Three heads start no run at all: one whose head commit carries a workflow-skip literal, a
+  pull request with a merge conflict ([a-skipped-job-reports-success](a-skipped-job-reports-success.md)),
+  and a push the pull request did not take up
+  ([the-pull-request-shows-the-old-head-after-a-push](the-pull-request-shows-the-old-head-after-a-push.md)).
+  For the first two only the pending required check holds the merge. For the third the check
+  shows the old head's result, and only the merge tool holds it, when it is given the pushed
+  commit or the old head is behind `main`; otherwise nothing does (HAZARD #432). In all three the
+  pushed paths and strings were read by nothing unless the pre-push hook was on.
 - Before a push (`.githooks/pre-push`), in a clone that switched the hook on with
   `git config core.hooksPath .githooks`. Where it is off nothing runs: HAZARD #4.
 - At write time (the hook in `.claude/settings.json`), for the Write and Edit tools of an agent

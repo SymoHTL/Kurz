@@ -303,7 +303,8 @@ is (§3, the owner, 2026-11-01, "A strong T?, held", against a read that stays `
 
 `weak` may stand before an interface as before a class: a `weak I?` is the two words of a value of
 the interface and holds the weak count of the instance's block, as Rust's `Weak<dyn Trait>` (§3,
-the owner, 2026-11-02, #110, comment 6573113786, against a compile error).
+the owner, 2026-11-02, #110, comment 6573113786, against a compile error). What it holds where the
+value is an actor's, or one of a type an `impl` block declares, stands open (§14).
 
 A `weak T?` type stands wherever a type stands: a field, a list's item, a variable, a parameter, a
 return type, a map's value and a union's case (§3, the owner, 2026-11-01, "Anywhere a type

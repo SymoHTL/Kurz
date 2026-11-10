@@ -36,7 +36,9 @@ flowchart TD
     or PARTLY on a gate not listed there (merge-checks is listed, and N/A is normal).
     Read the table at the end of the log and fix the first row that turned the run red:
     pr-title and pr-breadth by editing the title or the description, the rest by one push.
-    No run at all on a head: a merge conflict, or a skip literal in the head commit"]
+    No run at all on a head: a merge conflict, a skip literal in the head commit,
+    or a push the pull request did not take up (the-pull-request-shows-the-old-head-after-a-push),
+    HAZARD issue 432"]
     E --> F["mark Ready with the description final; after a review round node I marks it Ready again.
     The review is the default branch's workflow, reviewer and rules, with the diff as data.
     Whether the forge starts it is the event policy: HAZARD issue 10.

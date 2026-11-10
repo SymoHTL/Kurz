@@ -204,9 +204,14 @@ check reads every class of the program)*.
 
 `==` on two values of an interface, and a key of an interface's type, read the classes that
 implement it as the paragraph above reads the classes derived from a class: false where the classes
-of the two instances differ, else the class's own `==`, and its own hash for a key, so that such a
-field of a class that implements it makes `==` on the interface `type-mismatch` *(assumed, §4:
-proposed on #110, comment 6567439435, and not objected to in the answer, comment 6573113786)*.
+of the two instances differ, else the class's own `==`, and its own hash for a key. So a field of a
+type `==` does not take, among the fields that count of a class that implements the interface, makes
+`==` on two values of the interface `type-mismatch`, at the comparison, and the interface as a map's
+key type `type-mismatch`, at the type that names it *(assumed, §4: proposed on #110, comment
+6567439435, and not objected to in the answer, comment 6573113786; the cost is that of K13's reading of
+the classes derived from a class, and a test of the two instances' classes at run time for each `==`)*. This speaks of a value whose
+class implements the interface; one of an actor or of a type an `impl` block declares stands open
+(§14).
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz
@@ -376,7 +381,9 @@ inherited without `pub` does not count, and the class is `missing-member` (the o
 implements the interface with a `pub` method of its own, which hides nothing, since a base method the
 class cannot see is hidden by nothing (below). A property, the class's own or inherited, is no method and
 implements none, since a call of its name calls the value it gives (below), and the class is
-`missing-member` *(assumed, §4: as C# refuses a property for a method of an interface, CS0535)*.
+`missing-member` *(assumed, §4: as C# refuses a property for a method of an interface, CS0535)*. Nor
+does a `static` method, which takes no instance: the class is `missing-member`, as C# refuses it
+(CS0736) (§4, the owner, 2026-11-08, #386, comment 6722257619).
 Between the braces of a class, a field is written `Type name`, with `mut` in front when it can be
 assigned and its first value after `=`, which may be any expression (the owner, 2026-10-10, against a constant, which F12 keeps for a
 parameter's default): it may read the parameters its primary constructor lists, whose fields are set
