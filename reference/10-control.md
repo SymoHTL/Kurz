@@ -145,12 +145,17 @@ tests at run time whether the class of the instance implements the arm's interfa
 `type-mismatch` as built; the cost is a search per such arm, one comparison of the instance's table for each class of the program
 that implements both); where no class of the program implements both, it is `type-mismatch` *(assumed, §5: the reading of
 2026-10-11 over the program compiled whole)*. Such an arm is `unreachable-arm` where the arms above take every case it tests,
-as an arm that can never run is (§5, the owner, 2026-10-09). Which classes
-derive from a class and which implement an
-interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
-An arm that tests the class of the instance at run time makes no later such arm `unreachable-arm` by the classes the
-program has: `Dot d` then `Shape s` over `Named | int`, where `Dot` is the only class that implements both, compiles,
-and its `Shape s` arm never runs (§5, the owner, 2026-11-10, #430, comment 6762143993).
+as an arm whose type an earlier arm covers is (§5, the owner, 2026-10-09). Which classes
+derive from a class and which implement an interface is read over the program compiled whole (§2) for two judgments: the
+cases an arm of an interface, of a base class or of a base `data` type covers, which count for O8 and for
+`unreachable-arm` by the cases the arms above take, and whether a class of the program implements both interfaces of
+an arm over a case that is another interface. Whether an arm that tests the class of the instance at run time can ever
+run is no such judgment: such an arm takes no case, so it makes no later arm `unreachable-arm` by the classes the
+program has, and a later arm that those classes leave nothing to take compiles and never runs. `Dot d` then `Shape s`
+over `Named | int`, where `Dot` is the only class that implements both, compiles, and its `Shape s` arm never runs (§5,
+the owner, 2026-11-10, #430, comment 6762143993). A later arm whose own type an earlier arm covers stays
+`unreachable-arm` (§5, the owner, 2026-10-09): `Shape s` then `Dot d` over `Named | int`, where `Dot` declares `Shape`,
+refuses the `Dot` arm.
 A value whose type is a type parameter is C10's.
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
@@ -398,6 +403,31 @@ print(Show(Tag("t")))
 print(Show(5))
 print(Area(Dot()))
 print(Area(Tag("u")))
+```
+
+Case: [control/match-interface-test-before-class.kz](../corpus/control/match-interface-test-before-class.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+string Show(Named | int v) => match v {
+    Shape s => "shape {s.Area()}"
+    Dot d => "dot"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+print(Show(Dot()))
 ```
 
 Case: [control/match-interface-test-after-class.kz](../corpus/control/match-interface-test-after-class.kz)
