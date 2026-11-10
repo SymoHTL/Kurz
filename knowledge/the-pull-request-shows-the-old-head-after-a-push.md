@@ -80,10 +80,12 @@ forge fail the lock was not found.
 - A local `gates.py --pr N` right after a push reads the head the same way and has no `--head`:
   compare the head of `gh pr view N --json headRefOid` with the pushed commit before running it,
   or read its `pr-findings` verdict as one about the head the forge showed. `judgment step`
-- Once a minute has passed since a push, the longest lag recorded above, and the push printed
+- Once a minute has passed since a push, the bound within which the lag of 2026-10-08 ended the two
+  times it was read, and the push printed
   `cannot lock ref` or no run started on the pushed commit, compare the branch
   (`git ls-remote origin <branch>`) with the pull request's head (`gh pr view N --json headRefOid`).
-  Where the branch has the commit and the pull request does not, commit nothing but an empty
+  Where the branch has the commit and the pull request does not, and a second read of both still
+  says so, commit nothing but an empty
   commit on it (`git commit --allow-empty`, the message saying that the pull request did not take
   up the push) and push it as any push, never with `--force`. That is the way seen to work, once
   (426); a close and reopen was not tried. A merge note names the empty commit as the

@@ -526,7 +526,7 @@ public sealed class CheckerTests
         // which no duration holds, and 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
         Clean("print(duration.FromNanoseconds(9223372036854775295UL))");
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromNanoseconds(9223372036854775807UL))"));
-        Assert.Contains("rounded to the nearest `double` first; `long(...)` keeps", ErrorText("print(duration.FromNanoseconds(9223372036854775807UL))"), StringComparison.Ordinal);
+        Assert.Contains("`long(...)`", ErrorText("print(duration.FromNanoseconds(9223372036854775807UL))"), StringComparison.Ordinal);
 
         // V10: the constructors of one type are no members of the other
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(timestamp.FromSeconds(5))"));

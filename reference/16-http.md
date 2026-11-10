@@ -1252,7 +1252,12 @@ body, for a `HEAD` (§12, the owner, 2026-11-02, Q10 and Q13). Neither writes `D
 `Content-Length` of the writer's and no `Transfer-Encoding`, a handler's dropped (§12, assumed);
 a `Content-Length` the handler set is dropped on a `204` and kept on a `304`, as RFC 9110, section
 8.6, has it (§12, the owner, 2026-11-09, pull request 413, comment 6735967569, "Drop on 204, keep
-304 (Recommended)"), the `304`'s unchecked against its empty body (§12, assumed); and an empty `205`
+304 (Recommended)"), the `304`'s unchecked against its empty body (§12, assumed); a `204` and a
+`304` reach neither the writer's check that a handler's `Content-Length` is a number and the body's
+length nor its check of a `Transfer-Encoding` beside a `Content-Length`, so that a
+`Content-Length: abc` is dropped on a `204` and sent as it is on a `304`, and on a `304` a
+`Content-Length` beside a `Transfer-Encoding` is sent and the `Transfer-Encoding` dropped (§12,
+assumed); and an empty `205`
 is written with `Content-Length: 0` (§12, the owner, 2026-11-02, Q14).
 `HttpResponse.Text` and `HttpResponse.Bytes` given a `205` and a body that is not empty stop the
 program with `thrown` and the text `status 205 takes no body`, as a status outside the range does,
@@ -1388,6 +1393,18 @@ void | IoError | HttpError All() {
     cached = HttpResponse.Empty(304)
     cached.Headers.Set("Content-Length", "7")
     Wire(cached)
+    // a `204` and a `304` reach none of the writer's checks of a handler's `Content-Length`: one that is no number is dropped on a
+    // `204` and kept on a `304`, and on a `304` one beside a `Transfer-Encoding` is kept and the `Transfer-Encoding` dropped
+    unread = HttpResponse.Empty(204)
+    unread.Headers.Set("Content-Length", "abc")
+    Wire(unread)
+    kept = HttpResponse.Empty(304)
+    kept.Headers.Set("Content-Length", "abc")
+    Wire(kept)
+    framed = HttpResponse.Empty(304)
+    framed.Headers.Set("Transfer-Encoding", "chunked")
+    framed.Headers.Set("Content-Length", "9")
+    Wire(framed)
 }
 
 All() else {
@@ -2538,18 +2555,22 @@ its response is written closes the connection, since no status can be sent after
 (§12, the owner, 2026-11-03), and one it gives before its first write, when nothing was written yet,
 is answered `500` with no body and `Connection: close` in place of the head first, under a
 `Content-Length` the handler set too *(assumed, §12: a reading of #412, comment 6740344904,
-"500 + close, as #411")*, as Kestrel answers a handler that fails before its response
-started (§12, the owner, 2026-11-09, #411, comment 6735967844, "500 + close"), and so is a function
+"500 + close, as #411")*, the `500` as Kestrel answers a handler that fails before its
+response started, which keeps the connection open there (its `HttpProtocol.ProduceEnd` writes that
+`500` with `Content-Length: 0` and no `Connection: close`, §12, the owner, 2026-11-10, #39, comment 6762818536, "Check
+Kestrel first"; §12, the owner, 2026-11-09, #411, comment 6735967844, "500 + close"), and so is a function
 that returns after a write that failed while nothing was written, a write that would pass a
 `Content-Length` among them, the responses held before it going out first (§12, the owner,
 2026-11-09, #411, comment 6737456858, "Fix in #411 FU"), `Write` and `ServeConnection` then giving
 the function's `IoError`, or the failed write's (§12, assumed), and `IoError(InvalidData, 0, "")`
 for a write past the count (§12, the owner, 2026-11-09, #110, comment 6735258248, G5 Q5). After
 that `500`, and after the `500` for a
-file whose size cannot be read (W8), the connection closes in stages, as after the loop's own `500`,
-so that a client still sending its body reads the `500` and not a reset, while what it still sends
-fits within the limits of the close in stages (W9) (§12, the owner, 2026-11-09, #411, comment
-6737456858, "In stages"). A read of the
+file whose size cannot be read (W8), the server's loop closes the connection in stages, as after its
+own `500`, so that a client still sending its body reads the `500` and not a reset, while what it
+still sends fits within the limits of the close in stages (W9) (§12, the owner, 2026-11-09, #411,
+comment 6737456858, "In stages"). Outside the loop, `response.Write(stream)` writes each `500` the
+writer sends, gives its `IoError` and closes nothing, the stream being left to the program (§12,
+the owner, 2026-11-10, #39, comment 6762818536, "Loop closes, raw Write not"). A read of the
 request's body in the function that falls under its rate gives
 `HttpError(Protocol, "request timed out")`, as a handler's read does (W10) (§12, the owner,
 2026-11-04, #110, comment 6643368937, Q12 (b)). Before the close that follows a head sent while the

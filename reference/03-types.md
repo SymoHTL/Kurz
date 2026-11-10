@@ -800,7 +800,8 @@ the nanosecond (§4, the owner, 2026-11-08, issue 110, comment 6723644046, "Also
 "Seconds + milliseconds, as C#"). C#'s two Unix-time constructors take a `long` alone, so the `double`
 form of the timestamp's two is Kurz's own, which that comment states of every `timestamp.FromUnixX`
 as of every `duration.FromX`. *(assumed, §4: a count of an integer type that widens to `long` (T8)
-takes the `long` form, and any other number the `double` form, as C#'s better conversion picks
+takes the `long` form, and any other number that widens to `double` takes the `double` form, as C#'s
+better conversion picks
 `TimeSpan.FromSeconds(long)` for an integer, an overload of .NET 9 on; a type that widens to neither
 is `type-mismatch`. So a `ulong` count is rounded to the nearest `double` first, as every integer
 widens into a `double` (T23), and one above 2^53 can lose its last units without a word, as C# rounds
@@ -832,6 +833,13 @@ print(duration.FromDays(big))
 // a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
 long odd = 9007199254740993
 print(duration.FromNanoseconds(odd))
+
+// a `ulong` count takes the `double` form, rounded to the nearest double, ties to even: 2^53 + 3 is 2^53 + 4 there, where a
+// cut would give 2^53 + 2, and `long(u)` keeps it exact; 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
+ulong u = 9007199254740995
+print(duration.FromNanoseconds(u))
+print(duration.FromNanoseconds(long(u)))
+print(duration.FromNanoseconds(9223372036854775295UL))
 ```
 
 Case: [types/duration-from-double.kz](../corpus/types/duration-from-double.kz)
@@ -880,10 +888,22 @@ Case: [types/duration-from-constant-overflow.kz](../corpus/types/duration-from-c
 print(duration.FromDays(106752))
 ```
 
+Case: [types/duration-from-ulong-constant.kz](../corpus/types/duration-from-ulong-constant.kz)
+```kurz
+// a `ulong` constant is decided by the `double` it is rounded to: 2^63 - 1 is 2^63 there, which no duration holds
+print(duration.FromNanoseconds(9223372036854775807UL))
+```
+
 Case: [types/duration-from-constant-nan.kz](../corpus/types/duration-from-constant-nan.kz)
 ```kurz
 // a constant NaN is no count of a time, as `int(1.0 / 0.0)` is no `int` (T6)
 print(duration.FromSeconds(0.0 / 0.0))
+```
+
+Case: [types/duration-from-decimal.kz](../corpus/types/duration-from-decimal.kz)
+```kurz
+// a `decimal` widens to neither a `long` nor a `double` (T8, T23), so it takes neither form, as C# refuses `TimeSpan.FromSeconds(1.5m)`
+print(duration.FromSeconds(1.5m))
 ```
 
 Case: [types/duration-from-string.kz](../corpus/types/duration-from-string.kz)
@@ -2158,8 +2178,8 @@ takes the constant's default, and with none is `cannot-infer` (T27), E1)* *(assu
 constant parameter as the type, `const Mode M, const M N`, is `unknown-name`, as `M value` is (below), and no type
 outside the list)*; a call that writes at least one type argument
 but fewer than the parameters without a default, or more than all of them, is T19's count, `syntax`, which names each
-count the call may write, while a call that writes none infers them or takes their defaults, and is `cannot-infer` (T27) where it can do neither, as C# infers them (CS0411)
-(§4, the owner, 2026-11-09, "Confirm 'at least one'"). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
+count the call may write, while a call that writes none infers them or takes their defaults, and is `cannot-infer` (T27) where it can do neither, as C# reports CS0411 where it can infer none
+(§4, the owner, 2026-11-09, "Confirm 'at least one'", and the owner, 2026-11-10, #39, comment 6762818536, "Compare the error only"). The parameter's name as the type of a declaration, `M value`, is `unknown-name` (V10), and
 among type arguments where a type stands it is a constant, `type-mismatch` (T1) as a literal and an
 `enum`'s value are there, inside a declaration's type too, `List<M> values`, where it stands among type arguments; a constant passed on to a parameter of a wider integer type widens as a
 value of its type does (T8) (§4, the owner, 2026-11-03, "every default", with the widening "as C#

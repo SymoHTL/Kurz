@@ -5,6 +5,9 @@
 // | HTTP/1.1 204 No Content|Content-Type: text/plain; charset=utf-8||
 // | HTTP/1.1 204 No Content||
 // | HTTP/1.1 304 Not Modified|Content-Length: 7||
+// | HTTP/1.1 204 No Content||
+// | HTTP/1.1 304 Not Modified|Content-Length: abc||
+// | HTTP/1.1 304 Not Modified|Content-Length: 9||
 // rules: W8
 
 // a `204` and a `304` have no body, so neither a body nor its length nor a `Transfer-Encoding` is written; a `Content-Length` the
@@ -40,6 +43,18 @@ void | IoError | HttpError All() {
     cached = HttpResponse.Empty(304)
     cached.Headers.Set("Content-Length", "7")
     Wire(cached)
+    // a `204` and a `304` reach none of the writer's checks of a handler's `Content-Length`: one that is no number is dropped on a
+    // `204` and kept on a `304`, and on a `304` one beside a `Transfer-Encoding` is kept and the `Transfer-Encoding` dropped
+    unread = HttpResponse.Empty(204)
+    unread.Headers.Set("Content-Length", "abc")
+    Wire(unread)
+    kept = HttpResponse.Empty(304)
+    kept.Headers.Set("Content-Length", "abc")
+    Wire(kept)
+    framed = HttpResponse.Empty(304)
+    framed.Headers.Set("Transfer-Encoding", "chunked")
+    framed.Headers.Set("Content-Length", "9")
+    Wire(framed)
 }
 
 All() else {
