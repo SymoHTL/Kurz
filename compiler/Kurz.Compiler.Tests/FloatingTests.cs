@@ -306,6 +306,27 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     }
 
     [Fact]
+    public void A_constant_typed_double_is_rounded_once_as_the_run_time_conversion_is()
+    {
+        // T23: 2^53 + 3 lies halfway between the doubles 2^53 + 2 and 2^53 + 4 and goes to the even one, 2^53 + 4, as the conversion
+        // of a `long` at run time gives it and as C# folds the constant; a fold that cuts the bits past the 53rd gave 2^53 + 2; the
+        // literal, the written conversion of a literal without a suffix (T10) and of one with `L`, and the negative literal each fold
+        var text = """
+            double a = 9007199254740995
+            print(a)
+            print(double(9007199254740995))
+            print(double(9007199254740995L))
+            double m = -9007199254740995
+            print(m)
+            long n = 9007199254740995
+            double c = n
+            print(c)
+            """;
+        Ran(BuildAndRun(text, "double-rounded-once"), 0,
+            ["9007199254740996", "9007199254740996", "9007199254740996", "-9007199254740996", "9007199254740996"], "");
+    }
+
+    [Fact]
     public void A_C_function_takes_and_gives_a_double_and_a_float()
     {
         // functions both C libraries export: Windows' C runtime on x64 has `fabsf` inline in its headers and in no library, and
