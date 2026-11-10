@@ -1682,7 +1682,9 @@ a copy's body before the calls that follow the call that made it. A later call w
 copy, so that an error of the copy is reported once, and one reported at the call, `kind-not-read` or the
 `unlisted-case` of an outcome the type gives, shows at that first call, the call that made it (§4, the owner,
 2026-11-06, against the first call in the order of the text and against a report at every call that names the copy;
-the cost is that the line named is not always the first in the file). The order is stated for one file, and the order
+the cost is that the line named is not always the first in the file). Where that copy was made inside another copy,
+the call is the one outside every copy that made the outermost copy (§4, the owner, 2026-11-10, "Outermost call, as
+built", against the call inside a copy that made it). The order is stated for one file, and the order
 across the files of a program is open (§14, which names its options). *(assumed, §4, with the build: a call that infers
 its type arguments makes a copy as one that writes them; a fault of the function's text that several copies give,
 `redeclared` (V9) among them, is reported once, at its line, and one that differs between copies, `kind-not-read` for
@@ -2415,9 +2417,10 @@ another copy, the call the build stops at is the one that made the outermost cop
 names that copy (§4, the owner, 2026-11-06). Where the `)` that closes the `(` after `const assert`
 is followed by `=>` or `{`, the shape of a function's body, the line declares a function named
 `assert` whose type is named `const`, as before the statement existed (L18); an `=>` inside the
-parentheses decides nothing, and neither does a `{` on the next line, since a function's body
-opens on the line of its signature (C1), so that such a line is a `const assert` and its `syntax`
-(§4, the owner, 2026-11-06).
+parentheses decides nothing (§4, the owner, 2026-11-06). *(assumed, §4: the owner's "`=>` or `{`
+there" read as the token after the `)` on its line, which L2 makes the line's end, so that an `=>`
+or a `{` on the next line decides nothing either, and such a line is a `const assert` and its
+`syntax`)*
 
 Case: [types/const-assert.kz](../corpus/types/const-assert.kz)
 ```kurz
@@ -2458,6 +2461,16 @@ Case: [types/const-assert-variable.kz](../corpus/types/const-assert-variable.kz)
 ```kurz
 n = 2
 const assert(n > 1, "n is small")
+```
+
+Case: [types/const-assert-function-named-assert.kz](../corpus/types/const-assert-function-named-assert.kz)
+```kurz
+// `=>` after the `)` makes the line a function named `assert` whose type is named `const`, as before the statement existed (L18)
+data const(int A)
+
+const assert(int x) => const(x)
+
+print(assert(1).A)
 ```
 
 Case: [types/const-assert-constant.kz](../corpus/types/const-assert-constant.kz)
