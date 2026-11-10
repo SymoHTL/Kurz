@@ -339,17 +339,18 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("long code = 3\nreturn code\n", "narrowing-conversion", 2, "a `long` is returned among the top-level statements, where the exit code is an `int` (F17, T7)")]
-    [InlineData("return \"stop\"\n", "type-mismatch", 1, "a `string` is returned among the top-level statements, where the exit code is an `int` (F17, T1)")]
-    [InlineData("void Stop() {\n}\n\nreturn Stop()\n", "syntax", 4, "a call with a `void` success used as a value (O10)")]
-    [InlineData("Environment.Exit(\"stop\")\n", "type-mismatch", 1, "a `string` where an `int` is required (T1)")]
-    [InlineData("long code = 3\nEnvironment.Exit(code)\n", "narrowing-conversion", 2, "a `long` where an `int` is required (T7)")]
-    public void An_exit_code_that_is_no_int_is_refused_where_it_stands(string text, string id, int line, string message)
+    [InlineData("long code = 3\nreturn code\n", "narrowing-conversion", 2)]
+    [InlineData("return \"stop\"\n", "type-mismatch", 1)]
+    [InlineData("void Stop() {\n}\n\nreturn Stop()\n", "syntax", 4)] // O10
+    [InlineData("Environment.Exit(\"stop\")\n", "type-mismatch", 1)]
+    [InlineData("long code = 3\nEnvironment.Exit(code)\n", "narrowing-conversion", 2)]
+    public void An_exit_code_that_is_no_int_is_refused_where_it_stands(string text, string id, int line)
     {
+        // section 8: a test pins the id and the line of an error, never its message (the owner, 2026-10-02)
         var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
         Assert.Null(refused.Program);
         var error = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((id, line, message), (error.Id, error.Line, error.Message));
+        Assert.Equal((id, line), (error.Id, error.Line));
         Assert.NotNull(Compile(text.Replace("long code", "int code", StringComparison.Ordinal).Replace("\"stop\"", "3", StringComparison.Ordinal).Replace("return Stop()", "return 3", StringComparison.Ordinal),
             Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
