@@ -24,7 +24,7 @@ class Pet(string Name = "pet")
 
 class Cat : Pet
 
-base = Dog(4)
+base = Dog(4) // a name here: `base` is a word right after a constructor's `:` alone (L18)
 print(base.Name)
 print(Dog("rex").Name)
 print(Cat().Name)

@@ -3699,6 +3699,17 @@ public sealed class CheckerTests
     }
 
     [Theory]
+    [InlineData("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = this.Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()", 8)] // `this.Log`
+    [InlineData("class Audit {\n    string Tag = Log()\n\n    string Log() {\n        return \"m\"\n    }\n\n    pub void Run() {\n        print(Tag)\n    }\n}\n\nAudit().Run()", 2)] // `Log()` for a method named `Log`
+    public void In_a_fields_default_of_a_type_with_a_member_named_log_this_log_and_a_method_log_are_unknown_name(string program, int line)
+    {
+        // P1 in a field's default, where K7 reads no `this` and no method of the instance
+        Assert.Equal([(ErrorIds.UnknownName, line)], Errors(program));
+        // the positive control: `Log` alone reaches a parameter of the primary constructor
+        Clean("class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    Sink Kept = Log\n\n    pub void Run() {\n        Kept.Information(\"a\")\n    }\n}\n\nOrders(Sink()).Run()");
+    }
+
+    [Theory]
     [InlineData("f = Log.Information\nprint(f)", ErrorIds.UnknownName)]
     [InlineData("y = Log\nprint(y)", ErrorIds.UnknownName)]
     [InlineData("x = Log.Information(\"a\")\nprint(x)", ErrorIds.Syntax)]
@@ -3928,7 +3939,8 @@ public sealed class CheckerTests
         // parameters given
         Clean("class A(string Name) {\n    pub A(int n) : this(\"n{n}\") { }\n}\n\nclass B : A {\n    pub B(int n) : base(n) {\n        print(Name)\n        print(this.Name)\n    }\n\n    pub B(string s) : base(s) { }\n\n    pub B() : this(\"b\") { }\n}\n\nclass P(string Name = \"p\")\n\nclass Q : P\n\nclass R : P {\n    pub R() {\n        print(Name)\n    }\n}\n\nbase = B(2)\nprint(base.Name)\nprint(B().Name)\nprint(Q().Name)\nprint(R().Name)");
         // where no constructor of the base takes no arguments, a constructor without `: base(...)` is `argument-mismatch` at its line,
-        // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies
+        // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies (the
+        // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
         // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, and in a class
