@@ -28,9 +28,10 @@ readme, licence, git, session and skill files, and nothing else; the owner said 
   pull request with a merge conflict ([a-skipped-job-reports-success](a-skipped-job-reports-success.md)),
   and a push the pull request did not take up
   ([the-pull-request-shows-the-old-head-after-a-push](the-pull-request-shows-the-old-head-after-a-push.md)).
-  There only the pending required check holds the merge, and for the third the merge tool, which
-  refuses a head the pull request does not show; the pushed paths and strings were read by nothing
-  unless the pre-push hook was on.
+  For the first two only the pending required check holds the merge. For the third the check
+  shows the old head's result, and only the merge tool holds it, when it is given the pushed
+  commit or the old head is behind `main`; otherwise nothing does (HAZARD #432). In all three the
+  pushed paths and strings were read by nothing unless the pre-push hook was on.
 - Before a push (`.githooks/pre-push`), in a clone that switched the hook on with
   `git config core.hooksPath .githooks`. Where it is off nothing runs: HAZARD #4.
 - At write time (the hook in `.claude/settings.json`), for the Write and Edit tools of an agent
