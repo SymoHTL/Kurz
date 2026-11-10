@@ -278,8 +278,9 @@ public sealed class CheckerTests
         // T6, L11: the same bound as for a literal with an exponent
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("double d = 1" + new string('0', 310) + "\nprint(d)"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("x = double(1" + new string('0', 310) + ")\nprint(x)"));
-        // T23 at the edge: the halfway point between the largest double and 2^1024 rounds to the even one, 2^1024, beyond the range,
-        // where a fold that cut it gave the largest double; one below it rounds to the largest double, the control
+        // L11 at the edge, with T23's rounding to the nearest (assumed in T23: a tie to the even one, beyond the largest to an infinity):
+        // the halfway point between the largest double and 2^1024 rounds to 2^1024, beyond the range, where a fold that cut it gave the
+        // largest double; one below it rounds to the largest double, the control
         var half = System.Numerics.BigInteger.Pow(2, 1024) - System.Numerics.BigInteger.Pow(2, 970);
         var halfway = half.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var below = (half - 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
