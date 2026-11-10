@@ -244,22 +244,18 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Theory]
-    [InlineData("x = Stdin.Lines()\nprint(1)\n", "syntax", 1, "`Stdin.Lines()` stands as the collection of a `for` loop alone (S16, S22)")]
-    [InlineData("x = Stdin.Peek()\nprint(1)\n", "unknown-name", 1, "`Stdin` has no function `Peek` (S22, V10)")]
-    [InlineData("x = Stdin\nprint(1)\n", "unknown-name", 1, "no `Stdin` is visible here (V10)")]
-    [InlineData("void Stdin() {\n}\n\nprint(1)\n", "redeclared", 1, null)]
-    [InlineData("void | IoError Some() {\n    mut into = Bytes()\n    print(Stdin.Read(into, 4))\n}\n\nSome() else {\n    IoError e => print(e)\n}\n", "mut-at-call", 3, null)] // M7, as of `f.Read`; the same program with `mut` is the Windows theory's row, built clean here
-    public void A_use_of_stdin_outside_its_members_is_refused_where_it_stands(string text, string id, int line, string? message)
+    [InlineData("x = Stdin.Lines()\nprint(1)\n", "syntax", 1)]
+    [InlineData("x = Stdin.Peek()\nprint(1)\n", "unknown-name", 1)]
+    [InlineData("x = Stdin\nprint(1)\n", "unknown-name", 1)]
+    [InlineData("void Stdin() {\n}\n\nprint(1)\n", "redeclared", 1)]
+    [InlineData("void | IoError Some() {\n    mut into = Bytes()\n    print(Stdin.Read(into, 4))\n}\n\nSome() else {\n    IoError e => print(e)\n}\n", "mut-at-call", 3)] // M7, as of `f.Read`; the same program with `mut` is the Windows theory's row, built clean here
+    public void A_use_of_stdin_outside_its_members_is_refused_where_it_stands(string text, string id, int line)
     {
         // S22, S16, V9, V10: `Lines()` stands as a loop's collection alone, `Stdin` has its four members and is no value, and a file's
         // own declaration of the name is `redeclared`; M7: the bytes `Read` appends to are a `mut` argument, written so at the call
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((id, line), (diagnostic.Id, diagnostic.Line));
-        if (message is not null)
-        {
-            Assert.Equal(message, diagnostic.Message);
-        }
+        Assert.Equal((id, line), (diagnostic.Id, diagnostic.Line)); // section 8: the id and the line of an error, never its message
     }
 }
