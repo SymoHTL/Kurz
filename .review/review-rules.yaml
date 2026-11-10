@@ -216,3 +216,11 @@ sections:
       - A retry of anything but an infrastructure failure.
       - A review rule that describes a preference, or one the reviewer cannot judge from what the header of this file says it is given.
       - A section whose file patterns no longer cover what its rules talk about.
+
+  - name: license
+    files: ["LICENSE"]
+    rules:
+      - >-
+        A change to the license's text anywhere but in its first lines, which name the repository: the
+        text is LLVM's LICENSE.TXT from the Apache License to the end of the LLVM exceptions, the
+        license the owner chose on 2026-11-10 (Apache-2.0 WITH LLVM-exception).
