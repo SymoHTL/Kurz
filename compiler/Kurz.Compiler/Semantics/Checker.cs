@@ -2582,6 +2582,7 @@ public sealed partial class Checker
         KurzType element;
         KurzType? value = null;
         UnionType? failures = null;
+        string? failing = null; // S16: the words the loop's texts name a collection that fails with, set beside its failures
         if (Unwrap(f.Collection) is RangeExpression range)
         {
             element = CheckRange(range);
@@ -2596,6 +2597,7 @@ public sealed partial class Checker
             if (Unwrap(f.Collection) is CallExpression lines && model.HasCall(lines) && model.CallOf(lines).Kind == CallKind.FileLines && t.Type is UnionType pulls)
             {
                 failures = pulls; // S16: a line is a `string`, and a pull's cases go to the loop's `else`, or leave the function through it
+                failing = "a file's lines";
                 element = Types.String;
             }
             else
@@ -2651,7 +2653,7 @@ public sealed partial class Checker
         {
             // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
             // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
-            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : failures is not null ? "a file's lines" : Types.A(model.TypeOf(f.Collection).Type);
+            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : failing ?? Types.A(model.TypeOf(f.Collection).Type);
             CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)", $"a loop over {over} fails with (S16, T1)");
         }
 
