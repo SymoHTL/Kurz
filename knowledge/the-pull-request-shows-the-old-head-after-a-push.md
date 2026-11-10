@@ -41,8 +41,9 @@ a run that started is a bill ([[a-cancel-does-not-beat-the-runner]]).
 
 The shape: the lag above ends by itself within a minute; this one did not. The `gates` workflow
 starts on the pull request's events (`synchronize` among them, in `.github/workflows/gates.yml`),
-and a pull request that did not take up the push sends none, so its required checks stay those of
-the old head, which may be green. Nothing is merged wrongly: the merge tool takes the head in full
+and a pull request that did not take up the push sends none, so the checks it shows stay those of
+the old head: on pull request 426 they were green, `gates`, `compiler-windows` and `review` on
+17ca00ec. Nothing is merged wrongly: the merge tool takes the head in full
 and refuses while the pull request shows another (`tools/merge_pr.py`). What is lost is the time
 spent waiting for runs that never start. What made the forge fail the lock was not found.
 
@@ -75,5 +76,5 @@ spent waiting for runs that never start. What made the forge fail the lock was n
   not, commit nothing but an empty commit on it (`git commit --allow-empty`, the message saying
   that the pull request did not take up the push) and push it as any push, never with `--force`;
   never close and reopen the pull request to wake it. A merge note names the empty commit as the
-  head and says its tree is the pushed one's, so that gates run on that tree stand. HAZARD (no
-  gate: nothing watches for a push the pull request did not take up).
+  head and says its tree is the pushed one's, so that gates run on that tree stand. HAZARD (#432):
+  nothing notices a push the pull request did not take up.
