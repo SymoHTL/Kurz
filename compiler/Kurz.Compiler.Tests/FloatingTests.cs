@@ -145,8 +145,8 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
             Assert.Equal(Shortest(n => value.ToString("E" + (n - 1), Invariant), t => double.Parse(t, Invariant) == value), Digits(run.Output[i]));
         }
 
-        // .NET 10.0.14 writes 2^-958 and 2^-25 with digits that read back as other values, and 10.0.15 with the digits the program
-        // writes: the misreads a run finds depend on the runtime it runs on, and the program's text for both is held below
+        // .NET 10.0.13 and 10.0.14 write 2^-958 and 2^-25 with 16 digits that read back as other values, and 10.0.15 with the digits
+        // the program writes: the misreads a run finds depend on the runtime it runs on, and the program's text for both is held below
         // (knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md)
         Assert.Subset(new HashSet<ulong> { 0x0410000000000000UL, 0x3E60000000000000UL }, misread.ToHashSet());
         Assert.Contains("4.1045368012983762E-289", run.Output);
