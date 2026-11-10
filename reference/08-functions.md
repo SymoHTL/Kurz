@@ -1252,7 +1252,7 @@ its exit code, and the end of the top-level code, and a bare `return` among its 
 return n + Exit" and "0, silently"). The value is an `int`: a wider integer is `narrowing-conversion`,
 as anywhere an `int` is required (T7), and a value of another type is `type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
 for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
-`Environment.Exit`. *(assumed, §12: the type, the low 8 bits and Windows)*
+`Environment.Exit`. *(assumed, §12: the type, a wider integer's `narrowing-conversion` among it, the low 8 bits and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 
