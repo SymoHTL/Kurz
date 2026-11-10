@@ -196,7 +196,7 @@ public sealed partial class Checker
 
             if (Types.IsFloating(target))
             {
-                var d = (double)value;
+                var d = DoubleOf(value);
                 if (double.IsInfinity(d))
                 {
                     Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `double` (T6, L11)");
@@ -283,15 +283,25 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// T23, L11: the <c>float</c> nearest the value the digits write, rounded once, from the digits, as C# folds a constant into
-    /// <c>float</c> and as its <c>float.Parse</c> reads digits since .NET Core 3.0; the <c>double</c> of the digits rounded again to
-    /// <c>float</c> is another value where that <c>double</c> lands on the midpoint of two <c>float</c> values, 2^53 + 2^29 + 1 among
-    /// them. Beyond the range it is an infinity.
+    /// T23, L11, L17: the <c>float</c> nearest the value the digits write, rounded once, from the digits, as C# folds an integer
+    /// constant or a literal with <c>f</c> into <c>float</c> and as its <c>float.Parse</c> reads digits since .NET Core 3.0; a fraction
+    /// literal without a suffix that a <c>float</c> reaches takes that type first (L17), as one with <c>f</c>, where C# refuses it
+    /// (CS0664). The <c>double</c> of the digits rounded again to <c>float</c> is another value where that <c>double</c> lands on the
+    /// midpoint of two <c>float</c> values, 2^53 + 2^29 + 1 among them. Beyond the range it is an infinity.
     /// </summary>
     private static float FloatOf(string digits) => float.Parse(digits, NumberStyles.Float, CultureInfo.InvariantCulture);
 
     /// <summary>The <c>float</c> nearest an integer, rounded once (<see cref="FloatOf(string)"/>).</summary>
     private static float FloatOf(BigInteger value) => FloatOf(value.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// T23, L11: the <c>double</c> nearest an integer, rounded once, from its digits, as C# folds an integer constant into
+    /// <c>double</c> and as the conversion of a <c>long</c> at run time gives it; <c>(double)</c> of a <c>BigInteger</c> drops the
+    /// bits past the 53rd on .NET 10, so 2^53 + 3 became 2^53 + 2 where the nearest even is 2^53 + 4. Beyond the range it is an
+    /// infinity.
+    /// </summary>
+    private static double DoubleOf(BigInteger value) =>
+        double.Parse(value.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
 
     private Typed CheckUnit(UnitLiteralValue literal, int line, KurzType? expected, bool negative)
     {
