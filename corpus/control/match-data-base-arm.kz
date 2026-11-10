@@ -1,0 +1,20 @@
+// expect: output
+// | hound rex 4
+// | beast tom
+// | gone
+// rules: C4
+
+data Beast(string Name)
+data Hound(int Legs) : Beast
+data Lynx(int Lives) : Beast
+data Gone
+
+string Say(Hound | Lynx | Gone v) => match v {
+    Hound h => "hound {h.Name} {h.Legs}"
+    Beast b => "beast {b.Name}"
+    Gone => "gone"
+}
+
+print(Say(Hound("rex", 4)))
+print(Say(Lynx("tom", 9)))
+print(Say(Gone))

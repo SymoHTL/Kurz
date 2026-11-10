@@ -1,0 +1,52 @@
+// expect: output
+// | shape 1
+// | shape 4
+// | named t
+// | int 5
+// | 1
+// | 0
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+class Round(int R) : Shape, Named {
+    pub virtual int Area() => R
+    pub string Name() => "round"
+}
+
+class Ring(int Hole) : Round {
+    pub override int Area() => R - Hole
+}
+
+class Tag(string Text) : Named {
+    pub string Name() => Text
+}
+
+string Show(Named | int v) => match v {
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+int Area(Named n) => match n {
+    Shape s => s.Area()
+    else => 0
+}
+
+print(Show(Dot()))
+print(Show(Ring(5, 1)))
+print(Show(Tag("t")))
+print(Show(5))
+print(Area(Dot()))
+print(Area(Tag("u")))
