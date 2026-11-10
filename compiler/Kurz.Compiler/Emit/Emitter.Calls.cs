@@ -22,7 +22,8 @@ public sealed partial class Emitter
         var result = Sub(info.Result);
         var value = info.Kind switch
         {
-            CallKind.Print => EmitPrint(c),
+            CallKind.Print => EmitPrint(c, 1),
+            CallKind.ErrorPrint => EmitPrint(c, 2),
             CallKind.Log => EmitLog(c),
             CallKind.Intrinsic => EmitIntrinsic(c, info),
             CallKind.Conversion => EmitConversion(c, info.Target!),
@@ -92,12 +93,12 @@ public sealed partial class Emitter
         return null;
     }
 
-    /// <summary>A1: the text of the value, with the file and the line of the `print`, to the runtime's <c>Print</c>, which raises <c>print-failed</c> at that place (the owner, 2026-10-23, "Caller passes it").</summary>
-    private string? EmitPrint(CallExpression c)
+    /// <summary>A1, A17: the text of the value, with the file and the line of the `print` or the `eprint`, to the runtime's <c>Print</c>, which writes it to <paramref name="fd"/>, standard output (1) or standard error (2), and raises <c>print-failed</c> at that place (the owner, 2026-10-23, "Caller passes it").</summary>
+    private string? EmitPrint(CallExpression c, int fd)
     {
         var argument = c.Arguments[0].Value;
         var text = Text(EmitExpression(argument), TypeOf(argument), argument.Line);
-        fn.Emit($"call void {RuntimeFunction("Print")}(%kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
+        fn.Emit($"call void {RuntimeFunction("Print")}(i32 {fd}, %kz.str {text}, %kz.str {StringValue(unit.File)}, i32 {Number(c.Line)})");
         return null;
     }
 
