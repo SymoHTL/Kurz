@@ -1081,8 +1081,8 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// K7: whether the code being checked stands in a <c>static</c> method of its class, or in the initial value of a <c>static</c>
-    /// field, where no instance is.
+    /// K7: whether the code being checked stands in a <c>static</c> method of its class, in the initial value of a <c>static</c>
+    /// field, or in the arguments of a constructor's <c>: this(...)</c> or <c>: base(...)</c> (K14), where no instance is.
     /// </summary>
     private bool InStaticMember()
     {
@@ -1095,6 +1095,27 @@ public sealed partial class Checker
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// K7, K19, K14: why no instance is where the code being checked stands, the text that opens its <c>static-mismatch</c>, and the rules
+    /// it names: a <c>static</c> member, or the arguments of a constructor's <c>: this(...)</c> or <c>: base(...)</c>, which read the
+    /// constructor's parameters while no instance exists yet, as C# names the member in CS0120 (§4, the owner, 2026-11-09, #429, comment
+    /// 6752598091).
+    /// </summary>
+    private (string Why, string Rules) NoInstance()
+    {
+        for (var f = frame; f is not null; f = f.Outer)
+        {
+            if (f.Class is not null)
+            {
+                return f.Chain is { } chain
+                    ? ($"the arguments of `{chain}` read the constructor's parameters, and no instance exists yet", "K14")
+                    : ("a `static` member has no instance", "K7, K19");
+            }
+        }
+
+        return ("a `static` member has no instance", "K7, K19");
     }
 
     /// <summary>
@@ -1113,7 +1134,8 @@ public sealed partial class Checker
             return false;
         }
 
-        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a field of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+        var (why, rules) = NoInstance();
+        Report(ErrorIds.StaticMismatch, line, $"{why}: `{name}` is a field of an instance of `{CurrentClass()!.Name}` ({rules})");
         return true;
     }
 
@@ -1124,8 +1146,11 @@ public sealed partial class Checker
             : $"`{name}` is a method of an instance of `{symbol.Name}`, not of the class: call it on an instance (K7, K19)");
 
     /// <summary>K19: a method of an instance named alone, with a call or without one, in a <c>static</c> member, which has no instance.</summary>
-    private void InstanceMethodInStatic(string name, int line) =>
-        Report(ErrorIds.StaticMismatch, line, $"a `static` member has no instance: `{name}` is a {(Property(CurrentClass()!, name) is not null ? "property" : "method")} of an instance of `{CurrentClass()!.Name}` (K7, K19)");
+    private void InstanceMethodInStatic(string name, int line)
+    {
+        var (why, rules) = NoInstance();
+        Report(ErrorIds.StaticMismatch, line, $"{why}: `{name}` is a {(Property(CurrentClass()!, name) is not null ? "property" : "method")} of an instance of `{CurrentClass()!.Name}` ({rules})");
+    }
 
     /// <summary>K7, K18: inside the class, a name that is one of its <c>static</c> fields.</summary>
     private StaticFieldSymbol? ImplicitStaticField(string name) => CurrentClass()?.StaticField(name);
@@ -1227,7 +1252,8 @@ public sealed partial class Checker
 
         if (InStaticMember())
         {
-            Report(ErrorIds.StaticMismatch, t.Line, "a `static` member has no instance, and so no `this` (K7, K19)");
+            var (why, rules) = NoInstance();
+            Report(ErrorIds.StaticMismatch, t.Line, $"{why}, and so no `this` ({rules})");
             return Typed.Error;
         }
 

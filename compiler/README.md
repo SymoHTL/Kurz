@@ -2507,7 +2507,11 @@ round can ask about it by the rule's id.
 - K14 with C#'s constructors (section 4): a construction picks among the primary constructor and the
   constructors of the body as a call picks an overload (F13), and a class without a primary
   constructor that declares one has no empty one, as C# makes none. The arguments of `: this(...)`
-  read the parameters and no instance, as C#'s initializer does. Of a class with no primary
+  read the parameters and no instance, as C#'s initializer does: the checker reads them in a frame of
+  the class marked as one without an instance, as a `static` method's, so that a member of the
+  instance there is `static-mismatch` with a text that says no instance exists yet and a `static`
+  member of the class is read (the owner, 2026-11-09, #429, comment 6752598091; the `static` member
+  assumed). Of a class with no primary
   constructor, no base and no derived classes, each field of the body without `=` is assigned on
   every path of each constructor that calls no other, read as C#'s definite assignment reads a
   `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
@@ -2518,8 +2522,11 @@ round can ask about it by the rule's id.
   the build's reading of "a call with no arguments reaches", which the owner's answer on #409, comment
   6737367678, does not name)*, and where
   the base has none the constructor that implies
-  it is `argument-mismatch`, as C#'s CS7036, and `: base(...)` in a class without a base class is
-  `syntax` (the owner, 2026-11-09, #409, comment 6737367678). `base` is read as that word right after a
+  it is `argument-mismatch`, as C#'s CS7036, and `: base(...)` in a class without a primary
+  constructor and without a base class is `syntax` (the owner, 2026-11-09, #409, comment 6737367678),
+  where in a further constructor of a class with a primary constructor it is `constructor-must-chain`
+  (the owner, 2026-11-09, #429, comment 6752598091, for a class without a base class; for one with a
+  base class *assumed*, the same reading). `base` is read as that word right after a
   constructor's `:` alone, as `as` in a `use` line, and is a name everywhere else (L18).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that

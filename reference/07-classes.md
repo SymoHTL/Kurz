@@ -1021,8 +1021,9 @@ print(Limits(1).Size)
 
 A member of an instance named where there is no instance, and a `static` member named through an
 instance, are the compile error `static-mismatch`, its message saying on which side the member is:
-a field or a method of the instance, or `this`, in a `static` method or in the initial value of a
-`static` field, and one named through its class, `Counter.Next()`, a method so named with its call
+a field or a method of the instance, or `this`, in a `static` method, in the initial value of a
+`static` field or in the arguments of a constructor's `: this(...)` or `: base(...)` (K14; §4, the
+owner, 2026-11-09, #429, comment 6752598091), and one named through its class, `Counter.Next()`, a method so named with its call
 or without it, `f = Counter.Next` and `f = Next` in a `static` method; a `static` field or method named
 through an instance, `c.Of(3)`. C# refuses the same with CS0120, CS0026 and CS0176; the owner chose
 one id whose text names the side on 2026-11-02, against reusing `unknown-name` and against an id
@@ -1218,7 +1219,12 @@ constructor's `:` and a name everywhere else (L18), as `as` is a word of a `use`
 needs a primary constructor in each class derived from it, and against a core word, which no
 program could use as a name). `: base(...)` picks among the constructors of the base as a
 construction does, and its arguments read the parameters and no instance, as those of `: this(...)`
-do, so that a field's name there is `unknown-name` (V10) *(assumed, §4: the build's reading)*. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
+do, since none exists yet, so that a member of the instance named there, a field, a method or `this`,
+is `static-mismatch` (K19), with a text that says so, as C# names the member in CS0120 (§4, the
+owner, 2026-11-09, #429, comment 6752598091); a `static` member of the class is read in the arguments
+of `: this(...)` as a `static` method reads it *(assumed, §4: the reading of the places of
+`static-mismatch`)*, and a `static` field of another class is read in either through its class's name;
+a class with a base and its base take no `static` member yet (`not supported`, K6, K7, K18). The base's constructor runs before the body, as C#'s does. A constructor that writes neither
 `: this(...)` nor `: base(...)` runs the constructor of the base that a call with no arguments
 reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13), two that
 such a call reaches alike being `ambiguous-call` *(assumed,
@@ -1228,9 +1234,10 @@ no such constructor, that constructor is `argument-mismatch`, at its line or at 
 reports CS7036 there (§4, the owner, 2026-11-09, #409, comment 6737367678). In a class
 without a primary constructor and without a base class, `: base(...)` is `syntax` (§4, the owner,
 2026-11-09, #409, comment 6737367678). In a further constructor of a class with a primary
-constructor it is `constructor-must-chain`, whether the class has a base class or not, since that
-constructor calls the primary one first *(assumed, §4: the missing `: this(...)` is read first, so
-that one defect gives one error)*.
+constructor and no base class it is `constructor-must-chain`, since that constructor calls the
+primary one first (§4, the owner, 2026-11-09, #429, comment 6752598091), and in one of a class with
+a primary constructor and a base class too *(assumed, §4: the same reading; the answer names a class
+without a base)*.
 
 Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
 ```kurz
@@ -1288,6 +1295,33 @@ class Dog : Animal {
 }
 
 print(Dog().Legs)
+```
+
+Case: [classes/base-in-further-constructor.kz](../corpus/classes/base-in-further-constructor.kz)
+```kurz
+class Animal(string Name) {
+    pub Animal(int legs) : base(legs) {
+        print(legs)
+    }
+}
+
+print(Animal("rex").Name)
+```
+
+Case: [classes/constructor-arguments-static.kz](../corpus/classes/constructor-arguments-static.kz)
+```kurz
+class Box(int Size) {
+    pub static int Four = 4
+
+    pub static int Twice(int n) => n * 2
+
+    pub Box() : this(Four) { }
+
+    pub Box(string s) : this(Twice(3)) { }
+}
+
+print(Box().Size)
+print(Box("six").Size)
 ```
 
 Case: [classes/base-constructor-ambiguous.kz](../corpus/classes/base-constructor-ambiguous.kz)
