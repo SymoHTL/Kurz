@@ -22,6 +22,8 @@
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>|Connection: close||1|u|0||]
 // | io: not found: serve-stream-missing.txt
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|f]
+// | io: not found: serve-stream-missing.txt
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Transfer-Encoding: chunked|Date: <29>||1|o|0||HTTP/1.1 500 Internal Server Error|Content-Length: 0|Connection: close|Date: <29>||]
 // | io: invalid input
 // | []
 // | http: malformed request: bad chunk size
@@ -29,7 +31,9 @@
 // | void
 // | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Date: <29>|Connection: close||g]
 // | void
-// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Connection: keep-alive|Transfer-Encoding: chunked|Date: <29>||1|k|0||]
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Connection: keep-alive|Transfer-Encoding: chunked|Date: <29>|Connection: close||1|k|0||]
+// | void
+// | [HTTP/1.1 200 OK|Content-Type: application/octet-stream|Connection: keep-alive|Transfer-Encoding: chunked|Date: <29>|Connection: close||1|x|3|abc|0||]
 // rules: W11
 
 // the loop writes a response a function writes with its `Date`, chunked to HTTP/1.1 and kept alive, and to HTTP/1.0 as it is with
@@ -38,10 +42,12 @@
 // `Transfer-Encoding` and with `Connection: close`; the function may read the request's body while it writes, a read before its
 // first write sending `100 Continue` and none after it, and what it left unread is drained after it, the connection closing where
 // that is past `MaxDrainSize`, and a body malformed there closing it with that error; a head that goes out while the request still
-// awaits `100 Continue` says `Connection: close` where the handler set no `Connection`, and the connection closes after the
-// function, whether it read the body after its first write or not, and where the head says the handler's `Connection` instead; a
-// function's `IoError` closes the connection, which gives it; and a `Content-Length` the handler set is
-// `InvalidInput` with nothing written, here to a peer of HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
+// awaits `100 Continue` says `Connection: close`, beside a handler's `Connection: keep-alive` too (section 12, the owner,
+// 2026-11-05, Q6), and the connection closes after the function, whether it read the body after its first write or not; a
+// function's `IoError` closes the connection, which gives it, and one before its first write is answered `500` with
+// `Connection: close` in place of the head, after the response held before it (section 12, the owner, 2026-11-09, #411, comment
+// 6735967844); and a `Content-Length` the handler set that is no number is `InvalidInput` with nothing written, here to a peer of
+// HTTP/1.0, as `http/response-stream.kz` shows it on the raw layer
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {
@@ -150,7 +156,7 @@ failing = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
 })
 sized = (HttpRequest r) => {
     response = HttpResponse.Stream(200, (HttpWriter w) => w.Write("s"))
-    response.Headers.Set("Content-Length", "1") else {
+    response.Headers.Set("Content-Length", "one") else {
         HttpError e => return HttpResponse.Empty(500)
     }
 
@@ -172,6 +178,25 @@ kept = (HttpRequest r) => {
 
     return response
 }
+keptLate = (HttpRequest r) => {
+    response = HttpResponse.Stream(200, (HttpWriter w) => {
+        w.Write("x")
+        w.Write(Whole(r))
+    })
+    response.Headers.Set("Connection", "keep-alive") else {
+        HttpError e => return HttpResponse.Empty(500)
+    }
+
+    return response
+}
+early = (HttpRequest r) => HttpResponse.Stream(200, (HttpWriter w) => {
+    if r.Path == "/f" {
+        size = File.Size("serve-stream-missing.txt")
+        w.Write("{size}")
+    }
+
+    w.Write("o")
+})
 get = "GET /n HTTP/1.1\r\nHost: h\r\n\r\n"
 Exchange("GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /bc HTTP/1.1\r\nHost: h\r\n\r\n", paths, HttpLimits())
 Exchange("GET /a HTTP/1.0\r\n\r\n", paths, HttpLimits())
@@ -184,7 +209,9 @@ Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-contin
 Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", echo, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", unread, HttpLimits())
 Exchange("GET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", failing, HttpLimits())
+Exchange("GET /o HTTP/1.1\r\nHost: h\r\n\r\nGET /f HTTP/1.1\r\nHost: h\r\n\r\n{get}", early, HttpLimits())
 Exchange("GET /s HTTP/1.0\r\n\r\n", sized, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n{get}", unread, HttpLimits())
 Exchange("GET /g HTTP/1.0\r\n\r\n", coded, HttpLimits())
 Exchange("POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", kept, HttpLimits())
+Exchange("POST /late HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nExpect: 100-continue\r\n\r\nabc{get}", keptLate, HttpLimits())

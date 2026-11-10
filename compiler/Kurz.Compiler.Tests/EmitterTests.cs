@@ -651,9 +651,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_value_of_an_interface_is_the_address_and_the_table_its_class_has_for_the_interface()
     {
         // K6, as Rust lays out `Rc<dyn Trait>`: a value of an interface is the address of the instance's block and its class's table for
-        // the interface, whose words are the class's release, its weak release, its equality and its hash where `==` or a key reads them,
-        // and a slot for each method of the interface in its order; its `null` is the pair of the address 0 (N1); a class nothing derives
-        // from has that table alone, and its own references stay the one word of the address
+        // the interface, whose words are the class's release, its weak release, its equality and its hash (null where no `==` and no key
+        // reads them), the class's own table (null for a class with no base and no derived class), and a slot for each method of the
+        // interface in its order, so `Dot`'s table for `Shape` is 7 words; its `null` is the pair of the address 0 (N1); a class with no
+        // base and no derived class, as `Dot`, has that table alone, and its own references stay the one word of the address
         const string Program = """
             interface Shape {
                 int Area()

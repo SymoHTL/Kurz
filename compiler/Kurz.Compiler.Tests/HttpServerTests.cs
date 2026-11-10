@@ -701,11 +701,16 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         // `KeepAliveTimeout` more for a client that sends nothing; a connection that sends no first byte, or none after a request, closes
         // at `KeepAliveTimeout`; and a response the client does not take ends at the grace of `MinResponseDataRate`. Each bound is
         // 300 ms against defaults of 5 or 30 seconds, and the connection ends, the program with it, within 2.5 seconds of the client's
-        // last byte; the cases `serve-timeouts` and `serve-keep-alive` show each outcome and that it waited at least its bound
+        // last byte; the cases `serve-timeouts` and `serve-keep-alive` show each outcome and that it waited at least its bound. The clock
+        // holds that span alone. The program writes its port once its body of 32 MiB is built, so that the client, which connects to
+        // that port and whose connection the system completes before any accept, starts the clock where nothing but the accept is left
+        // before the loop; and the end is the close of the program's listener, which resets a second connection the program never
+        // accepts, read on the test's own thread. The end of the run's task is no such end: it waits for its reads of the program's
+        // output on threads of the pool, and with every thread of the pool held by other work it came 13.6 seconds after a connection
+        // that ended at 0.33 seconds (2026-11-09)
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
-                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 mut piece = Bytes()
                 while piece.Count < 65536 {
                     piece.Add(122)
@@ -725,6 +730,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
                     return HttpResponse.Text(200, "hi")
                 }
 
+                File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
                 HttpServer.ServeConnection(server, handler, HttpLimits(LIMITS)) else {
                     IoError e => print(e.Kind)
@@ -752,11 +758,22 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         TimeSpan ended;
         (int Code, string Output, string Error) result;
         using (var client = Connect(executable, run))
+        using (var witness = Connect(executable, run))
         {
+            witness.ReceiveTimeout = 60_000;
             var watch = System.Diagnostics.Stopwatch.StartNew();
             client.GetStream().Write(System.Text.Encoding.ASCII.GetBytes(sent));
-            result = await run;
+            try
+            {
+                _ = witness.GetStream().Read(new byte[1]);
+            }
+            catch (IOException)
+            {
+                // the reset of the listener's close, or the end of the 60 seconds, which the range below refuses
+            }
+
             ended = watch.Elapsed;
+            result = await run;
         }
 
         Ran((0, "", printed), (result.Code, result.Error, result.Output));
@@ -769,7 +786,12 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         // W10 (section 12, the default of the follow-up's product pass, Q10): a response of 32 MiB at 16 MB a second has 2.1 seconds
         // for its whole write, and the runtime sets what remains of them before each call of the system. A client that reads 64 KiB
         // every 50 ms keeps each call short, so a bound set whole for each call would not run out, and the client, reading at full
-        // speed after 3 seconds, would get every byte; held across the calls, the write ends at its bound, `TimedOut`, the body cut
+        // speed after 3 seconds, would get every byte; held across the calls, the write ends at its bound, `TimedOut`, the body cut. The
+        // 3 seconds count from the first byte of the response, its head, which the server writes just before the body whose bound they
+        // must outlast: counted from before the program started, they held its start and its build of the body, and where those took
+        // over 0.9 seconds the bound ran out after the client read at full speed, and the body went out whole (2026-11-09). The client
+        // waits by blocking its own thread, since after an `await` it goes on only once a thread of the pool takes it: a slow phase that
+        // ends late leaves the defect's second call too little of its 2.1 seconds to take the rest
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
@@ -810,19 +832,20 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(60),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
-        var watch = System.Diagnostics.Stopwatch.StartNew();
         using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
             stream.Write("GET /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"u8);
             var buffer = new byte[65536];
+            System.Diagnostics.Stopwatch? watch = null;
             int n;
             while ((n = stream.Read(buffer)) > 0)
             {
+                watch ??= System.Diagnostics.Stopwatch.StartNew();
                 got.Write(buffer, 0, n);
                 if (watch.Elapsed < TimeSpan.FromSeconds(3))
                 {
-                    await Task.Delay(50);
+                    Thread.Sleep(50);
                 }
             }
         }
@@ -837,19 +860,38 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
     [Theory]
     [InlineData("POST /a HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 200 OK\r\n", "served\n")]
     [InlineData("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 60000\r\n\r\n", 10000, "HTTP/1.1 413 Content Too Large\r\n", "request body over limit\nserved\n")]
+    [InlineData("POST /f HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 500 Internal Server Error\r\n", "NotFound\nserved\n")]
+    [InlineData("POST /s HTTP/1.1\r\nHost: h\r\nConnection: close\r\nContent-Length: 40000\r\n\r\n", 40000, "HTTP/1.1 500 Internal Server Error\r\n", "NotFound\nserved\n")]
     public async Task A_connection_the_server_closes_after_its_answer_is_closed_in_stages(string head, int sent, string status, string printed)
     {
         // section 12 (the owner, 2026-11-02, "a half-close on `TcpStream`"), W9: once the server has written a response it closes the
         // connection, here for the request's `Connection: close`, or a refusal, here `413` for a body over its limit, it ends its
         // writes, reads and drops what the client still sends, and only then closes, as RFC 9112, section 9.6, has it. The body is
         // left unread either way; closed at once with bytes unread, the socket sends a reset in place of the end of the stream, and a
-        // client that reads its answer after that sees the reset
+        // client that reads its answer after that sees the reset. So does the writer's own `500` before the `IoError` that
+        // `ServeConnection` gives, for a file whose size cannot be read and for a streamed function's `IoError` before its first write
+        // (section 12, the owner, 2026-11-09, #411, comment 6737456858, "In stages")
         const string text = """
+            HttpResponse Answer(HttpRequest r) {
+                if r.Path == "/f" {
+                    return HttpResponse.File(200, "staged-missing.txt")
+                }
+
+                if r.Path == "/s" {
+                    return HttpResponse.Stream(200, (HttpWriter w) => {
+                        size = File.Size("staged-missing.txt")
+                        w.Write("{size}")
+                    })
+                }
+
+                return HttpResponse.Text(200, "ok")
+            }
+
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
                 File.WriteAll("port", "{listener.Port}\n".Bytes)
                 server = listener.Accept()
-                HttpServer.ServeConnection(server, (HttpRequest r) => HttpResponse.Text(200, "ok"), HttpLimits(MaxRequestBodySize: 50000)) else {
+                HttpServer.ServeConnection(server, (HttpRequest r) => Answer(r), HttpLimits(MaxRequestBodySize: 50000)) else {
                     IoError e => print(e.Kind)
                     HttpError e => print(e.Detail)
                 }
@@ -869,7 +911,7 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         }
 
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-        var executable = toolchain.Build(compilation.Program, $"http-server-staged-close-{sent}");
+        var executable = toolchain.Build(compilation.Program, $"http-server-staged-close-{sent}-{head[6]}");
         var run = Task.Run(() => Processes.Capture(executable, ["127.0.0.1:0"], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30),
             new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" }));
         var got = new MemoryStream();
@@ -908,7 +950,10 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         // runs out at its second wait, and the request is answered `408` about 1 second after its head; a refill given the whole grace
         // again would answer 1 second after the second byte, 1.8 seconds after the head at the earliest, past the window, and one that
         // waited for the rest of the line without a bound would answer only once the client sent it, which this client does after the
-        // answer
+        // answer. The client waits and reads by blocking its own thread: after an `await` it goes on only once a thread of the pool takes
+        // it, and with every thread of the pool held by other work its wait of 800 ms ended at 1043 ms, after the answer (2026-11-09),
+        // so that the time it read was the pool's, and a second byte sent after the first refill's whole second leaves a refill given
+        // the whole grace again answering at 1 second too
         const string text = """
             void | IoError Main(string address) {
                 listener = TcpListener.Bind(address)
@@ -952,13 +997,13 @@ public sealed class HttpServerTests(Toolchain toolchain) : IClassFixture<Toolcha
         using (var client = Connect(executable, run))
         {
             var stream = client.GetStream();
+            stream.ReadTimeout = 5000;
             var watch = System.Diagnostics.Stopwatch.StartNew();
             stream.Write("POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1"u8);
-            await Task.Delay(800);
+            Thread.Sleep(800);
             stream.Write("0"u8);
             var buffer = new byte[65536];
-            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var n = await stream.ReadAsync(buffer, limit.Token);
+            var n = stream.Read(buffer);
             answered = watch.Elapsed;
             got.Write(buffer, 0, n);
             stream.Write("\r\n0123456789abcdef\r\n0\r\n\r\n"u8);
