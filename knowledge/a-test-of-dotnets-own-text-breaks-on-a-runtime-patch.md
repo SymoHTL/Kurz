@@ -18,21 +18,28 @@ windows-2025-vs2026 20261103.298.1.
   - At 16:11 and at 16:26 the failing attempts downloaded `dotnet-runtime-10.0.15-win-x64.zip`,
     and the step printed "Installed version is 10.0.15".
   - .NET's release list gives 10.0.15 the release date 2026-11-10.
-  - .NET runs an app on the newest patch it finds of the release the app targets, so the suite ran
-    on 10.0.15 (inferred: no log line names the runtime of the test host).
+  - .NET runs an app on the newest patch it finds of the release the app targets. A program built
+    for `net10.0`, run where 10.0.14 and 10.0.15 were both installed, named its runtime as
+    ".NET 10.0.15". So the suite ran on 10.0.15 (inferred for Windows: no log line names the
+    runtime of the test host there).
 - A program that prints .NET's invariant text of both doubles, and whether it reads back, gave on
-  each runtime, which it named itself:
+  each runtime, which it named itself. It ran on Linux x64: on 10.0.13 in a development image, on
+  the image `mcr.microsoft.com/dotnet/runtime:10.0.14`, and on .NET's archive of 10.0.15 for Linux
+  x64, whose SHA-512 matched the release list. It did not run on Windows.
   - 10.0.13 and 10.0.14: `4.104536801298376E-289` and `2.980232238769531E-08`, neither reads back;
   - 10.0.15: `4.1045368012983762E-289` and `2.9802322387695312E-08`, both read back. These are the
     texts the test finds in the program's output, A4's fewest digits that read back.
 - So under 10.0.15 the list of misreads is empty, and the program's text did not change.
 - The `gates` job passed on the same head.
 
-What holds now:
+What holds since 2026-11-10:
 - The test accepts each run's misreads as a subset of the two it names.
 - It holds the program's text for both doubles by `Assert.Contains`, whatever the runtime writes.
 - The runtime the Windows job installs is pinned to no version: `CLAUDE.md` lists it with the tools
-  of HAZARD (#15). A test that holds what a dependency itself does names the version where that
-  changed, or accepts both.
+  of HAZARD (#15), and says why it stays open: `kurz` is a .NET 10 command that does not carry its
+  runtime, so a machine runs it on the newest patch it has, and the job installs the newest patch
+  too.
+- A test that holds what a dependency itself does names the version where that changed, or
+  accepts both.
 
 Gate: `compiler-tests` in `compiler-windows`, the test named above; the unpinned runtime: HAZARD (#15).
