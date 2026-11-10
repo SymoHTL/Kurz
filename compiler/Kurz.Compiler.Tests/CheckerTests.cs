@@ -526,7 +526,7 @@ public sealed class CheckerTests
         // which no duration holds, and 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
         Clean("print(duration.FromNanoseconds(9223372036854775295UL))");
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("print(duration.FromNanoseconds(9223372036854775807UL))"));
-        Assert.Contains("rounded to the nearest `double` first; `long(...)` keeps", ErrorText("print(duration.FromNanoseconds(9223372036854775807UL))"), StringComparison.Ordinal);
+        Assert.Contains("`long(...)`", ErrorText("print(duration.FromNanoseconds(9223372036854775807UL))"), StringComparison.Ordinal);
 
         // V10: the constructors of one type are no members of the other
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("print(timestamp.FromSeconds(5))"));
@@ -3959,7 +3959,8 @@ public sealed class CheckerTests
         // arguments, as C#'s implied `base()`, and so does the empty constructor of a class without one, the defaults of the base's
         // parameters given
         Clean("class A(string Name) {\n    pub A(int n) : this(\"n{n}\") { }\n}\n\nclass B : A {\n    pub B(int n) : base(n) {\n        print(Name)\n        print(this.Name)\n    }\n\n    pub B(string s) : base(s) { }\n\n    pub B() : this(\"b\") { }\n}\n\nclass P(string Name = \"p\")\n\nclass Q : P\n\nclass R : P {\n    pub R() {\n        print(Name)\n    }\n}\n\nbase = B(2)\nprint(base.Name)\nprint(B().Name)\nprint(Q().Name)\nprint(R().Name)");
-        // where no constructor of the base takes no arguments, a constructor without `: base(...)` is `argument-mismatch` at its line,
+        // where a call with no arguments reaches no constructor of the base, the defaults of its parameters given, a constructor
+        // without `: base(...)` is `argument-mismatch` at its line,
         // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies (the
         // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));

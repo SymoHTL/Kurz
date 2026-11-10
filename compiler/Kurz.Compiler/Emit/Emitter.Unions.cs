@@ -106,7 +106,8 @@ public sealed partial class Emitter
     /// <summary>
     /// C4: whether an arm of <paramref name="armType"/> takes every value of the case: the case is the type or derived from it (D6), or a
     /// class that implements the arm's interface or derives from the arm's class, which the tag decides with no test of the instance's
-    /// class (the owner, 2026-11-09, #408).
+    /// class (the owner, 2026-11-09, #408). The symbols are compared without type arguments, here and in <see cref="FaceArm"/>, since a
+    /// generic interface and a generic class are refused, <c>not supported</c> (T19), before a <c>match</c> is read.
     /// </summary>
     private static bool TakesCase(KurzType c, KurzType armType) =>
         Types.Same(c, armType) || (c is DataType && armType is DataType && Types.Assignable(c, armType))

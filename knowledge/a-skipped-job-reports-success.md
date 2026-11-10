@@ -46,8 +46,8 @@ How this repository is built around it:
   for a merge conflict first, then for a skip literal in the head commit's message. A third case
   shows no pending check: a pushed commit with no run while the pull request shows the head before
   it, with that head's checks, is a push the pull request did not take up
-  ([[the-pull-request-shows-the-old-head-after-a-push]]); compare the pull request's head with the
-  branch.
+  ([[the-pull-request-shows-the-old-head-after-a-push]], HAZARD #432); compare the pull request's
+  head with the branch.
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
   The squash commit is written from the title and the description by the merge tool, and by a
   squash through the button from the commit's or the pull request's title and the commit messages,

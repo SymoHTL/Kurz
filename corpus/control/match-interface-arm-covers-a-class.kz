@@ -1,0 +1,29 @@
+// expect: output
+// | shape 1
+// | named t
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape {
+    pub int Area() => 1
+}
+
+class Tag(string Text) : Named {
+    pub string Name() => Text
+}
+
+// no class implements both `Shape` and `Named`: the arm of `Shape` covers the case `Dot`, and so is no `type-mismatch`
+string Show(Dot | Named v) => match v {
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+}
+
+print(Show(Dot()))
+print(Show(Tag("t")))

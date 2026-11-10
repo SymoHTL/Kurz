@@ -37,8 +37,8 @@
 // nothing written yet, is answered `500` with `Connection: close` after the response held before it, the next request not served
 // (section 12, the owner, 2026-11-09, #411, comment 6737456858), and so is one that returns short of its count having written
 // nothing (section 12, the owner, 2026-11-09, #412, comment 6740344904); a function's own `IoError` after its first write gives
-// that error, not `InvalidData`, and closes the connection, the body cut; and a `Content-Length` beside a `Transfer-Encoding` gets
-// nothing, `InvalidInput`, as W8 has it
+// that error, not `InvalidData` (W11, assumed), and closes the connection, the body cut; and a `Content-Length` beside a
+// `Transfer-Encoding` gets nothing, as W8 has it (section 12, the owner, 2026-11-03), `InvalidInput` (W11, assumed)
 // serves `requests`, sent at once and then the client's end, on one connection with `handler` within `limits`, and prints the
 // loop's result and what the client got
 void Exchange(string requests, (HttpRequest) => HttpResponse handler, HttpLimits limits) {

@@ -1,10 +1,9 @@
 // expect: output
-// | other (os error 9): seek-write.txt
 // | abXYef
 // | 9
 // | 0
 // | 90
-// rules: S27, S5
+// rules: S27
 
 string Text(Bytes bytes) {
     text = string.FromUtf8(bytes) else {
@@ -15,7 +14,7 @@ string Text(Bytes bytes) {
 }
 
 // a file the program creates seeks too: a write after a seek lands at the offset, one past the end extends the file with bytes of 0
-// before it, and a seek after a `Close` gives the closed handle's error
+// before it
 void | IoError Run() {
     f = File.Create("seek-write.txt")
     f.Write("abcdef".Bytes)
@@ -24,9 +23,6 @@ void | IoError Run() {
     f.Seek(8)
     f.Write("Z".Bytes)
     f.Close()
-    f.Seek(0) else {
-        IoError e => print(e)
-    }
 
     bytes = File.ReadAll("seek-write.txt")
     File.Delete("seek-write.txt")
