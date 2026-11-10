@@ -151,21 +151,17 @@ public sealed partial class Checker
     /// <summary>
     /// S13: <c>Environment.Args()</c>, the program's arguments with its name first, as Rust's <c>std::env::args()</c> (section 12, the
     /// owner, 2026-10-30, "Both"); S14: <c>Environment.Variable(name)</c>, a variable of the environment or the case <c>EnvError</c>, as
-    /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust").
+    /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust"); S23: <c>Environment.Exit(code)</c>, the end of the
+    /// process with an <c>int</c> code, as C#'s <c>Environment.Exit</c> and Rust's <c>std::process::exit</c> (section 12, the owner, 2026-11-01,
+    /// "Top-level return n + Exit"), after which no path goes on (<see cref="IsExit"/>).
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
-        if (m.Member == "Exit")
-        {
-            NotSupported(m.Line, "`Environment.Exit`, the exit code (S23)");
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
         (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
         {
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
             "Variable" => (CallKind.EnvironmentVariable, [new Slot("name", Types.String, false, false, false)], Types.Union([Types.String, new DataType(dataTypes["EnvError"], [])])),
+            "Exit" => (CallKind.EnvironmentExit, [new Slot("code", Types.Int, false, false, false)], Types.Void),
             _ => null,
         };
         if (function is not { } f)
