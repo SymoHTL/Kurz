@@ -811,7 +811,7 @@ of the kind `NotSeekable` (S1) (§12, the owner, 2026-11-08, #110, comment 67210
 comment 6717319917, against a part of a file as a response and against a read at an offset that
 moves no position; the cost is the system call and this rule, and a position every holder of the
 handle shares, as it shares the buffer, S5). Any other failure of the system's seek, `EINVAL` past
-the file system's largest offset among them, gives its `IoError` by S1. *(assumed, §12, the defaults of the product pass of G5
+the file system's largest offset among them, gives its `IoError` by S1, which decides it for every call on a file or a socket. *(assumed, §12, the defaults of the product pass of G5
 (#110, comment 6728933408): `offset` a `long`, as `File.Size` gives one (S7) and C#'s `Position` is
 one; an offset past the
 end allowed, a read there giving no bytes and a write there extending the file with bytes of 0 before
@@ -915,7 +915,7 @@ string Text(Bytes bytes) {
 }
 
 // a file the program creates seeks too: a write after a seek lands at the offset, one past the end extends the file with bytes of 0
-// before it, and a seek after a `Close` gives the closed handle's error
+// before it
 void | IoError Run() {
     f = File.Create("seek-write.txt")
     f.Write("abcdef".Bytes)
@@ -924,9 +924,6 @@ void | IoError Run() {
     f.Seek(8)
     f.Write("Z".Bytes)
     f.Close()
-    f.Seek(0) else {
-        IoError e => print(e)
-    }
 
     bytes = File.ReadAll("seek-write.txt")
     File.Delete("seek-write.txt")
@@ -1112,7 +1109,22 @@ Case: [system/consume-closed-negative.kz](../corpus/system/consume-closed-negati
 
 Case: [system/read-buffer-zero-closed.kz](../corpus/system/read-buffer-zero-closed.kz)
 
-Case: [system/seek-write.kz](../corpus/system/seek-write.kz)
+Case: [system/seek-closed.kz](../corpus/system/seek-closed.kz)
+```kurz
+// a seek after a `Close` gives the closed handle's error
+void | IoError Closed() {
+    f = File.Create("seek-closed.txt")
+    File.Delete("seek-closed.txt")
+    f.Close()
+    f.Seek(0) else {
+        IoError e => print(e)
+    }
+}
+
+Closed() else {
+    IoError e => print(e)
+}
+```
 
 ### S6 (decided, §12) A whole file
 

@@ -1126,6 +1126,7 @@ int | NotFound Find(int id) {
 
 value = Find(2) else {
     string s => 0
+    NotFound => 0
 }
 print(value)
 ```

@@ -1,0 +1,13 @@
+// expect: error ambiguous-call at 10
+// rules: K14
+
+class P {
+    pub P(int x = 1) { }
+    pub P(string s = "") { }
+}
+
+class Q : P {
+    pub Q() { }
+}
+
+print(Q() == Q())

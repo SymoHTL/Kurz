@@ -1,0 +1,5 @@
+// expect: error type-mismatch at 5
+// rules: T38
+
+// a `decimal` widens to neither a `long` nor a `double` (T8, T23), so it takes neither form, as C# refuses `TimeSpan.FromSeconds(1.5m)`
+print(duration.FromSeconds(1.5m))

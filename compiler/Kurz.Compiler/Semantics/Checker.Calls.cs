@@ -750,7 +750,8 @@ public sealed partial class Checker
     /// T38: the constructors of a time of a count, with the nanoseconds of one unit of each: one for each unit of a duration literal (L14),
     /// as C#'s <c>TimeSpan.FromSeconds</c> and its siblings, and on a <c>timestamp</c> the seconds and the milliseconds since 1970, as C#'s
     /// <c>DateTimeOffset.FromUnixTimeSeconds</c> and <c>FromUnixTimeMilliseconds</c> (section 4, the owner, 2026-11-08, issue 110, comment
-    /// 6723644046, "Seconds + milliseconds, as C#").
+    /// 6721051459, G4 (b), and comment 6723644046, "Seconds + milliseconds, as C#"; the units, those of a duration literal, assumed: the
+    /// default of the product pass that the answer took).
     /// </summary>
     private static readonly Dictionary<(string Type, string Member), long> TimeFrom = new()
     {

@@ -4,7 +4,7 @@
 // | legs 4
 // | rex
 // | pet
-// rules: K14
+// rules: K14, L18
 
 class Animal(string Name) {
     pub Animal(int legs) : this("legs {legs}") {

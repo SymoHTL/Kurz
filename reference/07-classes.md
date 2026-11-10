@@ -1223,10 +1223,14 @@ do, since none exists yet, so that a member of the instance named there, a field
 is `static-mismatch` (K19), with a text that says so, as C# names the member in CS0120 (§4, the
 owner, 2026-11-09, #429, comment 6752598091); a `static` member of the class is read in the arguments
 of `: this(...)` as a `static` method reads it *(assumed, §4: the reading of the places of
-`static-mismatch`)*, and a `static` field of another class is read in either through its class's name;
-a class with a base and its base take no `static` member yet (`not supported`, K6, K7, K18). The base's constructor runs before the body, as C#'s does. A constructor that writes neither
+`static-mismatch`)*, and a `static` field of another class is read in either through its class's name *(assumed, §4: the
+build's reading)*;
+a class with a base and its base take no `static` member yet (`not supported` at the member, K6, K7, K18), so that the name of
+a `static` member of the base in `: base(...)`, `: base(Four)`, is then `unknown-name` (V10), the refused member declaring no
+name. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
 `: this(...)` nor `: base(...)` runs the constructor of the base that a call with no arguments
-reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13) *(assumed,
+reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13), two that
+such a call reaches alike being `ambiguous-call` *(assumed,
 §4: the build's reading of "a call with no arguments reaches")*, as C#'s
 implied `base()` does, and so does the empty constructor of a class without one; where the base has
 no such constructor, that constructor is `argument-mismatch`, at its line or at the class's, as C#
@@ -1236,6 +1240,8 @@ without a primary constructor and without a base class, `: base(...)` is `syntax
 constructor and no base class it is `constructor-must-chain`, since that constructor calls the
 primary one first (§4, the owner, 2026-11-09, #429, comment 6752598091), and in one of a class with
 a primary constructor and a base class too (§4, the owner, 2026-11-10, #435, comment 6762144386).
+Such a constructor reports `constructor-must-chain` alone: the arguments of its `: base(...)` are
+not read *(assumed, §4: the build's reading, which #441's walk names, issue 39, comment 6767149029)*.
 
 Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
 ```kurz
@@ -1320,6 +1326,20 @@ class Box(int Size) {
 
 print(Box().Size)
 print(Box("six").Size)
+```
+
+Case: [classes/base-constructor-ambiguous.kz](../corpus/classes/base-constructor-ambiguous.kz)
+```kurz
+class P {
+    pub P(int x = 1) { }
+    pub P(string s = "") { }
+}
+
+class Q : P {
+    pub Q() { }
+}
+
+print(Q() == Q())
 ```
 
 Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)

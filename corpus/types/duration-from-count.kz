@@ -7,6 +7,9 @@
 // | -3h
 // | 2days
 // | 104days 5h 59min 59s 254ms 740us 993ns
+// | 104days 5h 59min 59s 254ms 740us 996ns
+// | 104days 5h 59min 59s 254ms 740us 995ns
+// | 106751days 23h 47min 16s 854ms 774us 784ns
 // rules: T38
 
 int n = 90
@@ -22,3 +25,10 @@ print(duration.FromDays(big))
 // a `long` count takes the `long` form, exact beyond the 53 bits a `double` holds
 long odd = 9007199254740993
 print(duration.FromNanoseconds(odd))
+
+// a `ulong` count takes the `double` form, rounded to the nearest double, ties to even: 2^53 + 3 is 2^53 + 4 there, where a
+// cut would give 2^53 + 2, and `long(u)` keeps it exact; 2^63 - 513 is 2^63 - 1024, the largest double below 2^63
+ulong u = 9007199254740995
+print(duration.FromNanoseconds(u))
+print(duration.FromNanoseconds(long(u)))
+print(duration.FromNanoseconds(9223372036854775295UL))

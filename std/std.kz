@@ -7119,13 +7119,13 @@ pub class HttpResponse {
 // chunks, held to that count, as Kestrel holds a body to `Response.ContentLength`: a write that would pass it writes none of its bytes
 // and gives `IoError(InvalidData)`, which leaves the writer failed, and a body short of it at a return without an `IoError` of the
 // function's own gives that error too, the body cut where a write sent the head (design record, section 12: G5). A function that
-// gives an `IoError` before its first write of bytes, when nothing was written yet, is answered `500` with no body and
-// `Connection: close` in place of the head, as Kestrel answers a handler that fails before its response started, whatever
-// `Content-Length` the handler set (design record, section 12: the owner, 2026-11-09, "500 + close"), and so is one that returns
-// after a write that failed while nothing was written, a write that would pass the `Content-Length` among them (the owner,
-// 2026-11-09, "Fix in #411 FU"), and one that returns having written nothing under a `Content-Length` above 0 (the owner,
-// 2026-11-09, "500 + close, as #411"); the server's loop then closes the connection in stages, as after its own `500` (the owner,
-// 2026-11-09, "In stages").
+// gives an `IoError` before its first write of bytes, when nothing was written yet, is answered `500` with no body and `Connection:
+// close` in place of the head, the `500` as Kestrel answers a handler that fails before its response started, which keeps the
+// connection open there (its `HttpProtocol.ProduceEnd` writes no `Connection: close`; issue 39, comment 6762818536), whatever
+// `Content-Length` the handler set (design record, section 12: the owner, 2026-11-09, "500 + close"), and so is one that returns after
+// a write that failed while nothing was written, a write that would pass the `Content-Length` among them (the owner, 2026-11-09, "Fix
+// in #411 FU"), and one that returns having written nothing under a `Content-Length` above 0 (the owner, 2026-11-09, "500 + close, as
+// #411"); the server's loop then closes the connection in stages, as after its own `500` (the owner, 2026-11-09, "In stages").
 pub class HttpWriter {
     mut TcpStream? stream = null
     mut Bytes ahead = Bytes()

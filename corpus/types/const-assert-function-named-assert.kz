@@ -1,0 +1,10 @@
+// expect: output
+// | 1
+// rules: T37
+
+// `=>` after the `)` makes the line a function named `assert` whose type is named `const`, as before the statement existed (L18)
+data const(int A)
+
+const assert(int x) => const(x)
+
+print(assert(1).A)

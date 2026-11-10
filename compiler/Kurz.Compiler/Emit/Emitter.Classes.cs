@@ -610,8 +610,9 @@ public sealed partial class Emitter
         {
             // the receiver is borrowed past the arguments, as a class's is below: one read from a field holds a count of its own to the end
             // of the statement (InstanceField), and one in a variable cannot change while they run (M7, F15, F16); one read from an item
-            // is kept by what keeps its list: a list read from a field holds a count of its own (InstanceField), and a call that takes a
-            // list in a variable as `mut` while its item is in use is `changed-while-held` (M7)
+            // is kept by what keeps its list: a list read from a field holds a count of its own (InstanceField), and a `mut` method of a
+            // list in a variable, an assignment of the variable and a call that takes it as `mut`, each while its item is in use, are
+            // `changed-while-held` (M7)
             var value = EmitExpression(target);
             var passed = Arguments(
                 c,
