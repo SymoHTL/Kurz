@@ -598,7 +598,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (functions.ContainsKey(n.Name) || n.Name == "print")
+        if (functions.ContainsKey(n.Name) || n.Name is "print" or "eprint")
         {
             Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a function, and no value stands here (F11)");
             return Typed.Error;
