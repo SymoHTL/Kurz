@@ -278,8 +278,10 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     {
         // T23, L11: 2^53 + 2^29 + 1 and the digits just above 1 + 2^-24 each lie just above the midpoint of two floats, and their
         // doubles lie on it, so a fold through `double` gave the lower float; the literal, the written conversion and a suffix give the
-        // nearest float, as the conversion of a `long` at run time does and as C# does; a written conversion reaches a literal without a
-        // suffix (T10), and folds the `long` of one with `L`; a tie goes to the even float, and `double` keeps its one rounding
+        // nearest float, as the conversion of a `long` at run time does and as C# does; a fraction literal without a suffix that a
+        // `float` reaches takes that type first (L17), as one with `f`, a form C# refuses (CS0664); a written conversion reaches a
+        // literal without a suffix (T10), and folds the `long` of one with `L`; a tie goes to the even float, and `double` keeps its
+        // one rounding
         var text = """
             float a = 9007199791611905
             print(a)
@@ -301,6 +303,27 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
             """;
         Ran(BuildAndRun(text, "float-rounded-once"), 0,
             ["9.0072E+15", "9.0072E+15", "9.0072E+15", "9.0072E+15", "9.0072E+15", "-9.0072E+15", "16777216", "9007199791611904", "1.0000001", "1.0000001"], "");
+    }
+
+    [Fact]
+    public void A_constant_typed_double_is_rounded_once_as_the_run_time_conversion_is()
+    {
+        // T23: 2^53 + 3 lies halfway between the doubles 2^53 + 2 and 2^53 + 4 and goes to the even one, 2^53 + 4, as the conversion
+        // of a `long` at run time gives it and as C# folds the constant; a fold that cuts the bits past the 53rd gave 2^53 + 2; the
+        // literal, the written conversion of a literal without a suffix (T10) and of one with `L`, and the negative literal each fold
+        var text = """
+            double a = 9007199254740995
+            print(a)
+            print(double(9007199254740995))
+            print(double(9007199254740995L))
+            double m = -9007199254740995
+            print(m)
+            long n = 9007199254740995
+            double c = n
+            print(c)
+            """;
+        Ran(BuildAndRun(text, "double-rounded-once"), 0,
+            ["9007199254740996", "9007199254740996", "9007199254740996", "-9007199254740996", "9007199254740996"], "");
     }
 
     [Fact]
