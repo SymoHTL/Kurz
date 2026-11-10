@@ -51,6 +51,42 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return runtime;
     }
 
+    [Fact]
+    public void An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output()
+    {
+        // A17: the text and the one line feed of `print` (A1), on standard error, and nothing of it on standard output
+        var run = BuildAndRun("eprint(\"to error\")\nprint(1)\nname = \"kurz\"\neprint(\"hi {name}\")\neprint(25)\n", "eprint");
+        Assert.Equal(["1"], run.Output);
+        Assert.Equal(0, run.Code);
+        Assert.Equal("to error\nhi kurz\n25\n", run.Error);
+    }
+
+    [Fact]
+    public async Task An_eprint_the_system_refuses_ends_the_program_with_the_code_of_an_error_and_its_report_dropped()
+    {
+        // A17: the failed write raises `print-failed`, whose report goes to the same closed standard error and is dropped; the program
+        // ends with 1, as a crash does (section 6), and no statement after the `eprint` runs
+        var compilation = Compile("mut i = 0\nwhile i < 100000000 {\n    eprint(\"line\")\n    i = i + 1\n}\nprint(\"after\")\n", toolchain.Runtime, false);
+        var executable = toolchain.Build(compilation.Program!, "eprint-failed");
+        var info = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        using var process = Process.Start(info)!;
+        try
+        {
+            process.StandardError.Close(); // the reader is gone: the next write is refused (a closed pipe)
+            var output = process.StandardOutput.ReadToEndAsync();
+            Assert.True(process.WaitForExit(30_000), "the program did not end once its standard error was closed");
+            Assert.Equal(1, process.ExitCode);
+            Assert.Equal("", await output);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+            }
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)] // a release build names the line too (the owner, 2026-10-23)

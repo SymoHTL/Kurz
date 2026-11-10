@@ -118,12 +118,14 @@ pub void FreePath(byte* p, string path) {
     std.Free(p, long(path.Bytes.Count) + 1)
 }
 
-// `print` (A1): the text and a line feed, handed to the system's write call in one piece, which is
+// `print` (A1) and `eprint` (A17): the text and a line feed, handed to the system's write call on
+// `fd`, standard output (1) for `print` and standard error (2) for `eprint`, in one piece, which is
 // called again for what a call did not take; a write the system refuses, or one that takes no byte,
 // as Rust's `write_all` fails on a write of zero bytes, raises `print-failed` at the place of the
-// `print`, which the emitted call passes (design record, section 6; the owner, 2026-10-23, "Caller
-// passes it").
-pub void Print(string text, string file, int line) {
+// call, which the emitted call passes (design record, section 6; the owner, 2026-10-23, "Caller
+// passes it"). Where `eprint`'s write failed, the report of `print-failed` fails too, and `Raise`
+// drops it (A17).
+pub void Print(int fd, string text, string file, int line) {
     long count = long(text.Bytes.Count)
     long total = count + 1
     raw {
@@ -150,7 +152,7 @@ pub void Print(string text, string file, int line) {
     while done < total {
         mut long written = -1
         raw {
-            written = sys.Write(1, buffer + done, total - done)
+            written = sys.Write(fd, buffer + done, total - done)
         }
 
         if written <= 0 {
