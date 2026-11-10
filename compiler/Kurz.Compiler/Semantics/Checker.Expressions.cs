@@ -196,7 +196,7 @@ public sealed partial class Checker
 
             if (Types.IsFloating(target))
             {
-                var d = (double)value;
+                var d = DoubleOf(value);
                 if (double.IsInfinity(d))
                 {
                     Report(ErrorIds.ConstantOverflow, line, "the literal lies outside the range of `double` (T6, L11)");
@@ -292,6 +292,15 @@ public sealed partial class Checker
 
     /// <summary>The <c>float</c> nearest an integer, rounded once (<see cref="FloatOf(string)"/>).</summary>
     private static float FloatOf(BigInteger value) => FloatOf(value.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// T23, L11: the <c>double</c> nearest an integer, rounded once, from its digits, as C# folds an integer constant into
+    /// <c>double</c> and as the conversion of a <c>long</c> at run time gives it; <c>(double)</c> of a <c>BigInteger</c> drops the
+    /// bits past the 53rd on .NET 10, so 2^53 + 3 became 2^53 + 2 where the nearest even is 2^53 + 4. Beyond the range it is an
+    /// infinity.
+    /// </summary>
+    private static double DoubleOf(BigInteger value) =>
+        double.Parse(value.ToString(CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
 
     private Typed CheckUnit(UnitLiteralValue literal, int line, KurzType? expected, bool negative)
     {
