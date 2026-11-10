@@ -1,4 +1,4 @@
-// expect: error unknown-name at 7
+// expect: error static-mismatch at 7
 // rules: K14
 
 class Animal(int Legs)
