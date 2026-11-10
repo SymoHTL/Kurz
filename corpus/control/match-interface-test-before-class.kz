@@ -1,0 +1,28 @@
+// expect: error unreachable-arm at 23
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+class Tag : Named {
+    pub string Name() => "tag"
+}
+
+string Show(Named | int v) => match v {
+    Shape s => "shape {s.Area()}"
+    Dot d => "dot"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+print(Show(Dot()))
