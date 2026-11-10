@@ -1,6 +1,6 @@
 ---
 name: a-skipped-job-reports-success
-description: On GitHub a job skipped by `if:` reports success to a required check, while a workflow that never starts leaves the check pending; a head with no gates run at all has a merge conflict or a skip literal in its head commit; how the two workflows here are built around that
+description: On GitHub a job skipped by `if:` reports success to a required check, while a workflow that never starts leaves the check pending; a head with no gates run at all has a merge conflict or a skip literal in its head commit, or is a push the pull request did not take up (the-pull-request-shows-the-old-head-after-a-push); how the two workflows here are built around that
 metadata:
   type: reference
 ---
@@ -42,8 +42,11 @@ How this repository is built around it:
   nothing re-checks it, HAZARD #24 (it fails closed: a status the ruleset stopped accepting leaves the merge
   pending), and any workflow run of this repository can post a status of that name:
   HAZARD #11, see [[the-review-runs-the-default-branch]].
-- A head with no `gates` run at all, and the check pending, is one of the two cases above: look
-  for a merge conflict first, then for a skip literal in the head commit's message.
+- A head with no `gates` run at all, and the check pending, is one of the two cases above, or a
+  push the pull request did not take up, its head still the one before
+  ([[the-pull-request-shows-the-old-head-after-a-push]]): look for a merge conflict first, then
+  for a skip literal in the head commit's message, then compare the pull request's head with the
+  pushed commit.
 - A skip literal can also reach `main`, where it would skip the gates run on the merge commit.
   The squash commit is written from the title and the description by the merge tool, and by a
   squash through the button from the commit's or the pull request's title and the commit messages,

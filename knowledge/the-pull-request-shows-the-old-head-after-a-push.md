@@ -1,6 +1,6 @@
 ---
 name: the-pull-request-shows-the-old-head-after-a-push
-description: Read one second after a push, the pull request (GET repos/{owner}/{repo}/pulls/{n}) still named the old head, a minute later the new one, and 15 seconds after the next push (seen 2026-10-08); the resolve tool had compared the finding's commit with itself and reported the answered thread as "the file did not change"; pass the pushed commit as --head, and the tool refuses while the pull request shows another head: run it again
+description: Read one second after a push, the pull request (GET repos/{owner}/{repo}/pulls/{n}) still named the old head, a minute later the new one, and 15 seconds after the next push (seen 2026-10-08); the resolve tool had compared the finding's commit with itself and reported the answered thread as "the file did not change"; pass the pushed commit as --head, and the tool refuses while the pull request shows another head: run it again. On 2026-11-09 a push that printed "cannot lock ref" moved the branch while the pull request kept the old head and no run started on the pushed commit; an empty commit on it, pushed as any push, was taken up
 metadata:
   type: reference
 ---
@@ -26,6 +26,27 @@ own event starts can read the old head was not seen, and nothing checks it: the 
 red `pr-findings` on a head whose threads were resolved before the run, and the answer a re-run
 of the gates.
 
+## When the pull request does not catch up
+
+Seen on 2026-11-09 on pull request 426. The merge of `main` into its branch was pushed as
+77be7dff, and `git push` printed `remote rejected` with `cannot lock ref`: the branch "is at
+77be7dff but expected 17ca00ec", the head before. The branch had moved all the same:
+`git ls-remote` and the branches API named 77be7dff. The pull request did not: it named 17ca00ec
+when read before the next push. No workflow run had started on 77be7dff eight minutes after the
+push, and none ever did, neither `gates` nor `compiler-windows` nor the review run. The forge's
+status page named no incident. An empty commit on 77be7dff, so the same tree, pushed as any push (8f64ef0a, the
+message saying why), was taken up: the pull request named it, and the three workflows ran on it.
+Closing and reopening the pull request was not tried, since a reopen can start a review run, and
+a run that started is a bill ([[a-cancel-does-not-beat-the-runner]]).
+
+The shape: the lag above ends by itself within a minute; this one did not. The `gates` workflow
+starts on the pull request's events (`synchronize` among them, in `.github/workflows/gates.yml`),
+and a pull request that did not take up the push sends none, so the checks it shows stay those of
+the old head: on pull request 426 they were green, `gates`, `compiler-windows` and `review` on
+17ca00ec. Nothing is merged wrongly: the merge tool takes the head in full
+and refuses while the pull request shows another (`tools/merge_pr.py`). What is lost is the time
+spent waiting for runs that never start. What made the forge fail the lock was not found.
+
 ## How to apply
 
 - The resolve tool takes the pushed commit as `--head`, in full or its first seven or more hex
@@ -49,3 +70,11 @@ of the gates.
 - A local `gates.py --pr N` right after a push reads the head the same way and has no `--head`:
   compare the head of `gh pr view N --json headRefOid` with the pushed commit before running it,
   or read its `pr-findings` verdict as one about the head the forge showed. `judgment step`
+- After a push that printed `cannot lock ref`, or when no run started on the pushed commit within
+  a few minutes, compare the branch (`git ls-remote origin <branch>`) with the pull request's head
+  (`gh pr view N --json headRefOid`). Where the branch has the commit and the pull request does
+  not, commit nothing but an empty commit on it (`git commit --allow-empty`, the message saying
+  that the pull request did not take up the push) and push it as any push, never with `--force`;
+  never close and reopen the pull request to wake it. A merge note names the empty commit as the
+  head and says its tree is the pushed one's, so that gates run on that tree stand. HAZARD (#432):
+  nothing notices a push the pull request did not take up.
