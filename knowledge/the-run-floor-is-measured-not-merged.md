@@ -26,6 +26,13 @@ The two wrong merges fail differently:
 - **A number too low** is green. A case that stops being built then goes unseen while the count
   stays above the floor.
 
+Two sides that raised the floor to the same number do not conflict at all: the merge, or the
+rebase, takes the one change once. The rebase of pull request 439's branch onto `main` 5eb5bdc1
+(2026-11-10) did so. Each side had added one case and raised `461 : 562` to `462 : 563`, and the
+rebased tree read `462 : 563` where its cases needed `463 : 564`. The bound caught it, the floor of `main` plus the
+branch's own change to it (`CLAUDE.md`, "Merging over a red or missing check"). So a take of `main`
+reads the floor against that bound whether or not its line conflicted.
+
 ## How to apply
 
 - **Linux.** Set the system's number to 999 and run the one test in `compiler/`, in the image:

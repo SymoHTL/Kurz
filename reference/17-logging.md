@@ -19,7 +19,9 @@ constructor declared in a class's body is `not supported`, K14), `Log.Informatio
 call, though the member's type has a method `Information`. In the type's methods and its
 properties, `Log` alone, `Log()` and `this.Log` reach the member, as K7 reads a member's name; in a
 field's default, where K7 reads no `this` and no method or property of the instance, `Log` alone
-reaches a parameter of the primary constructor named `Log`, while `this.Log`, and `Log()` for a
+reaches a parameter of the primary constructor named `Log` and a field named `Log` declared above
+the default, and is `unknown-name` where the member named `Log` is a field declared below it, a
+method or a property, while `this.Log`, and `Log()` for a
 method named `Log`, are `unknown-name` (K7). A member of `Log` that names no level is `unknown-name`
 (V10), `Log.Foo("a")` in such a type too, though the member's type has a method `Foo`. So is `Log`
 alone where no member takes its name; and so is a log function used as a value,

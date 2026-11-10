@@ -1,0 +1,5 @@
+// expect: error constant-overflow at 5
+// rules: T38
+
+// a `ulong` constant is decided by the `double` it is rounded to: 2^63 - 1 is 2^63 there, which no duration holds
+print(duration.FromNanoseconds(9223372036854775807UL))

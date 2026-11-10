@@ -1,4 +1,4 @@
-// expect: error unreachable-arm at 19
+// expect: error unreachable-arm at 23
 // rules: C4
 
 interface Shape {
@@ -12,6 +12,10 @@ interface Named {
 class Dot : Shape, Named {
     pub int Area() => 1
     pub string Name() => "dot"
+}
+
+class Tag : Named {
+    pub string Name() => "tag"
 }
 
 string Show(Named | int v) => match v {

@@ -278,8 +278,9 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     {
         // T23, L11: 2^53 + 2^29 + 1 and the digits just above 1 + 2^-24 each lie just above the midpoint of two floats, and their
         // doubles lie on it, so a fold through `double` gave the lower float; the literal, the written conversion and a suffix give the
-        // nearest float, as the conversion of a `long` at run time does and as C# does; a fraction literal without a suffix that a
-        // `float` reaches takes that type first (L17), as one with `f`, a form C# refuses (CS0664); a written conversion reaches a
+        // nearest float, as the conversion of a `long` at run time does and as C# folds an integer constant or a literal with `f`; a
+        // fraction literal without a suffix that a `float` reaches takes that type first (L17), as one with `f`, a form C# refuses
+        // (CS0664); a written conversion reaches a
         // literal without a suffix (T10), and folds the `long` of one with `L`; a tie goes to the even float, and `double` keeps its
         // one rounding
         var text = """
