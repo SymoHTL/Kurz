@@ -252,6 +252,7 @@ public sealed class CheckerTests
     [InlineData("x = 1e400\nprint(x)", 1)]
     [InlineData("x = 3.5e38f\nprint(x)", 1)]
     [InlineData("float f = 1e300\nprint(f)", 1)]
+    [InlineData("float f = 400000000000000000000000000000000000000\nprint(f)", 1)]
     [InlineData("print(byte(300))", 1)]
     [InlineData("print(int(1e10))", 1)]
     [InlineData("print(int(1.0 / 0.0))", 1)]
