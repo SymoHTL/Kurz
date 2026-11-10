@@ -125,8 +125,8 @@ is a case as well, which tests the class of the instance at run time, as C#'s `i
 covers no case (O8), and the `match` has `else` or the case's own arm after it (§5, the owner, 2026-11-02, #110,
 comment 6573113786, against a compile error). It covers no case where the arms take every class of
 the program that implements the interface or derives from the class, too, as arms of those classes never
-complete a C# `switch` over the interface or the class *(assumed, §5: the owner's choice read without the
-reason its question gave, #110, comment 6567439435, that no list of those classes is closed)*. An arm may also name an interface that cases of the union implement, or a class that
+complete a C# `switch` over the interface or the class (§5, the owner, 2026-11-10, #430, comment
+6762143993). An arm may also name an interface that cases of the union implement, or a class that
 cases derive from, directly or through a class between: it covers exactly those cases, which each case's class decides while the
 program compiles, takes them by the case the value holds, with no test of the instance's class at run time, and counts for O8 (§5, the owner, 2026-11-09, #408, comments 6737367326 and 6737634153, against the
 refusal as built). Such an arm is `unreachable-arm` only when every case it covers is taken by the arms above it, as C# reads a
@@ -148,6 +148,9 @@ that implements both); where no class of the program implements both, it is `typ
 as an arm that can never run is (§5, the owner, 2026-10-09). Which classes
 derive from a class and which implement an
 interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
+An arm that tests the class of the instance at run time makes no later such arm `unreachable-arm` by the classes the
+program has: `Dot d` then `Shape s` over `Named | int`, where `Dot` is the only class that implements both, compiles,
+and its `Shape s` arm never runs (§5, the owner, 2026-11-10, #430, comment 6762143993).
 A value whose type is a type parameter is C10's.
 
 Case: [control/match-unreachable-literal.kz](../corpus/control/match-unreachable-literal.kz)
@@ -395,6 +398,32 @@ print(Show(Tag("t")))
 print(Show(5))
 print(Area(Dot()))
 print(Area(Tag("u")))
+```
+
+Case: [control/match-interface-test-after-class.kz](../corpus/control/match-interface-test-after-class.kz)
+```kurz
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+string Show(Named | int v) => match v {
+    Dot d => "dot"
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+print(Show(Dot()))
+print(Show(5))
 ```
 
 Case: [control/match-arm-no-case.kz](../corpus/control/match-arm-no-case.kz)
