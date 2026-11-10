@@ -3939,7 +3939,8 @@ public sealed class CheckerTests
         // parameters given
         Clean("class A(string Name) {\n    pub A(int n) : this(\"n{n}\") { }\n}\n\nclass B : A {\n    pub B(int n) : base(n) {\n        print(Name)\n        print(this.Name)\n    }\n\n    pub B(string s) : base(s) { }\n\n    pub B() : this(\"b\") { }\n}\n\nclass P(string Name = \"p\")\n\nclass Q : P\n\nclass R : P {\n    pub R() {\n        print(Name)\n    }\n}\n\nbase = B(2)\nprint(base.Name)\nprint(B().Name)\nprint(Q().Name)\nprint(R().Name)");
         // where no constructor of the base takes no arguments, a constructor without `: base(...)` is `argument-mismatch` at its line,
-        // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies
+        // and the empty constructor of a class without one at the class, as C# reports CS7036 at the constructor C# implies (the
+        // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
         // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, and in a class

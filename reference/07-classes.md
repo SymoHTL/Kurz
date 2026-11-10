@@ -1211,14 +1211,18 @@ constructor's `:` and a name everywhere else (L18), as `as` is a word of a `use`
 needs a primary constructor in each class derived from it, and against a core word, which no
 program could use as a name). `: base(...)` picks among the constructors of the base as a
 construction does, and its arguments read the parameters and no instance, as those of `: this(...)`
-do. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
-`: this(...)` nor `: base(...)` runs the constructor of the base that takes no arguments, as C#'s
+do, so that a field's name there is `unknown-name` (V10) *(assumed, §4: the build's reading)*. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
+`: this(...)` nor `: base(...)` runs the constructor of the base that a call with no arguments
+reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13) *(assumed,
+§4: the build's reading of "a call with no arguments reaches")*, as C#'s
 implied `base()` does, and so does the empty constructor of a class without one; where the base has
 no such constructor, that constructor is `argument-mismatch`, at its line or at the class's, as C#
-reports CS7036 there *(assumed: C#'s error, which the answer does not name)*. In a further
-constructor of a class with a primary constructor, `: base(...)` is `constructor-must-chain`, and
-in a class without a base class it is `syntax` *(assumed: the error for text no rule gives a
-meaning)*.
+reports CS7036 there (§4, the owner, 2026-11-09, #409, comment 6737367678). In a class
+without a primary constructor and without a base class, `: base(...)` is `syntax` (§4, the owner,
+2026-11-09, #409, comment 6737367678). In a further constructor of a class with a primary
+constructor it is `constructor-must-chain`, whether the class has a base class or not, since that
+constructor calls the primary one first *(assumed, §4: the missing `: this(...)` is read first, so
+that one defect gives one error)*.
 
 Case: [classes/base-arguments.kz](../corpus/classes/base-arguments.kz)
 ```kurz
@@ -1240,7 +1244,7 @@ class Pet(string Name = "pet")
 
 class Cat : Pet
 
-base = Dog(4)
+base = Dog(4) // a name here: `base` is a word right after a constructor's `:` alone (L18)
 print(base.Name)
 print(Dog("rex").Name)
 print(Cat().Name)
@@ -1265,6 +1269,17 @@ class Animal {
 }
 
 print(Animal() == Animal())
+```
+
+Case: [classes/base-arguments-field.kz](../corpus/classes/base-arguments-field.kz)
+```kurz
+class Animal(int Legs)
+
+class Dog : Animal {
+    pub Dog() : base(Legs) { }
+}
+
+print(Dog().Legs)
 ```
 
 Case: [classes/field-unassigned-none.kz](../corpus/classes/field-unassigned-none.kz)
