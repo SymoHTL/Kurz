@@ -86,8 +86,11 @@ The commands are written for Windows; elsewhere `py -3` is `python3`, as in CI.
   digest for a hosted image. Of those images the tools use python3, node (for the CLI), gh (every
   forge call) and git, of the Windows image zstd and tar, which unpack LLVM's archive there, and of
   the gates image python3, git and the point release of the pinned LLVM major, which the
-  distribution's and LLVM's packages give on the day the image is built: none of them pinned to a
-  version, HAZARD (#15). The Windows job installs the release `LLVM_VERSION` names, of the major the
+  distribution's and LLVM's packages give on the day the image is built, and the .NET runtime that
+  `actions/setup-dotnet` installs in the Windows job beside the SDK `compiler/global.json` pins,
+  10.0.15 from the day that patch was released
+  ([knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md](knowledge/a-test-of-dotnets-own-text-breaks-on-a-runtime-patch.md)):
+  none of them pinned to a version, HAZARD (#15). The Windows job installs the release `LLVM_VERSION` names, of the major the
   compiler pins, from a cache of LLVM's archive for Windows, which it checks by the SHA-256 in
   `LLVM_SHA256` before it unpacks it.
   Gate: `ci-config` (pip with `--require-hashes`, the CLI's exact version, the runner labels, the
@@ -692,7 +695,7 @@ Gate: review rule "rules for sessions".
 | | the author and committer address a push publishes (#12) |
 | | a title or description edited after the review (#13) |
 | | a merge by the button, which skips what only the merge tool does (#14) |
-| | the hosted images' python3, node, gh and git, the Windows image's zstd and tar, and the gates image's python3, git and LLVM point release, pinned to no version (#15) |
+| | the hosted images' python3, node, gh and git, the Windows image's zstd and tar, the Windows job's .NET runtime, and the gates image's python3, git and LLVM point release, pinned to no version (#15) |
 | | the gates job judging a pull request with the pull request's own gates (#16) |
 | | a review that stopped at the pass cap posting `success` (#17) |
 | | the evidence digest, which a recomputed hash passes (#18) |

@@ -511,8 +511,9 @@ since it multiplies the row's inverse power itself where `ryu` multiplies it les
 through the high 64 bits of the same powers), laid out as .NET Core 3.0 and later write a `double` and a `float` with the invariant culture
 (A4, A11, A14): the exponent form from `1E+17` for a `double` and from `1E+09` for a `float` (the
 owner, 2026-10-28, "As .NET prints: 1E+17" and "As C# prints a float"), and below `1E-04`, with `E`,
-a sign and two digits or more. Where .NET 10 writes a text that does not read back as the value, as
-for 2^-25 and 2^-958, the text is A4's, the fewest digits that do. `FloatingTests` holds the text of
+a sign and two digits or more. Where .NET 10 writes a text that does not read back as the value, the
+text is A4's, the fewest digits that do: .NET 10.0.13 and 10.0.14 write such a text for 2^-25 and
+2^-958, and 10.0.15 writes A4's text for both. `FloatingTests` holds the text of
 20000 values of a xorshift sequence, of the largest value with each exponent, the smallest and the one
 after it, and of the powers of ten and their neighbours, of a `double` and of a `float`, to what .NET
 writes.
