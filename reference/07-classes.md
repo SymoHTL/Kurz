@@ -1223,8 +1223,11 @@ do, since none exists yet, so that a member of the instance named there, a field
 is `static-mismatch` (K19), with a text that says so, as C# names the member in CS0120 (§4, the
 owner, 2026-11-09, #429, comment 6752598091); a `static` member of the class is read in the arguments
 of `: this(...)` as a `static` method reads it *(assumed, §4: the reading of the places of
-`static-mismatch`)*, and a `static` field of another class is read in either through its class's name;
-a class with a base and its base take no `static` member yet (`not supported`, K6, K7, K18). The base's constructor runs before the body, as C#'s does. A constructor that writes neither
+`static-mismatch`)*, and a `static` field of another class is read in either through its class's name *(assumed, §4: the
+build's reading)*;
+a class with a base and its base take no `static` member yet (`not supported` at the member, K6, K7, K18), so that the name of
+a `static` member of the base in `: base(...)`, `: base(Four)`, is then `unknown-name` (V10), the refused member declaring no
+name. The base's constructor runs before the body, as C#'s does. A constructor that writes neither
 `: this(...)` nor `: base(...)` runs the constructor of the base that a call with no arguments
 reaches, the defaults of its parameters given, picked as `: base()` would pick it (F13), two that
 such a call reaches alike being `ambiguous-call` *(assumed,
