@@ -252,6 +252,7 @@ public sealed class CheckerTests
     [InlineData("x = 1e400\nprint(x)", 1)]
     [InlineData("x = 3.5e38f\nprint(x)", 1)]
     [InlineData("float f = 1e300\nprint(f)", 1)]
+    [InlineData("float f = 400000000000000000000000000000000000000\nprint(f)", 1)]
     [InlineData("print(byte(300))", 1)]
     [InlineData("print(int(1e10))", 1)]
     [InlineData("print(int(1.0 / 0.0))", 1)]
@@ -1659,6 +1660,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("y = Nope() else {\n    else => 0\n}\nprint(y)"));
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    else => print(0)\n}"));
         Assert.Equal([(ErrorIds.UnknownName, 1), (ErrorIds.UnknownName, 4), (ErrorIds.BreakOutsideLoop, 5)], Errors("for line in g.Lines() {\n    print(line)\n} else {\n    Nope e => print(e)\n    IoError => break\n}"));
+    }
+
+    [Fact]
+    public void A_wrong_arm_of_the_else_after_a_loop_names_the_loop_and_S16()
+    {
+        // S16: an arm of a type the loop's collection does not fail with is `type-mismatch` at the arm, in the words of the loop's
+        // `unreachable-arm` text, over a file's lines, a list and a type's fields; after a call the text stays the call's (O5)
+        Assert.Equal("`HexError` is no case a loop over a file's lines fails with (S16, T1)", ErrorText("void | IoError Show(File f) {\n    for line in f.Lines() {\n        print(line)\n    } else {\n        HexError h => print(h)\n    }\n}\n\nprint(1)"));
+        Assert.Equal("`IoError` is no case a loop over a `List<int>` fails with (S16, T1)", ErrorText("void Show(List<int> xs) {\n    for x in xs {\n        print(x)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow([1])"));
+        Assert.Equal("`IoError` is no case a loop over `T.Fields` fails with (S16, T1)", ErrorText(Fields + "void Show<T>(T value) {\n    for f in T.Fields {\n        print(f.Name)\n    } else {\n        IoError e => print(e)\n    }\n}\n\nShow(Order(\"a\", 1))"));
+        var find = "data NotFound\n\nint | NotFound Find(int id) {\n    if id == 1 {\n        return 10\n    }\n    return NotFound\n}\n\n";
+        Assert.Equal("`string` is no case the call can return beside its success (O5, T1)", ErrorText(find + "int OrZero(int id) {\n    value = Find(id) else {\n        string s => 0\n    }\n    return value\n}\n\nprint(OrZero(1))"));
     }
 
     [Fact]

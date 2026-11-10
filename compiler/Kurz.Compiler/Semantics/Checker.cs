@@ -2651,8 +2651,8 @@ public sealed partial class Checker
         {
             // S16: the cases a pull fails with are handled by the arms of the `else` after the block, as a call's (O5), and every other
             // one leaves the function at the loop's line (O2, O3, O9); a collection that fails with none gives its arms no case
-            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : Types.A(model.TypeOf(f.Collection).Type);
-            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)");
+            var over = Unwrap(f.Collection) is RangeExpression ? "a range" : failures is not null ? "a file's lines" : Types.A(model.TypeOf(f.Collection).Type);
+            CheckElseArms(f.Arms ?? [], Types.Void, failures?.Cases.Skip(1).ToList() ?? [], f.Line, f.ElseLine, $"a loop over {over}, whose collection fails with no case (S16, C4)", $"a loop over {over} fails with (S16, T1)");
         }
 
         KurzType Report(int line, KurzType type)
