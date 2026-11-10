@@ -3983,6 +3983,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class B(int M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        // a constructor that must chain reports that error alone: the arguments of its `: base(...)` are not read, so `N` of the
+        // base gives no `static-mismatch` there (assumed, the build's reading, which #441's walk names, issue 39, comment 6767149029)
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
         // a `static` member of the class is read there as in a `static` method, and one of another class through its name *(assumed)*
         Clean("class C(int N) {\n    pub static int Four = 4\n\n    pub static int Twice(int n) => n * 2\n\n    pub C() : this(Four) { }\n\n    pub C(string s) : this(Twice(3)) { }\n}\n\nprint(C().N)\nprint(C(\"s\").N)");
         Clean("class Config {\n    pub static int Four = 4\n}\n\nclass A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Config.Four) { }\n}\n\nprint(Dog().Legs)");
