@@ -4398,6 +4398,14 @@ public sealed class CheckerTests
         Clean(faces + "int Size(Named v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(Dot()))");
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 12)], Errors(faces + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(1))"));
         Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(faces + "int Size(Named | int v) => match v {\n    Named n => 0\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(1))"));
+        // C4 with the rule of 2026-10-09: an arm whose type an earlier arm's type subsumes never runs, also where it tests an interface
+        // case at run time; another interface after it still runs, and so does the same pair after a postfix `else` (O5)
+        Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(faces + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    Shape t => t.Area()\n    else => 0\n}\n\nprint(Size(1))"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(faces + "int Size(Dot | Named v) => match v {\n    Shape s => s.Area()\n    Shape t => t.Area()\n    else => 0\n}\n\nprint(Size(Dot()))"));
+        Clean(faces + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    Named n => n.Name().Bytes.Count\n    int i => i\n}\n\nprint(Size(1))");
+        const string faceCall = "int | Named Find(int id) {\n    if id == 1 {\n        return Dot()\n    }\n    return 5\n}\n\nint Run() {\n    v = Find(1) else {\n        Shape s => s.Area()\n";
+        Clean(faces + faceCall + "        Named n => n.Name().Bytes.Count\n    }\n    return v\n}\n\nprint(Run())");
+        Assert.Equal([(ErrorIds.UnreachableArm, 22)], Errors(faces + faceCall + "        Shape t => t.Area()\n        Named n => n.Name().Bytes.Count\n    }\n    return v\n}\n\nprint(Run())"));
         const string apart = "interface Shape {\n    int Area()\n}\ninterface Named {\n    string Name()\n}\nclass Dot : Shape {\n    pub int Area() => 1\n}\n\n";
         Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors(apart + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"));
         Assert.EndsWith("`Shape` is no case of `Named | int`, no case implements it, and no class implements both it and an interface that is a case (C4, K6, T1)", ErrorText(apart + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"), StringComparison.Ordinal);
