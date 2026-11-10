@@ -293,10 +293,11 @@ public sealed partial class Checker
     /// <summary>
     /// C4: whether an arm's type names a case: the case itself, a data type derived from it (D6), or a class derived from the case's
     /// class or that implements the case's interface, whose arm tests the instance's class at run time, as C#'s <c>is</c> (K6; the
-    /// owner, 2026-11-02, #110); no widening (T8) makes a case. No list of the classes derived from a class or of those that implement
-    /// an interface is closed, so such an arm covers no case (O8), and one after an arm of its case's type, or of an interface its class
-    /// implements or a class it derives from, is <c>unreachable-arm</c>. Read the other way round, a case is covered by an arm of its type,
-    /// of an interface its class implements or of a class it derives from (<see cref="Covers"/>).
+    /// owner, 2026-11-02, #110); no widening (T8) makes a case. Such an arm covers no case (O8), where the arms take every class of the
+    /// program derived from the class or implementing the interface too, as in C# (§5, the owner, 2026-11-10), and one after an arm of
+    /// its case's type, or of an interface its class implements or a class it derives from, is <c>unreachable-arm</c>. Read the other
+    /// way round, a case is covered by an arm of its type, of an interface its class implements or of a class it derives from
+    /// (<see cref="Covers"/>).
     /// </summary>
     private static bool IsCaseOf(KurzType type, KurzType c) => Types.Same(type, c) || (type is DataType && c is DataType && Types.Assignable(type, c))
         || BelowArm(type, c) || (type is ClassType arm && c is ClassType b && arm.Symbol.HasBaseOrIs(b.Symbol));

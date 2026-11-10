@@ -1,0 +1,27 @@
+// expect: output
+// | dot
+// | int 5
+// rules: C4
+
+interface Shape {
+    int Area()
+}
+
+interface Named {
+    string Name()
+}
+
+class Dot : Shape, Named {
+    pub int Area() => 1
+    pub string Name() => "dot"
+}
+
+string Show(Named | int v) => match v {
+    Dot d => "dot"
+    Shape s => "shape {s.Area()}"
+    Named n => "named {n.Name()}"
+    int i => "int {i}"
+}
+
+print(Show(Dot()))
+print(Show(5))
