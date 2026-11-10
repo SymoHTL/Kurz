@@ -1683,8 +1683,8 @@ copy, so that an error of the copy is reported once, and one reported at the cal
 `unlisted-case` of an outcome the type gives, shows at that first call, the call that made it (§4, the owner,
 2026-11-06, against the first call in the order of the text and against a report at every call that names the copy;
 the cost is that the line named is not always the first in the file). Where that copy was made inside another copy,
-the call is the one outside every copy that made the outermost copy (§4, the owner, 2026-11-10, "Outermost call, as
-built", against the call inside a copy that made it). The order is stated for one file, and the order
+the call is the one outside every copy that made the outermost copy (§4, the owner, 2026-11-10, issue 39, comment
+6762818536, "Outermost call, as built", against the call inside a copy that made it). The order is stated for one file, and the order
 across the files of a program is open (§14, which names its options). *(assumed, §4, with the build: a call that infers
 its type arguments makes a copy as one that writes them; a fault of the function's text that several copies give,
 `redeclared` (V9) among them, is reported once, at its line, and one that differs between copies, `kind-not-read` for
