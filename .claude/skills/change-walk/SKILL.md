@@ -59,7 +59,8 @@ is `python3`. Every step ends in its gate, a HAZARD with its issue, or `judgment
    NOT RUN, or PARTLY on a gate other than `merge-checks`. No run at all on a head: a merge
    conflict, a skip literal in the head commit, or a push the pull request did not take up, its
    head still the one before (`knowledge/the-pull-request-shows-the-old-head-after-a-push.md`).
-   Gate: the required check `gates`.
+   Gate: the required check `gates` for the first two; HAZARD (#432) for a push the pull request
+   did not take up, whose pull request shows the old head's checks.
 
 ## 3. Review
 

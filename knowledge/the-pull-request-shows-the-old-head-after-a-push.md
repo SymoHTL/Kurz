@@ -33,19 +33,29 @@ Seen on 2026-11-09 on pull request 426. The merge of `main` into its branch was 
 77be7dff but expected 17ca00ec", the head before. The branch had moved all the same:
 `git ls-remote` and the branches API named 77be7dff. The pull request did not: it named 17ca00ec
 when read before the next push. No workflow run had started on 77be7dff eight minutes after the
-push, and none ever did, neither `gates` nor `compiler-windows` nor the review run. The forge's
-status page named no incident. An empty commit on 77be7dff, so the same tree, pushed as any push (8f64ef0a, the
-message saying why), was taken up: the pull request named it, and the three workflows ran on it.
-Closing and reopening the pull request was not tried, since a reopen can start a review run, and
-a run that started is a bill ([[a-cancel-does-not-beat-the-runner]]).
+push, and none ever did, neither `gates` nor `compiler-windows` nor the review run: on
+2026-11-10, after the pull request had merged, the runs API (`actions/runs?head_sha=77be7dff...`)
+listed none for that commit. The forge's status page named no incident when it was read during the
+wait; the time of that reading was not recorded. An empty commit on 77be7dff, so the same tree,
+pushed as any push (8f64ef0a, the message saying why), was taken up: the pull request named it,
+and the three workflows ran on it. Closing and reopening the pull request was not tried, so
+whether a reopen takes up such a push is not known. Either way starts a review run, since the
+review workflow starts on `synchronize` and on `reopened` (`.github/workflows/review.yml`), and a
+run that started is a bill ([[a-cancel-does-not-beat-the-runner]]).
 
-The shape: the lag above ends by itself within a minute; this one did not. The `gates` workflow
+The shape: the lag above ended by itself within a minute on 2026-10-08, the two times it was
+read; this one had not ended after eight minutes, and the empty commit ended it. The `gates` workflow
 starts on the pull request's events (`synchronize` among them, in `.github/workflows/gates.yml`),
 and a pull request that did not take up the push sends none, so the checks it shows stay those of
 the old head: on pull request 426 they were green, `gates`, `compiler-windows` and `review` on
-17ca00ec. Nothing is merged wrongly: the merge tool takes the head in full
-and refuses while the pull request shows another (`tools/merge_pr.py`). What is lost is the time
-spent waiting for runs that never start. What made the forge fail the lock was not found.
+17ca00ec. The sign is therefore not a pending check: it is the branch on the forge naming a
+commit the pull request's head does not. The merge tool takes the head in full and refuses one
+the pull request does not show (`tools/merge_pr.py`, `decide`), so given the pushed commit it
+refuses. Given the head the pull request shows, it refuses only where that head is behind `main`,
+as 17ca00ec was, since the push it missed was a take of `main`; after a missed push that does not
+take `main`, it would merge the old head. Nothing else notices the case (HAZARD #432). Where the
+tool holds it, what is lost is the time spent waiting for runs that never start. What made the
+forge fail the lock was not found.
 
 ## How to apply
 
@@ -70,11 +80,12 @@ spent waiting for runs that never start. What made the forge fail the lock was n
 - A local `gates.py --pr N` right after a push reads the head the same way and has no `--head`:
   compare the head of `gh pr view N --json headRefOid` with the pushed commit before running it,
   or read its `pr-findings` verdict as one about the head the forge showed. `judgment step`
-- After a push that printed `cannot lock ref`, or when no run started on the pushed commit within
-  a few minutes, compare the branch (`git ls-remote origin <branch>`) with the pull request's head
-  (`gh pr view N --json headRefOid`). Where the branch has the commit and the pull request does
-  not, commit nothing but an empty commit on it (`git commit --allow-empty`, the message saying
-  that the pull request did not take up the push) and push it as any push, never with `--force`;
-  never close and reopen the pull request to wake it. A merge note names the empty commit as the
+- Once a minute has passed since a push, the longest lag recorded above, and the push printed
+  `cannot lock ref` or no run started on the pushed commit, compare the branch
+  (`git ls-remote origin <branch>`) with the pull request's head (`gh pr view N --json headRefOid`).
+  Where the branch has the commit and the pull request does not, commit nothing but an empty
+  commit on it (`git commit --allow-empty`, the message saying that the pull request did not take
+  up the push) and push it as any push, never with `--force`. That is the way seen to work, once
+  (426); a close and reopen was not tried. A merge note names the empty commit as the
   head and says its tree is the pushed one's, so that gates run on that tree stand. HAZARD (#432):
   nothing notices a push the pull request did not take up.
