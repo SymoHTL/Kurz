@@ -119,7 +119,7 @@ public sealed partial class Checker
     /// <summary>
     /// K14: what runs before each constructor's body, its parameters' defaults and its <c>: this(...)</c> or the construction of its
     /// base, then its body, class by class; the arguments of <c>: this(...)</c> and <c>: base(...)</c> read the parameters and no
-    /// instance, as C# reads them.
+    /// instance, as C# reads them, and a member of the instance named there is <c>static-mismatch</c> (§4, the owner, 2026-11-09).
     /// </summary>
     private void CheckConstructorBodies()
     {
@@ -167,7 +167,13 @@ public sealed partial class Checker
             return;
         }
 
-        frame = new Frame { ReturnType = Types.Void, Line = d.Line, Reserved = reservedTopLevel };
+        // the arguments read the parameters while no instance exists yet, a place of `static-mismatch` (§4, the owner, 2026-11-09, #429,
+        // comment 6752598091), where the class's `static` members are read as in its other places *(assumed)*
+        frame = new Frame
+        {
+            ReturnType = Types.Void, Line = d.Line, Reserved = reservedTopLevel, Class = symbol, Static = true,
+            Chain = d.ThisArguments is not null ? ": this(...)" : ": base(...)",
+        };
         foreach (var (p, node) in k.Parameters.Zip(d.Parameters))
         {
             k.InitializerParameters.Add(DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node));

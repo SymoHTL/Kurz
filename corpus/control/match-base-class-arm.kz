@@ -1,0 +1,25 @@
+// expect: output
+// | dog rex 4
+// | animal tom
+// | gone
+// rules: C4
+
+class Animal(string Name)
+
+class Dog(int Legs) : Animal
+
+class Cat(int Lives) : Animal
+
+data Gone
+
+void Show(Dog | Cat | Gone v) {
+    match v {
+        Dog d => print("dog {d.Name} {d.Legs}")
+        Animal a => print("animal {a.Name}")
+        Gone => print("gone")
+    }
+}
+
+Show(Dog("rex", 4))
+Show(Cat("tom", 9))
+Show(Gone)

@@ -3932,9 +3932,10 @@ public sealed class CheckerTests
         // a constructor that calls another assigns no field without `mut`, as a method does not
         Assert.Equal([(ErrorIds.AssignImmutable, 9)], Errors("class P {\n    int x\n\n    pub P(int v) {\n        x = v\n    }\n\n    pub P() : this(1) {\n        x = 2\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
         // a further constructor of a class with a primary constructor calls it, else `constructor-must-chain`; the arguments of
-        // `: this(...)` read the parameters and no instance
+        // `: this(...)` read the parameters and no instance, so a field there is `static-mismatch` (the owner, 2026-11-09, #429,
+        // comment 6752598091), the theory of `static-mismatch` holding its texts
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class C(int N) {\n    pub C() { }\n}\n\nprint(C().N)"));
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("class C(int N) {\n    pub C() : this() { }\n\n    pub C(string s) : this(1) { }\n}\n\nprint(C().N)"));
         // a class without a primary constructor that declares one has no empty one, as C# makes none
         Assert.Equal([(ErrorIds.ArgumentMismatch, 5)], Errors("class C {\n    pub C(int n) { }\n}\n\nprint(C() == C(1))"));
@@ -3963,12 +3964,18 @@ public sealed class CheckerTests
         // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
-        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, and in a class
-        // without a base class `syntax`; its arguments read no field, take the types of the base's parameters, and reach no
-        // constructor of the base without `pub` (F9)
+        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, without a base
+        // class (the owner, 2026-11-09, #429, comment 6752598091) and with one (assumed, the same reading), and in a class without a
+        // primary constructor and without a base class `syntax`; its arguments read no field of the instance, a field of the base's
+        // among them, which is `static-mismatch` (that comment), take the types of the base's parameters, and reach no constructor
+        // of the base without `pub` (F9)
         Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class B(int M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
-        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        // a `static` member of the class is read there as in a `static` method, and one of another class through its name *(assumed)*
+        Clean("class C(int N) {\n    pub static int Four = 4\n\n    pub static int Twice(int n) => n * 2\n\n    pub C() : this(Four) { }\n\n    pub C(string s) : this(Twice(3)) { }\n}\n\nprint(C().N)\nprint(C(\"s\").N)");
+        Clean("class Config {\n    pub static int Four = 4\n}\n\nclass A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Config.Four) { }\n}\n\nprint(Dog().Legs)");
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(\"s\") { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class A {\n    A(int n) { }\n}\n\nclass B : A {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
     }
@@ -4143,10 +4150,17 @@ public sealed class CheckerTests
     [InlineData("class C(mut int V) {\n    pub static int Bad() {\n        V = 3\n        return 1\n    }\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static () => int Bad() => () => V\n}\n\nprint(1)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static int A = V\n}\n\nprint(C.A)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Legs) { }\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet: `Legs` is a field of an instance of `Dog` (K14)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(this.Legs) { }\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet, and so no `this` (K14)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Count()) { }\n\n    pub int Count() => 4\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet: `Count` is a method of an instance of `Dog` (K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)", "2: the arguments of `: this(...)` read the constructor's parameters, and no instance exists yet: `N` is a field of an instance of `C` (K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(F(() => N)) { }\n\n    pub static int F(() => int f) => f()\n}\n\nprint(C().N)", "2: the arguments of `: this(...)` read the constructor's parameters, and no instance exists yet: `N` is a field of an instance of `C` (K14)")]
     public void A_member_on_the_other_side_of_static_is_static_mismatch_and_names_its_side(string program, string expected)
     {
         // K19, the product pass's Q1 (b): one id for a member of an instance where no instance is, as C#'s CS0120 and CS0026, and for a
-        // `static` member reached through an instance, as C#'s CS0176, its text saying on which side the member is
+        // `static` member reached through an instance, as C#'s CS0176, its text saying on which side the member is; K14: the arguments
+        // of a constructor's `: this(...)` and `: base(...)` are such a place, a lambda among them, with a text that says no instance
+        // exists yet (the owner, 2026-11-09, #429, comment 6752598091)
         var (diagnostics, _) = Check(program);
         Assert.Equal([expected], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
         Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.StaticMismatch, d.Id));
@@ -4305,8 +4319,74 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MatchNotExhaustive, 11)], Errors(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\n\nShape s = Dot()\nprint(match s {\n    Dot d => d.Area()\n})"));
         Assert.Equal([(ErrorIds.UnreachableArm, 13)], Errors(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\n\nShape s = Dot()\nprint(match s {\n    Shape t => 1\n    Dot d => 2\n})"));
         Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\nclass Other\n\nShape s = Dot()\nprint(match s {\n    Other o => 1\n    else => 2\n})"));
-        Assert.EndsWith("`Other` is no case of `Shape`, derives from none and implements none (C4, K6, T1)", ErrorText(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\nclass Other\n\nShape s = Dot()\nprint(match s {\n    Other o => 1\n    else => 2\n})"), StringComparison.Ordinal);
+        Assert.EndsWith("`Other` is no case of `Shape`, derives from none and implements none, and no case derives from it (C4, K6, T1)", ErrorText(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\nclass Other\n\nShape s = Dot()\nprint(match s {\n    Other o => 1\n    else => 2\n})"), StringComparison.Ordinal);
         Clean(shape + "class Dot : Shape {\n    pub int Area() => 1\n    pub string Text() => \"dot\"\n}\n\nint | Shape Pick(int n) {\n    if n > 0 {\n        return n\n    }\n    return Dot()\n}\n\nprint(match Pick(1) {\n    int n => n\n    Shape s => s.Area()\n})\nx = Pick(0) else {\n    Shape s => s.Area()\n}\nprint(x)");
+    }
+
+    [Fact]
+    public void An_arm_of_an_interface_or_a_base_class_covers_the_cases_that_implement_it_or_derive_from_it()
+    {
+        // C4 with K6: an arm of an interface over a union takes exactly the cases whose classes implement it, naming it or through a base,
+        // as the program compiled whole decides, and counts for completeness (the owner, 2026-11-09, #408, comment 6737367326, "Accept, as
+        // C#"); an arm of such a case after it, an arm of the interface whose every such case an earlier arm covers and an `else` after
+        // arms that cover every case are `unreachable-arm`, and an arm that still takes a case is not, as C# reads a pattern earlier ones
+        // subsume (comment 6737634153, "C#'s rule, as built"); an interface that no case implements is no case (`type-mismatch`)
+        const string two = "interface Shape {\n    int Area()\n}\nclass Dot : Shape {\n    pub int Area() => 1\n}\nclass Box : Shape {\n    pub int Area() => 2\n}\nclass Other\n\n";
+        Clean(two + "int Size(Dot | Box | int v) => match v {\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(3))");
+        Clean(two + "int Size(Dot | Box | int v) => match v {\n    Dot d => 0\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(3))");
+        Clean(two + "int Size(Dot d) => match d {\n    Shape s => s.Area()\n}\n\nprint(Size(Dot()))");
+        Clean(two + "class Leaf : Dot\n\nint Size(Leaf | int v) => match v {\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(3))");
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 12)], Errors(two + "int Size(Dot | Other v) => match v {\n    Shape s => s.Area()\n}\n\nprint(Size(Dot()))"));
+        Clean(two + "int Size(Dot | Other v) => match v {\n    Shape s => s.Area()\n    Other o => 0\n}\n\nprint(Size(Dot()))");
+        Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(two + "int Size(Dot | Box v) => match v {\n    Shape s => s.Area()\n    Box b => 3\n}\n\nprint(Size(Dot()))"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 15)], Errors(two + "int Size(Dot | Box | int v) => match v {\n    Dot d => 1\n    Box b => 2\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(3))"));
+        Assert.EndsWith("the arms above cover every case of `Dot | Box | int` that implements `Shape` (C4, K6)", ErrorText(two + "int Size(Dot | Box | int v) => match v {\n    Dot d => 1\n    Box b => 2\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(3))"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(two + "int Size(Dot | Box v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(Dot()))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 13)], Errors(two + "int Size(Other | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"));
+        Assert.EndsWith("`Shape` is no case of `Other | int`, and no case implements it (C4, K6, T1)", ErrorText(two + "int Size(Other | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"), StringComparison.Ordinal);
+
+        // the same for an arm of a class that cases derive from, directly or through a class between (comment 6737634153, "Same as
+        // interface")
+        const string kin = "class Animal(string Name)\nclass Dog(int Legs) : Animal\nclass Cat(int Lives) : Animal\nclass Other\n\n";
+        Clean(kin + "string Say(Dog | Cat v) => match v {\n    Animal a => a.Name\n}\n\nprint(Say(Cat(\"tom\", 9)))");
+        Clean(kin + "string Say(Dog | Cat v) => match v {\n    Dog d => \"dog\"\n    Animal a => a.Name\n}\n\nprint(Say(Cat(\"tom\", 9)))");
+        Clean(kin + "class Puppy(bool Small) : Dog\n\nstring Say(Puppy | int v) => match v {\n    Animal a => a.Name\n    int n => \"{n}\"\n}\n\nprint(Say(1))");
+        Clean(kin + "string Say(Dog d) => match d {\n    Animal a => a.Name\n}\n\nprint(Say(Dog(\"rex\", 4)))");
+        Assert.Equal([(ErrorIds.UnreachableArm, 8)], Errors(kin + "string Say(Dog | Cat v) => match v {\n    Animal a => a.Name\n    Cat c => \"cat\"\n}\n\nprint(Say(Cat(\"tom\", 9)))"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 9)], Errors(kin + "string Say(Dog | Cat v) => match v {\n    Dog d => \"dog\"\n    Cat c => \"cat\"\n    Animal a => a.Name\n}\n\nprint(Say(Cat(\"tom\", 9)))"));
+        Assert.EndsWith("the arms above cover every case of `Dog | Cat` that derives from `Animal` (C4, K6)", ErrorText(kin + "string Say(Dog | Cat v) => match v {\n    Dog d => \"dog\"\n    Cat c => \"cat\"\n    Animal a => a.Name\n}\n\nprint(Say(Cat(\"tom\", 9)))"), StringComparison.Ordinal);
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 6)], Errors(kin + "string Say(Dog | Other v) => match v {\n    Animal a => a.Name\n}\n\nprint(Say(Other()))"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 7)], Errors(kin + "string Say(Other | int v) => match v {\n    Animal a => a.Name\n    else => \"x\"\n}\n\nprint(Say(1))"));
+        Assert.EndsWith("`Animal` is no case of `Other | int` and derived from none, and no case derives from it (C4, K6, T1)", ErrorText(kin + "string Say(Other | int v) => match v {\n    Animal a => a.Name\n    else => \"x\"\n}\n\nprint(Say(1))"), StringComparison.Ordinal);
+
+        // the owner's three answers of 2026-11-09 (#408, comment 6748445211): an arm of a postfix `else` (O5) is read as an arm of `match`,
+        // "Cover, as match does"; an arm of a `data` type covers the cases whose `data` types derive from it (D6), "Cover, as a base class";
+        // and an arm of an interface over a case that is another interface tests the instance's class at run time where a class of the
+        // program implements both, covering no case (O8), "Test at run time, as C#"
+        const string call = "int | Dot | Box Find(int id) {\n    if id == 1 {\n        return Dot()\n    }\n    return 5\n}\n\nint Run() {\n    v = Find(1) else {\n";
+        Clean(two + call + "        Shape s => s.Area()\n    }\n    return v\n}\n\nprint(Run())");
+        Assert.Equal([(ErrorIds.UnreachableArm, 22)], Errors(two + call + "        Shape s => s.Area()\n        Dot d => 0\n    }\n    return v\n}\n\nprint(Run())"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 23)], Errors(two + call + "        Dot d => 0\n        Box b => 1\n        Shape s => s.Area()\n    }\n    return v\n}\n\nprint(Run())"));
+        Assert.EndsWith("the arms above handle every case of the call that implements `Shape` (O5, C4, K6)", ErrorText(two + call + "        Dot d => 0\n        Box b => 1\n        Shape s => s.Area()\n    }\n    return v\n}\n\nprint(Run())"), StringComparison.Ordinal);
+        const string partly = "int | Dot | Other Find(int id) {\n    if id == 1 {\n        return Dot()\n    }\n    return 5\n}\n\n";
+        Clean(two + partly + "int | Other Run() {\n    v = Find(1) else {\n        Shape s => s.Area()\n    }\n    return v\n}\n\nx = Run() else {\n    Other o => 0\n}\nprint(x)");
+        Assert.Equal([(ErrorIds.UnlistedCase, 20)], Errors(two + partly + "int Run() {\n    v = Find(1) else {\n        Shape s => s.Area()\n    }\n    return v\n}\n\nprint(Run())"));
+        const string kinCall = "int | Dog | Cat Find(int id) {\n    if id == 1 {\n        return Dog(\"rex\", 4)\n    }\n    return 5\n}\n\nint Run() {\n    v = Find(1) else {\n";
+        Clean(kin + kinCall + "        Animal a => 0\n    }\n    return v\n}\n\nprint(Run())");
+        Assert.Equal([(ErrorIds.UnreachableArm, 16)], Errors(kin + kinCall + "        Animal a => 0\n        Cat c => c.Lives\n    }\n    return v\n}\n\nprint(Run())"));
+        const string facts = "data Beast(string Name)\ndata Hound(int Legs) : Beast\ndata Lynx(int Lives) : Beast\n\n";
+        Clean(facts + "string Say(Hound | Lynx v) => match v {\n    Beast b => b.Name\n}\n\nprint(Say(Lynx(\"tom\", 9)))");
+        Clean(facts + "string Say(Hound | Lynx | int v) => match v {\n    Hound h => \"hound\"\n    Beast b => b.Name\n    int n => \"{n}\"\n}\n\nprint(Say(1))");
+        Assert.Equal([(ErrorIds.UnreachableArm, 8)], Errors(facts + "string Say(Hound | Lynx v) => match v {\n    Hound h => \"hound\"\n    Lynx l => \"lynx\"\n    Beast b => b.Name\n}\n\nprint(Say(Lynx(\"tom\", 9)))"));
+        Assert.EndsWith("`Beast` is no case of `int` and derived from none, and no case derives from it (C4, D6, T1)", ErrorText(facts + "string Say(int v) => match v {\n    Beast b => b.Name\n    else => \"x\"\n}\n\nprint(Say(1))"), StringComparison.Ordinal);
+        const string faces = "interface Shape {\n    int Area()\n}\ninterface Named {\n    string Name()\n}\nclass Dot : Shape, Named {\n    pub int Area() => 1\n    pub string Name() => \"dot\"\n}\n\n";
+        Clean(faces + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(Dot()))");
+        Clean(faces + "int Size(Named v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(Dot()))");
+        Assert.Equal([(ErrorIds.MatchNotExhaustive, 12)], Errors(faces + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(1))"));
+        Assert.Equal([(ErrorIds.UnreachableArm, 14)], Errors(faces + "int Size(Named | int v) => match v {\n    Named n => 0\n    Shape s => s.Area()\n    int n => n\n}\n\nprint(Size(1))"));
+        const string apart = "interface Shape {\n    int Area()\n}\ninterface Named {\n    string Name()\n}\nclass Dot : Shape {\n    pub int Area() => 1\n}\n\n";
+        Assert.Equal([(ErrorIds.TypeMismatch, 12)], Errors(apart + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"));
+        Assert.EndsWith("`Shape` is no case of `Named | int`, no case implements it, and no class implements both it and an interface that is a case (C4, K6, T1)", ErrorText(apart + "int Size(Named | int v) => match v {\n    Shape s => s.Area()\n    else => 0\n}\n\nprint(Size(1))"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -6184,6 +6264,13 @@ public sealed class CheckerTests
     }
 
     // ---- const assert (T37) -----------------------------------------------------------------------
+
+    [Fact]
+    public void A_function_named_assert_whose_type_is_named_const_is_clean()
+    {
+        // L18 with T37: `=>` after the `)` makes the line a function's declaration, which a call reads as any other
+        Clean("data const(int A)\n\nconst assert(int x) => const(x)\n\nprint(assert(1).A)");
+    }
 
     [Fact]
     public void A_const_assert_that_holds_is_clean()
