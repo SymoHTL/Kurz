@@ -2518,8 +2518,8 @@ round can ask about it by the rule's id.
   it is `argument-mismatch`, as C#'s CS7036, and `: base(...)` in a class without a primary
   constructor and without a base class is `syntax` (the owner, 2026-11-09, #409, comment 6737367678),
   where in a further constructor of a class with a primary constructor it is `constructor-must-chain`
-  (the owner, 2026-11-09, #429, comment 6752598091, for a class without a base class; for one with a
-  base class *assumed*, the same reading). `base` is read as that word right after a
+  (the owner, 2026-11-09, #429, comment 6752598091, for a class without a base class, and 2026-11-10,
+  #435, comment 6762144386, for one with a base class). `base` is read as that word right after a
   constructor's `:` alone, as `as` in a `use` line, and is a name everywhere else (L18).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
