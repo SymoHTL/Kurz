@@ -278,6 +278,16 @@ public sealed class CheckerTests
         // T6, L11: the same bound as for a literal with an exponent
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("double d = 1" + new string('0', 310) + "\nprint(d)"));
         Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("x = double(1" + new string('0', 310) + ")\nprint(x)"));
+        // L11 at the edge, with T23's rounding to the nearest (assumed in T23: a tie to the even one, beyond the largest to an infinity):
+        // the halfway point between the largest double and 2^1024 rounds to 2^1024, beyond the range, where a fold that cut it gave the
+        // largest double; one below it rounds to the largest double, the control
+        var half = System.Numerics.BigInteger.Pow(2, 1024) - System.Numerics.BigInteger.Pow(2, 970);
+        var halfway = half.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var below = (half - 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("double d = " + halfway + "\nprint(d)"));
+        Assert.Equal([(ErrorIds.ConstantOverflow, 1)], Errors("x = double(" + halfway + ")\nprint(x)"));
+        Assert.Empty(Errors("double d = " + below + "\nprint(d)"));
+        Assert.Empty(Errors("x = double(" + below + ")\nprint(x)"));
     }
 
     [Fact]
@@ -3974,6 +3984,9 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class B(int M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        // a constructor that must chain reports that error alone: the arguments of its `: base(...)` are not read, so `N` of the
+        // base gives no `static-mismatch` there (assumed, the build's reading, which #441's walk names, issue 39, comment 6767149029)
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
         // a `static` member of the class is read there as in a `static` method, and one of another class through its name *(assumed)*
         Clean("class C(int N) {\n    pub static int Four = 4\n\n    pub static int Twice(int n) => n * 2\n\n    pub C() : this(Four) { }\n\n    pub C(string s) : this(Twice(3)) { }\n}\n\nprint(C().N)\nprint(C(\"s\").N)");
         Clean("class Config {\n    pub static int Four = 4\n}\n\nclass A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Config.Four) { }\n}\n\nprint(Dog().Legs)");
@@ -4554,6 +4567,19 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ReferenceCycle, 1)], through.Items.Select(d => (d.Id, d.Line)));
         // the positive control: no lambda of the file captures an instance
         Assert.Empty(CheckSeeingStd("h = HttpHeaders()\nh.OnChange = () => 1\nprint(h.OnChange())\n", runtime).Diagnostics.Items);
+    }
+
+    [Fact]
+    public void A_lambda_whose_own_type_names_no_type_parameter_counts_by_the_value_of_one_it_captures()
+    {
+        // R9 (the owner, 2026-11-04, #110, comment 6643368937, a captured value's type read as on the way, assumed): that reading alone,
+        // with no reading of the lambda's own type to stand on;
+        // `() => One(x)` is of type `() => int` and captures `x` of type `T`, so the field counts every lambda, and the lambda of std/
+        // that captures the class closes the ring, reported at the lambda of the file; without the type parameter nothing closes it
+        var named = ListTests.Edited(("std/std.kz", "pub class HttpHeaders {", "pub class HttpHeaders {\n    pub mut () => int OnChange = () => 0\n\n    pub (string) => int Named() => (string k) => OnChange() + k.Bytes.Count\n"));
+        var (captured, _) = CheckSeeingStd("int One<U>(U u) => 1\n\nint Keep<T>(T x) {\n    f = () => One(x)\n    return f()\n}\n\nprint(Keep(1))\n", named);
+        Assert.Equal([(ErrorIds.ReferenceCycle, 4)], captured.Items.Select(d => (d.Id, d.Line)));
+        Assert.Empty(CheckSeeingStd("int One<U>(U u) => 1\n\nint Keep(int x) {\n    f = () => One(x)\n    return f()\n}\n\nprint(Keep(1))\n", named).Diagnostics.Items);
     }
 
     [Fact]

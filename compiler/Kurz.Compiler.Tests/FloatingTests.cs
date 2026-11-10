@@ -311,7 +311,8 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
     {
         // T23: 2^53 + 3 lies halfway between the doubles 2^53 + 2 and 2^53 + 4 and goes to the even one, 2^53 + 4, as the conversion
         // of a `long` at run time gives it and as C# folds the constant; a fold that cuts the bits past the 53rd gave 2^53 + 2; the
-        // literal, the written conversion of a literal without a suffix (T10) and of one with `L`, and the negative literal each fold
+        // literal, the written conversion of a literal without a suffix (T10) and of one with `L`, and the negative literal each fold;
+        // at the top of the range, one below the halfway point between the largest double and 2^1024 folds to the largest double
         var text = """
             double a = 9007199254740995
             print(a)
@@ -322,9 +323,11 @@ public sealed class FloatingTests(Toolchain toolchain) : IClassFixture<Toolchain
             long n = 9007199254740995
             double c = n
             print(c)
+            double top = 179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497791
+            print(top == 1.7976931348623157e308)
             """;
         Ran(BuildAndRun(text, "double-rounded-once"), 0,
-            ["9007199254740996", "9007199254740996", "9007199254740996", "-9007199254740996", "9007199254740996"], "");
+            ["9007199254740996", "9007199254740996", "9007199254740996", "-9007199254740996", "9007199254740996", "true"], "");
     }
 
     [Fact]
