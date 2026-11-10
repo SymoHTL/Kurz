@@ -326,10 +326,11 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(\"a\")\nif args.Count == 0 {\n    return 5\n}\nprint(\"b\")\n", "return-five", 5, "a")]
     [InlineData("return 300\n", "return-300", 44, "")]
     [InlineData("byte b = 7\nreturn b\n", "return-byte", 7, "")]
-    [InlineData("print(\"a\")\nreturn\n", "return-bare", 0, "a")]
-    public void A_program_ends_with_the_code_its_exit_or_its_top_level_return_gives(string text, string name, int code, string output)
+    [InlineData("print(\"a\")\nreturn\n", "return-bare", 0, "a", false)]
+    public void A_program_ends_with_the_code_its_exit_or_its_top_level_return_gives(string text, string name, int code, string output, bool refusedOnWindows = true)
     {
-        if (Ran(text, name, "") is { } run)
+        // a bare `return` sets no code, so a build for Windows builds it
+        if (Ran(text, name, "", reads: refusedOnWindows) is { } run)
         {
             Assert.Equal((code, ""), (run.Code, run.Error));
             string[] lines = output == "" ? [] : [output];
