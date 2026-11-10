@@ -413,7 +413,7 @@ public sealed partial class Checker
         var cases = result.Type is UnionType u && Types.NonNull(u) is null ? u.Cases.ToList() : [result.Type]; // N8: a `T?` is no outcome list
         var success = cases[0];
         var rest = cases.Skip(1).ToList();
-        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)"); // `e.Line` is the `else` keyword's
+        CheckElseArms(e.Arms, success, rest, e.Line, e.Line, "a call with no case beside its success (O5, C4)", "the call can return beside its success (O5, T1)"); // `e.Line` is the `else` keyword's
 
         if (!isStatement && Types.IsVoid(success))
         {
@@ -428,9 +428,10 @@ public sealed partial class Checker
     /// O5: the arms of an <c>else</c> over the cases of <paramref name="rest"/>, beside the success, of a call or of a loop's collection
     /// (S16); a case no arm handles leaves the function at <paramref name="line"/> (O2, O3, O9). An <c>else</c> with no arms where there
     /// is no case, after what <paramref name="after"/> names, is <c>unreachable-arm</c> at <paramref name="elseLine"/>, as an
-    /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02).
+    /// <c>else =&gt;</c> arm there is (section 5, the owner, 2026-11-02). An arm of a type that is none of the cases is
+    /// <c>type-mismatch</c>, "is no case" followed by <paramref name="wrong"/>, which names the call (O5) or the loop (S16).
     /// </summary>
-    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after)
+    private void CheckElseArms(IReadOnlyList<MatchArm> arms, KurzType success, List<KurzType> rest, int line, int elseLine, string after, string wrong)
     {
         if (arms.Count == 0 && rest.Count == 0)
         {
@@ -470,7 +471,7 @@ public sealed partial class Checker
                             var (namesCase, below) = ArmOver(type, rest); // read as an arm of `match` (section 5, the owner, 2026-11-09, #408, comment 6748445211)
                             if (!namesCase && below.Count == 0)
                             {
-                                Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case the call can return beside its success (O5, T1)");
+                                Report(ErrorIds.TypeMismatch, arm.Line, $"`{type}` is no case {wrong}");
                                 armWrong = true;
                             }
                             else if (namesCase ? handled.Any(h => IsCaseOf(type, h)) : below.All(c => handled.Any(h => IsCaseOf(c, h))))

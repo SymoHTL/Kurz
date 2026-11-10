@@ -19,8 +19,10 @@ namespace Kurz.Compiler.Emit;
 /// (K7), with its table where its class has a base or derived classes. A read of a counted field through an instance takes a count of
 /// its own, a temporary of the region, since a call can assign the field through another reference while the value is still in use
 /// (K2, K9). A constructor of a class's body is a function of the module that fills the block it takes, as C#'s <c>.ctor</c> fills
-/// the object <c>new</c> allocated: first what its <c>: this(...)</c> calls, or the base's construction and the defaults of the body,
-/// then its body, whose first assignment of a field stores into a field that holds nothing yet (K14).
+/// the object <c>new</c> allocated: first what its <c>: this(...)</c> calls, or the base's construction, or for a class without a base
+/// the defaults of the body, then its body, whose first assignment of a field stores into a field that holds nothing yet (K14). A class
+/// with a base has no field in its body (<c>not supported</c>), whose defaults section 4 puts before the base's construction, as C#
+/// runs the field initializers of a derived class first.
 /// </summary>
 public sealed partial class Emitter
 {
@@ -240,7 +242,8 @@ public sealed partial class Emitter
     /// <summary>
     /// K14: the function <see cref="Constructor"/> names, which takes the block of the instance and the parameters, which it borrows:
     /// what its <c>: this(...)</c> calls, a construction into the same block; without one the base's construction into that block,
-    /// the one <c>: base(...)</c> picks or C#'s implied <c>base()</c>, and the defaults of the body (<see cref="ClassDefaults"/>); then
+    /// the one <c>: base(...)</c> picks or C#'s implied <c>base()</c>, or for a class without a base the defaults of the body
+    /// (<see cref="ClassDefaults"/>), since a class with a base has no field in its body (<c>not supported</c>); then
     /// its body, with the instance as <c>this</c>, whose table no code there reads, since the checker refuses <c>this</c> and a method
     /// of it in a class with derived classes. A trace names its frame by the class, as the construction is written.
     /// </summary>
@@ -286,7 +289,8 @@ public sealed partial class Emitter
             {
                 if (made.BaseCall is { } baseCall)
                 {
-                    // `: base(...)` or C#'s implied `base()`: the base's part of the block, before the defaults and the body (K14)
+                    // `: base(...)` or C#'s implied `base()`: the base's part of the block, before the body; the class has no defaults of
+                    // its body to run, a field there being `not supported` where a base is, whose defaults section 4 puts first (K14)
                     InRegion(() => Construct(symbol.Base!, baseCall, Model.CallOf(baseCall), () => "%this"));
                 }
 

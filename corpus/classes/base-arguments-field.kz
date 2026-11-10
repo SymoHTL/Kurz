@@ -1,0 +1,10 @@
+// expect: error unknown-name at 7
+// rules: K14
+
+class Animal(int Legs)
+
+class Dog : Animal {
+    pub Dog() : base(Legs) { }
+}
+
+print(Dog().Legs)

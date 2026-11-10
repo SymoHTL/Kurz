@@ -14,6 +14,7 @@ extern "C" {
     int* __errno_location()
     int open(byte* path, int mode, ...)
     long pread(int fd, byte* bytes, long count, long offset)
+    long lseek(int fd, long offset, int whence)
     byte* getenv(byte* name)
     ulong getauxval(ulong type)
     int mprotect(void* address, long length, int protection)
@@ -1792,6 +1793,21 @@ pub long ReadFile(int fd, byte* bytes, long count) {
     }
 
     return Checked(result)
+}
+
+// The position of the file `fd` moved to `offset` bytes from its start, by `lseek` with `SEEK_SET` (0), as Rust's
+// `Seek::seek(SeekFrom::Start(n))` moves it (S27): 0, or the failure, `ESPIPE` (29) on a socket or a pipe, which the
+// kinds give as `NotSeekable`.
+pub long Seek(int fd, long offset) {
+    mut long result = 0
+    raw {
+        long moved = lseek(fd, offset, 0)
+        if moved < 0 {
+            result = Checked(moved)
+        }
+    }
+
+    return result
 }
 
 // The thread put to sleep while the lock word of a file at `word` holds `expected`, by `futex` (202,

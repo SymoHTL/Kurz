@@ -744,8 +744,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - a time of a count (T38), `duration.FromSeconds(n)` and its siblings and `timestamp.FromUnixSeconds(n)`
   and `timestamp.FromUnixMilliseconds(n)`: a `long` count multiplied, a `double` one split at its point,
   its whole units multiplied and its fraction rounded to the nearest nanosecond, ties to even, with the
-  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, each raising
-  `overflow` in every build where the time leaves the range, NaN and an infinity among them;
+  error of the fraction's product (LLVM's `fma`) deciding a product rounded onto a half, but for a count
+  of nanoseconds, which is rounded whole, since a tie of its fraction, split off, would go to the even
+  fraction, 3.5 to 3, where ties to even give 4 (every other unit is an even count of nanoseconds, so
+  its whole units keep the parity the fraction's rounding picked), each raising `overflow` in every
+  build where the time leaves the range, NaN and an infinity among them;
 - a reading of the monotonic clock, an `instant` (T36), as the `i64` of its nanoseconds: the difference
   of two readings a `duration`, a reading plus or less a narrow duration a reading, each raising
   `overflow` in every build where it leaves the range, the comparisons, a field, a map's key and its
@@ -1055,7 +1058,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   block the system refuses ends the program with `allocation-failed` and the bytes the allocator was
   asked for, the block's counts and keys among them, as a list's growth does (M9);
 - files and sockets (chapter 13), in a build for Linux: each call of `File`, `Directory`, `TcpListener`
-  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Write` and `Close`, each of a
+  and `TcpStream`, the second form of `TcpStream.Connect`, each of a file's and a stream's `Read`, `Fill`, `Consume`, `Seek`, `Write` and `Close`, each of a
   stream's `SetReadTimeout` and `SetWriteTimeout` and of a listener's `SetAcceptTimeout`, whose `duration?` reaches the runtime as its nanoseconds and whether it is
   not `null`, each of a stream's `ShutdownWrite` and `SetNoDelay`, and each of a listener's
   `Accept` and `Close` calls the Linux runtime's function (above), and a result below 0 makes the
@@ -1063,7 +1066,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose text is the words of its kind and its path, the system's number after the words of `Other` (S1); a `File`, a `TcpListener` and a `TcpStream` are the address of a block of 56 bytes,
   the count of the values that hold it, the descriptor, a listener's port, which `l.Port` reads, the path or the address, which a stream from `Accept` takes from its listener (S9), and the buffer its reads and a file's lines are read through with the position and the count of its bytes and the word of its lock (S3, S16), and the word of the calls in
   flight on it, counted as a list's block is and closed at zero where no `Close` marked it, the error of that close ignored, the buffer
-  freed with the block; each `Read`, `Fill`, `Consume`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
+  freed with the block; each `Read`, `Fill`, `Consume`, `Seek`, `Write`, `ShutdownWrite`, setter, `Accept` and pull of a line is a call in flight, which a
   compare-and-swap adds 2 to the word for after the call's arguments and before it reads the descriptor and an atomic subtraction
   takes off at its end, and `Close` sets the word's mark, 1, by a compare-and-swap, so that every later call through any holder, a
   second `Close` among them, finds it and gets the system's error of a descriptor that is not open, 9, with no system call, and the
@@ -1082,6 +1085,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   left where it is, and where it holds none fills it as such a read does and takes all that read gave, the room in the list made for
   the bytes it appends, and a fill that finds the mark keeps none of them; `Consume` raises `index-out-of-range` for an `n` below 0
   before it enters and for one past the bytes the buffer holds under the lock, and else moves the position by `n` (S24);
+  `Seek` raises `index-out-of-range` for an offset below 0 before it enters, and under the lock calls the runtime's `Seek`, the
+  system's `lseek` from the start, whose failure leaves the buffer as it was and whose success sets its position and count to 0 (S27);
   `for line in f.Lines()` holds the file while it runs and pulls a line a round
   through a helper that takes the file's lock, a compare-and-swap from 0 to 1 and else Rust's futex wait, makes the buffer of 8192
   bytes at the first pull, reads it again where every byte of it was taken, looks for the next `\n` with `std/`'s `Find` and gathers
@@ -1857,7 +1862,7 @@ functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
-`HttpBody`, `HttpResponse`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
+`HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
 `HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
@@ -2503,9 +2508,11 @@ round can ask about it by the rule's id.
   `readonly` field and Rust's an immutable binding: the paths join where the paths of N3 join, a loop
   is read again until what it keeps holds, a `while true` leaves by its `break`s alone, and a `throw`
   leaves no path. The base's constructor runs before the body, as C#, Java and Swift run it: the one
-  `: base(...)` picks, whose arguments read the parameters and no instance, else the one that takes
-  no arguments, as C#'s implied `base()`, and where the base has none the constructor that implies
-  it is `argument-mismatch`, as C#'s CS7036. `base` is read as that word right after a
+  `: base(...)` picks, whose arguments read the parameters and no instance, else the one that a call
+  with no arguments reaches, the defaults of its parameters given, as C#'s implied `base()`, and where
+  the base has none the constructor that implies
+  it is `argument-mismatch`, as C#'s CS7036, and `: base(...)` in a class without a base class is
+  `syntax` (the owner, 2026-11-09, #409, comment 6737367678). `base` is read as that word right after a
   constructor's `:` alone, as `as` in a `use` line, and is a name everywhere else (L18).
 - K20 with T6, T7 and T25: the initial values of the `static` fields are checked class by class and
   field by field, in source order, and a read of a field whose value is not checked yet checks that
@@ -2561,10 +2568,15 @@ round can ask about it by the rule's id.
   The rule is judged after every body, when the lambdas are known, and the text of a ring
   through such a field names R9 beside R2 *(assumed)*. A class of `std/` with such a field is a step
   of the file's rings too; a ring of `std/`'s classes alone, which a lambda of the file closes, is
-  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*. A ring
+  reported at the line of the file's first lambda that captures a class of the ring *(assumed)*, or,
+  where the field counts a lambda of `std/` or of a folder that captures a class of the ring only
+  through a function value a lambda of the file captures, at the line of the file's first such lambda
+  *(R9, assumed)*. A ring
   of classes of `std/` or of a folder alone, which a lambda of `std/` or of a folder closes through a
   type argument that only a call of the file gives, is reported at the file's first such call (the
-  owner, 2026-11-05), since the checker of `std/` or of the folder does not see that call. One that
+  owner, 2026-11-05, #39, comment 6664350645), since the checker of `std/` or of the folder does not
+  see that call, a call counting only where it gives the argument to a lambda a field of the ring
+  counts, a reading of that answer *(assumed)*. One that
   neither a lambda nor a call of the file closes is `std/`'s own, or the folder's. A stored lambda is counted as a function value
   is, a read of the field for a call takes a count of its own (K2), so a lambda that replaces the
   field it is called through runs on, and the instance's release lets go of the environment. Pinned

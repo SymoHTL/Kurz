@@ -143,7 +143,7 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     {
         // P1 outside the type's methods: a parameter of a primary constructor named `Log`, whose type has an `Information` of its own,
         // beside a log call in a field's default and in a property, each inside a lambda, and properties that give the member by
-        // its name alone and through `this`; and a method named `Log`, called in a method and in a property's lambda
+        // its name alone and through `this`; and a method named `Log`, called in a property's lambda
         const string text = "class Sink {\n    pub void Information(string s) {\n        print(s)\n    }\n}\n\nclass Orders(Sink Log) {\n    () => void report = () => Log.Information(\"in a field's default\")\n\n    pub () => void Notice => () => Log.Information(\"in a property\")\n\n    pub Sink Kept => Log\n\n    pub Sink Through => this.Log\n\n    pub void Pay() {\n        report()\n        n = Notice\n        n()\n        k = Kept\n        k.Information(\"the member through a property\")\n        t = Through\n        t.Information(\"the member through this in a property\")\n    }\n}\n\nclass Audit {\n    pub void Log() {\n        print(\"the method Log\")\n    }\n\n    pub () => void Call => () => Log()\n\n    pub void Run() {\n        c = Call\n        c()\n        Log.Information(\"a log call beside a method named Log\")\n    }\n}\n\no = Orders(Sink())\no.Pay()\na = Audit()\na.Run()\n";
         if (Logged(text, "log-member-outside-a-method") is { } run)
         {
