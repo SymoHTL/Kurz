@@ -27,10 +27,17 @@ A probe of 2026-11-10 (.NET SDK 10.0.402, runtime 10.0.13, Linux) read:
 - A fold that must give the `double` the program computes converts the constant through the C#
   type of the program's integer, `(double)(ulong)` or `(double)(long)`, never `(double)` of the
   `BigInteger`.
+- A fold whose constant can lie beyond a `ulong`, an integer literal typed `float` or `double`,
+  reads the integer's invariant digits once with `float.Parse` or `double.Parse` (`FloatOf` and
+  `DoubleOf`, `compiler/Kurz.Compiler/Semantics/Checker.Expressions.cs`), which rounds once, as C#
+  folds the constant. The cut gave two defects of that kind, fixed by pull requests 436 (`float`)
+  and 438 (`double`).
 - A test of such a rounding takes a value whose cut and rounding differ: 2^53 + 3, where 2^53 + 1
   is a tie that both give as 2^53, and 2^63 - 1, which rounds out of a `long`'s range and cuts into
   it.
 
 The gate is `compiler-tests` for T38's fold: `CheckerTests` refuses `duration.FromNanoseconds` of
-2^63 - 1 as a `ulong` constant, which a cut would let through. Another fold that converts a
+2^63 - 1 as a `ulong` constant, which a cut would let through, and `FloatingTests` holds the
+folds of an integer literal typed `float` and one typed `double` to the conversion at run time.
+Another fold that converts a
 `BigInteger` to a `double` is a `judgment step` for its author and the review.
