@@ -152,8 +152,7 @@ does not name)*; where no class of the program implements both, it is `type-mism
 class `Dot` implements `Shape`, covers `Dot` and is no error (§5, the owner, 2026-11-10, issue 39, comment 6763339742,
 "As built"); how a package built without the program that uses it reads such an arm stands
 open (§14). Such an arm is `unreachable-arm` where the arms above take every case it tests,
-as an arm that can never run is, and so is an arm of a class that implements both after it, `Shape s` then `Dot d` over
-`Named | int`, since the earlier arm covers its type (§5, the owner, 2026-10-09). Which classes
+as an arm that can never run is (§5, the owner, 2026-10-09). Which classes
 derive from a class and which implement an
 interface is read over the program compiled whole (§2), so each of these arms is judged on every class of the program.
 An arm that tests the class of the instance at run time makes no later such arm `unreachable-arm` by the classes the
