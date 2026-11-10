@@ -32,9 +32,9 @@ Seen on 2026-11-09 on pull request 426. The merge of `main` into its branch was 
 77be7dff, and `git push` printed `remote rejected` with `cannot lock ref`: the branch "is at
 77be7dff but expected 17ca00ec", the head before. The branch had moved all the same:
 `git ls-remote` and the branches API named 77be7dff. The pull request did not: it named 17ca00ec
-eight minutes later, and again when read before the next push, and no workflow run started on
-77be7dff, neither `gates` nor `compiler-windows` nor the review run. The forge's status page named
-no incident. An empty commit on 77be7dff, so the same tree, pushed as any push (8f64ef0a, the
+when read before the next push. No workflow run had started on 77be7dff eight minutes after the
+push, and none ever did, neither `gates` nor `compiler-windows` nor the review run. The forge's
+status page named no incident. An empty commit on 77be7dff, so the same tree, pushed as any push (8f64ef0a, the
 message saying why), was taken up: the pull request named it, and the three workflows ran on it.
 Closing and reopening the pull request was not tried, since a reopen can start a review run, and
 a run that started is a bill ([[a-cancel-does-not-beat-the-runner]]).
