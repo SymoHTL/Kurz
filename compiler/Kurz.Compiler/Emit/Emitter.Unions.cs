@@ -103,9 +103,14 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(to)}, ptr {result}");
     }
 
-    /// <summary>C4: whether an arm of <paramref name="armType"/> takes every value of the case: the case is the type or derived from it (D6).</summary>
+    /// <summary>
+    /// C4: whether an arm of <paramref name="armType"/> takes every value of the case: the case is the type or derived from it (D6), or a
+    /// class that implements the arm's interface or derives from the arm's class, which the tag decides with no test of the instance's
+    /// class (the owner, 2026-11-09, #408).
+    /// </summary>
     private static bool TakesCase(KurzType c, KurzType armType) =>
-        Types.Same(c, armType) || (c is DataType && armType is DataType && Types.Assignable(c, armType));
+        Types.Same(c, armType) || (c is DataType && armType is DataType && Types.Assignable(c, armType))
+        || (c is ClassType k && ((armType is InterfaceType face && k.Symbol.Implements(face.Symbol)) || (armType is ClassType b && k.Symbol.HasBaseOrIs(b.Symbol))));
 
     // ---- `match` (C4, C9) ------------------------------------------------------------------------
 
@@ -185,8 +190,9 @@ public sealed partial class Emitter
     /// <summary>
     /// Branches to <paramref name="body"/> when the arm's pattern takes the value and to <paramref name="next"/> when it does not.
     /// <c>else</c> takes every value; a literal (C9) a value equal to it, of its case in a union; a type every value of a case
-    /// that is the type or derived from it, and of a case it derives from the values whose block holds it or a type derived from
-    /// it (C4, D6). A type's arm binds the value, as the arm's type, to its name; the slot it is in is returned, null for the others.
+    /// that is the type or derived from it, or whose class implements it or derives from it, and of a case it derives from the values whose block holds it
+    /// or a type derived from it, and of an interface case, as another interface, the values whose class implements it too (C4, D6, K6). A type's arm
+    /// binds the value, as the arm's type, to its name; the slot it is in is returned, null for the others.
     /// </summary>
     private string? Test(Pattern pattern, string value, KurzType type, string? tag, IReadOnlyList<KurzType> cases, string body, string next)
     {
@@ -235,9 +241,10 @@ public sealed partial class Emitter
                         }
 
                         var take = fn.Label("derived");
-                        if (armType is ClassType armClass)
+                        if (armType is ClassType or InterfaceType)
                         {
-                            var (holds, held) = ClassArm(value, type, armClass.Symbol); // the instance's class is the arm's or derives from it (K6)
+                            var (holds, held) = armType is ClassType armClass ? ClassArm(value, type, armClass.Symbol) // the instance's class is the arm's or derives from it (K6)
+                                : FaceArm(value, ((InterfaceType)type).Symbol, ((InterfaceType)armType).Symbol); // the instance's class implements the arm's interface too (C4)
                             fn.CondBranch(holds, take, next);
                             fn.Block(take);
                             fn.Emit($"store {Ir(armType)} {held}, ptr {slot}");
@@ -255,7 +262,7 @@ public sealed partial class Emitter
                     foreach (var c in cases)
                     {
                         var takes = TakesCase(c, armType);
-                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)))
+                        if (!takes && !(armType is DataType or ClassType && c is DataType or ClassType or InterfaceType && Types.Assignable(armType, c)) && !(armType is InterfaceType && c is InterfaceType))
                         {
                             continue;
                         }
@@ -269,10 +276,11 @@ public sealed partial class Emitter
                         {
                             fn.Emit($"store {Ir(armType)} {Convert(payload, c, armType, tp.Line)}, ptr {slot}");
                         }
-                        else if (armType is ClassType armClass)
+                        else if (armType is ClassType or InterfaceType)
                         {
                             var take = fn.Label("derived");
-                            var (holds, held) = ClassArm(payload, c, armClass.Symbol); // the instance's class is the arm's or derives from it (K6)
+                            var (holds, held) = armType is ClassType armClass ? ClassArm(payload, c, armClass.Symbol) // the instance's class is the arm's or derives from it (K6)
+                                : FaceArm(payload, ((InterfaceType)c).Symbol, ((InterfaceType)armType).Symbol); // the instance's class implements the arm's interface too (C4)
                             fn.CondBranch(holds, take, other);
                             fn.Block(take);
                             fn.Emit($"store {Ir(armType)} {held}, ptr {slot}");

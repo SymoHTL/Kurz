@@ -288,7 +288,10 @@ print(a.Value)
 
 ### D6 (decided, §4) A `data` type may inherit from another
 
-A value of the derived type can be used wherever the base type is required.
+A value of the derived type can be used wherever the base type is required. An arm of a `data`
+type covers the cases of a union whose types derive from it (C4; §5, the owner, 2026-11-09, #408,
+comment 6748445211, "Cover, as a base class"), and one that no case derives from is `type-mismatch`,
+as an arm of a type the value cannot have is (C4; §5, the owner, 2026-10-11).
 
 Case: [control/match-unreachable-arm.kz](../corpus/control/match-unreachable-arm.kz)
 ```kurz
@@ -385,6 +388,20 @@ data Node(int Value) : Node
 data Leaf(int Size) : Node
 
 print(1)
+```
+
+Case: [control/match-data-arm-no-derived.kz](../corpus/control/match-data-arm-no-derived.kz)
+```kurz
+data Beast(string Name)
+data Stray(string Name)
+data Gone
+
+string Say(Stray | Gone v) => match v {
+    Beast b => b.Name
+    else => "gone"
+}
+
+print(Say(Gone))
 ```
 
 ### D7 (decided, §4) How `data` inheritance is written
