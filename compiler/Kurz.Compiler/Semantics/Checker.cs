@@ -180,6 +180,12 @@ public sealed partial class Checker
         /// <summary>K7: set where <see cref="Class"/>'s member being checked is <c>static</c>, a method or a field's initial value, which has no instance.</summary>
         public bool Static { get; init; }
 
+        /// <summary>
+        /// K14: <c>: this(...)</c> or <c>: base(...)</c> where this frame checks a constructor's arguments to it, which read the constructor's
+        /// parameters while no instance exists yet; set with <see cref="Static"/>, since they are a place of <c>static-mismatch</c> (§4).
+        /// </summary>
+        public string? Chain { get; init; }
+
         /// <summary>K14: the constructor of <see cref="Class"/>'s body this frame checks, with the marks of the fields it assigns; a lambda inside it finds it through <see cref="Outer"/>.</summary>
         public Building? Building { get; init; }
 

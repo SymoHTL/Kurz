@@ -1,0 +1,17 @@
+// expect: output
+// | 4
+// | 6
+// rules: K14
+
+class Box(int Size) {
+    pub static int Four = 4
+
+    pub static int Twice(int n) => n * 2
+
+    pub Box() : this(Four) { }
+
+    pub Box(string s) : this(Twice(3)) { }
+}
+
+print(Box().Size)
+print(Box("six").Size)

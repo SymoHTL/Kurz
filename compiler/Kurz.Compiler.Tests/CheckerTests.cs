@@ -3925,9 +3925,10 @@ public sealed class CheckerTests
         // a constructor that calls another assigns no field without `mut`, as a method does not
         Assert.Equal([(ErrorIds.AssignImmutable, 9)], Errors("class P {\n    int x\n\n    pub P(int v) {\n        x = v\n    }\n\n    pub P() : this(1) {\n        x = 2\n    }\n\n    pub int X() => x\n}\n\nprint(P().X())"));
         // a further constructor of a class with a primary constructor calls it, else `constructor-must-chain`; the arguments of
-        // `: this(...)` read the parameters and no instance
+        // `: this(...)` read the parameters and no instance, so a field there is `static-mismatch` (the owner, 2026-11-09, #429,
+        // comment 6752598091), the theory of `static-mismatch` holding its texts
         Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class C(int N) {\n    pub C() { }\n}\n\nprint(C().N)"));
-        Assert.Equal([(ErrorIds.UnknownName, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 2)], Errors("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 2)], Errors("class C(int N) {\n    pub C() : this() { }\n\n    pub C(string s) : this(1) { }\n}\n\nprint(C().N)"));
         // a class without a primary constructor that declares one has no empty one, as C# makes none
         Assert.Equal([(ErrorIds.ArgumentMismatch, 5)], Errors("class C {\n    pub C(int n) { }\n}\n\nprint(C() == C(1))"));
@@ -3956,12 +3957,18 @@ public sealed class CheckerTests
         // owner, 2026-11-09, #409, comment 6737367678, for this id and for `syntax` below)
         Assert.Equal([(ErrorIds.ArgumentMismatch, 6)], Errors("class A {\n    pub A(int n) { }\n}\n\nclass B : A {\n    pub B() { }\n\n    pub B(int n) : base(n) { }\n}\n\nprint(B(1) == B(1))"));
         Assert.Equal([(ErrorIds.ArgumentMismatch, 3)], Errors("class A(int N)\n\nclass B : A\n\nprint(1)"));
-        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, and in a class
-        // without a base class `syntax`; its arguments read no field, take the types of the base's parameters, and reach no
-        // constructor of the base without `pub` (F9)
+        // `: base(...)` in a further constructor of a class with a primary constructor is `constructor-must-chain`, without a base
+        // class (the owner, 2026-11-09, #429, comment 6752598091) and with one (assumed, the same reading), and in a class without a
+        // primary constructor and without a base class `syntax`; its arguments read no field of the instance, a field of the base's
+        // among them, which is `static-mismatch` (that comment), take the types of the base's parameters, and reach no constructor
+        // of the base without `pub` (F9)
         Assert.Equal([(ErrorIds.ConstructorMustChain, 4)], Errors("class A(int N)\n\nclass B(int M) : A(M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.ConstructorMustChain, 2)], Errors("class B(int M) {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("class C {\n    pub C() : base() { }\n}\n\nprint(1)"));
-        Assert.Equal([(ErrorIds.UnknownName, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(N) { }\n}\n\nprint(1)"));
+        // a `static` member of the class is read there as in a `static` method, and one of another class through its name *(assumed)*
+        Clean("class C(int N) {\n    pub static int Four = 4\n\n    pub static int Twice(int n) => n * 2\n\n    pub C() : this(Four) { }\n\n    pub C(string s) : this(Twice(3)) { }\n}\n\nprint(C().N)\nprint(C(\"s\").N)");
+        Clean("class Config {\n    pub static int Four = 4\n}\n\nclass A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Config.Four) { }\n}\n\nprint(Dog().Legs)");
         Assert.Equal([(ErrorIds.TypeMismatch, 4)], Errors("class A(int N)\n\nclass B : A {\n    pub B() : base(\"s\") { }\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("class A {\n    A(int n) { }\n}\n\nclass B : A {\n    pub B() : base(1) { }\n}\n\nprint(1)"));
     }
@@ -4136,10 +4143,17 @@ public sealed class CheckerTests
     [InlineData("class C(mut int V) {\n    pub static int Bad() {\n        V = 3\n        return 1\n    }\n}\n\nprint(C.Bad())", "3: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static () => int Bad() => () => V\n}\n\nprint(1)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
     [InlineData("class C(int V) {\n    pub static int A = V\n}\n\nprint(C.A)", "2: a `static` member has no instance: `V` is a field of an instance of `C` (K7, K19)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Legs) { }\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet: `Legs` is a field of an instance of `Dog` (K14)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(this.Legs) { }\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet, and so no `this` (K14)")]
+    [InlineData("class A(int Legs)\n\nclass Dog : A {\n    pub Dog() : base(Count()) { }\n\n    pub int Count() => 4\n}\n\nprint(1)", "4: the arguments of `: base(...)` read the constructor's parameters, and no instance exists yet: `Count` is a method of an instance of `Dog` (K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(N) { }\n}\n\nprint(C().N)", "2: the arguments of `: this(...)` read the constructor's parameters, and no instance exists yet: `N` is a field of an instance of `C` (K14)")]
+    [InlineData("class C(int N) {\n    pub C() : this(F(() => N)) { }\n\n    pub static int F(() => int f) => f()\n}\n\nprint(C().N)", "2: the arguments of `: this(...)` read the constructor's parameters, and no instance exists yet: `N` is a field of an instance of `C` (K14)")]
     public void A_member_on_the_other_side_of_static_is_static_mismatch_and_names_its_side(string program, string expected)
     {
         // K19, the product pass's Q1 (b): one id for a member of an instance where no instance is, as C#'s CS0120 and CS0026, and for a
-        // `static` member reached through an instance, as C#'s CS0176, its text saying on which side the member is
+        // `static` member reached through an instance, as C#'s CS0176, its text saying on which side the member is; K14: the arguments
+        // of a constructor's `: this(...)` and `: base(...)` are such a place, a lambda among them, with a text that says no instance
+        // exists yet (the owner, 2026-11-09, #429, comment 6752598091)
         var (diagnostics, _) = Check(program);
         Assert.Equal([expected], diagnostics.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
         Assert.All(diagnostics.Items, d => Assert.Equal(ErrorIds.StaticMismatch, d.Id));
