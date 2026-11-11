@@ -551,9 +551,9 @@ The error lines are the record's (section 6): `error: <id> at <file>:<n>` for an
 run-time table, the file named as the command line gave it, and `error: thrown at <file>:<n>:` for
 a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
-no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
-2026-10-23, "Caller passes it"); on Linux a write the system fails with error 9 counts as written
-(`WriteOut`), as Rust's `handle_ebadf` reads it for its `Stdout` and `Stderr` (the owner, 2026-11-11,
+no byte, as Rust's `write_all` fails on a write of zero bytes, in every build, but for error 9 on
+Linux (the owner, 2026-10-23, "Caller passes it"); on Linux a write the system fails with error 9
+counts as written (`WriteOut`), as Rust's `handle_ebadf` reads it for its `Stdout` and `Stderr` (the owner, 2026-11-11,
 "Success, as Rust"), and the runtime's `Start` first opens `/dev/null` in the place of a descriptor 0,
 1 or 2 the caller closed (`Standard`, by `fcntl` with `F_GETFD`, then `open` or `dup`, and `abort`
 where neither can be had), as Rust's `sanitize_standard_fds` does (the owner, 2026-11-11, "0, 1, 2 as

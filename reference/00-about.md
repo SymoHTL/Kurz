@@ -80,8 +80,9 @@ run-time error `print-failed` (§6, the owner, 2026-10-21), at the file and the 
 the `print` passes, in every build (§6, the owner, 2026-10-23). On Linux a descriptor 1 that the program's
 caller closed is `/dev/null` from the start, into which a `print` writes and succeeds, and a write the
 system fails with error 9, a descriptor 1 open for reading alone, counts as written whole, as Rust's
-`Stdout` reads it *(decided, §12: the owner, 2026-11-11, "0, 1, 2 as Rust" and "Success, as Rust";
-assumed there: Linux alone)*.
+`Stdout` reads it, and where `/dev/null` can be neither opened nor taken again by `dup` the process ends by
+`abort`, with no report, as Rust's *(decided, §12: the owner, 2026-11-11, "0, 1, 2 as Rust" and "Success,
+as Rust"; assumed there: Linux alone, and the end by `abort`)*.
 
 No case: every case that expects output shows it, and no case can make a write of standard output
 fail, which `print-failed` needs.
@@ -97,7 +98,7 @@ and the program ends with the code of an error that ends it.
 *(assumed, §12: the file's own `eprint`, and the report dropped)* On Linux a closed descriptor 2 is
 `/dev/null` from the start, and a write the system fails with error 9 counts as written, as for `print`
 (A1) *(decided, §12: the owner, 2026-11-11, "0, 1, 2 as Rust" and "Success, as Rust"; assumed there:
-the runtime's own report lost with an `eprint`'s line, as Rust's panic message is lost)*.
+Linux alone, and a closed descriptor 2 losing the runtime's own report, as Rust loses its panic message)*.
 
 No case for what it writes: the lines of a case's header are what the program writes to standard
 output, and a case that expects output writes nothing to standard error.
