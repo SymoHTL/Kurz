@@ -90,9 +90,10 @@ pub void Start(int count, byte* values) {
 // the owner, 2026-11-11, "0, 1, 2 as Rust"), as Rust's `sanitize_standard_fds` does at the start of a
 // process (`library/std/src/sys/pal/unix/mod.rs` of rust-lang/rust, read on 2026-11-11). A descriptor is
 // closed where `fcntl` with `F_GETFD` (1) fails with `EBADF` (9), the check Rust falls back to where its
-// one `poll` of the three cannot run: three calls of the system where Rust's `poll` makes one, since the
-// runtime has no place for the three structures `poll` takes before the program's first allocation (the
-// owner, 2026-11-11, "Three fcntl, as built"). The
+// one `poll` of the three cannot run: three calls of the system where Rust's `poll` makes one. The
+// runtime keeps no place for the three structures `poll` takes before the program's first allocation;
+// one could be made, as a new form of the runtime for a place of 24 bytes, and the owner chose the three
+// calls against it (2026-11-11, "Three fcntl, as built", issue 174, comment 6798189188). The
 // `/dev/null` opened first is taken again by `dup` for the next closed one, as Rust takes it; `open` and
 // `dup` give the lowest free number, the closed one, since the lower ones are open by then. Where
 // neither can be had the process ends by `abort`, as Rust's does, with no report, since the descriptor
