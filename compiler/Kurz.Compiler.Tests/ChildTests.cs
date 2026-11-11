@@ -12,7 +12,7 @@ namespace Kurz.Compiler.Tests;
 /// a child gets the program's environment less and with what its members took away and set, in the order of their calls; a program
 /// named without a <c>/</c> is looked up in the <c>PATH</c> the child gets, a directory that refuses it passed over, and in the
 /// default path where the child gets none; a start that fails names the program, or the directory <c>Dir</c> named where that is
-/// what failed; a child gets no descriptor but its three streams, and its standard input where the program started with its own
+/// what failed, a second <c>Dir</c> replacing the first; a NUL byte in any string of a command is <c>InvalidInput</c>; a child gets no descriptor but its three streams, and its standard input where the program started with its own
 /// closed; <c>Status()</c> gives it the program's streams, and a stream set
 /// to <c>Stdio.Piped</c> that the call does not read is closed at once; and a build for Windows says <c>not supported</c> at each
 /// call. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, whose command <c>setup</c> makes the files a
@@ -184,19 +184,43 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_start_that_fails_names_the_program_or_the_directory_dir_named()
     {
         // S21: the path of a failed start is the program, or the directory where that is what failed, never an argument; an empty
-        // program is `NotFound` with the empty path
+        // program is `NotFound` with the empty path; a second `Dir` replaces the first, each way round
         const string body = """
-                for c in [Command.New("kurz-case-no-such").Arg("a"), Command.New("true").Dir("kurz-case-no-dir").Arg("a"), Command.New("")] {
+                for c in [Command.New("kurz-case-no-such").Arg("a"), Command.New("true").Dir("kurz-case-no-dir").Arg("a"), Command.New(""), Command.New("true").Dir("kurz-case-no-dir").Dir("."), Command.New("true").Dir(".").Dir("kurz-case-no-dir")] {
                     c.Status() else {
                         IoError e => print("{e.Kind} [{e.Path}]")
                         ExitError e => print(e)
                     }
+
+                    print("called")
                 }
             """;
         if (Ran(Program(body), "child-start-failed") is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
-            Assert.Equal(["NotFound [kurz-case-no-such]", "NotFound [kurz-case-no-dir]", "NotFound []"], ran.Output);
+            Assert.Equal(["NotFound [kurz-case-no-such]", "called", "NotFound [kurz-case-no-dir]", "called", "NotFound []", "called", "called", "NotFound [kurz-case-no-dir]", "called"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_nul_byte_in_any_string_of_a_command_is_invalid_input_with_the_number_0()
+    {
+        // S21: in the program, an argument, the directory, and a name or a value of the environment, each refused before any call of
+        // the system, so that no directory is entered and no program is looked up; the positive control runs the same command clean
+        const string body = """
+                for c in [Command.New("tr\0ue"), Command.New("true").Arg("a\0"), Command.New("true").Dir("kurz-case-no-dir\0"), Command.New("true").Env("KURZ\0CASE", "1"), Command.New("true").Env("KURZ_CASE", "1\0"), Command.New("true").EnvRemove("KURZ\0CASE"), Command.New("true").Env("KURZ_CASE", "1")] {
+                    c.Status() else {
+                        IoError e => print("{e.Kind} {e.Code}")
+                        ExitError e => print(e)
+                    }
+
+                    print("called")
+                }
+            """;
+        if (Ran(Program(body), "child-nul") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "called"], ran.Output);
         }
     }
 

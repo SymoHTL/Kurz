@@ -1197,12 +1197,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   each to its end, as Rust's `output()` does, so that a process the child leaves behind holding a pipe holds the call too;
   a pipe the call does not read is closed at once (S19). The program waits for the child on every path. The result is a
   union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
-  `runtime/common/`. A build for Windows says `not supported` to each call on a command. `ChildTests` pins what no case can:
-  a chain and `cmd = cmd.Arg(x)` built with no copy, under a runtime whose copy of a list fails; both pipes filled past what a
-  pipe holds; the environment a child gets; the places a program is looked up in; the path of a
-  start that fails; the descriptors a child gets; its standard input where the program started with its own closed; the
-  streams of `Status()` and those `Output()` does not read; the refusal
-  for Windows; and a use of a command outside its members;
+  `runtime/common/`. A build for Windows says `not supported` to each call on a command. `ChildTests` pins what no case can: a
+  chain and `cmd = cmd.Arg(x)` built with no copy, under a runtime whose copy of a list fails; both pipes filled past what a
+  pipe holds; the environment a child gets; the places a program is looked up in; the path of a start that fails, and a second
+  `Dir` that replaces the first; a NUL byte in each string of a command; the descriptors a child gets; its standard input
+  where the program started with its own closed; the streams of `Status()` and those `Output()` does not read; the refusal for
+  Windows; and a use of a command outside its members;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
