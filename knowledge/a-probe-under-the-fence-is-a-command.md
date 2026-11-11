@@ -45,6 +45,18 @@ on 2026-10-30 a program that made a list for each chunk of 64 bytes of an input 
 memory under the fence to 3.7 GB. Probe such a program with less data, and read 137 as the fence's
 cost, 139 as a fault.
 
+## A claim of a freed block is the probe's result
+
+On 2026-11-11, reading the findings of the round of pull request 456, a session wrote up a `mut`
+receiver reached through a field of an instance as a write after free, on a run without the fence
+that printed the value it expected. The probe under the fence exited 0: the read of the instance
+holds a count to the end of the statement (`InstanceField`, K2), so the method writes into a block
+that is still alive. The reading on issue 39 was corrected (comment 6788627649), and the finding
+became a comment the code lacked and a line of the fenced program. A freed block keeps its bytes
+until something else takes it, so a run without the fence shows nothing of a freed block either
+way: before a read or a write after free goes into a reading, a thread or an issue, the program runs
+under `--fenced`, with the run without it as the control (`judgment step`).
+
 Gate: `compiler-tests` (`ProbeTests`: a clean program with and without the fence, a read through a
 list's pointer after its block was freed that ends the program under the fence and prints the
 value without it, a program's errors, and a command line the probe does not read, a missing file
