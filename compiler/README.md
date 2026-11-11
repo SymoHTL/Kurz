@@ -1133,10 +1133,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the process goes through: `Stdin.Read` reads as a file's `Read` does, `for line in Stdin.Lines()` pulls as a loop over a file's
   lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
   the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
-  its end, with room for 8192 more bytes made before each read; each is a call in flight. The module declares the handle where a
-  file of the program calls a member of `Stdin`, and a build for Windows says `not supported` to each such call and loop.
-  `StdinTests` pins what no case can: lines given on standard input and read across a loop, `ReadLine`, `Read` and `ReadAll`; a
-  line that is not UTF-8; a closed descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
+  its end, with room for 8192 more bytes made before each read; each is a call in flight. A read that gives the system's error 9,
+  of a descriptor 0 the caller closed, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does. Where the
+  read of `ReadAll` fails otherwise, the bytes it took go back to the reader's buffer from its start (`KeepRest`), made again with
+  room for them where it has less, and the handle keeps that room after a handle's fields, so that the next one frees it with its
+  size. The module declares the handle where a file of the program calls a member of `Stdin`, and a build for Windows says
+  `not supported` to each such call and loop. `StdinTests` pins what no case can: lines given on standard input and read across a
+  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a closed descriptor 0, and a directory, whose read fails; a
+  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
   whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
