@@ -6,7 +6,7 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The decisions on running a program (S17, S18, S21; design record, section 12) that no corpus case pins, since a case runs with no
+/// The decisions on running a program (S17, S18, S20, S21; design record, section 12) that no corpus case pins, since a case runs with no
 /// file of its own, no variable of its own and no descriptor but its three streams: a chain and <c>cmd = cmd.Arg(x)</c> build one
 /// command with no copy, and a command another value holds is copied; <c>Output()</c> reads both pipes as they fill;
 /// a child gets the program's environment less and with what its members took away and set, in the order of their calls; a program
@@ -17,8 +17,10 @@ namespace Kurz.Compiler.Tests;
 /// or the environment the child gets is <c>InvalidInput</c>; a read of the output that fails is the call's <c>IoError</c>, named by
 /// the program, once both pipes are closed and the child waited for; a child gets no descriptor but its three streams, where the system refuses <c>close_range</c> too, and its standard
 /// input where the program's own native code closed its own; <c>Status()</c> gives it the program's streams, and a stream set
-/// to <c>Stdio.Piped</c> that the call does not read is closed at once; and a build for Windows says <c>not supported</c> at the
-/// first call on a command. Each program that <see cref="Ran"/> starts runs under the runtime it is given, this machine's unless a
+/// to <c>Stdio.Piped</c> that the call does not read is closed at once; a bound that passes kills a child still running and gives
+/// <c>TimedOut</c>, at the start where it is 0 or below, and a child that ends before its bound gives its own status, at the bound
+/// where a process it left behind holds a pipe; and a build for Windows says <c>not supported</c> at the first call on a command.
+/// Each program that <see cref="Ran"/> starts runs under the runtime it is given, this machine's unless a
 /// test edits it, through <c>/bin/sh</c>, whose command <c>setup</c> makes the files a
 /// program finds, so that no file the test host wrote is started (<c>knowledge/a-file-this-process-wrote-does-not-start-beside-a-fork.md</c>);
 /// on Windows the tests hold the build's refusal instead.
@@ -75,7 +77,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_chain_and_an_assignment_of_a_member_to_its_variable_build_one_command_in_place()
     {
         // S17, section 12, the owner, 2026-11-01, P1: each step of a chain, whose command no other value holds, and `cmd = cmd.Arg(x)`,
-        // which keeps no earlier command, write into the one block, so that a runtime whose every copy of a list fails runs them, and
+        // which keeps no earlier command, `Timeout(d)` among its members (S20), write into the one block, so that a runtime whose every
+        // copy of a list fails runs them, and
         // an argument of such an assignment reads the command as it was before the assignment; a command another value holds is
         // copied, which that runtime ends with `allocation-failed`, the positive control
         var text = Program("""
@@ -83,7 +86,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 print(string.FromUtf8(out.Stdout))
                 mut d = Command.New("printf").Arg("%s,")
                 for w in ["p", "q"] {
-                    d = d.Arg(w).Arg("{w}{w}")
+                    d = d.Arg(w).Timeout(10s).Arg("{w}{w}")
                 }
 
                 print(string.FromUtf8(d.Output().Stdout))
@@ -343,6 +346,33 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_read_that_fails_under_a_bound_stays_the_calls_error_and_the_wait_after_it_ends_at_the_bound()
+    {
+        // S18, S20 (assumed, §12, with the build of the bound): the wait after a read that fails is held to the bound, so that a
+        // child that neither writes nor ends is killed when it passes, and the read's `IoError` stays the call's error then, as it
+        // does where the child ends with 3 before its bound; a wait that is not held to the bound waits on `sleep` past the run's
+        // limit, and a kill that takes the call's error prints `TimedOut [sh]`; the positive control, under this machine's runtime,
+        // reads the byte and gives `TimedOut` at the bound, and the child's own status where it ends before it
+        var text = Program("""
+                for c in [Command.New("sh").Args(["-c", "printf a; exec sleep 60"]).Timeout(500ms), Command.New("sh").Args(["-c", "printf a; sleep 0.2; exit 3"]).Timeout(10s)] {
+                    match c.Output() {
+                        ProcessOutput o => print(o.Stdout.Count)
+                        IoError e => print("{e.Kind} [{e.Path}]")
+                        ExitError e => print(e)
+                    }
+                }
+            """);
+        if (Ran(text, "child-read-fails-bound", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sh]", "Other [sh]"], ran.Output);
+            var control = Ran(text, "child-read-bound-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["TimedOut [sh]", "exit status 3: sh"], control.Output);
+        }
+    }
+
+    [Fact]
     public void Status_gives_the_child_the_programs_streams_and_output_gives_empty_bytes_for_one_it_does_not_pipe()
     {
         // S18, S21: `Status()` gives the child the program's three streams; `Output()` gives empty `Bytes` for a stream set to
@@ -382,10 +412,140 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    /// <summary>
+    /// Two functions a program of the bound calls: the case of <c>Status()</c> and the case or the output's count of <c>Output()</c>, as a
+    /// line, so that a program goes on after a failed call.
+    /// </summary>
+    private const string Cases = """
+        string Waited(Command c) {
+            c.Status() else {
+                IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+                ExitError e => return "{e}"
+            }
+
+            return "ended"
+        }
+
+        string Tried(Command c) {
+            match c.Output() {
+                ProcessOutput o => return "{o.Stdout.Count}"
+                IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+                ExitError e => return "{e}"
+            }
+        }
+
+        """;
+
+    [Fact]
+    public void A_bound_that_passes_kills_the_child_and_gives_timed_out_with_the_program_as_its_path()
+    {
+        // S20: `Status()` and `Output()` kill a child still running at its bound, `Output()` after part of its output, and a bound of 0
+        // or below has passed at the start, so that the child is killed once it started; a program that does not start is `NotFound`,
+        // as without a bound (S21), and of two bounds the later holds (S21's order). Each child would run ten seconds, so the program's
+        // own clock, read from before the first call on, shows that each was killed (knowledge/a-test-clock-holds-only-its-bound.md).
+        var text = Program("""
+                start = instant.Now
+                for c in [Command.New("sleep").Arg("10").Timeout(100ms), Command.New("sleep").Arg("10").Timeout(0s), Command.New("sleep").Arg("10").Timeout(-1ms), Command.New("kurz-case-no-such").Timeout(0s), Command.New("sleep").Arg("10").Timeout(10s).Timeout(100ms)] {
+                    print(Waited(c))
+                }
+
+                print(Tried(Command.New("sh").Args(["-c", "echo part; exec sleep 10"]).Timeout(300ms)))
+                print(start.Elapsed < 8s)
+            """) + Cases;
+        if (Ran(text, "child-bound-passed") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["TimedOut [sleep] 0", "TimedOut [sleep] 0", "TimedOut [sleep] 0", "NotFound [kurz-case-no-such] 2", "TimedOut [sleep] 0", "TimedOut [sh] 0", "true"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_child_that_ends_before_its_bound_gives_its_own_status_at_its_end()
+    {
+        // S20: a child that ends before its bound gives its output and its status as without a bound, at its end and not at the bound;
+        // the largest `duration` as a bound is held at the largest time of the clock, not wrapped past it into the past; of two bounds
+        // the later holds (S21's order), so that a child of one second under `Timeout(100ms).Timeout(10s)` ends with its own status
+        var text = Program("""
+                start = instant.Now
+                quick = Command.New("sh").Args(["-c", "echo ok"]).Timeout(duration.FromNanoseconds(9223372036854775807)).Output()
+                print(string.FromUtf8(quick.Stdout).Split("\n"))
+                print(Waited(Command.New("sh").Args(["-c", "exit 3"]).Timeout(10s)))
+                print(Waited(Command.New("sh").Args(["-c", "sleep 1; exit 4"]).Timeout(100ms).Timeout(10s)))
+                print(start.Elapsed < 8s)
+            """) + Cases;
+        if (Ran(text, "child-bound-held") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["[ok, ]", "exit status 3: sh", "exit status 4: sh", "true"], ran.Output); // bounds of ten seconds that did not hold the call
+        }
+    }
+
+    [Fact]
+    public void A_child_that_ended_while_another_process_holds_its_pipe_gives_its_own_status_at_the_bound()
+    {
+        // S20, the child's end deciding: a child that ended while a process it started still holds its standard output ends `Output()`
+        // at the bound with its own status and what the call read, the pipes closed unread, where without a bound the call reads to
+        // their end; the `sleep` holds the pipe six seconds, and the call ends after its bound of half a second and before five
+        var text = Program("""
+                start = instant.Now
+                print(Tried(Command.New("sh").Args(["-c", "sleep 6 & echo started"]).Timeout(500ms)))
+                taken = start.Elapsed
+                print("{taken >= 500ms} {taken < 5s}")
+            """) + Cases;
+        if (Ran(text, "child-bound-pipe-held") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["8", "true true"], ran.Output); // `started` and its line's end
+        }
+    }
+
+    [Fact]
+    public void A_kill_at_the_bound_reaches_the_child_alone_and_a_process_it_started_lives_on()
+    {
+        // S20 (the owner, 2026-11-11, "All four as built", Q5): at the bound the call kills the child it started and no process the
+        // child started, as Rust's `kill()` sends it; the `sleep` the child left behind, its streams sent away so that it holds none
+        // of the program's, is still sleeping after the call, which its state in `/proc` reads, and is then ended by hand. A kill of
+        // the child's process group would end it too, and the state would be gone or a zombie's, since a container's first process
+        // may reap no orphan, so that `kill -0` would find the zombie and pass
+        var text = Program("""
+                print(Waited(Command.New("sh").Args(["-c", "sleep 5 > /dev/null 2>&1 & echo $! > kurz-left; exec sleep 10"]).Timeout(300ms)))
+                print(Waited(Command.New("sh").Args(["-c", "grep -q sleeping /proc/$(cat kurz-left)/status"])))
+                print(Waited(Command.New("sh").Args(["-c", "kill $(cat kurz-left)"])))
+            """) + Cases;
+        if (Ran(text, "child-bound-alone") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["TimedOut [sh] 0", "ended", "ended"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_bound_where_the_system_refuses_pidfd_open_kills_the_child_and_gives_the_refusal()
+    {
+        // S20 (assumed, §12, with the build of the bound): the call waits for the child's end through the descriptor `pidfd_open`
+        // gives; where the system refuses it (a kernel before 5.3, or a filter), the call kills the child it started, waits for its end
+        // and gives the system's error, here `ENOSYS` (38), `Unsupported`, at once and not at the bound; a call that went on without
+        // the descriptor would wait to the bound and give `TimedOut`, which the positive control, under this machine's runtime, gives
+        var text = Program("""
+                start = instant.Now
+                print(Waited(Command.New("sleep").Arg("10").Timeout(2s)))
+                print(start.Elapsed < 1500ms)
+            """) + Cases;
+        if (Ran(text, "child-bound-no-pidfd", runtime: ListTests.Edited(("runtime/linux/linux.kz", "process = int(syscall(434, long(pid), long(0)))", "process = int(syscall(-1, long(pid), long(0)))"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Unsupported [sleep] 38", "true"], ran.Output);
+            var control = Ran(text, "child-bound-pidfd-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["TimedOut [sleep] 0", "false"], control.Output);
+        }
+    }
+
     [Theory]
     [InlineData("print(1)\nCommand.New(\"true\").Arg(\"x\").Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    Command.New(\"true\").Status()\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    print(1)\n    out = Command.New(\"true\").Output()\n    print(out.Stdout.Count)\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 3)]
+    [InlineData("print(1)\nCommand.New(\"sleep\").Arg(\"1\").Timeout(1s).Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     public void A_build_for_windows_says_not_supported_at_the_first_call_on_a_command(string text, int line)
     {
         // S17 to S21 with S11: as `Stdin` is, the first call on `Command` or on a command, where the build stops
@@ -407,7 +567,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(1)\nc = Command.New(\"a\").Stdout(1)\n", "type-mismatch", 2)]
     [InlineData("print(1)\nc = Command.New(\"a\").Spawn()\n", "", 2)] // S19, `not supported`
     [InlineData("print(1)\nc = Command.New(\"a\").Input([1])\n", "", 2)] // S19
-    [InlineData("print(1)\nc = Command.New(\"a\").Timeout(1)\n", "", 2)] // S20
+    [InlineData("print(1)\nc = Command.New(\"a\").Timeout(1)\n", "type-mismatch", 2)] // S20, a number is no `duration`
     [InlineData("print(1)\nChildProcess c = null\n", "", 2)] // S19
     [InlineData("void Command() {\n}\n", "redeclared", 1)] // V9: a name every file sees
     [InlineData("data Stdio(int A)\n", "redeclared", 1)]
@@ -416,7 +576,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data ExitError(int A)\n", "redeclared", 1)]
     public void A_use_of_a_command_outside_its_members_is_refused_where_it_stands(string text, string id, int line)
     {
-        // S17: a command has the members of S17 and S18 and no text and no `==`; S19 and S20 stay `not supported` (an empty id); and
+        // S17: a command has the members of S17, S18 and S20 and no text and no `==`; S19 stays `not supported` (an empty id); and
         // a file declares none of the five names of S17 and S18 (V9)
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);

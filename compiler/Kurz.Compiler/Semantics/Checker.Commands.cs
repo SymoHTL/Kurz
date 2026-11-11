@@ -32,8 +32,9 @@ public sealed partial class Checker
     /// S17: a command's members, each of which gives a new command: <c>Arg(x)</c>, <c>Args(list)</c>, <c>Dir(path)</c>,
     /// <c>Env(name, value)</c>, <c>EnvRemove(name)</c>, <c>EnvClear()</c>, <c>Stdin(s)</c>, <c>Stdout(s)</c> and <c>Stderr(s)</c>; S18:
     /// <c>Output()</c>, whose success is a <c>ProcessOutput</c>, and <c>Status()</c>, whose success is <c>void</c>, each with the cases
-    /// <c>IoError</c> and <c>ExitError</c> (section 12, the owner, 2026-11-01, "Bytes, as Rust" and "A case of the call"). <c>Spawn()</c>
-    /// (S19), <c>Input(bytes)</c> (S19) and <c>Timeout(d)</c> (S20) are <c>not supported</c>.
+    /// <c>IoError</c> and <c>ExitError</c> (section 12, the owner, 2026-11-01, "Bytes, as Rust" and "A case of the call"); S20:
+    /// <c>Timeout(d)</c>, a bound on the child's time (the owner, 2026-11-01, "Optional .Timeout(d)"). <c>Spawn()</c> and
+    /// <c>Input(bytes)</c> (S19) are <c>not supported</c>.
     /// </summary>
     private Typed CheckCommandMethod(MemberAccess m, CallExpression c)
     {
@@ -41,7 +42,6 @@ public sealed partial class Checker
         {
             "Spawn" => "a child beside the program, `Spawn()` (S19)",
             "Input" => "the input of a child, `Input(bytes)` (S19)",
-            "Timeout" => "a bound on a child's time, `Timeout(d)` (S20)",
             _ => null,
         };
         if (unbuilt is not null)
@@ -63,6 +63,7 @@ public sealed partial class Checker
             "EnvRemove" => (CallKind.CommandAdd, [Text("name")], Types.Command),
             "EnvClear" => (CallKind.CommandAdd, [], Types.Command),
             "Stdin" or "Stdout" or "Stderr" => (CallKind.CommandStream, [new Slot("s", stdio, false, false, false)], Types.Command),
+            "Timeout" => (CallKind.CommandTimeout, [new Slot("d", Types.Duration, false, false, false)], Types.Command),
             "Output" => (CallKind.CommandOutput, [], Types.Union([new DataType(dataTypes["ProcessOutput"], []), IoError, exitError])),
             "Status" => (CallKind.CommandStatus, [], Types.Union([Types.Void, IoError, exitError])),
             _ => null,

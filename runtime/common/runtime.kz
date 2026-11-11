@@ -3189,11 +3189,11 @@ long LogStamp(byte* p, long at, long nanoseconds) {
 // strings for each member in the order of its calls, the member's tag and its two values: `a` an
 // argument, `d` the working directory, `e` a variable of the environment and its value, `r` a variable
 // taken away, `c` the environment cleared, and `0`, `1` and `2` standard input, output and error with
-// the letter of their `Stdio`, `i`, `p` or `n`. A member appends to the list the emitted code gives it:
-// a command no other value holds, the result of the member before it in a chain or the variable that
-// `cmd = cmd.Arg(x)` writes, is changed in place, and one another value holds is copied by the first
-// `Add`, as any list a write finds shared (M3), so that the command the member was called on stays as
-// it was.
+// the letter of their `Stdio`, `i`, `p` or `n`, and `t` a bound on its time in nanoseconds. A member
+// appends to the list the emitted code gives it: a command no other value holds, the result of the
+// member before it in a chain or the variable that `cmd = cmd.Arg(x)` writes, is changed in place, and
+// one another value holds is copied by the first `Add`, as any list a write finds shared (M3), so that
+// the command the member was called on stays as it was.
 pub List<string> CommandNew(string program) {
     mut command = List<string>()
     command.Add(program)
@@ -3225,6 +3225,12 @@ pub void CommandStream(mut List<string> command, int stream, Stdio mode) {
     }
 
     CommandAdd(mut command, "{stream}", letter, "")
+}
+
+// A bound on the command's time, its nanoseconds, a `duration` as the emitted code gives it (`Timeout`,
+// S20).
+pub void CommandTimeout(mut List<string> command, long nanoseconds) {
+    CommandAdd(mut command, "t", "{nanoseconds}", "")
 }
 
 // The text of an `ExitError` (S18): what ended the child and the program, `exit status 3: sh` or

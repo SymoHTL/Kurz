@@ -2424,7 +2424,9 @@ ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the chi
 `string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A read of the child's
 output that fails ends `Output()` with an `IoError` (S1) whose path is the program, once the call has closed
 both pipes and waited for the child's end (§12, the owner, 2026-11-11, "The program" and "Close pipes,
-wait"). A child that ends
+wait"). The read's `IoError` is the call's error whatever status the child ends with, and where the command
+has a bound the wait after it is held to the bound (S20) *(assumed, §12: the order of the errors and the bound
+of the wait)*. A child that ends
 with a code other than 0, or that a signal ends, is a case of the call, which the unwrap rule sends to
 the caller unless an `else` takes it (O2, O5) (§12, the owner, 2026-11-01, "A case of the call"); that
 case is `data ExitError(string Program, ProcessOutput Output)`. `ExitStatus` holds `Code`, an `int` that is 128 and
@@ -2624,11 +2626,18 @@ Command.New("cat").Input("hi\n".Bytes).Status() else {
 `Timeout(d)`, a `duration`, bounds the run from its start: when it has passed, the call that waits
 kills the child, waits for its end and gives an `IoError` of the kind `TimedOut` (S1) whose path is the
 program, `timed out: sleep`; without it a call waits without a bound (§12, the owner, 2026-11-01,
-"Optional .Timeout(d)"). A bound of 0 or below has passed at the start, so that the child is killed at
-once and the call gives `TimedOut`. Under `Spawn()` the bound is held by `Wait()` and `WaitWithOutput()`,
-so that a read of the child's pipe before them and a child let go of are not bounded, and a child that
-ended before the bound gives its own status. *(assumed, §12: the kill by `SIGKILL`, the path, a bound of 0
-or below, the bound under `Spawn()` and the child's end)*
+"Optional .Timeout(d)"). The kill is `SIGKILL` and reaches the child alone, so that a process the child
+started lives on, and the call stops reading the pipes at the bound; a bound of 0 or below has passed at
+the start, so that the child is killed at once and the call gives `TimedOut`; and a child that ended before
+the bound gives its own status under `Output()` and `Status()` as under `Spawn()`, with what the call read,
+where a process it left behind still holds a pipe (§12, the owner, 2026-11-11, "All four as built" and
+"Child's end decides"). Under `Spawn()` the bound is
+held by `Wait()` and `WaitWithOutput()`, so that a read of the child's pipe before them and a child let go
+of are not bounded. After a read of the output that failed (S18), the wait is held to the bound, and when
+it passes the child is killed and the read's `IoError` stays the call's error. Where the system refuses
+`pidfd_open`, through which the call waits for the child's end, the call kills the child, waits for its end
+and gives the system's error at once. *(assumed, §12: the bound under `Spawn()`, the bound after a failed
+read and a refused `pidfd_open`)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
 ```kurz

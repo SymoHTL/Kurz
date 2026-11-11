@@ -47,8 +47,8 @@ public sealed class CorpusTests
     /// The rules the checker does not read: the null chapter's paths through class instances (N9), the
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), collections between actors (M8), the texts of class instances (A5, A7, A9,
-    /// A10, A15), the grants of files and sockets (S12), a child beside the program, its input and a bound on its time
-    /// (S19, S20), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
+    /// A10, A15), the grants of files and sockets (S12), a child beside the program and its input
+    /// (S19), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
     /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
     /// (K14) among them, stands in <see cref="UnsupportedByConstruct"/>.
@@ -59,7 +59,7 @@ public sealed class CorpusTests
         || rule is "F9" or "F10" or "T19" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A15"
         || rule is "S12"
-        || rule is "S19" or "S20"
+        || rule is "S19"
         || rule is "T33"
         || rule is "G1" or "G2" or "G3" or "G4" or "G5";
 
