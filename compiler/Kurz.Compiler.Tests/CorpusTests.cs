@@ -48,8 +48,8 @@ public sealed class CorpusTests
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9), <c>flags</c>
     /// (D13, D17, D19),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), collections between actors (M8), the texts of class instances and sets of flags (A5, A7, A9,
-    /// A10, A13, A15), the grants of files and sockets (S12), processes and standard input
-    /// (S17 to S22), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
+    /// A10, A13, A15), the grants of files and sockets (S12), processes
+    /// (S17 to S21), the reading of a type by its fields and its parts (T33) and regular expressions (G1 to G5). A
     /// case that cites one may get <c>not supported</c>; one the checker reads in full is held to its header. The rules of the
     /// class chapter the checker reads, so a case of theirs that uses a construct it does not, a constructor in the body of a class
     /// (K14) among them, stands in <see cref="UnsupportedByConstruct"/>.
@@ -60,7 +60,7 @@ public sealed class CorpusTests
         || rule is "D13" or "D17" or "D19" or "F9" or "F10" or "T19" or "M8"
         || rule is "A5" or "A7" or "A9" or "A10" or "A13" or "A15"
         || rule is "S12"
-        || rule is "S17" or "S18" or "S19" or "S20" or "S21" or "S22"
+        || rule is "S17" or "S18" or "S19" or "S20" or "S21"
         || rule is "T33"
         || rule is "G1" or "G2" or "G3" or "G4" or "G5";
 
