@@ -1353,11 +1353,13 @@ built"). A declaration of 32 names that also writes a wrong number gets that one
 alone, at its 32nd name (§4, the owner, 2026-11-11, issue 452, "All as built, decided"), a number of
 another type or outside the range of an `int` among the wrong numbers, with no `type-mismatch`,
 `narrowing-conversion`, `sign-mix` or `constant-overflow` (§4, the owner, 2026-11-11, issue 452,
-"Count alone, as built"). A negative number is `flags-number`, `-4` and `-2147483648` among them, the
+"Count alone, as built", and for `type-mismatch` and `sign-mix` "All four, as built", comment
+6800642597). A negative number is `flags-number`, `-4` and `-2147483648` among them, the
 minus before a literal being part of the literal (L17) (§4, the owner, 2026-11-11, issue 452, "All as
 built, decided").
 
-The rest of a declaration is read as D20 reads an `enum`'s. A number that is no constant is
+The rest of a declaration is read as D20 reads an `enum`'s. In a declaration of at most 31 names, a
+number that is no constant is
 `flags-number` before its type is read, `Write = Two()` with `long Two()` among them, as D20 reads an
 `enum`'s (§4, the owner, 2026-11-11, issue 452, "Constant first"), and its text says so, then the
 rule: "the number of `Write` is no constant: a name's number is a constant expression of type
@@ -1483,7 +1485,7 @@ flags Many {
     F29 = 268435456,
     F30 = 536870912,
     F31 = 1073741824,
-    F32 = 1 // bit 1, which no other name holds, since F1 writes 3
+    F32 = 1 // the bit of 1, the one F1 would hold had it written 1, not 3
 }
 
 print(Many.F2)
@@ -1493,6 +1495,86 @@ Case: [data/flags-number-count-type.kz](../corpus/data/flags-number-count-type.k
 ```kurz
 flags Many {
     F1 = 3L,
+    F2 = 2,
+    F3 = 4,
+    F4 = 8,
+    F5 = 16,
+    F6 = 32,
+    F7 = 64,
+    F8 = 128,
+    F9 = 256,
+    F10 = 512,
+    F11 = 1024,
+    F12 = 2048,
+    F13 = 4096,
+    F14 = 8192,
+    F15 = 16384,
+    F16 = 32768,
+    F17 = 65536,
+    F18 = 131072,
+    F19 = 262144,
+    F20 = 524288,
+    F21 = 1048576,
+    F22 = 2097152,
+    F23 = 4194304,
+    F24 = 8388608,
+    F25 = 16777216,
+    F26 = 33554432,
+    F27 = 67108864,
+    F28 = 134217728,
+    F29 = 268435456,
+    F30 = 536870912,
+    F31 = 1073741824,
+    F32 = 1
+}
+
+print(Many.F2)
+```
+
+Case: [data/flags-number-count-unsigned.kz](../corpus/data/flags-number-count-unsigned.kz)
+```kurz
+flags Many {
+    F1 = 3u,
+    F2 = 2,
+    F3 = 4,
+    F4 = 8,
+    F5 = 16,
+    F6 = 32,
+    F7 = 64,
+    F8 = 128,
+    F9 = 256,
+    F10 = 512,
+    F11 = 1024,
+    F12 = 2048,
+    F13 = 4096,
+    F14 = 8192,
+    F15 = 16384,
+    F16 = 32768,
+    F17 = 65536,
+    F18 = 131072,
+    F19 = 262144,
+    F20 = 524288,
+    F21 = 1048576,
+    F22 = 2097152,
+    F23 = 4194304,
+    F24 = 8388608,
+    F25 = 16777216,
+    F26 = 33554432,
+    F27 = 67108864,
+    F28 = 134217728,
+    F29 = 268435456,
+    F30 = 536870912,
+    F31 = 1073741824,
+    F32 = 1
+}
+
+print(Many.F2)
+```
+
+Case: [data/flags-number-count-real.kz](../corpus/data/flags-number-count-real.kz)
+```kurz
+flags Many {
+    F1 = 1.5,
     F2 = 2,
     F3 = 4,
     F4 = 8,
