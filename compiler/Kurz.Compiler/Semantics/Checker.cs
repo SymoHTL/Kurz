@@ -33,6 +33,7 @@ public sealed partial class Checker
     private readonly List<DataSymbol> dataDeclared = [];
     private readonly List<DataSymbol> refusedTypes = [];
     private readonly Dictionary<string, EnumSymbol> enums = new(StringComparer.Ordinal); // D12: the enums of the file, by name
+    private readonly Dictionary<string, FlagsSymbol> flagsTypes = new(StringComparer.Ordinal); // D13: the flags types of the file, by name
     private readonly HashSet<string> unsupportedTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> unsupportedBases = new(StringComparer.Ordinal);
     private readonly HashSet<string> unreadData = new(StringComparer.Ordinal);
@@ -346,6 +347,7 @@ public sealed partial class Checker
         MakeDataMethodViews(); // D16: of the methods no duplicate took out (F12)
         CheckStates();
         CheckEnumNumbers();
+        CheckFlagsNumbers();
         CheckDefaults();
         CheckClassDefaults();
         CheckMethodDefaults(); // F12, K7
@@ -583,6 +585,21 @@ public sealed partial class Checker
             return;
         }
 
+        if (d.Kind == TypeDeclarationKind.Flags)
+        {
+            if ((d.Modifiers & Modifiers.Extern) != 0)
+            {
+                Report(ErrorIds.Syntax, d.Line, "`extern \"C\"` before a `flags` type is text no rule gives a meaning (D13, E4)");
+            }
+
+            if (!clash)
+            {
+                DeclareFlags(d);
+            }
+
+            return;
+        }
+
         if (d.Kind == TypeDeclarationKind.Class && !clash)
         {
             DeclareClass(d); // K1: chapter 7
@@ -597,26 +614,7 @@ public sealed partial class Checker
 
         if (d.Kind != TypeDeclarationKind.Data)
         {
-            if (clash)
-            {
-                return;
-            }
-
-            var what = d.Kind switch
-            {
-                TypeDeclarationKind.Class => "a class (chapter 7)",
-                TypeDeclarationKind.Interface => "an interface (K6, K10)",
-                _ => "a flags type (D13)",
-            };
-            NotSupported(d.Line, what);
-            unsupportedTypes.Add(d.Name);
-            unsupportedBases[d.Name] = d.Kind switch
-            {
-                TypeDeclarationKind.Class => "a class a data type names (chapter 7)",
-                TypeDeclarationKind.Interface => "an interface a data type names (K10)",
-                _ => "a flags type a data type names (D13)",
-            };
-            return;
+            return; // a class or an interface whose name was reported as `redeclared` above
         }
 
         if ((d.Modifiers & Modifiers.Extern) != 0)
@@ -755,6 +753,125 @@ public sealed partial class Checker
         }
 
         enums[d.Name] = symbol;
+    }
+
+    /// <summary>
+    /// D13, D19: a <c>flags</c> type and its names in the order written; a name written twice is <c>redeclared</c>, as an enum's value is
+    /// (D20, V9), and one named <c>None</c>, which D17 gives every flags type, is <c>flags-number</c>. Their bits are read once every
+    /// function is declared (<see cref="CheckFlagsNumbers"/>).
+    /// </summary>
+    private void DeclareFlags(TypeDeclaration d)
+    {
+        var symbol = new FlagsSymbol(d.Name, d);
+        foreach (var flag in d.Values)
+        {
+            if (symbol.Names.Contains(flag.Name))
+            {
+                Report(ErrorIds.Redeclared, flag.Line, $"`{d.Name}` has a name `{flag.Name}` already (D13, V9)");
+                symbol.Refused = true;
+            }
+            else if (flag.Name == "None")
+            {
+                Report(ErrorIds.FlagsNumber, flag.Line, $"`None` is the set that holds nothing, which every flags type has, so no name of `{d.Name}` is `None` (D17, D19)");
+                symbol.Refused = true;
+            }
+            else
+            {
+                symbol.Names.Add(flag.Name);
+            }
+        }
+
+        flagsTypes[d.Name] = symbol;
+    }
+
+    /// <summary>
+    /// D19: the bit of each name of a flags type, 1, 2, 4 and so on in their order, or the number its declaration writes, a constant
+    /// expression of type <c>int</c> read as an enum's is (D18), written for every name or for none, as D20 says of an enum. A number that
+    /// is not one bit (0, 3, a negative one), a bit that two names write, a name without a number beside one with a number, a number that
+    /// is no constant, and more names than the 31 bits of an <c>int</c> below its sign, are <c>flags-number</c>; one past the range of an
+    /// <c>int</c> is <c>constant-overflow</c>, which its folding reports (T6, L10).
+    /// </summary>
+    private void CheckFlagsNumbers()
+    {
+        foreach (var symbol in flagsTypes.Values)
+        {
+            var flags = symbol.Declaration.Values.Where(v => symbol.Names.Contains(v.Name)).DistinctBy(v => v.Name).ToList();
+            var numbered = flags.Where(v => v.Number is not null).ToList();
+            if (numbered.Count == 0)
+            {
+                if (flags.Count > 31)
+                {
+                    Report(ErrorIds.FlagsNumber, flags[31].Line, $"`{symbol.Name}` has more than 31 names, and an `int` has 31 bits below its sign, one for each name (D19)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (!symbol.Refused)
+                {
+                    symbol.Bits.AddRange(flags.Select((_, i) => 1 << i));
+                }
+
+                continue;
+            }
+
+            frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = symbol.Line };
+            var bits = new List<(string Name, int Bit)>();
+            foreach (var flag in flags)
+            {
+                if (flag.Number is null)
+                {
+                    Report(ErrorIds.FlagsNumber, flag.Line, $"`{flag.Name}` has no number, and `{numbered[0].Name}` has one: number every name or none (D19, as D20 says of an enum)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                var reading = readingConstant;
+                readingConstant = true;
+                var typed = CheckExpression(flag.Number, Types.Int);
+                readingConstant = reading;
+                if (typed.IsError)
+                {
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (!Types.Assignable(typed.Type, Types.Int))
+                {
+                    ReportMismatch(typed.Type, Types.Int, flag.Number.Line, $"the number of `{flag.Name}` is {Types.A(typed.Type)} where an `int` is required", "D19");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (typed.Constant is not IntegerConstant number)
+                {
+                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D19)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                if (number.Value <= 0 || !number.Value.IsPowerOfTwo)
+                {
+                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is {number.Value}, which is not one bit: a name's number is 1, 2, 4 and so on (D19)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                var first = bits.FindIndex(b => b.Bit == (int)number.Value);
+                if (first >= 0)
+                {
+                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"`{flag.Name}` has the bit {number.Value} that `{bits[first].Name}` has: each name has a bit of its own (D19)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
+                bits.Add((flag.Name, (int)number.Value));
+            }
+
+            if (!symbol.Refused)
+            {
+                symbol.Bits.AddRange(bits.Select(b => b.Bit));
+            }
+        }
     }
 
     /// <summary>
@@ -1250,6 +1367,17 @@ public sealed partial class Checker
             return new EnumType(enumSymbol);
         }
 
+        if (flagsTypes.TryGetValue(n.Name, out var flagsSymbol))
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` takes no type arguments (D13, T19)");
+                return Types.Error;
+            }
+
+            return new FlagsType(flagsSymbol);
+        }
+
         if (IsUnreadType(n.Name))
         {
             return Types.Error;
@@ -1326,7 +1454,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || flagsTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1742,7 +1870,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || flagsTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>

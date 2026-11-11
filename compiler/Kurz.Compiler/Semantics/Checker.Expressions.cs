@@ -431,6 +431,7 @@ public sealed partial class Checker
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
+        FlagsType => true, // A13: the names it holds, or `None`
         HasherType => true, // H6: the name of its type
         ErrorType => true,
         ListType l => HasText(l.Element, seen),
@@ -576,6 +577,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (flagsTypes.ContainsKey(n.Name))
+        {
+            Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a type, and no value stands here: a set of it is written `{n.Name}.None` or with the name it holds, a dot before it (D13, D17; E4)");
+            return Typed.Error;
+        }
+
         if (IsUnreadName(n.Name))
         {
             return Typed.Error;
@@ -671,6 +678,11 @@ public sealed partial class Checker
                 return EnumValue(enumSymbol, m.Member, m.Line);
             }
 
+            if (flagsTypes.TryGetValue(n.Name, out var flagsSymbol))
+            {
+                return FlagsValue(flagsSymbol, m.Member, m.Line);
+            }
+
             if (classes.TryGetValue(n.Name, out var classSymbol) && ImplicitField(n.Name) is null)
             {
                 return ClassStaticMember(classSymbol, m); // K7, K18, K19
@@ -743,6 +755,38 @@ public sealed partial class Checker
         }
 
         Report(ErrorIds.UnknownName, line, $"`{symbol.Name}` has no value `{member}` (D12, V10)");
+        return Typed.Error;
+    }
+
+    /// <summary>
+    /// D13, D17: <c>Access.Read</c>, the set that holds that name, and <c>Access.None</c>, the set that holds nothing, each a constant;
+    /// <c>From</c> is called (D19), and any other name is no name of the type (V10).
+    /// </summary>
+    private Typed FlagsValue(FlagsSymbol symbol, string member, int line)
+    {
+        var index = symbol.IndexOf(member);
+        if (symbol.Refused && (index >= 0 || member == "None" || symbol.Declaration.Values.Any(v => v.Name == member)))
+        {
+            return Typed.Error; // the declaration's error was reported there, and the names have no bits (E1)
+        }
+
+        if (index >= 0)
+        {
+            return new Typed(new FlagsType(symbol), new FlagsConstant(symbol.Bits[index]));
+        }
+
+        if (member == "None")
+        {
+            return new Typed(new FlagsType(symbol), new FlagsConstant(0));
+        }
+
+        if (member == "From")
+        {
+            Report(ErrorIds.Syntax, line, $"`{symbol.Name}.From` is a function, and no value stands here: it is called, `{symbol.Name}.From(n)` (D19, F11)");
+            return Typed.Error;
+        }
+
+        Report(ErrorIds.UnknownName, line, $"`{symbol.Name}` has no name `{member}` (D13, V10)");
         return Typed.Error;
     }
 
@@ -836,6 +880,8 @@ public sealed partial class Checker
                 }
 
                 return new Typed(Types.Int); // D18
+            case FlagsType when member == "Number":
+                return new Typed(Types.Int); // D19: the sum of the bits the set holds
             case HandleType { Kind: Handle.TcpListener } when member == "Port":
                 return new Typed(Types.Int); // S9
             case UnionType when Types.NonNull(type) is not null:
@@ -1074,6 +1120,12 @@ public sealed partial class Checker
 
                 break;
             case TokenKind.Tilde:
+                if (operand.Type is FlagsType flags)
+                {
+                    // D17: the names of the type that the set does not hold, and no bit that no name has (section 4, assumed there)
+                    return new Typed(flags, operand.Constant is FlagsConstant set ? new FlagsConstant(~set.Bits & flags.Symbol.All) : null);
+                }
+
                 if (Types.IsInteger(operand.Type))
                 {
                     var type = Types.IsNarrow(operand.Type) && !literal ? Types.Int : (PrimitiveType)operand.Type;
@@ -1270,6 +1322,23 @@ public sealed partial class Checker
 
             case OperatorClass.Bits:
                 {
+                    if (left.Type is FlagsType flags && Types.Same(left.Type, right.Type))
+                    {
+                        // D17: `|` holds the names of both sets, `&` the names they share, `^` the names one of them holds, as C# combines a
+                        // `[Flags]` enum's values
+                        if (left.Constant is FlagsConstant ls && right.Constant is FlagsConstant rs)
+                        {
+                            return new Typed(flags, new FlagsConstant(b.Operator switch
+                            {
+                                TokenKind.Ampersand => ls.Bits & rs.Bits,
+                                TokenKind.Bar => ls.Bits | rs.Bits,
+                                _ => ls.Bits ^ rs.Bits,
+                            }));
+                        }
+
+                        return new Typed(flags);
+                    }
+
                     if (!Types.IsInteger(left.Type) || !Types.IsInteger(right.Type))
                     {
                         Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` works on the bits of integers, not on `{left.Type}` and `{right.Type}` (T22)");

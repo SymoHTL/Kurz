@@ -74,6 +74,12 @@ public enum CallKind
     /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
     EnumFrom,
 
+    /// <summary><c>Access.From(n)</c> (D19), the set of the <c>flags</c> type whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the flags type.</summary>
+    FlagsFrom,
+
+    /// <summary>A set's <c>Has(flag)</c> (D13, D17): whether it holds every name of <c>flag</c>.</summary>
+    FlagsHas,
+
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
 

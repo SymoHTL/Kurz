@@ -191,6 +191,8 @@ public sealed partial class Emitter
                 return "zeroinitializer"; // D8: a structure of no fields
             case EnumConstant e when type is EnumType enumType:
                 return IntegerText(Lower.EnumStored(enumType.Symbol, e.Index), type); // D12, D18: its number, or its place
+            case FlagsConstant f when type is FlagsType:
+                return IntegerText(f.Bits, Types.Int); // D13, D19: the bits of the names it holds
             default:
                 throw Unsupported(line, $"a constant of type `{type}`");
         }
@@ -428,6 +430,8 @@ public sealed partial class Emitter
                 return ListPointer(target(), list.Element);
             case EnumType e when m.Member == "Number":
                 return EnumNumber(target(), e); // D18
+            case FlagsType when m.Member == "Number":
+                return target(); // D19: the sum of the bits it holds, which is the set itself
             case PrimitiveType { Kind: Primitive.Instant } when m.Member == "Elapsed":
                 return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
@@ -472,7 +476,9 @@ public sealed partial class Emitter
             case TokenKind.Tilde:
                 {
                     var x = Convert(EmitExpression(u.Operand), TypeOf(u.Operand), type, u.Line);
-                    return fn.Value($"xor {Ir(type)} {x}, -1");
+                    var flipped = fn.Value($"xor {Ir(type)} {x}, -1");
+                    // D17: of a set, the names of the type it does not hold, and no bit that no name has
+                    return type is FlagsType flags ? fn.Value($"and i32 {flipped}, {Number(flags.Symbol.All)}") : flipped;
                 }
 
             case TokenKind.Star:
@@ -1012,6 +1018,8 @@ public sealed partial class Emitter
 
             case EnumType e:
                 return EnumText(value, e); // A4
+            case FlagsType f:
+                return FlagsText(value, f); // A13
             case NullType:
                 return StringValue("null"); // A4
             case HasherType:
