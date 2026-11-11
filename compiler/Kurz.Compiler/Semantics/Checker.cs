@@ -791,7 +791,9 @@ public sealed partial class Checker
     /// is no constant, and more names than the 31 bits of an <c>int</c> below its sign, are <c>flags-number</c>; one past the range of an
     /// <c>int</c> is <c>constant-overflow</c>, which its folding reports (T6, L10). The names are counted before their numbers are read,
     /// so that a declaration of 32 names that numbers them all is <c>flags-number</c> at its 32nd name, as one that numbers none is, and
-    /// not <c>constant-overflow</c> at the number of that name (D19, the owner, 2026-11-11, "All as built").
+    /// not <c>constant-overflow</c> at the number of that name (D19, the owner, 2026-11-11, "All as built"). A number that is no constant
+    /// is <c>flags-number</c> before its type is read, and a constant's type and range are read before its bit (D19, the owner,
+    /// 2026-11-11, "Constant first").
     /// </summary>
     private void CheckFlagsNumbers()
     {
@@ -837,6 +839,14 @@ public sealed partial class Checker
                     continue;
                 }
 
+                if (typed.Constant is null)
+                {
+                    // the constant before the type, as D20 reads an enum's (D19, the owner, 2026-11-11, "Constant first")
+                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D19)");
+                    symbol.Refused = true;
+                    continue;
+                }
+
                 if (!Types.Assignable(typed.Type, Types.Int))
                 {
                     ReportMismatch(typed.Type, Types.Int, flag.Number.Line, $"the number of `{flag.Name}` is {Types.A(typed.Type)} where an `int` is required", "D19");
@@ -846,6 +856,7 @@ public sealed partial class Checker
 
                 if (typed.Constant is not IntegerConstant number)
                 {
+                    // a constant of a type an `int` holds is an integer wherever T6 folds it: no program reaches this
                     Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D19)");
                     symbol.Refused = true;
                     continue;

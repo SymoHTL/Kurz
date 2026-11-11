@@ -1,0 +1,8 @@
+// expect: error flags-number at 6
+// rules: D19
+
+long Two() => 2L
+
+flags Access { Read = 1, Write = Two() }
+
+print(Access.Read)
