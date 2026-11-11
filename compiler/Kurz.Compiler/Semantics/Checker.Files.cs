@@ -148,6 +148,9 @@ public sealed partial class Checker
         return Record(c, kind, Call([candidate], c, null, out var picked), picked);
     }
 
+    /// <summary>S22: the four functions of <c>Stdin</c>, as the refusals of a name it does not have and of <c>Stdin</c> as a value list them.</summary>
+    private const string StdinFunctions = "`Stdin.Lines()` as the collection of a `for` loop, `Stdin.ReadLine()`, `Stdin.Read(mut into, max)` and `Stdin.ReadAll()`";
+
     /// <summary>
     /// S22: the members of <c>Stdin</c>, Rust's <c>io::stdin()</c> in Kurz's casing (section 12, the owner, 2026-11-01, "A type Stdin" and
     /// "Also Stdin.ReadLine()"): <c>Stdin.Lines()</c>, as a file's (<see cref="CheckLines"/>); <c>Stdin.ReadAll()</c>, what is left, a
@@ -171,7 +174,7 @@ public sealed partial class Checker
         };
         if (function is not { } f)
         {
-            Report(ErrorIds.UnknownName, m.Line, $"`Stdin` has no function `{m.Member}` (S22, V10)");
+            Report(ErrorIds.UnknownName, m.Line, $"`Stdin` has no function `{m.Member}`: its functions are {StdinFunctions} (S22, V10)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

@@ -616,6 +616,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (n.Name == "Stdin")
+        {
+            Report(ErrorIds.UnknownName, n.Line, $"`Stdin` is no value: its functions are called on it, {StdinFunctions} (S22, V10)");
+            return Typed.Error;
+        }
+
         if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
