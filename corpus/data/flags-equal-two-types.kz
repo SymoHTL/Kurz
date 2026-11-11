@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 7
+// rules: D13
+
+flags Access { Read, Write }
+flags Mode { Fast, Slow }
+
+print(Access.Read == Mode.Fast)

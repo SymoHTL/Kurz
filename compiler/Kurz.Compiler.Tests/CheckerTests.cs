@@ -2792,8 +2792,8 @@ public sealed class CheckerTests
     [InlineData("extern \"C\" flags Access { Read, Write }\n\nprint(Access.Read)", "syntax", 1)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Run)", "unknown-name", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Parse(1))", "unknown-name", 3)]
-    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == 1)", "type-mismatch", 3)] // a set is not an integer (D19: its number is `Number`)
-    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read == Mode.Read)", "type-mismatch", 4)] // two flags types are never equal (D15)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == 1)", "type-mismatch", 3)] // a set is not an integer (D13, the owner, 2026-11-11, issue 452; its number is `Number`, D19)
+    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read == Mode.Read)", "type-mismatch", 4)] // two flags types are never equal (D13, the owner, 2026-11-11, issue 452)
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read < Access.Write)", "type-mismatch", 3)] // sets have no order (D13, the owner, 2026-11-11, issue 452)
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read >= Access.Write)", "type-mismatch", 3)]
     [InlineData("flags Access { Read, Write }\n\nmut xs = [1]\nxs.SortBy(x => Access.Read)", "type-mismatch", 4)] // nor does a sort by a set (X8)
