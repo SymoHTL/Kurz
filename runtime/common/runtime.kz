@@ -3182,3 +3182,63 @@ long LogStamp(byte* p, long at, long nanoseconds) {
 
     return at + 24
 }
+
+// ---- running a program (design record, section 12) ---------------------------------------------------
+
+// A command (S17), as the emitted code lays it out: a list of strings, the program first, then three
+// strings for each member in the order of its calls, the member's tag and its two values: `a` an
+// argument, `d` the working directory, `e` a variable of the environment and its value, `r` a variable
+// taken away, `c` the environment cleared, and `0`, `1` and `2` standard input, output and error with
+// the letter of their `Stdio`, `i`, `p` or `n`. Each member gives a new list and leaves the command it
+// was called on as it was: the copy shares the block, and the first `Add` copies it (section 4).
+pub List<string> CommandNew(string program) {
+    mut command = List<string>()
+    command.Add(program)
+    return command
+}
+
+// The command with one member more, its tag and its two values.
+pub List<string> CommandAdd(List<string> command, string tag, string first, string second) {
+    mut more = command
+    more.Add(tag)
+    more.Add(first)
+    more.Add(second)
+    return more
+}
+
+// The command with an argument more for each word of the list, in its order (`Args`, S17).
+pub List<string> CommandArgs(List<string> command, List<string> words) {
+    mut more = command
+    for word in words {
+        more.Add("a")
+        more.Add(word)
+        more.Add("")
+    }
+
+    return more
+}
+
+// The command with one of its streams set, 0 standard input, 1 output and 2 error (`Stdin`, `Stdout`
+// and `Stderr`, S17).
+pub List<string> CommandStream(List<string> command, int stream, Stdio mode) {
+    mut letter = "n"
+    if mode == Stdio.Inherit {
+        letter = "i"
+    } else if mode == Stdio.Piped {
+        letter = "p"
+    }
+
+    return CommandAdd(command, "{stream}", letter, "")
+}
+
+// The text of an `ExitError` (S18): what ended the child and the program, `exit status 3: sh` or
+// `signal 15: sh`.
+pub string ExitErrorText(ExitError e) {
+    mut text = "exit status {e.Output.Status.Code}: {e.Program}"
+    match e.Output.Status.Signal {
+        int signal => text = "signal {signal}: {e.Program}"
+        null => {}
+    }
+
+    return text
+}

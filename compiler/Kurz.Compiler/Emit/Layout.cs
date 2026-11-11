@@ -87,12 +87,17 @@ internal sealed class Layout(IrModule module)
         _ => [],
     };
 
-    /// <summary>The number of a type in this program, given out on first use.</summary>
+    /// <summary>
+    /// The number of a type in this program, given out on first use. A data type has the number of its name, as the IR names it
+    /// (<see cref="Lower.Mangle"/>): the runtime's files are checked apart from the program's, so that a built-in type every file
+    /// sees, <c>IoError</c> or <c>ExitError</c>, is one symbol in the runtime and another in the program, and a union the runtime
+    /// gives a program, as <c>CommandOutput</c> does (S18), holds the tag the program reads.
+    /// </summary>
     public int Number(KurzType type)
     {
         foreach (var (t, n) in numbers)
         {
-            if (Types.Same(t, type))
+            if (Types.Same(t, type) || (t is DataType && type is DataType && Lower.Mangle(t) == Lower.Mangle(type)))
             {
                 return n;
             }

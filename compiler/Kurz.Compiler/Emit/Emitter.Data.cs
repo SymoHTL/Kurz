@@ -588,6 +588,9 @@ public sealed partial class Emitter
                 case DataType d when IsEnvError(d):
                     EnvErrorText(d); // S14: its words and its name, in the form of an `IoError`'s
                     break;
+                case DataType d when IsExitError(d):
+                    fn.Return($"%kz.str {fn.Value($"call %kz.str {RuntimeFunction("ExitErrorText")}({Ir(d)} %a0)")}"); // S18: what ended the child and the program
+                    break;
                 case DataType d when IsParseError(d):
                     ParseErrorText(d); // X7: its words alone, as it holds none of the input
                     break;

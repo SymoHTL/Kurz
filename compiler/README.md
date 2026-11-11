@@ -864,7 +864,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   6748445211, "Test at run time, as C#"). The
   counting is below;
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
-  number among the cases needs (section 5, round 19), their text, the text of the case's value
+  number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
+  that a built-in type the runtime's files see as one symbol and a program's as another, `IoError` or `ExitError`,
+  has one number, and a union the runtime gives, as `CommandOutput` does (S18), holds the tags the program reads, their text, the text of the case's value
   (A4), `==` on a field of one, by the case and its value (D3), a call whose result is one, kept
   whole (O4) or used where its success is required, with its other cases passed on to the caller
   (O1, O2), a success case without a value (O10), `match` with arms of a type, of a value and
@@ -1178,6 +1180,26 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `gates` job runs in, which no file pins (HAZARD #15); a closed descriptor 0, 1 or 2, which a file the program opens does not
   take; a `print` and an `eprint` whose write fails with error 9; and the refusal for Windows. The suite runs every program with an empty pipe
   whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
+- running a program (S17, S18, S21), in a build for Linux: a `Command` is the block of a list of strings, the program and then
+  three strings for each member in the order of its calls, its tag and its two values, which `CommandAdd` of `runtime/common/`
+  appends to a copy of the list, so that the command a member is called on stays as it was; the build copies the list at every
+  member, where S17 reads a change in place of a command no other value holds, which a program cannot tell from a copy.
+  `Output()` and `Status()` call `CommandOutput` and `CommandStatus` of the Linux file, which apply the members in their order,
+  the later one winning, refuse a NUL byte before any call of the system, lay out the arguments, the environment and the places
+  the program is looked up in in one region mapped before the `fork`, so that the child allocates nothing, move a descriptor
+  they open below 3, which a program started with one of its streams closed gets, to 3 or above, and start the child with
+  `fork` and `execve`: the child takes back the default action of `SIGPIPE`, takes its three streams with `dup2`, marks
+  every other descriptor close-on-exec with `close_range`, changes its directory with `chdir` and tries each place in turn as
+  `execvp` does, a directory that refuses the program passed over, and writes a failure to the program through a pipe that its
+  `execve` closes, as Rust's `Command` does. `Output()` reads standard output and standard error under `poll` as they fill,
+  each to its end, as Rust's `output()` does, so that a process the child leaves behind holding a pipe holds the call too;
+  a pipe the call does not read is closed at once (S19). The program waits for the child on every path. The result is a
+  union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
+  `runtime/common/`. A build for Windows says `not supported` to each call on a command. `ChildTests` pins what no case can:
+  both pipes filled past what a pipe holds; the environment a child gets; the places a program is looked up in; the path of a
+  start that fails; the descriptors a child gets; its standard input where the program started with its own closed; the
+  streams of `Status()` and those `Output()` does not read; the refusal
+  for Windows; and a use of a command outside its members;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1936,7 +1958,7 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16, S22 and S25; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S18, S21, S22 and S25; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H7, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
@@ -2073,9 +2095,9 @@ compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a t
 `not supported`, as an intrinsic of a class under `X86` is there), a function of a built class and a lane operation it does not build, an immediate that is
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
-whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
-`ExitStatus`, `Stdio` and `ExitError`, under which processes stand, and which every file sees, so that a
-file's own declaration of one is `redeclared` (S17 to S21);
+whose lanes are a type parameter (T19); a child beside the program,
+`Spawn()` and `ChildProcess`, the input of a child, `Input(bytes)`, and a bound on its time, `Timeout(d)`, whose names
+every file sees, so that a file's own declaration of `ChildProcess` is `redeclared` (S19, S20);
 a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
