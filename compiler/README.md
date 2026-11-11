@@ -552,7 +552,12 @@ run-time table, the file named as the command line gave it, and `error: thrown a
 a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
-2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
+2026-10-23, "Caller passes it"); on Linux a write the system fails with error 9 counts as written
+(`WriteOut`), as Rust's `handle_ebadf` reads it for its `Stdout` and `Stderr` (the owner, 2026-11-11,
+"Success, as Rust"), and the runtime's `Start` first opens `/dev/null` in the place of a descriptor 0,
+1 or 2 the caller closed (`Standard`, by `fcntl` with `F_GETFD`, then `open` or `dup`, and `abort`
+where neither can be had), as Rust's `sanitize_standard_fds` does (the owner, 2026-11-11, "0, 1, 2 as
+Rust"). An `eprint` passes the same to `Print`, with standard error in place of
 standard output; where its write failed, the report of the error goes to standard error too and is
 dropped where that write is refused or takes no byte, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
@@ -783,7 +788,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   text, a generic type's under the name its declaration gives (A3), or the `Text()` its body declares (A5);
   the methods of a body, each a function of the module whose first parameter is the value, the place of
   the variable or the path that holds it for a `mut` method, as Rust passes `&mut self`, and the value
-  itself for another, as Rust passes `self` by reference, borrowed as an argument is (D16, M5, M7);
+  itself for another, borrowed as an argument is, as Rust's `&self` borrows it (D16, M5, M7): one read
+  from an item of a list is kept by its list, so that a `mut` argument of the call that changes the list is
+  `changed-while-held` (M7), and the place of a `mut` receiver inside an instance's block is kept by the read
+  of that instance, whose count holds the block to the end of the statement (K2), so that a method that
+  replaces the field holding the instance writes into a block still alive; a new value as the receiver, a
+  construction or the result of a call, is a temporary of its statement (K7); a `mut` method on a value of a
+  map meets the map's nullable read first, which is `nullable-unchecked` (N2);
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
@@ -1149,13 +1160,16 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
   the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
   its end, with room for 8192 more bytes made before each read; each is a call in flight. A read that gives the system's error 9,
-  of a descriptor 0 the caller closed, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does. Where the
+  of a descriptor 0 open for writing alone, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does; a
+  descriptor 0 the caller closed is `/dev/null` from the start (`Standard`), which reads as empty. Where the
   read of `ReadAll` fails otherwise, the bytes it took go back to the reader's buffer from its start (`KeepRest`), made again with
   room for them where it has less, and the handle keeps that room after a handle's fields, so that the next one frees it with its
   size. The module declares the handle where a file of the program calls a member of `Stdin`, and a build for Windows says
   `not supported` to each such call and loop. `StdinTests` pins what no case can: lines given on standard input and read across a
-  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a closed descriptor 0, and a directory, whose read fails; a
-  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
+  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a descriptor 0 open for writing alone, and a directory, whose read fails; a
+  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0, the `python3` of the image the
+  `gates` job runs in, which no file pins (HAZARD #15); a closed descriptor 0, 1 or 2, which a file the program opens does not
+  take; a `print` and an `eprint` whose write fails with error 9; and the refusal for Windows. The suite runs every program with an empty pipe
   whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
@@ -1916,7 +1930,7 @@ flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged b
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
 and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16, S22 and S25; S12's grants, `env`'s
-among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
+among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H7, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
 `HttpError` by the body `std/` declares, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
@@ -2085,7 +2099,8 @@ on an element of a list and an element of a list passed as `mut` (M7, M9); of th
 type (D16), a property, which section 14 leaves open, a field, a constructor, a `static`, `virtual` or
 `override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
 type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
-or that another names as its base, a member of the type after the type's name and a method named without a
+or that another names as its base, a member the body declares after the type's name, where a name it does
+not declare is `unknown-name` as after a type without a body (V10), and a method named without a
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
@@ -2339,7 +2354,8 @@ round can ask about it by the rule's id.
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
   however many reads it meets and statements it stands in (E1). A `mut` method of a `data` type
-  (D16) changes its receiver while the call holds its arguments, as an argument after `mut` does. `Add`
+  (D16) changes its receiver while the call holds its arguments, as an argument after `mut` does, since M7
+  takes the receiver of every `mut` method as what its call takes as `mut`. `Add`
   changes its receiver after its argument ran,
   so a read of the receiver in its argument meets no change (the owner, 2026-10-25, "Allow, as Rust's
   clone"), while a call in its argument that changes the receiver is the error; the emitter's `Add`

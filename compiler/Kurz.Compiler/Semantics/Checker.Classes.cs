@@ -1238,7 +1238,7 @@ public sealed partial class Checker
         return receiver ?? throw new InvalidOperationException("no `this` inside a method");
     }
 
-    /// <summary>K7, V9: inside a method, whether a name is a member of its class, which a declaration of the name would hide.</summary>
+    /// <summary>K7, V9, D16: inside a method of a class or of a data type, whether a name is a member of its type, which a declaration of the name would hide.</summary>
     private bool IsMemberName(string name) =>
         (CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || MethodsOf(c, name) is not null))
         || (CurrentData() is { } d && (d.Field(name) is not null || BodyNames(d).Contains(name))); // D16: a data type's fields and methods, as a class's

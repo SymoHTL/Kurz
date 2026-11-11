@@ -153,7 +153,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// V10: the rules of the functions of a name every file sees (<see cref="IsBuiltInName"/>) that is called on and is no value, as the
-    /// texts of an unknown function of the name cite them; null for every other name. <c>Stdin</c> lists its functions (S22), the names
+    /// texts of an unknown function of the name cite them, for the text "is no value" of these thirteen names (section 12, the owner,
+    /// 2026-11-11, "As built, 13 names"); null for every other name. <c>Stdin</c> lists its functions (S22), the names
     /// of R18 have texts of their own (<c>IntrinsicNameAsValue</c>), and a type's or a function's name is <c>syntax</c> (E4, F11).
     /// </summary>
     private static string? FunctionsOnly(string name) => name switch

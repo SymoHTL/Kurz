@@ -38,9 +38,10 @@ public sealed partial class Emitter
     private const string StdinHandle = "@kz.stdin";
 
     /// <summary>
-    /// S22: where the handle of standard input holds the room of its reader's buffer, 8 bytes after a handle's fields: 0 while the buffer
-    /// is none or the <see cref="LineBuffer"/> bytes a fill makes, else the bytes of the buffer a <c>ReadAll</c> that failed part-way made
-    /// for what it kept (<see cref="KeepRest"/>), so that the next one frees it with its size.
+    /// S22: where the handle of standard input holds the room of its reader's buffer, in 8 bytes right after a handle's fields, at offset
+    /// <see cref="HandleSize"/>: 0 while the buffer is none or the <see cref="LineBuffer"/> bytes a fill makes, else the bytes of the
+    /// buffer a <c>ReadAll</c> that failed part-way made for what it kept (<see cref="KeepRest"/>), so that the next one frees it with its
+    /// size.
     /// </summary>
     private const int StdinRoom = 56;
 

@@ -12,10 +12,12 @@ namespace Kurz.Compiler.Tests;
 /// standard input (chapter 0): the lines given to a program are read as a file's are, <c>\n</c> and <c>\r\n</c> ending a line and
 /// taken off it, and the next read goes on where a loop that stopped left the one buffer of the process, through
 /// <c>Stdin.ReadLine()</c>, <c>Stdin.Read(mut into, max)</c> and <c>Stdin.ReadAll()</c>, <c>ReadLine</c> giving <c>null</c> at the
-/// end; a line that is not UTF-8 is <c>InvalidUtf8</c> and is taken, so that the next read gives the line after it; a closed
-/// descriptor 0 is the end of the input, as Rust's <c>handle_ebadf</c> reads it, and another failed read an <c>IoError</c> naming
-/// <c>&lt;stdin&gt;</c>, after which the bytes a <c>ReadAll</c> took are the next read's; and a build for Windows says
-/// <c>not supported</c> at each of the four. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, which gives it its input; on
+/// end; a line that is not UTF-8 is <c>InvalidUtf8</c> and is taken, so that the next read gives the line after it; a read the
+/// system fails with error 9 is the end of the input, as Rust's <c>handle_ebadf</c> reads it, and another failed read an
+/// <c>IoError</c> naming <c>&lt;stdin&gt;</c>, after which the bytes a <c>ReadAll</c> took are the next read's; a closed descriptor 0,
+/// 1 or 2 is <c>/dev/null</c> from the start, so that no file the program opens takes its number, and a <c>print</c> or an
+/// <c>eprint</c> the system fails with error 9 counts as written; and a build for Windows says <c>not supported</c> at each of the
+/// four. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, which gives it its input; on
 /// Windows the tests hold the build's refusal instead.
 /// </summary>
 public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -26,7 +28,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0"</c> after <paramref name="input"/>, a shell
     /// command whose output is piped into it, or with the redirections <paramref name="redirect"/> given; its exit code, its lines and
     /// its error stream. Null on Windows, where the build is held to its refusal: <c>not supported</c>, on lines that call on
-    /// <c>Stdin</c> and at none other (S11, S22), by the id and the line, never the message (section 8).
+    /// <c>Stdin</c> or <c>File</c> and at none other (S11, S22), by the id and the line, never the message (section 8).
     /// </summary>
     private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string input, string redirect = "")
     {
@@ -34,7 +36,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var refused = Compile(text, toolchain.Runtime);
             Assert.Null(refused.Program);
-            var lines = text.Split('\n').Select((line, i) => (line, i + 1)).Where(l => l.line.Contains("Stdin.", StringComparison.Ordinal)).Select(l => l.Item2).ToHashSet();
+            var lines = text.Split('\n').Select((line, i) => (line, i + 1)).Where(l => l.line.Contains("Stdin.", StringComparison.Ordinal) || l.line.Contains("File.", StringComparison.Ordinal)).Select(l => l.Item2).ToHashSet();
             Assert.NotEmpty(refused.Diagnostics.Items);
             Assert.All(refused.Diagnostics.Items, d => Assert.True(d.Kind == DiagnosticKind.NotSupported && lines.Contains(d.Line), $"{d.Id} at line {d.Line}"));
             return null;
@@ -173,10 +175,10 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_closed_standard_input_is_the_end_of_the_input_and_another_failed_read_names_stdin()
     {
-        // S22: a read of descriptor 0, which the program's caller closed, gives the system's error of a descriptor that is not open, 9,
-        // which is the end of the input, as Rust's `handle_ebadf` reads it (the owner, 2026-11-11, "End of input"): the program prints
-        // what it prints with an empty input. The control is a read that fails otherwise, of a directory, 21, whose `IoError` names the
-        // path `<stdin>` at each of the three
+        // S22: a read of descriptor 0 open for writing alone gives the system's error 9, which is the end of the input, as Rust's
+        // `handle_ebadf` reads it (the owner, 2026-11-11, "End of input" and "End of input, as Rust"): the program prints what it
+        // prints with an empty input. A descriptor 0 the caller closed is `/dev/null` from the start, which reads as empty too. The
+        // control is a read that fails otherwise, of a directory, 21, whose `IoError` names the path `<stdin>` at each of the three
         const string text = """
             match Stdin.ReadLine() {
                 string l => print(l)
@@ -214,6 +216,12 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["end", "0", "0", "no line"], closed.Output);
         }
 
+        if (Ran(text, "stdin-write-only", "", "0>/dev/null") is { } writeOnly)
+        {
+            Assert.True((0, "") == (writeOnly.Code, writeOnly.Error), $"exit {writeOnly.Code}: {writeOnly.Error}");
+            Assert.Equal(["end", "0", "0", "no line"], writeOnly.Output);
+        }
+
         if (Ran(text, "stdin-directory", "", "< /") is { } directory)
         {
             Assert.True((0, "") == (directory.Code, directory.Error), $"exit {directory.Code}: {directory.Error}");
@@ -224,6 +232,104 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.True((0, "") == (empty.Code, empty.Error), $"exit {empty.Code}: {empty.Error}");
             Assert.Equal(["end", "0", "0", "no line"], empty.Output);
+        }
+    }
+
+    [Theory]
+    [InlineData("<&-", "standard-0", 0)]
+    [InlineData(">&-", "standard-1", 1)]
+    [InlineData("2>&-", "standard-2", 2)]
+    public void A_closed_standard_descriptor_is_dev_null_from_the_start_so_no_file_takes_its_number(string redirect, string name, int fd)
+    {
+        // S22, A1, A17: a descriptor 0, 1 or 2 the caller closed is opened again on `/dev/null` before the first statement (section 12,
+        // the owner, 2026-11-11, "0, 1, 2 as Rust"), so the file the program opens next takes another number: a read of `Stdin` is the
+        // end, and the line of a `print` or an `eprint` goes to `/dev/null`, not into the file, which stays empty. Without the step
+        // the file took the closed number, and the read gave the file's line (issue 174, comment 6792523201) or the line went into the
+        // file. The control is each program with its descriptors open
+        var text = fd switch
+        {
+            0 => $$"""
+                void | IoError | InvalidUtf8 Run() {
+                    File.WriteAll("{{name}}.txt", "a line of the file".Bytes)
+                    f = File.Open("{{name}}.txt")
+                    match Stdin.ReadLine() {
+                        string l => print("read {l}")
+                        null => print("end")
+                        IoError e => print(e)
+                        InvalidUtf8 e => print(e)
+                    }
+
+                    f.Close()
+                    File.Delete("{{name}}.txt")
+                }
+
+                Run() else {
+                    IoError e => print(e)
+                    InvalidUtf8 e => print(e)
+                }
+                """,
+            _ => $$"""
+                void | IoError Run() {
+                    f = File.Create("{{name}}.txt")
+                    {{(fd == 1 ? "print" : "eprint")}}("a line")
+                    f.Close()
+                    {{(fd == 1 ? "eprint" : "print")}}(File.ReadAll("{{name}}.txt").Count)
+                    File.Delete("{{name}}.txt")
+                }
+
+                Run() else {
+                    IoError e => {{(fd == 1 ? "eprint" : "print")}}(e)
+                }
+                """,
+        };
+        if (Ran(text, name, "", redirect) is { } closed)
+        {
+            switch (fd)
+            {
+                case 0:
+                    Assert.True((0, "") == (closed.Code, closed.Error), $"exit {closed.Code}: {closed.Error}");
+                    Assert.Equal(["end"], closed.Output);
+                    break;
+                case 1:
+                    Assert.True((0, "0\n") == (closed.Code, closed.Error), $"exit {closed.Code}: {closed.Error}");
+                    Assert.Empty(closed.Output);
+                    break;
+                default:
+                    Assert.True((0, "") == (closed.Code, closed.Error), $"exit {closed.Code}: {closed.Error}");
+                    Assert.Equal(["0"], closed.Output);
+                    break;
+            }
+        }
+
+        if (Ran(text, name + "-control", "") is { } open)
+        {
+            Assert.Equal(0, open.Code);
+            Assert.Equal(fd switch { 0 => ["end"], 1 => ["a line"], _ => ["0"] }, open.Output);
+            Assert.Equal(fd switch { 0 => "", 1 => "0\n", _ => "a line\n" }, open.Error);
+        }
+    }
+
+    [Theory]
+    [InlineData("1</dev/null", "print", "eprint")]
+    [InlineData("2</dev/null", "eprint", "print")]
+    public void A_print_or_eprint_the_system_fails_with_error_9_counts_as_written(string redirect, string refused, string after)
+    {
+        // A1, A17: a write to a descriptor open for reading alone gives the system's error 9, which counts as written whole, as Rust's
+        // `handle_ebadf` reads it for its `Stdout` and `Stderr` (section 12, the owner, 2026-11-11, "Success, as Rust"): the program
+        // goes on and ends with 0, where `print-failed` ended it with 1. A closed pipe still raises `print-failed` (EmitterTests)
+        var text = $"{refused}(\"into nothing\")\n{after}(\"after\")\n";
+        if (Builder.HostTarget == Target.Windows)
+        {
+            // the owner's answer names Linux: on Windows the program builds, and a refused write stays `print-failed`
+            Assert.NotNull(Compile(text, toolchain.Runtime).Program);
+            return;
+        }
+
+        if (Ran(text, refused + "-ebadf", "", redirect) is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(after == "print" ? ["after"] : [], run.Output);
+            Assert.Equal(after == "eprint" ? "after\n" : "", run.Error);
         }
     }
 
@@ -269,8 +375,9 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// The program built for this machine and started with a stream as its standard input: <c>python3</c> connects to a listener of the
-    /// test, puts the connection on descriptor 0 and runs the program in its place. The listener sends <c>first\nrest of it</c>, waits
+    /// The program built for this machine and started with a stream as its standard input: <c>python3</c>, the one of the image the
+    /// <c>gates</c> job runs in, which no file pins (HAZARD #15), connects to a listener of the test, puts the connection on descriptor 0
+    /// and runs the program in its place. The listener sends <c>first\nrest of it</c>, waits
     /// half a second, so that the program's <c>ReadAll</c> waits on its read, and then resets the connection (<paramref name="reset"/>,
     /// a close that lingers 0 seconds) or closes it.
     /// </summary>
