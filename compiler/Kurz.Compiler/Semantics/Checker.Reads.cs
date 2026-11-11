@@ -97,9 +97,10 @@ public sealed partial class Checker
 
             if (changes.TryGetValue(call, out var receiver))
             {
-                foreach (var (_, part) in ordered.Skip(1))
+                // D16: a `mut` method of a data type changes its receiver while it holds its arguments, as an argument after `mut` does
+                foreach (var (held, part) in ordered.Skip(1))
                 {
-                    Conflict(Kept(part), call, receiver);
+                    Conflict(dataReceivers.Contains(call) ? held : Kept(part), call, receiver);
                 }
             }
         }

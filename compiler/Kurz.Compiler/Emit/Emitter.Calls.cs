@@ -48,6 +48,7 @@ public sealed partial class Emitter
             CallKind.DataNew => EmitConstruction(c, info),
             CallKind.ClassNew => EmitClassNew(c, info),
             CallKind.Method => EmitMethodCall(c, info),
+            CallKind.DataMethod => EmitDataMethodCall(c, info),
             CallKind.ListClear => EmitListClear(c),
             CallKind.ListIndexOf or CallKind.ListIndexOfRun => EmitListIndexOf(c, info.Kind == CallKind.ListIndexOfRun),
             CallKind.ListAddRange => EmitListAddRange(c),
@@ -77,6 +78,7 @@ public sealed partial class Emitter
                 or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin => EmitFileCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
+            CallKind.EnvironmentExit => EmitExit(c, info),
             CallKind.Hash or CallKind.HmacHash or CallKind.HexEncode or CallKind.HasherNew or CallKind.HmacNew or CallKind.HasherUpdate or CallKind.HasherFinish
                 or CallKind.HmacVerify or CallKind.FixedTimeEqual => EmitHashCall(c, info),
             _ => throw new InvalidOperationException(info.Kind.ToString()),
@@ -140,6 +142,33 @@ public sealed partial class Emitter
         var result = Types.Substitute(f.ReturnType, instanceMap);
         var call = $"call {ParameterType(f, result)} {name}({string.Join(", ", arguments)})";
         return Types.IsVoid(result) ? Emitted(call) : fn.Value(call);
+    }
+
+    /// <summary>
+    /// D16: a method of a data type, called as the function it was checked as, with the value before the dot first: the place that holds
+    /// it where the method is <c>mut</c> (M5), which the call changes as a <c>mut</c> argument's (M7), and else the value, borrowed as an
+    /// argument is: one read from a variable or a path of data fields from one is held while the call runs, so that a change of it in the
+    /// call's arguments is <c>changed-while-held</c> (M7) and the method, a function, reaches no variable of its caller; and one read
+    /// through a field of an instance holds a count of its own to the end of its statement (<c>InstanceField</c>, K2), so that the method
+    /// may replace that field while it runs.
+    /// </summary>
+    private string EmitDataMethodCall(CallExpression c, CallInfo info)
+    {
+        var method = info.Function!;
+        var f = method.Real!;
+        var target = ((MemberAccess)Unwrap(c.Callee)).Target;
+        var receiver = f.Parameters[0].Mut ? $"ptr {CollectionPlace(target)}" : $"{Ir(f.Parameters[0].Type)} {EmitExpression(target)}";
+        var arguments = Arguments(
+            c,
+            info,
+            j => method.Parameters[j].Type,
+            j => method.Parameters[j].Mut,
+            j => Default(f.Declaration!.Parameters[j + 1].Default, owners[f]),
+            cConvention: false,
+            owned: false);
+        arguments.Insert(0, receiver);
+        var call = $"call {Ir(f.ReturnType)} {Instance(f, NoMap)}({string.Join(", ", arguments)})";
+        return Types.IsVoid(f.ReturnType) ? Emitted(call) : fn.Value(call);
     }
 
     /// <summary>R16: a call of a declaration of a block of C functions, by its own name, the library it comes from added to the link; an argument in the place of <c>...</c> is passed as C passes it, an integer narrower than an <c>int</c> widened to one.</summary>

@@ -62,6 +62,9 @@ public sealed partial class Emitter
     // the standard library that reaches a call on a file or a socket is `not supported` in a build for Windows at the program's call
     private int origin;
     private IrFunction fn = null!;
+
+    // F17: the function of the top-level statements, in which a `return` with a value ends the program with it as its exit code
+    private IrFunction? topLevel;
     private string display = "main"; // the function being emitted as a trace names it, which names a lambda in it
     private string? guardedDisplay; // the guarded block being emitted as a trace names it, which names a guarded block in it
     private Dictionary<VariableSymbol, string> slots = new(ReferenceEqualityComparer.Instance);
@@ -163,6 +166,7 @@ public sealed partial class Emitter
 
         unit = program;
         Begin(new IrFunction("internal void @kz.main()"), NoMap, Types.Void);
+        topLevel = fn;
         Trace("main", "kz.main", 1);
         InScope(() =>
         {
@@ -278,8 +282,16 @@ public sealed partial class Emitter
                     state.Add((u, v));
                     break;
                 case TypeDeclaration { Kind: TypeDeclarationKind.Data } t:
-                    dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
-                    break;
+                    {
+                        var symbol = u.Model.DataTypeOf(t);
+                        dataOwners[symbol] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
+                        foreach (var method in symbol.Methods.Values.SelectMany(m => m))
+                        {
+                            owners[method.Real!] = u; // D16: emitted when called, as a function is
+                        }
+
+                        break;
+                    }
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     {
                         var symbol = u.Model.ClassOf(t);
@@ -710,6 +722,10 @@ public sealed partial class Emitter
                 if (r.Value is null)
                 {
                     EmitReturn(null, Types.Void, r.Line);
+                }
+                else if (fn == topLevel)
+                {
+                    EmitExitCode(r.Value);
                 }
                 else
                 {

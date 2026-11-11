@@ -5095,7 +5095,7 @@ public sealed class CheckerTests
     [InlineData("class C {\n    prot int Count => 1\n}\n\nprint(1)\n", "2: the modifier `prot` of a property, which section 14 leaves open (K7)")]
     [InlineData("class C {\n    pub extern \"C\" int Count => 1\n}\n\nprint(1)\n", "2: the modifier `extern` of a property (K7, R16)")]
     [InlineData("interface I {\n    int Count => 1\n}\n\nprint(1)\n", "2: a property of an interface, which section 14 leaves open (K7)")]
-    [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: the body of a data type (D16)")]
+    [InlineData("data D(int X) {\n    pub int Twice => X * 2\n}\n\nprint(D(1).X)\n", "2: a property of a data type, which section 14 leaves open (D16, K7)")]
     [InlineData("class C {\n    pub void Say => print(1)\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
     [InlineData("class C {\n    pub int | IoError Count => 1\n}\n\nprint(1)\n", "2: a property of `void` or of a type that lists cases beside its success (K7, O2, O10)")]
     [InlineData("class C {\n    pub int Count => 1\n}\n\nC? Find() => null\n\nprint(Find()?.Count ?? 0)\n", "7: a property read after `?.` (K7, N5)")]
@@ -5105,7 +5105,7 @@ public sealed class CheckerTests
         // K7: a `static`, `virtual`, `override` or `prot` property, one in an interface or in the body of a `data` type, and one of `void`
         // or of a type that lists cases are open (section 14, the product pass's questions 6 and 7 and #39's readings, at their defaults),
         // and `extern` is not supported on a property as on a method (R16); a read after `?.` is N5's and a read after `&` R10's, which
-        // this checker does not take for a property; a `data` type's body is not supported whatever it holds
+        // this checker does not take for a property; a property in a `data` type's body is open as one in a class (D16)
         Assert.Equal([expected], NotSupported(program));
     }
 
@@ -5311,7 +5311,6 @@ public sealed class CheckerTests
     [InlineData("data In(int X)\ndata Out(In? I)\n\nvoid Bump(mut int n) {\n    n = n + 1\n}\n\nmut o = Out(In(1))\nif o.I != null {\n    Bump(mut o.I.X)\n}", "10: a path through a nullable variable or field passed as `mut` (N3, M7)")]
     [InlineData("use tools\nprint(1)", "1: use (F10)")]
     [InlineData("use a/util\nprint(1)", "1: use (F10)")]
-    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nc = Counter(0)\nprint(c.Count)", "2: the body of a data type (D16)")]
     [InlineData("print(string(1))", "1: a conversion to `string`, a type that is neither a number type nor a time type (T10, T29)")]
     [InlineData("data Box(List<int> Items)\n\nmut bs = List<Box>()\nbs[0].Items[0] = 1", "4: an assignment into a list reached through an item or a call, or into a path that goes on after the item (M4, M9)")]
     [InlineData("data In(List<int> Items)\ndata Out(In? I)\n\nmut o = Out(In(List<int>()))\nif o.I != null {\n    o.I.Items[0] = 1\n}", "6: an assignment into a path through a nullable variable or field (N3, M4)")]
@@ -5325,9 +5324,9 @@ public sealed class CheckerTests
     [InlineData("uint u = 1\nprint(-u)", "2: `-` on a `uint`, which no rule gives a meaning")]
     [InlineData("ulong u = 1\nprint(-u)", "2: `-` on a `ulong`, which no rule gives a meaning")]
     [InlineData("void Bump(mut int n) {\n    n = n + 1\n}\n\nmut xs = List<short>()\nBump(mut xs[0])", "6: an element of a list passed as `mut` (M7, M9)")]
-    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nprint(Counter.Increment)", "2: the body of a data type (D16)")]
-    [InlineData("data Counter(int Count) {\n    pub static Counter Zero() => Counter(0)\n}\n\nprint(Counter.Zero().Count)", "2: the body of a data type (D16)")]
-    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type (D16)")]
+    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nprint(Counter.Increment)", "7: a member of a data type named after the type's name (D16, K19)")]
+    [InlineData("data Counter(int Count) {\n    pub static Counter Zero() => Counter(0)\n}\n\nprint(Counter.Zero().Count)", "2: a `static` method of a data type (D16, K19)")]
+    [InlineData("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()", "2: the body of a data type that derives from another or that another derives from (D16, D6)")]
     [InlineData("static int Twice(int n) {\n    return \"x\"\n}\n\nprint(Twice(\"a\"))", "1: the modifier `static` of a method (K7, M6)")]
     [InlineData("data User(string Name)\n\nmut u = User(\"a\")\nu?.Name = \"b\"", "4: `?.` (N5)")]
     public void A_construct_of_a_chapter_the_checker_does_not_read_is_not_supported_and_carries_no_error(string program, string first)
@@ -5335,6 +5334,91 @@ public sealed class CheckerTests
         // the helper asserts that no diagnostic is an error: what stands inside the construct is read with its diagnostics dropped, so that
         // the variables it uses count as used and nothing of it is reported (E1)
         Assert.Equal(first, NotSupported(program)[0]);
+    }
+
+    // ---- the body of a data type (D16) --------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(2, "D16, T19", "data W<T>(T Value) {\n    pub T Get() => Value\n}\n\nprint(1)")]
+    [InlineData(3, "D16, D6", "data A(int X)\ndata B(int Y) : A {\n    pub int Get() => Y\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K5", "data D(int X) {\n    pub bool Equals(D other) => true\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K5", "data D(int X) {\n    pub int GetHashCode() => 1\n}\n\nprint(1)")]
+    [InlineData(2, "D16, F9", "data D(int X) {\n    pub int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K14", "data D(int X) {\n    pub D() : this(1) { }\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K7", "data D(int X) {\n    pub virtual int Get() => X\n}\n\nprint(1)")]
+    [InlineData(2, "D16, F9", "data D(int X) {\n    prot int Get() => X\n}\n\nprint(1)")]
+    [InlineData(2, "D16, A5", "data D(int X) {\n    pub mut string Text() => \"d\"\n}\n\nprint(1)")]
+    [InlineData(2, "section 4, T19", "data D(int X) {\n    pub T Id<T>(T v) => v\n}\n\nprint(1)")]
+    [InlineData(5, "D16, F11", "data C(int N) {\n    pub int Get() => N\n}\n\nprint(C(1).Get)")]
+    [InlineData(8, "M5, M9", "data C(int N) {\n    pub mut void Inc() {\n        N = N + 1\n    }\n}\n\nmut cs = [C(1)]\ncs[0].Inc()")]
+    public void A_part_of_a_data_body_the_checker_does_not_read_is_not_supported_at_its_line(int line, string rule, string program)
+    {
+        // D16: what a body holds beside its methods, a method with what this build does not read, and a body it does not read; section 14
+        // leaves a property and `Equals` open, and the product pass of issue 455 parked the rest at its defaults (questions 1b, 3, 4, 6)
+        NotSupportedAt(line, rule, program);
+    }
+
+    [Fact]
+    public void A_call_of_a_method_the_checker_refused_is_not_supported_at_the_call_too()
+    {
+        // D16, E1: the call reports `not supported` where the declaration did, and no error
+        var lines = NotSupported("data D(int X) {\n    pub bool Equals(D other) => true\n}\n\nprint(D(1).Equals(D(1)))").Select(d => d.Split(':')[0]);
+        Assert.Equal(["2", "5"], lines);
+    }
+
+    [Fact]
+    public void A_method_of_a_data_body_without_a_body_is_syntax_as_one_of_a_class_body_is()
+    {
+        // D16, K7, F2: a body lists methods with their bodies, as a class's does
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("data D(int X) {\n    pub int Get()\n}\n\nprint(D(1).X)\n"));
+    }
+
+    [Fact]
+    public void A_method_of_a_data_type_changes_its_value_when_it_is_mut_and_its_value_is_reachable_through_a_mut_variable()
+    {
+        // M5, M6, D16: a method without `mut` assigns no field and calls no `mut` method on its value, and a `mut` one is called on a
+        // `mut` variable or a path of data fields from one, and on nothing else (the product pass of issue 455, questions 1 and 2, at
+        // their defaults); a body that keeps to that on a `mut` variable and a path reports nothing
+        const string counter = "data Counter(int Count) {\n    pub void Reset() {\n        Count = 0\n    }\n\n    pub void Again() {\n        Increment()\n    }\n\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n";
+        const string fine = "data Counter(int Count) {\n    pub mut void Twice() {\n        Increment()\n        this.Increment()\n    }\n\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n";
+        Assert.Equal([(ErrorIds.AssignImmutable, 3), (ErrorIds.MutRequired, 7), (ErrorIds.MutRequired, 16), (ErrorIds.MutRequired, 17)], Errors(counter + "\nc = Counter(0)\nc.Increment()\nCounter(1).Increment()\n"));
+        Assert.Empty(Errors(fine + "data Outer(Counter C)\n\nmut c = Counter(0)\nc.Twice()\nmut o = Outer(c)\no.C.Increment()\nprint(c.Count + o.C.Count)\n"));
+    }
+
+    [Fact]
+    public void A_method_or_the_text_of_a_data_type_without_pub_is_visible_inside_its_type_alone()
+    {
+        // F9, A9, A15, D16: a method without `pub` is called inside its type, and is `not-visible` outside it; a `Text()` without `pub`
+        // is `not-visible` wherever `print` or an interpolation takes it, inside its type too, as a class's (the product pass of issue
+        // 455, question 7)
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("data P(int X) {\n    int Hidden() => X\n    pub int Shown() => Hidden()\n}\n\nprint(P(1).Hidden())\nprint(P(1).Shown())\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("data P(int X) {\n    string Text() => \"p\"\n}\n\nprint(P(1))\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 3)], Errors("data P(int X) {\n    string Text() => \"p\"\n    pub string Show() => \"{this}\"\n}\n\nprint(P(1).Show())\n"));
+        Assert.Empty(Errors("data P(int X) {\n    pub string Text() => \"p\"\n}\n\nprint(\"{P(1)}\")\n"));
+
+        // A5, D16: the text its body declares stands for A3's, so a field of a type that has no text takes none from it
+        Assert.Empty(Errors("class K(int X)\ndata F(K Item) {\n    pub string Text() => \"f\"\n}\n\nprint(F(K(1)))\n"));
+    }
+
+    [Fact]
+    public void A_method_named_like_a_field_and_a_name_a_method_declares_like_a_member_are_redeclared()
+    {
+        // V9, D16: a method takes no name of a field of its type, and inside a method a parameter and a variable take no name of a
+        // member, as in a class's method (the product pass of issue 455, question 9)
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Redeclared, 3), (ErrorIds.Redeclared, 5)], Errors("data P(int X) {\n    pub int X() => 1\n    pub int Y(int X) => 2\n    pub int Z() {\n        int X = 2\n        return 3\n    }\n}\n\nprint(1)\n"));
+        Assert.Equal([(ErrorIds.Redeclared, 4)], Errors("data P(int X) {\n    pub int Y() => 1\n    pub int Z() {\n        int Y = 2\n        return 3\n    }\n}\n\nprint(1)\n"));
+
+        // V9, E1: a type that is `redeclared` declares no method of its body, which would read another type's value as its own
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("data File(int X) {\n    pub int Get() => X\n}\n"));
+    }
+
+    [Fact]
+    public void A_mut_method_of_a_data_type_changes_its_value_while_its_arguments_hold_what_they_read()
+    {
+        // M7, D16: the receiver of a `mut` method of a data type changes while the call holds its arguments, as an argument after
+        // `mut` does, so a string read from it is `changed-while-held`, and a number, which is copied, is not
+        const string named = "data C(string Name, int N) {\n    pub mut void Set(string n) {\n        Name = n\n    }\n\n    pub mut void Count(int n) {\n        N = n\n    }\n}\n\nmut c = C(\"a\", 1)\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 12)], Errors(named + "c.Set(c.Name)\nc.Count(c.N)\nprint(c.Name)\n"));
     }
 
     [Fact]

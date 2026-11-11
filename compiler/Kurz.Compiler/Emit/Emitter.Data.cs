@@ -570,6 +570,9 @@ public sealed partial class Emitter
         {
             switch (type)
             {
+                case DataType { Symbol.TextMethod: { } text } d:
+                    fn.Return($"%kz.str {fn.Value($"call %kz.str {Instance(text.Real!, NoMap)}({Ir(d)} %a0)")}"); // A5, D16: the `Text()` its body declares
+                    break;
                 case DataType d when layout.IsBlock(d):
                     ByNumber("%a0", d.Symbol, held =>
                     {

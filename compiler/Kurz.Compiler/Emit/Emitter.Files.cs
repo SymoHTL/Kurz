@@ -1342,6 +1342,41 @@ public sealed partial class Emitter
     /// <summary>What a build for Windows says <c>not supported</c> with at a read of the command line, the environment or the clock (S11).</summary>
     internal const string ProcessNotOnWindows = "a read of the command line, the environment or the clock, which the runtime of Windows does not give (S11)";
 
+    /// <summary>What a build for Windows says <c>not supported</c> with at <c>Environment.Exit</c> and at a top-level <c>return</c> with a value (S11, S23, F17).</summary>
+    internal const string ExitNotOnWindows = "the exit code of `Environment.Exit` or of a top-level `return` with a value, which the runtime of Windows does not give (S11, S23, F17)";
+
+    /// <summary>
+    /// S23: <c>Environment.Exit(code)</c> ends the process at once with <c>code</c>, through the runtime's one exit, <c>_exit</c>, which runs
+    /// no handler of the C library; Linux takes the low 8 bits of the code. No path goes on after the call.
+    /// </summary>
+    private string? EmitExit(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, ExitNotOnWindows);
+        }
+
+        EndWith(Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(Types.Int).Length + 1)..]);
+        return null;
+    }
+
+    /// <summary>F17: a <c>return</c> with a value among the top-level statements ends the program with that <c>int</c>, at once, as S23's call does.</summary>
+    private void EmitExitCode(Expression value)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(value.Line, ExitNotOnWindows);
+        }
+
+        EndWith(Convert(EmitExpression(value), TypeOf(value), Types.Int, value.Line));
+    }
+
+    private void EndWith(string code)
+    {
+        fn.Emit($"call void {SysFunction("Exit")}({Ir(Types.Int)} {code})");
+        fn.Unreachable();
+    }
+
     /// <summary>Whether the data type is <c>EnvError</c>, which no file can declare beside the one every file sees (S14, V9).</summary>
     private static bool IsEnvError(KurzType type) => type is DataType { Symbol.Name: "EnvError" };
 

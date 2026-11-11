@@ -325,6 +325,8 @@ public sealed partial class Checker
             ResolveData(symbol);
         }
 
+        DeclareDataBodies(); // D16: before the signatures, which its methods' functions join
+
         foreach (var symbol in classDeclared)
         {
             ResolveClass(symbol); // K1
@@ -342,6 +344,7 @@ public sealed partial class Checker
         ResolveMethods(); // K7
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
+        MakeDataMethodViews(); // D16: of the methods no duplicate took out (F12)
         CheckStates();
         CheckEnumNumbers();
         CheckFlagsNumbers();
@@ -1142,11 +1145,9 @@ public sealed partial class Checker
             symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line)); // kept, so that the constructor's arity stays what is written
         }
 
-        if (d.Members is { Count: > 0 } members)
+        if (d.Members is { Count: > 0 } && !refusedTypes.Contains(symbol))
         {
-            // its members are not declared: a member that is no field, of a value of the type or of one derived from it, or after the
-            // type's name, is `not supported` where it is used (MemberOf, CheckMember), so nothing more is reported (E1)
-            NotSupported(members[0].Line, "the body of a data type (D16)");
+            dataBodies.Add(symbol); // D16: declared once every base is known (DeclareDataBodies)
         }
 
         typeContext = null;
@@ -2568,7 +2569,9 @@ public sealed partial class Checker
             }
             else if (!variable.Mut)
             {
-                Report(ErrorIds.AssignImmutable, a.Line, $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
+                Report(ErrorIds.AssignImmutable, a.Line, IsDataThis(variable)
+                    ? "a method without `mut` changes no field of the value it was called on: mark it `mut` (M5, M6, D16)"
+                    : $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
             }
             else
             {
@@ -2831,8 +2834,7 @@ public sealed partial class Checker
         frame.Building?.Returns.Add(frame.Known); // K14: a path that leaves a constructor here assigns its fields first
         if (frame.IsTopLevel && r.Value is not null)
         {
-            NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");
-            CheckExpression(r.Value, null);
+            CheckExitCode(r);
             return;
         }
 
@@ -2893,6 +2895,29 @@ public sealed partial class Checker
         else if (!Types.Assignable(value.Type, expected))
         {
             ReportMismatch(value.Type, expected, r.Value.Line, $"{Types.A(value.Type)} is returned where the result is {Types.A(expected)}", "F3"); // E1: at the value's line, as for every value that does not fit
+        }
+    }
+
+    /// <summary>
+    /// F17: a <c>return</c> with a value among the top-level statements ends the program with that value as its exit code, an <c>int</c>,
+    /// and a value of another type is <c>type-mismatch</c> (section 12, the owner, 2026-11-01, "Top-level return n + Exit"), as the value
+    /// a function returns is held to its result (F3).
+    /// </summary>
+    private void CheckExitCode(ReturnStatement r)
+    {
+        var value = CheckExpression(r.Value!, Types.Int);
+        if (value.IsError)
+        {
+            return;
+        }
+
+        if (Types.IsVoid(value.Type))
+        {
+            Report(ErrorIds.Syntax, r.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!Types.Assignable(value.Type, Types.Int))
+        {
+            ReportMismatch(value.Type, Types.Int, r.Value!.Line, $"{Types.A(value.Type)} is returned among the top-level statements, where the exit code is an `int`", "F17");
         }
     }
 

@@ -2486,6 +2486,110 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "[u, t] g [g]", // the list the first hole took a count of, which the lambda replaced (K2)
     ];
 
+    // the methods of a `data` type (D16): a `mut` method that changes a field by its name, one that replaces a string field, which lets
+    // go of the string it held, while a string another method gave is held in a variable, one that calls another on its value, a value
+    // copied before the changes, which keeps its fields (M3), a method that reads a field from a lambda, one that makes a new value with
+    // `with`, overloads, a private method called from a public one, a `mut` method through a path of data fields (M4, M5), the text
+    // the body declares in `print`, in an interpolation, in the text of a value that holds one and of a list (A5), a `mut` method on a
+    // `mut` field of an instance (K2), and a method on a value read from that field that replaces the field while it runs
+    private const string DataBodies = """
+        data Counter(int Count, string Name) {
+            pub mut void Increment() {
+                Count = Count + 1
+            }
+
+            pub mut void Rename(string name) {
+                Name = "{name}!"
+            }
+
+            pub mut void Add(int n) {
+                for i in 0..<n {
+                    Increment()
+                }
+            }
+
+            pub string Show() => "{Name}={Count}"
+
+            pub string Show(string prefix) => "{prefix}{Show()}"
+
+            pub string Label() => Name
+
+            pub int Twice() {
+                f = () => Count * 2
+                return f()
+            }
+
+            pub Counter Bumped() => this with { Count = this.Count + 1 }
+
+            pub mut int Next() {
+                Count = Count + 1
+                return Count
+            }
+
+            int Hidden() => Count
+
+            pub int Peek() => Hidden()
+
+            pub string Swapped(Box b) {
+                b.D = Counter(0, "x")
+                return "{Name}={Count}"
+            }
+
+            pub string Text() => "<{Show()}>"
+        }
+
+        data Outer(Counter C, List<string> Tags)
+
+        mut c = Counter(0, "a")
+        before = c
+        c.Add(3)
+        c.Rename("b")
+        print(c.Show())
+        print(before.Show())
+        print(c.Show("p:"))
+        label = c.Label()
+        c.Rename("c")
+        print(label)
+        print(c.Twice())
+        print(c.Bumped())
+        print(c.Next())
+        print(c.Peek())
+        mut o = Outer(Counter(5, "o"), ["t"])
+        o.C.Increment()
+        o.C.Rename("p")
+        print(o)
+        print("{c} and {o.C}")
+        xs = [Counter(1, "l"), c]
+        print(xs)
+        print(xs[0].Show())
+
+        class Box(mut Counter D)
+
+        bx = Box(Counter(1, "a"))
+        bx.D.Increment()
+        bx.D.Rename("z")
+        print(bx.D.Swapped(bx))
+        print(bx.D.Name)
+        """;
+
+    private static readonly string[] DataBodiesPrint =
+    [
+        "b!=3",
+        "a=0", // the value copied before the changes (M3)
+        "p:b!=3",
+        "b!", // the string the method gave, which the variable holds after the field let go of it
+        "6",
+        "<c!=4>",
+        "4",
+        "4",
+        "Outer { C = <p!=6>, Tags = [t] }",
+        "<c!=4> and <p!=6>",
+        "[<l=1>, <c!=4>]",
+        "l=1",
+        "z!=2", // the value read from the instance's field, which the read holds while the method replaces the field (K2)
+        "x",
+    ];
+
     // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets
     // go of the environment it held; a field without `mut`; one of a class body, called by its name inside a method; a lambda that
     // replaces the field it is called through while it runs, which the call holds to the end of its statement; a nullable one, a
@@ -4193,6 +4297,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(ListWrites, fenced, "list-writes-fenced"), 0, ListWritesPrint, "");
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
+        Ran(BuildAndRun(DataBodies, fenced, "data-bodies-fenced"), 0, DataBodiesPrint, "");
         // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
         // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
         // change stands (X8, section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that frees the instance whose field holds
