@@ -230,6 +230,9 @@ public enum CallKind
     /// <summary><c>c.Stdin(s)</c>, <c>c.Stdout(s)</c> and <c>c.Stderr(s)</c> (S17).</summary>
     CommandStream,
 
+    /// <summary><c>c.Timeout(d)</c> (S20).</summary>
+    CommandTimeout,
+
     /// <summary><c>c.Output()</c> (S18).</summary>
     CommandOutput,
 

@@ -63,6 +63,7 @@ extern "C" {
     int chdir(byte* path)
     int waitpid(int pid, int* status, int options)
     int getrlimit(int resource, long* limits)
+    int kill(int pid, int number)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -3028,8 +3029,24 @@ pub void | IoError | ExitError CommandStatus(List<string> command) {
     }
 }
 
-// The `IoError` of a start that failed (S21), or of a read of the child's output that failed (S18): its path is
-// the program, or the directory `Dir` named where that is what failed (`at` 1); a NUL byte in a string of the
+// The bound of `Timeout(d)` in nanoseconds, as `CommandTimeout` writes it in decimal; a bound below 0 is read
+// as 0, which has passed at the start as it has (S20).
+long BoundOf(string text) {
+    mut long parsed = 0
+    for b in text.Bytes {
+        if b == 45 {
+            return 0
+        }
+
+        parsed = parsed * 10 + (long(b) - 48)
+    }
+
+    return parsed
+}
+
+// The `IoError` of a start that failed (S21), of a read of the child's output that failed (S18), or of a bound
+// that passed (S20, `TimedOut`): its path is the program, or the directory `Dir` named where that is what failed
+// (`at` 1); a NUL byte in a string of the
 // command (`at` 2) is `InvalidInput` with the number 0, as Rust's `CString::new` refuses it before any call of
 // the system.
 IoError StartFailure(List<string> command, long result, int at) {
@@ -3187,7 +3204,7 @@ long Lift(int* fds, long k) {
 
 // The command run: the child's status as `waitpid` gives it, 0 or above, or -errno where its start or a read of
 // its output failed, with `at` naming what failed, 0 the program, 1 the directory `Dir` named, 2 a NUL byte
-// (S18, S21).
+// (S18, S21), or -4100, `TimedOut` with the number 0 and `at` 0, where the bound of `Timeout(d)` passed (S20).
 //
 // The members are applied in the order of their calls, the later one winning (S21). The child gets the
 // program's environment, less what `EnvRemove` and `EnvClear` took away and with what `Env` set, the
@@ -3207,6 +3224,14 @@ long Lift(int* fds, long k) {
 // closed at once (S19), so that a child that writes there is ended by `SIGPIPE` and one that reads there
 // reads its end. All that the child calls between `fork` and `execve` is written to memory mapped before
 // the `fork`, so that the child allocates nothing.
+//
+// With `Timeout(d)` the bound runs from the start the child's report says, read on the monotonic clock and
+// held at the largest `long` where it passes it; the child's end is polled with its pipes through a
+// descriptor of the process, `pidfd_open` (434 on x86-64), as Rust's `Child` waits on one on Linux. When the
+// bound has passed, a bound of 0 or below at the first look, the pipes are closed unread, so that a descriptor
+// another process still holds does not hold the call; a child that has not ended is killed with `SIGKILL` (9)
+// and waited for, and the call gives `TimedOut`, while one that ended gives its own status, the child's end
+// deciding.
 long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err, mut int at) {
     string program = command[0]
     mut arguments = List<string>()
@@ -3216,6 +3241,8 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
     mut values = List<string>()
     mut sets = List<bool>()
     mut bool cleared = false
+    mut bool bounded = false
+    mut long bound = 0
     mut int input = 0
     mut int standard = 0
     mut int error = 0
@@ -3255,6 +3282,9 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
             names = List<string>()
             values = List<string>()
             sets = List<bool>()
+        } else if tag == "t" {
+            bounded = true
+            bound = BoundOf(first)
         } else {
             mut int mode = 2
             if first == "i" {
@@ -3374,13 +3404,15 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
     mut long waitResult = 0
     raw {
         // the layout of the memory: the buffer of a read, 65536 bytes; 128 bytes for the nine descriptors (0),
-        // the child's report (48), the two entries of `poll` (64), the status of `waitpid` (80) and the limits of
-        // open files (88); then the three tables of addresses and their strings
+        // the child's report (48), the three entries of `poll` (64), the status of `waitpid` (96) and the time
+        // `clock_gettime` reads (104); then the three tables of addresses and their strings; the limits of open
+        // files are read into the buffer before the `fork`, while no read uses it
         byte* buffer = memory
         int* fds = Ptr<int>(memory + 65536)
         byte* report = memory + 65536 + 48
         int* polled = Ptr<int>(memory + 65536 + 64)
-        int* waited = Ptr<int>(memory + 65536 + 80)
+        int* waited = Ptr<int>(memory + 65536 + 96)
+        byte* clock = memory + 65536 + 104
         byte** argv = Ptr<byte*>(memory + 65536 + 128)
         byte** envp = argv + long(arguments.Count + 2)
         byte** paths = envp + (inherited + long(names.Count) + 1)
@@ -3518,7 +3550,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         // `close_range`; `RLIMIT_NOFILE` is 7, and no limit, or one past the kernel's default ceiling of open files,
         // `nr_open`, is read as that ceiling, 1048576
         mut long files = 1048576
-        long* limits = Ptr<long>(memory + 65536 + 88)
+        long* limits = Ptr<long>(buffer)
         if getrlimit(7, limits) == 0 && limits[0] > 0 && limits[0] < files {
             files = limits[0]
         }
@@ -3621,13 +3653,37 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
             close(fds[6])
         }
 
+        // S20: the bound from the start, and the child's end as an entry of `poll`
+        mut long deadline = 0
+        mut int process = -1
+        if failure == 0 && bounded {
+            clock_gettime(1, Ptr<void>(clock))
+            long now = *Ptr<long>(clock) * 1000000000 + *Ptr<long>(clock + 8)
+            deadline = 9223372036854775807
+            if bound <= 9223372036854775807 - now {
+                deadline = now + bound
+            }
+
+            process = int(syscall(434, long(pid), long(0)))
+            if process < 0 {
+                failure = -long(*__errno_location())
+                kill(pid, 9)
+            }
+        }
+
         if failure == 0 {
-            // `poll` on the pipes still open, each read into its list until its end
+            // `poll` on the pipes still open, each read into its list until its end, and on the child's end
+            // while a bound holds, until the bound passes
             mut int pending = 0
+            mut bool polling = true
+            mut bool exited = false
+            mut bool late = false
             polled[0] = fds[2]
             polled[1] = 1
             polled[2] = fds[4]
             polled[3] = 1
+            polled[4] = process
+            polled[5] = 1
             if fds[2] >= 0 {
                 pending = pending + 1
             }
@@ -3636,13 +3692,41 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
                 pending = pending + 1
             }
 
-            while pending > 0 {
+            while polling && (pending > 0 || (bounded && !exited)) {
+                mut int wait = -1
+                if bounded {
+                    clock_gettime(1, Ptr<void>(clock))
+                    long now = *Ptr<long>(clock) * 1000000000 + *Ptr<long>(clock + 8)
+                    if now >= deadline {
+                        late = true
+                        polling = false
+                    }
+
+                    // the time left in whole milliseconds, cut down, at least 1 and at most the largest `int`,
+                    // as `Connected` waits, the clock read again after each `poll`
+                    mut long remaining = (deadline - now) / 1000000
+                    if remaining < 1 {
+                        remaining = 1
+                    }
+
+                    if remaining > 2147483647 {
+                        remaining = 2147483647
+                    }
+
+                    wait = int(remaining)
+                }
+
                 *Ptr<short>(Ptr<byte>(polled) + 6) = 0
                 *Ptr<short>(Ptr<byte>(polled) + 14) = 0
-                int ready = poll(Ptr<void>(polled), 2, -1)
+                *Ptr<short>(Ptr<byte>(polled) + 22) = 0
+                mut int ready = 0
+                if polling {
+                    ready = poll(Ptr<void>(polled), 3, wait)
+                }
+
                 if ready < 0 && *__errno_location() != 4 {
                     failure = -long(*__errno_location())
-                    pending = 0
+                    polling = false
                 }
 
                 mut int s = 0
@@ -3672,13 +3756,40 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
                         } else if *__errno_location() != 4 {
                             // S18: a read that fails is the call's `IoError`, named by the program, once both pipes are
                             // closed and the child's end waited for (the owner, 2026-11-11, "The program" and "Close
-                            // pipes, wait", issue 174, comment 6802725183); Rust's `output` panics on it
+                            // pipes, wait", issue 174, comment 6802725183); Rust's `output` panics on it. The pipes are
+                            // closed here, so that a child that writes ends, and a bound still holds the wait (S20)
                             failure = -long(*__errno_location())
+                            mut int p = 0
+                            while p < 2 {
+                                if polled[p * 2] >= 0 {
+                                    close(polled[p * 2])
+                                    polled[p * 2] = -1
+                                    fds[2 + p * 2] = -1
+                                }
+
+                                p = p + 1
+                            }
+
                             pending = 0
                         }
                     }
 
                     s = s + 1
+                }
+
+                if ready > 0 && *Ptr<short>(Ptr<byte>(polled) + 22) != 0 {
+                    exited = true
+                    polled[4] = -1
+                }
+            }
+
+            // the child's end deciding (S20): one that ended before the bound gives its own status, with what the
+            // call read of the pipes a process it left behind still holds
+            if late && !exited {
+                kill(pid, 9)
+                if failure == 0 {
+                    failure = -4100 // a read that failed before the bound passed stays the call's failure (S18)
+                    at = 0
                 }
             }
         }
@@ -3700,6 +3811,10 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
 
             if r < 0 && failure == 0 {
                 failure = -long(*__errno_location())
+            }
+
+            if process >= 0 {
+                close(process)
             }
 
             if failure == 0 {
