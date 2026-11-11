@@ -1016,7 +1016,12 @@ print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
 ### D16 (assumed, §4) The body of a `data` type
 
 A `data` type takes its methods between braces after its constructor, in the form of a class body
-(K7).
+(K7). A method without `mut` changes nothing of the value it was called on: an assignment of a field
+in it is `assign-immutable`, and a call of a `mut` method on its value `mut-required`; a `mut`
+method is called on a value reachable through a `mut` variable alone (M5). A method takes no name of a
+field of its type, and inside a method a parameter or a variable takes no name of a member of its
+type (`redeclared`, V9), and a `Text()` without `pub` gives no text to `print` or an interpolation,
+inside its type too (`not-visible`, A9) *(assumed, §4: those readings)*.
 
 Case: [values/mut-method.kz](../corpus/values/mut-method.kz)
 ```kurz

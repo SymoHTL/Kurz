@@ -278,8 +278,16 @@ public sealed partial class Emitter
                     state.Add((u, v));
                     break;
                 case TypeDeclaration { Kind: TypeDeclarationKind.Data } t:
-                    dataOwners[u.Model.DataTypeOf(t)] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
-                    break;
+                    {
+                        var symbol = u.Model.DataTypeOf(t);
+                        dataOwners[symbol] = u; // the checker reads a data type and an enum, whose values are constants, and says `not supported` to the others
+                        foreach (var method in symbol.Methods.Values.SelectMany(m => m))
+                        {
+                            owners[method.Real!] = u; // D16: emitted when called, as a function is
+                        }
+
+                        break;
+                    }
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
                     {
                         var symbol = u.Model.ClassOf(t);

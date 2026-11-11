@@ -104,6 +104,17 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     /// <summary>K7: whether a call through a reference of a base class's type runs the override of the instance's class: a method marked <c>virtual</c> or <c>override</c>.</summary>
     public bool IsVirtual => Declaration is not null && (Declaration.Modifiers & (Modifiers.Virtual | Modifiers.Override)) != 0;
+
+    /// <summary>
+    /// D16: the <c>data</c> type whose body declares this method, set on both of its symbols: the one a call picks, whose
+    /// <see cref="Declaration"/> is the method as written and whose parameters are the written ones, and the function it is checked
+    /// and emitted as (<see cref="Real"/>), whose first parameter is the value the method was called on, <c>this</c>, <c>mut</c> in a
+    /// <c>mut</c> method (M5), as Rust's <c>self</c> and <c>&amp;mut self</c>; null for any other function.
+    /// </summary>
+    public DataSymbol? DataOwner { get; set; }
+
+    /// <summary>D16: of the symbol a call picks, the function it is checked and emitted as; null for any other function.</summary>
+    public FunctionSymbol? Real { get; set; }
 }
 
 /// <summary>
@@ -148,6 +159,13 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     public bool IsGeneric => TypeParameters.Count > 0;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+
+    /// <summary>D16: the methods its body declares, by name, each the symbol a call picks (<see cref="FunctionSymbol.Real"/>).</summary>
+    public Dictionary<string, List<FunctionSymbol>> Methods { get; } = [];
+
+    /// <summary>A5, D16: the <c>Text()</c> its body declares, a method of no parameters with a <c>string</c> result, which gives a value its text in place of A3's; null where it declares none.</summary>
+    public FunctionSymbol? TextMethod =>
+        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String } && (f.Declaration!.Modifiers & Modifiers.Mut) == 0) : null;
 }
 
 /// <summary>

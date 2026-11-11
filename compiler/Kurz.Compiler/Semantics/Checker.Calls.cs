@@ -1400,7 +1400,7 @@ public sealed partial class Checker
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields && HasBody(data))
             {
-                NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
+                NotSupported(m.Line, "a member of a data type named after the type's name (D16, K19)"); // its body has no `static` member the checker reads
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
             }
@@ -1510,6 +1510,11 @@ public sealed partial class Checker
         if (target.Type is ClassType classType)
         {
             return CallMethod(classType, m, c, null); // K7
+        }
+
+        if (target.Type is DataType dataType && dataType.Symbol.Field(m.Member) is null && BodyNames(dataType.Symbol).Contains(m.Member))
+        {
+            return CallDataMethod(dataType, m, c, null); // D16
         }
 
         if (target.Type is InterfaceType face)
@@ -2045,7 +2050,9 @@ public sealed partial class Checker
         }
         else if (!variable.Mut)
         {
-            Report(ErrorIds.MutRequired, line, $"{what}, and `{name.Name}` was declared without `mut` (M5)");
+            Report(ErrorIds.MutRequired, line, IsDataThis(variable)
+                ? $"{what}, and a method without `mut` changes nothing of the value it was called on (M5, D16)"
+                : $"{what}, and `{name.Name}` was declared without `mut` (M5)");
         }
         else
         {

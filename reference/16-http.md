@@ -187,8 +187,8 @@ failure of the network, which stays an `IoError` (S1), neither wrapped in the ot
 `enum HttpKind { Protocol, TooLarge, Status, Unsupported }`. An `HttpError` prints its detail alone,
 `malformed response: no status line`, with no words of its kind (§12, the owner, 2026-11-01, Q4 (a)).
 It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
-text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body, since the
-compiler reads no body of a `data` type (D16) and `std/` compiles with every program, so a build says
+text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body (D16), and
+`std/` compiles with every program, so a build says
 `not supported` to the text of an `HttpError` and of a value of a type whose text can hold an
 `HttpError`'s text, a list, a union, a nullable form, a map or a `data` type with one among its
 items, its cases, its value, its keys and values or its fields, whatever the value holds when the
