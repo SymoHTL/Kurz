@@ -1,0 +1,6 @@
+// expect: error flags-number at 4
+// rules: D19
+
+flags Sign { Low = 1, High = -4 }
+
+print(Sign.Low)
