@@ -672,6 +672,11 @@ public sealed partial class Emitter
                 {
                     var variable = Model.AssignedVariableOf(a);
                     var type = Sub(variable.Type);
+                    if (type is CommandType && EmitCommandInPlace(a.Value, variable, Place(variable, a.Line)))
+                    {
+                        break; // S17: `cmd = cmd.Arg(x)` appends to the variable itself
+                    }
+
                     var value = Owned(a.Value);
                     Store(Convert(value, TypeOf(a.Value), type, a.Value.Line), type, Place(variable, a.Line));
                     break;

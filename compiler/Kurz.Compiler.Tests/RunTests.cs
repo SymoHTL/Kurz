@@ -113,7 +113,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls and the reads of standard input. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 473 : 581;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 473 : 591;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -157,6 +157,13 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>The cases of standard input that expect a run, which a build for Windows says <c>not supported</c> to (S11, S22).</summary>
     private static readonly string[] StdinCases = ["system/stdin-empty.kz", "system/stdin-lines.kz"];
 
+    /// <summary>The cases of running a program that expect a run, which a build for Windows says <c>not supported</c> to (S11, S17 to S21).</summary>
+    private static readonly string[] CommandCases =
+    [
+        "system/command-env-dir.kz", "system/command-exit-code.kz", "system/command-not-found.kz", "system/command-nul.kz", "system/command-output.kz",
+        "system/command-reuse.kz", "system/command-signal.kz", "system/command-status.kz", "system/command-words.kz", "system/status-piped.kz",
+    ];
+
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -167,7 +174,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : [])
-        .Concat(OperatingSystem.IsWindows() ? StdinCases.Select(c => KeyValuePair.Create(c, Emitter.StdinNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
+        .Concat(OperatingSystem.IsWindows() ? StdinCases.Select(c => KeyValuePair.Create(c, Emitter.StdinNotOnWindows)) : [])
+        .Concat(OperatingSystem.IsWindows() ? CommandCases.Select(c => KeyValuePair.Create(c, Emitter.CommandNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
     private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()

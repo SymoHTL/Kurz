@@ -446,19 +446,19 @@ public sealed partial class Checker
     }
 
     /// <summary>S17 to S21: the names of processes, which every file sees (section 12, the owner, 2026-11-01), so that a file's own
-    /// declaration of one is <c>redeclared</c> (V9).</summary>
-    private static bool IsProcessName(string name) =>
-        name is "Command" or "ChildProcess" or "ProcessOutput" or "ExitStatus" or "Stdio" or "ExitError";
+    /// declaration of one is <c>redeclared</c> (V9); <c>ProcessOutput</c>, <c>ExitStatus</c>, <c>ExitError</c> and <c>Stdio</c> are
+    /// types of <see cref="BuiltInTypes"/>.</summary>
+    private static bool IsProcessName(string name) => name is "Command" or "ChildProcess";
 
-    /// <summary>S17 to S21: a name of <see cref="IsProcessName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
+    /// <summary>S19: <c>ChildProcess</c>, which the checker does not read: a use of it is <c>not supported</c>.</summary>
     private bool UnreadProcessName(string name, int line)
     {
-        if (!IsProcessName(name))
+        if (name != "ChildProcess")
         {
             return false;
         }
 
-        NotSupported(line, $"processes, `{name}` (S17 to S21)");
+        NotSupported(line, $"a child beside the program, `{name}` (S19)");
         return true;
     }
 
@@ -1281,6 +1281,17 @@ public sealed partial class Checker
             return Types.IsError(key) || Types.IsError(value) ? Types.Error : MapOf(key, value, n.Line);
         }
 
+        if (n.Name == "Command")
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, "`Command` takes no type arguments (S17, T17)");
+                return Types.Error;
+            }
+
+            return Types.Command;
+        }
+
         if (n.Name is "File" or "TcpListener" or "TcpStream")
         {
             if (n.TypeArguments.Count > 0)
@@ -1914,7 +1925,7 @@ public sealed partial class Checker
         : $"the name `{name}` is declared already (V9)";
 
     /// <summary>The rule that declares each type of <see cref="BuiltInTypes"/>, which a file's own declaration of its name cites.</summary>
-    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33" };
+    private static readonly Dictionary<string, string> BuiltInTypeRules = new() { ["InvalidUtf8"] = "T15", ["Invalid"] = "D18", ["IoKind"] = "S1", ["IoError"] = "S1", ["EnvKind"] = "S14", ["EnvError"] = "S14", ["Entry"] = "C6", ["ParseKind"] = "X7", ["ParseError"] = "X7", ["HexKind"] = "H7", ["HexError"] = "H7", ["TypeKind"] = "T33", ["Stdio"] = "S17", ["ExitStatus"] = "S18", ["ProcessOutput"] = "S18", ["ExitError"] = "S18" };
 
     /// <summary>
     /// The types every file sees without declaring them: <c>InvalidUtf8</c>, the case of <c>string.FromUtf8</c> that is not a string
@@ -1953,6 +1964,10 @@ public sealed partial class Checker
             data ParseError(ParseKind Kind)
             enum HexKind { OddLength, InvalidDigit }
             data HexError(HexKind Kind, int At)
+            enum Stdio { Inherit, Piped, Null }
+            data ExitStatus(int Code, int? Signal, bool Success)
+            data ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)
+            data ExitError(string Program, ProcessOutput Output)
             enum TypeKind {
                 SByte, Byte, Short, UShort, Int, UInt, Long, ULong, Float, Double, Decimal, Bool, String, Char, Duration, Timestamp,
                 LongDuration, LongTimestamp, Instant, List, Map, Nullable, Data, Enum, Union, Class, Interface, Function, Pointer

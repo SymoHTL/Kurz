@@ -218,6 +218,24 @@ public enum CallKind
     /// <summary><c>Stdin.ReadAll()</c> (S22).</summary>
     StdinReadAll,
 
+    /// <summary><c>Command.New(program)</c> (S17).</summary>
+    CommandNew,
+
+    /// <summary><c>c.Arg(x)</c>, <c>c.Dir(path)</c>, <c>c.Env(name, value)</c>, <c>c.EnvRemove(name)</c> and <c>c.EnvClear()</c>, each a member of strings (S17).</summary>
+    CommandAdd,
+
+    /// <summary><c>c.Args(list)</c> (S17).</summary>
+    CommandArgs,
+
+    /// <summary><c>c.Stdin(s)</c>, <c>c.Stdout(s)</c> and <c>c.Stderr(s)</c> (S17).</summary>
+    CommandStream,
+
+    /// <summary><c>c.Output()</c> (S18).</summary>
+    CommandOutput,
+
+    /// <summary><c>c.Status()</c> (S18).</summary>
+    CommandStatus,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 
