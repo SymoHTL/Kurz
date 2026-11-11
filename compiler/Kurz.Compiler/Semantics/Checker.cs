@@ -2706,8 +2706,7 @@ public sealed partial class Checker
         frame.Building?.Returns.Add(frame.Known); // K14: a path that leaves a constructor here assigns its fields first
         if (frame.IsTopLevel && r.Value is not null)
         {
-            NotSupported(r.Line, "a `return` with a value among the top-level statements, the program's exit code (F17)");
-            CheckExpression(r.Value, null);
+            CheckExitCode(r);
             return;
         }
 
@@ -2768,6 +2767,29 @@ public sealed partial class Checker
         else if (!Types.Assignable(value.Type, expected))
         {
             ReportMismatch(value.Type, expected, r.Value.Line, $"{Types.A(value.Type)} is returned where the result is {Types.A(expected)}", "F3"); // E1: at the value's line, as for every value that does not fit
+        }
+    }
+
+    /// <summary>
+    /// F17: a <c>return</c> with a value among the top-level statements ends the program with that value as its exit code, an <c>int</c>,
+    /// and a value of another type is <c>type-mismatch</c> (section 12, the owner, 2026-11-01, "Top-level return n + Exit"), as the value
+    /// a function returns is held to its result (F3).
+    /// </summary>
+    private void CheckExitCode(ReturnStatement r)
+    {
+        var value = CheckExpression(r.Value!, Types.Int);
+        if (value.IsError)
+        {
+            return;
+        }
+
+        if (Types.IsVoid(value.Type))
+        {
+            Report(ErrorIds.Syntax, r.Line, "a call with a `void` success used as a value (O10)");
+        }
+        else if (!Types.Assignable(value.Type, Types.Int))
+        {
+            ReportMismatch(value.Type, Types.Int, r.Value!.Line, $"{Types.A(value.Type)} is returned among the top-level statements, where the exit code is an `int`", "F17");
         }
     }
 

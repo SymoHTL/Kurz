@@ -393,6 +393,8 @@ under IR names of their own; nothing of it is compiled apart (record, section 2,
 emitted `main` takes the count and the addresses of the process's arguments, as C's `main` does, and
 calls the runtime's `Start` with them, then the program's top level, then `Finish`, which ends
 the process with the exit code 0 through the target's `Exit`, the runtime's one exit (section 6).
+`Environment.Exit(code)` and a top-level `return` with a value call that `Exit` with their code
+instead, and no path goes on after the call (S23, F17).
 `common/` gives what the emitted code calls: `Print`, the text of an integer, of a `char` and of a
 `float` and a `double` (below), the arithmetic, the conversions and the text of a `decimal` (below), the
 text of a duration and of a timestamp (below), the
@@ -1141,6 +1143,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
+- the exit code (S23, F17), in a build for Linux: `Environment.Exit(code)` and a `return` with an `int` among the
+  top-level statements call the target's `Exit` with the code, the C library's `_exit`, which runs none of its handlers, and the
+  block ends there; a wider integer is `narrowing-conversion` (T7) and a value of another type `type-mismatch`, as for the
+  value any function returns (F3). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
+  from the top level and from a function, the low 8 bits of 256, 257 and -1, a narrower integer widened, a bare `return`, the
+  lines printed before the end and none after it, the refusals, and the refusal for Windows at either form;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -2016,7 +2024,7 @@ vector and of a value that holds one, which C# writes as its lanes and no rule g
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
 `ExitStatus`, `Stdio`, `ExitError` and `Stdin`, under which processes and standard input stand, and which
 every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22);
-`Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
+a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of
 such a loop and an `enum`'s value, which is `type-mismatch` there (T35), which a folder's or a package's name before a type's would be (F10), and a chain of more than 64 copies of

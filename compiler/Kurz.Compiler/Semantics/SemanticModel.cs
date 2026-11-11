@@ -233,6 +233,9 @@ public enum CallKind
     /// <summary><c>Environment.Variable(name)</c> (S14).</summary>
     EnvironmentVariable,
 
+    /// <summary><c>Environment.Exit(code)</c> (S23).</summary>
+    EnvironmentExit,
+
     /// <summary><c>Sha256.Hash(bytes)</c>, <c>Md5.Hash(bytes)</c> or <c>Crc32.Hash(bytes)</c> (H1); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     Hash,
 
