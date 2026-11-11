@@ -1,0 +1,11 @@
+// expect: error type-mismatch at 7
+// rules: T33, D13
+
+flags Access { Read, Write }
+
+bool Before<T>(T a, T b) => match T.Kind {
+    TypeKind.Enum => a < b
+    else => false
+}
+
+print(Before(Access.Read, Access.Write))
