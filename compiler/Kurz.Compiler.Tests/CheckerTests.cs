@@ -5275,7 +5275,10 @@ public sealed class CheckerTests
     public void A_part_of_a_data_body_the_checker_does_not_read_is_not_supported_at_its_line(int line, string rule, string program)
     {
         // D16: what a body holds beside its methods, a method with what this build does not read, and a body it does not read; section 14
-        // leaves a property and `Equals` open, and the product pass of issue 455 parked the rest at its defaults (questions 1b, 3, 4, 6)
+        // leaves open a property, `Equals` and `GetHashCode`, a field of the body (question 4 of the product pass of issue 455), a body in
+        // a relation of inheritance with `virtual` and `override` (question 6) and a `mut` method on an item of a list (question 1b); a
+        // `static` method (question 3, parked for the owner), a constructor, `prot`, a method's own type parameters, a `mut` `Text`, the
+        // body of a generic type, a member read through the type's name and a method named without a call are what this build does not read
         NotSupportedAt(line, rule, program);
     }
 
@@ -5326,16 +5329,19 @@ public sealed class CheckerTests
     [Fact]
     public void A_method_of_a_data_body_without_a_body_is_syntax_as_one_of_a_class_body_is()
     {
-        // D16, K7, F2: a body lists methods with their bodies, as a class's does
+        // D16, K7, F2: a body lists methods with their bodies, as a class's does; a call of such a method, and its name without a call,
+        // carry no further diagnostic (E1)
         Assert.Equal([(ErrorIds.Syntax, 2)], Errors("data D(int X) {\n    pub int Get()\n}\n\nprint(D(1).X)\n"));
+        Assert.Equal([(ErrorIds.Syntax, 2)], Errors("data D(int X) {\n    pub int Get()\n}\n\nprint(D(1).Get())\nprint(D(1).Get)\n"));
     }
 
     [Fact]
     public void A_method_of_a_data_type_changes_its_value_when_it_is_mut_and_its_value_is_reachable_through_a_mut_variable()
     {
         // M5, M6, D16: a method without `mut` assigns no field and calls no `mut` method on its value, and a `mut` one is called on a
-        // `mut` variable or a path of data fields from one, and on nothing else (the product pass of issue 455, questions 1 and 2, at
-        // their defaults); a body that keeps to that on a `mut` variable and a path reports nothing
+        // `mut` variable, a path of data fields from one or a `mut` field of an instance (K2, which the fenced program of `ListTests`
+        // calls), and on nothing else (the product pass of issue 455, questions 1 and 2, at their defaults); a body that keeps to that on
+        // a `mut` variable and a path reports nothing
         const string counter = "data Counter(int Count) {\n    pub void Reset() {\n        Count = 0\n    }\n\n    pub void Again() {\n        Increment()\n    }\n\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n";
         const string fine = "data Counter(int Count) {\n    pub mut void Twice() {\n        Increment()\n        this.Increment()\n    }\n\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n";
         Assert.Equal([(ErrorIds.AssignImmutable, 3), (ErrorIds.MutRequired, 7), (ErrorIds.MutRequired, 16), (ErrorIds.MutRequired, 17)], Errors(counter + "\nc = Counter(0)\nc.Increment()\nCounter(1).Increment()\n"));

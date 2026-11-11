@@ -21,6 +21,10 @@ public sealed partial class Checker
     // M7, D16: the calls of a `mut` method of a data type, whose receiver changes while the arguments the call holds are in use
     private readonly HashSet<CallExpression> dataReceivers = new(ReferenceEqualityComparer.Instance);
 
+    // E1, D16: the methods of a data body that their declaration reported as an error, a method without a body, so that a use of one
+    // carries no further diagnostic
+    private readonly HashSet<(DataSymbol Type, string Name)> dataMethodErrors = [];
+
     /// <summary>D16: the data type whose method is being checked, inside its lambdas too; null anywhere else.</summary>
     private DataSymbol? CurrentData() => checking?.DataOwner;
 
@@ -99,7 +103,8 @@ public sealed partial class Checker
 
         if (f.ExpressionBody is null && f.BlockBody is null)
         {
-            Report(ErrorIds.Syntax, f.Line, "a method of a data type has a body (D16, K7, F2)");
+            Report(ErrorIds.Syntax, f.Line, "a method of a data type has a body, as one of a class body has (K7, F2)");
+            dataMethodErrors.Add((symbol, f.Name));
             return;
         }
 
@@ -164,7 +169,11 @@ public sealed partial class Checker
     {
         if (!type.Symbol.Methods.TryGetValue(m.Member, out var methods))
         {
-            NotSupported(m.Line, "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared
+            if (!dataMethodErrors.Contains((type.Symbol, m.Member)))
+            {
+                NotSupported(m.Line, "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared
+            }
+
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }

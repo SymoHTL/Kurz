@@ -680,7 +680,7 @@ public sealed partial class Checker
             {
                 if (BodyDeclares(data, m.Member))
                 {
-                    NotSupported(m.Line, "a member of a data type named after the type's name (D16, K19)"); // its body has no `static` member the checker reads
+                    NotSupported(m.Line, "a member of a data type read through the type's name (D16, K19)"); // its body has no `static` member the checker reads
                     return Typed.Error;
                 }
 
@@ -804,6 +804,11 @@ public sealed partial class Checker
 
                     if (BodyDeclares(d.Symbol, member))
                     {
+                        if (dataMethodErrors.Contains((d.Symbol, member)) && !d.Symbol.Methods.ContainsKey(member))
+                        {
+                            return Typed.Error; // its declaration reported the error (E1)
+                        }
+
                         NotSupported(line, d.Symbol.Methods.ContainsKey(member)
                             ? "a method of a data type named without a call (D16, F11)"
                             : "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared

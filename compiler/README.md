@@ -766,11 +766,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   text, a generic type's under the name its declaration gives (A3), or the `Text()` its body declares (A5);
   the methods of a body, each a function of the module whose first parameter is the value, the place of
   the variable or the path that holds it for a `mut` method, as Rust passes `&mut self`, and the value
-  itself for another, as Rust passes `self` by reference, borrowed as an argument is (D16, M5, M7): one read
+  itself for another, borrowed as an argument is, as Rust's `&self` borrows it (D16, M5, M7): one read
   from an item of a list is kept by its list, so that a `mut` argument of the call that changes the list is
   `changed-while-held` (M7), and the place of a `mut` receiver inside an instance's block is kept by the read
   of that instance, whose count holds the block to the end of the statement (K2), so that a method that
-  replaces the field holding the instance writes into a block still alive; a `mut` method on a value of a
+  replaces the field holding the instance writes into a block still alive; a new value as the receiver, a
+  construction or the result of a call, is a temporary of its statement (K7); a `mut` method on a value of a
   map meets the map's nullable read first, which is `nullable-unchecked` (N2);
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
