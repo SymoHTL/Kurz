@@ -39,7 +39,10 @@ leftmost one and, among the alternatives at its start, the first that matches, s
 matches `a` in `ab` on either. The automaton is bounded at 10 MiB and the lazy DFA's cache at 2 MiB,
 the defaults of Rust's `size_limit` and `dfa_size_limit`. *(assumed, §12: the linear engine without
 the flag, the flag's name and type, the constructs under it, no time bound, the same match on both
-engines and the two bounds)*
+engines and the two bounds)* The automaton's size is counted as 16 bytes for each of its states and 4
+bytes for each number that bounds a range of its classes, the same in the check of a literal (G3) and
+in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig`. *(assumed, §12: the default
+of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)*
 
 Case: [regex/backtracking.kz](../corpus/regex/backtracking.kz)
 ```kurz
@@ -55,6 +58,19 @@ Case: [regex/backreference-linear.kz](../corpus/regex/backreference-linear.kz)
 ```kurz
 twice = Regex.New(r"(\w+) \1")
 print(twice.IsMatch("a a"))
+```
+
+Case: [regex/bound.kz](../corpus/regex/bound.kz)
+```kurz
+void Try(string pattern) {
+    match Regex.New(pattern) {
+        Regex re => print(re)
+        RegexError e => print(e)
+    }
+}
+
+Try(r"a{655357}")
+Try(r"a{655358}")
 ```
 
 ### G3 (decided, §12) A pattern's errors
@@ -111,7 +127,8 @@ with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)
 `Regex` has members alone, with no static `Regex.IsMatch(input, pattern)`. *(assumed, §12: the
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
-owner)*
+owner)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+(K4): two `Regex`es of one pattern are equal. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)*
 
 Case: [regex/match.kz](../corpus/regex/match.kz)
 ```kurz
@@ -152,6 +169,21 @@ print(digits?.Length)
 print(Regex.New("b").Match("éb")?.Index)
 print(Regex.New(r"^\w+$").IsMatch("wörld"))
 print(Regex.New("(?i)é").IsMatch("É"))
+```
+
+Case: [regex/equality.kz](../corpus/regex/equality.kz)
+```kurz
+digits = Regex.New(r"\d+")
+same = Regex.New(r"\d+")
+print(digits == same)
+print(digits == Regex.New(r"\d*"))
+first = digits.Match("a12")
+again = same.Match("a12")
+other = digits.Match("a34")
+if first != null && again != null && other != null {
+    print(first == again)
+    print(first == other)
+}
 ```
 
 ### G5 (decided, §12) Replacing and splitting

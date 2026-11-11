@@ -3,7 +3,8 @@
 `char::UNICODE_VERSION` pins (the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"), from the mappings
 Rust's `unicode-table-generator` takes for the tables of `core::unicode::conversions`, in levels of deltas, as
 .NET's `CharUnicodeInfo` holds its mappings (issue 157: faster with the same results, under the owner's answer of
-2026-11-01, "Allow, faster wins").
+2026-11-01, "Allow, faster wins"), and the tables of G4 from the same version: the classes `\\d`, `\\w` and `\\s`
+and the simple case folding, as Rust's `regex` reads them.
 
   unicode_tables.py              write compiler/Kurz.Compiler/Emit/CaseTables.cs from the database's files
                                  and print every mapping that changed against the file it replaces
@@ -14,7 +15,7 @@ Rust's `unicode-table-generator` takes for the tables of `core::unicode::convers
 Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
 anything is fetched or written (tools/calls.py).
 
-The three files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
+The five files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
 before it is read: a file of another hash is refused (FAIL), and a file that cannot be fetched, or
 whose download is cut off, leaves the tables unread (PARTLY, which is red: nothing was compared). A
 fetched file is kept under its hash in the system's temporary directory, and read from there while its
@@ -32,7 +33,15 @@ What the tables hold, as Rust's generator takes them:
   point it maps to, 0 where it maps to none, and 32768 where it maps to several;
 - the mappings to two or three code points, padded with zeros;
 - the ranges of Cased and Case_Ignorable from DerivedCoreProperties.txt, ASCII among them, which
-  Rust's `is_cased` and `is_case_ignorable` take from the same properties.
+  Rust's `is_cased` and `is_case_ignorable` take from the same properties;
+- G4's classes, as Rust's `regex` reads them (`regex-syntax`, `unicode::perl_digit`, `perl_word` and
+  `perl_space`): the ranges of the general category Nd from UnicodeData.txt for `\\d`; of Alphabetic from
+  DerivedCoreProperties.txt, the marks Mn, Mc and Me, Nd and Pc from UnicodeData.txt and Join_Control from
+  PropList.txt, merged, for `\\w`; and of White_Space from PropList.txt for `\\s`. A range UnicodeData.txt
+  writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole;
+- the simple case folding of CaseFolding.txt, its statuses C and S, as Rust's `regex` folds a pattern under
+  `(?i)`: each set of the code points that fold together, as a cycle of each code point and the next of
+  its set in ascending order, the last with the first.
 This tool refuses the forms its tables do not hold: a mapping that leaves its plane, a mapping past
 the first two planes, to one code point or to several, a delta of 32768, and more distinct blocks than
 an index of one byte numbers; and levels that, read back, do not give the mappings they were made
@@ -55,6 +64,8 @@ FILES = {
     "UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
     "SpecialCasing.txt": "efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588",
     "DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "PropList.txt": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
+    "CaseFolding.txt": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
 }
 SOURCE = "https://www.unicode.org/Public/{version}/ucd/{name}"
 OUT = "compiler/Kurz.Compiler/Emit/CaseTables.cs"
@@ -64,10 +75,13 @@ BLOCK = 32
 PLANES = 0x20000
 MARK = 0x8000
 # the entries each table holds at the least; 17.0.0 holds 69 and 82 blocks of deltas, 1 and 102 multis, 158 and 464
-# ranges
-FLOORS = {"LowerDeltas": 30, "UpperDeltas": 30, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300}
+# ranges, and 72, 802 and 10 ranges of the classes and 2994 code points that fold
+FLOORS = {"LowerDeltas": 30, "UpperDeltas": 30, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300,
+          "RegexDigit": 60, "RegexWord": 700, "RegexSpace": 8, "RegexFold": 2500}
 WIDTH = {"LowerIndex": 1, "UpperIndex": 1, "LowerDeltas": BLOCK, "UpperDeltas": BLOCK, "LowerMultis": 4, "UpperMultis": 4,
-         "Cased": 2, "CaseIgnorable": 2}
+         "Cased": 2, "CaseIgnorable": 2, "RegexDigit": 2, "RegexWord": 2, "RegexSpace": 2, "RegexFold": 2}
+NAMES = ("LowerIndex", "LowerDeltas", "LowerMultis", "UpperIndex", "UpperDeltas", "UpperMultis", "Cased", "CaseIgnorable",
+         "RegexDigit", "RegexWord", "RegexSpace", "RegexFold")
 
 
 class Unread(Exception):
@@ -184,7 +198,7 @@ def tables(mapping):
 
 
 def ranges(properties, name):
-    """The merged ranges of one property of DerivedCoreProperties.txt, as (first, last)."""
+    """The merged ranges of one property of DerivedCoreProperties.txt or PropList.txt, as (first, last)."""
     found = []
     for line in properties.splitlines():
         body = line.split("#")[0].strip()
@@ -195,6 +209,11 @@ def ranges(properties, name):
             continue
         a, _, b = f[0].partition("..")
         found.append((int(a, 16), int(b or a, 16)))
+    return merge(found)
+
+
+def merge(found):
+    """Ranges as (first, last), sorted, with those that overlap or touch made one."""
     merged = []
     for a, b in sorted(found):
         if merged and a <= merged[-1][1] + 1:
@@ -204,7 +223,48 @@ def ranges(properties, name):
     return merged
 
 
-def generate(unicode_data, special_casing, properties, floors=FLOORS):
+def categories(unicode_data, names):
+    """The merged ranges of the code points of UnicodeData.txt whose general category is one of `names`; a range
+    the file writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole."""
+    found = []
+    first = None
+    for line in unicode_data.splitlines():
+        if not line.strip():
+            continue
+        f = line.split(";")
+        cp = int(f[0], 16)
+        if f[1].endswith(", First>"):
+            first = cp
+            continue
+        start = first if first is not None and f[1].endswith(", Last>") else cp
+        first = None
+        if f[2] in names:
+            found.append((start, cp))
+    return merge(found)
+
+
+def folds(case_folding):
+    """The simple case folding of CaseFolding.txt, its statuses C and S, as Rust's `regex` folds a pattern under
+    `(?i)`: every code point that folds with another, with the next code point of its set in ascending order, the
+    last with the first, as (code point, next), in the order of the code points."""
+    sets = {}
+    for line in case_folding.splitlines():
+        body = line.split("#")[0].strip()
+        if not body:
+            continue
+        f = [x.strip() for x in body.split(";")]
+        if f[1] not in ("C", "S"):
+            continue
+        a, b = int(f[0], 16), int(f[2], 16)
+        sets.setdefault(b, {b}).add(a)
+    out = []
+    for members in sets.values():
+        ordered = sorted(members)
+        out += [(c, ordered[(k + 1) % len(ordered)]) for k, c in enumerate(ordered)]
+    return sorted(out)
+
+
+def generate(unicode_data, special_casing, properties, prop_list, case_folding, floors=FLOORS):
     """The arrays of the file, by name, as lists of integers."""
     lower, upper = mappings(unicode_data, special_casing)
     lower_index, lower_deltas, lower_multis = tables(lower)
@@ -218,6 +278,11 @@ def generate(unicode_data, special_casing, properties, floors=FLOORS):
         "UpperMultis": [x for m in upper_multis for x in m],
         "Cased": [x for r in ranges(properties, "Cased") for x in r],
         "CaseIgnorable": [x for r in ranges(properties, "Case_Ignorable") for x in r],
+        "RegexDigit": [x for r in categories(unicode_data, {"Nd"}) for x in r],
+        "RegexWord": [x for r in merge(ranges(properties, "Alphabetic") + categories(unicode_data, {"Mn", "Mc", "Me", "Nd", "Pc"})
+                                       + ranges(prop_list, "Join_Control")) for x in r],
+        "RegexSpace": [x for r in ranges(prop_list, "White_Space") for x in r],
+        "RegexFold": [x for pair in folds(case_folding) for x in pair],
     }
     for name, floor in floors.items():
         if len(out[name]) // WIDTH[name] < floor:
@@ -234,6 +299,10 @@ SUMMARIES = {
     "UpperMultis": "The uppercase mappings to two or three code points, as <see cref=\"LowerMultis\"/> holds the lowercase ones.",
     "Cased": "The ranges of the property Cased, the first and the last code point of each, in order.",
     "CaseIgnorable": "The ranges of the property Case_Ignorable, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexDigit": "G4: the ranges of the general category Nd, which <c>\\d</c> matches, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexWord": "G4: the ranges <c>\\w</c> matches, as Rust's <c>regex</c> reads it: Alphabetic, the marks Mn, Mc and Me, Nd, Pc and Join_Control, merged, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexSpace": "G4: the ranges of the property White_Space, which <c>\\s</c> matches, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexFold": "G4: the simple case folding of the statuses C and S, which a pattern under <c>(?i)</c> reads, two numbers each: a code point that folds with another and the next code point of its set in ascending order, the last of a set with its first, in the order of the code points.",
 }
 
 
@@ -252,14 +321,15 @@ def render(arrays):
         "/// <summary>",
         "/// X3: the case tables of Unicode's full mappings and of the two properties Final_Sigma reads, of the version Rust's stable",
         "/// <c>char::UNICODE_VERSION</c> pins, the mappings of every code point above ASCII in levels of deltas, as .NET's",
-        "/// <c>CharUnicodeInfo</c> holds its mappings, and the properties of every code point, ASCII among them.",
+        "/// <c>CharUnicodeInfo</c> holds its mappings, and the properties of every code point, ASCII among them; and G4's classes and",
+        "/// simple case folding of the same version, as Rust's <c>regex</c> reads them.",
         "/// </summary>",
         "internal static class CaseTables",
         "{",
         "    /// <summary>The version of the Unicode Character Database the tables are generated from.</summary>",
         f"    public const string Version = \"{VERSION}\";",
     ]
-    for name in ("LowerIndex", "LowerDeltas", "LowerMultis", "UpperIndex", "UpperDeltas", "UpperMultis", "Cased", "CaseIgnorable"):
+    for name in NAMES:
         values = arrays[name]
         per = {1: 32, 2: 12, 4: 16}.get(WIDTH[name], 16)
         lines += ["", "    /// <summary>"]
@@ -298,11 +368,14 @@ def expand(arrays):
         multis = arrays.get(f"{kind}Multis", [])
         for at in range(0, len(multis) - 3, 4):
             found[(kind.lower(), multis[at])] = tuple(c for c in multis[at + 1:at + 4] if c)
-    for kind in ("Cased", "CaseIgnorable"):
+    for kind in ("Cased", "CaseIgnorable", "RegexDigit", "RegexWord", "RegexSpace"):
         values = arrays.get(kind, [])
         for at in range(0, len(values) - 1, 2):
             for cp in range(values[at], values[at + 1] + 1):
                 found[(kind, cp)] = True
+    values = arrays.get("RegexFold", [])
+    for at in range(0, len(values) - 1, 2):
+        found[("fold", values[at])] = (values[at + 1],)
     return found
 
 
@@ -318,7 +391,7 @@ def changes(old, new):
 
 
 def files(fetcher=fetch):
-    return [fetcher(name) for name in ("UnicodeData.txt", "SpecialCasing.txt", "DerivedCoreProperties.txt")]
+    return [fetcher(name) for name in ("UnicodeData.txt", "SpecialCasing.txt", "DerivedCoreProperties.txt", "PropList.txt", "CaseFolding.txt")]
 
 
 def main(argv, root=kit.ROOT, fetcher=fetch, floors=FLOORS):
@@ -434,10 +507,36 @@ def self_test():
     cases.append(("ranges: adjacent ranges merge and other properties stay out",
                   ranges(props, "Cased") == [(0x41, 0x5A), (0x61, 0x7A), (0xAA, 0xAA)] and ranges("0041..0042 ; Cased\n0043 ; Cased", "Cased") == [(0x41, 0x43)],
                   ranges(props, "Cased")))
-    out = got(lambda: generate(data, special, props))
+    def cat(cp, category, name="NAME"):
+        return f"{cp};{name};{category};0;L;;;;;N;;;;;"
+
+    classes = "\n".join([cat("0030", "Nd"), cat("0031", "Nd"), cat("005F", "Pc"), cat("0300", "Mn"), cat("0903", "Mc"), cat("20DD", "Me"),
+                         cat("0660", "Nd"), cat("2160", "Nl"), cat("3400", "Lo", "<CJK Ideograph Extension A, First>"),
+                         cat("4DBF", "Lo", "<CJK Ideograph Extension A, Last>"), cat("1D7CE", "Nd"), cat("1D7CF", "Nd")])
+    cases.append(("categories: Nd's ranges, adjacent ones merged, other categories out",
+                  categories(classes, {"Nd"}) == [(0x30, 0x31), (0x660, 0x660), (0x1D7CE, 0x1D7CF)], categories(classes, {"Nd"})))
+    cases.append(("categories: a range written as its First and Last lines is taken whole",
+                  categories(classes, {"Lo"}) == [(0x3400, 0x4DBF)], categories(classes, {"Lo"})))
+    plist = "0009..000D    ; White_Space # Cc\n0020 ; White_Space # Zs\n200C..200D ; Join_Control # Cf\n0085 ; White_Space\n002D ; Dash"
+    word_props = "0041..005A ; Alphabetic\n2160 ; Alphabetic # Nl\n0061..007A ; Alphabetic\n0041 ; Cased"
+    out = got(lambda: generate(classes, "", word_props, plist, "", floors={}))
+    cases.append(("generate: \\w is Alphabetic, the marks, Nd, Pc and Join_Control, merged",
+                  not isinstance(out, Exception) and out["RegexWord"] == [0x30, 0x31, 0x41, 0x5A, 0x5F, 0x5F, 0x61, 0x7A, 0x300, 0x300, 0x660, 0x660,
+                                                                          0x903, 0x903, 0x200C, 0x200D, 0x20DD, 0x20DD, 0x2160, 0x2160,
+                                                                          0x1D7CE, 0x1D7CF], out if isinstance(out, Exception) else out["RegexWord"]))
+    cases.append(("generate: \\s is White_Space and \\d is Nd",
+                  not isinstance(out, Exception) and out["RegexSpace"] == [0x9, 0xD, 0x20, 0x20, 0x85, 0x85]
+                  and out["RegexDigit"] == [0x30, 0x31, 0x660, 0x660, 0x1D7CE, 0x1D7CF], out))
+    folding = "\n".join(["# a comment", "004B; C; 006B; # K", "212A; C; 006B; # KELVIN SIGN", "00DF; F; 0073 0073; # SHARP S",
+                          "1E9E; F; 0073 0073; # CAPITAL SHARP S", "1E9E; S; 00DF; # CAPITAL SHARP S", "0049; C; 0069; # I",
+                          "0049; T; 0131; # I, Turkic", "0130; F; 0069 0307; # I WITH DOT ABOVE"])
+    cases.append(("folds: the statuses C and S, each set a cycle in ascending order; F and T out",
+                  folds(folding) == [(0x49, 0x69), (0x4B, 0x6B), (0x69, 0x49), (0x6B, 0x212A), (0xDF, 0x1E9E), (0x1E9E, 0xDF), (0x212A, 0x4B)],
+                  folds(folding)))
+    out = got(lambda: generate(data, special, props, plist, folding))
     cases.append(("generate: a table below its floor is refused", isinstance(out, ValueError) and "floor" in str(out), out))
     # a refusal of the tables, as a mutation of a case above makes, fails the two cases below and prints every case
-    arrays = got(lambda: generate(data, special, props, floors={}))
+    arrays = got(lambda: generate(data, special, props, plist, folding, floors={}))
     if isinstance(arrays, Exception):
         cases.append(("render and parse: the written file reads back as the arrays", False, arrays))
         cases.append(("changes: a changed mapping is named with both values", False, arrays))
@@ -505,7 +604,8 @@ def self_test():
         if isinstance(arrays, Exception):
             cases.append(("main: the runs of main over the tables of the cases above", False, arrays))
         else:
-            texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props}
+            texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props, "PropList.txt": plist,
+                     "CaseFolding.txt": folding}
             os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
             import contextlib
             import io
