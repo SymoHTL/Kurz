@@ -503,7 +503,8 @@ Gate: review rule "rules for sessions".
       other side changed, or only added items or table rows, both at the end of one list, in either
       order, and the merge keeps every line of both;
     - a chain of calls or a list whose two sides added or removed different whole lines at its
-      end, the line that was last or lines next to it, and changed no other line but by its end mark
+      end alone, the line that was last or lines next to it, and none elsewhere, and changed no other
+      line but by its end mark
       (a closing call such as `.ToDictionary(...)`, or a `;`), taken off the line that was last or put
       on the line that became last, and the merge keeps every line either side added, drops every line
       either side removed, and puts the end mark on the line that ends up last and on no other (comment
