@@ -152,6 +152,23 @@ public sealed partial class Checker
     private const string StdinFunctions = "`Stdin.Lines()` as the collection of a `for` loop, `Stdin.ReadLine()`, `Stdin.Read(mut into, max)` and `Stdin.ReadAll()`";
 
     /// <summary>
+    /// V10: the rules of the functions of a name every file sees (<see cref="IsBuiltInName"/>) that is called on and is no value, as the
+    /// texts of an unknown function of the name cite them; null for every other name. <c>Stdin</c> lists its functions (S22), the names
+    /// of R18 have texts of their own (<c>IntrinsicNameAsValue</c>), and a type's or a function's name is <c>syntax</c> (E4, F11).
+    /// </summary>
+    private static string? FunctionsOnly(string name) => name switch
+    {
+        "File" or "Directory" or "TcpListener" or "TcpStream" => "S2, S6 to S9, S15",
+        "Environment" => "S13, S14",
+        "Log" => "P1",
+        "Hint" => "F18",
+        "Sha256" or "Md5" or "Crc32" or "Hmac" => "H1 to H4",
+        "Hex" => "H2, H7",
+        "FixedTime" => "H4",
+        _ => null,
+    };
+
+    /// <summary>
     /// S22: the members of <c>Stdin</c>, Rust's <c>io::stdin()</c> in Kurz's casing (section 12, the owner, 2026-11-01, "A type Stdin" and
     /// "Also Stdin.ReadLine()"): <c>Stdin.Lines()</c>, as a file's (<see cref="CheckLines"/>); <c>Stdin.ReadAll()</c>, what is left, a
     /// <c>Bytes | IoError</c>; <c>Stdin.Read(mut into, max)</c>, which appends as <c>f.Read</c> does (S3); and <c>Stdin.ReadLine()</c>, one

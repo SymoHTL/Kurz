@@ -187,21 +187,14 @@ failure of the network, which stays an `IoError` (S1), neither wrapped in the ot
 `enum HttpKind { Protocol, TooLarge, Status, Unsupported }`. An `HttpError` prints its detail alone,
 `malformed response: no status line`, with no words of its kind (§12, the owner, 2026-11-01, Q4 (a)).
 It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
-text (A5) (§12, the owner, 2026-11-02). `std/` declares `HttpError` without that body (D16), and
-`std/` compiles with every program, so a build says
-`not supported` to the text of an `HttpError` and of a value of a type whose text can hold an
-`HttpError`'s text, a list, a union, a nullable form, a map or a `data` type with one among its
-items, its cases, its value, its keys and values or its fields, whatever the value holds when the
-program runs, a class whose own `Text()` reads none being no such type, at the expression where
-`print`, a hole of an interpolated string (L6) or `string.Join` (X6) takes it (§12, the owner,
-2026-11-02, the design standing), so that the text of an HTTP outcome,
-`string | IoError | HttpError` among them, is `not supported` whatever case it holds, until a
-`match` gives each case its own arm, and an empty `List<HttpError>` and a null `HttpError?` are
-refused as well (§12, the owner, 2026-11-03, Q2 (a))
-*(assumed: the values and the expressions named, as §12 marks them)*, and to a call of that
-`Text()`, `e.Text()`, at the call, with the same words (§12, the
-owner, 2026-11-02, against `unknown-name`, which says that the method does not exist, and against a
-`Text()` that builds by reading the body, the mechanism Q15 (a) set aside).
+text (A5) (§12, the owner, 2026-11-02). `std/` declares that body, `pub string Text() => Detail`, which the compiler reads as the body of any
+`data` type (D16): `print`, a hole of an interpolated string (L6) and `string.Join` (X6) take the text
+of an `HttpError` and of a value that holds one as any other's, an HTTP outcome
+`string | IoError | HttpError` the text of the case it holds (A4), and `e.Text()` is a call of that
+method; a `data` type of a file that derives from `HttpError` is `not supported` at its base, as a body
+in a relation of inheritance is (D16, §14) (§12, the owner, 2026-11-11, "(a) It lapses", issue 457,
+comment 6790380307: the `not supported` the owner chose on 2026-11-02 and 2026-11-03, while the
+compiler read no body of a `data` type, lapses with its cause).
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 

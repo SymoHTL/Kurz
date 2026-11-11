@@ -1148,11 +1148,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the process goes through: `Stdin.Read` reads as a file's `Read` does, `for line in Stdin.Lines()` pulls as a loop over a file's
   lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
   the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
-  its end, with room for 8192 more bytes made before each read; each is a call in flight. The module declares the handle where a
-  file of the program calls a member of `Stdin`, and a build for Windows says `not supported` to each such call and loop.
-  `StdinTests` pins what no case can: lines given on standard input and read across a loop, `ReadLine`, `Read` and `ReadAll`; a
-  line that is not UTF-8; a closed descriptor 0; and the refusal for Windows. The suite runs every program with a standard input
-  closed at its start (`Processes.Capture`), as chapter 0 runs a case;
+  its end, with room for 8192 more bytes made before each read; each is a call in flight. A read that gives the system's error 9,
+  of a descriptor 0 the caller closed, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does. Where the
+  read of `ReadAll` fails otherwise, the bytes it took go back to the reader's buffer from its start (`KeepRest`), made again with
+  room for them where it has less, and the handle keeps that room after a handle's fields, so that the next one frees it with its
+  size. The module declares the handle where a file of the program calls a member of `Stdin`, and a build for Windows says
+  `not supported` to each such call and loop. `StdinTests` pins what no case can: lines given on standard input and read across a
+  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a closed descriptor 0, and a directory, whose read fails; a
+  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
+  whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1911,11 +1915,11 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16 and S22; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16, S22 and S25; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
-`HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
-`HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
+`HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
+`HttpError` by the body `std/` declares, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
@@ -2041,9 +2045,8 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
-`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body `std/` does
-not declare (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+type (A4, R10, R17); a `data` type of the file whose base is a `data` type of `std/` with a body,
+`HttpError` among them, whose body `std/`'s checker reads with no type of the file deriving from it (D16, D6, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, while `Arm.AdvSimd`'s `Add`, which the checker's table holds, is read on every target and
 compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a test of it is
 `not supported`, as an intrinsic of a class under `X86` is there), a function of a built class and a lane operation it does not build, an immediate that is

@@ -2637,15 +2637,30 @@ public sealed class CheckerTests
     [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
     [InlineData("print(Held(e))")]
     [InlineData("print(e.Text())")]
-    [InlineData("print(e.Text() + \"!\")")]
-    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    [InlineData("print(\"{e.Text()}!\")")]
+    [InlineData("string | IoError | HttpError o = e\nprint(o)")]
+    [InlineData("HttpError? n = null\nprint(n)\nprint(e)")]
+    [InlineData("print(List<HttpError>())\nprint(e)")]
+    public void The_text_of_an_HttpError_is_taken_wherever_a_text_is(string use)
     {
-        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
-        // not read (D16), so it takes no text of one, nor of a value that holds one, and a call of that `Text()` has the same answer
-        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
-        var refused = Assert.Single(diagnostics.Items);
-        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
-        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
+        // W2 (the owner, 2026-11-02, Q15 (a)): `std/` declares the `Text()` of `HttpError` in its body (A5, D16), so its text, and the text
+        // of a value that holds one, is taken as any other's, and a call of that `Text()` is a call of a method of a data type
+        Assert.Empty(CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n").Diagnostics.Items);
+    }
+
+    [Fact]
+    public void A_data_type_of_the_file_that_derives_from_a_data_type_of_std_with_a_body_is_not_supported_at_its_base()
+    {
+        // D16 with D6: a body in a relation of inheritance is not read (section 14), and the checker of std/ sees no type of the file that
+        // derives from `HttpError`; one error, at the base, and a type that derives from the refused one carries none (E1)
+        var program = "data Mine(int Code) : HttpError\ndata Deeper(int More) : Mine\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n";
+        var refused = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
+        Assert.Equal((true, 1), (refused.IsNotSupported, refused.Line));
+
+        // the positive controls: the same type over an `HttpError` of std/ without its body, and over a data type of the file
+        var bodiless = ListTests.Edited(("std/std.kz", "pub data HttpError(HttpKind Kind, string Detail) {\n    pub string Text() => Detail\n}\n", "pub data HttpError(HttpKind Kind, string Detail)\n"));
+        Assert.Empty(CheckSeeingStd(program, bodiless).Diagnostics.Items);
+        Assert.Empty(CheckSeeingStd("data Base(HttpKind Kind, string Detail)\ndata Mine(int Code) : Base\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n").Diagnostics.Items);
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------
@@ -3738,18 +3753,40 @@ public sealed class CheckerTests
         Assert.Equal(written, Types.A(name));
 
     // a type's name where a value stands cites the rule of the type, D2, D12 or T10, and E4 for its `syntax` id; D12: a value of the
-    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; a row holds the
-    // citations and leaves the wording free (E2)
+    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; V10: a name every
+    // file sees whose functions are called on it is no value, and its text cites the rules of those functions, as the text of a
+    // function the name does not have cites them; a row holds the citations and leaves the wording free (E2)
     [Theory]
     [InlineData("data User(string Name)\n\nprint(User)", "`User`", "(D2; E4)")]
     [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan.Free`", "(D12; E4)")]
     [InlineData("print(List)", "`List`", "(T10; E4)")]
     [InlineData("int Count() => args.Count\n\nprint(Count())", "`Environment.Args()`", "(S13, V10)")]
+    [InlineData("print(File)", "`File`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Directory)", "`Directory`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpListener)", "`TcpListener`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpStream)", "`TcpStream`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Environment)", "`Environment`", "(S13, S14, V10)")]
+    [InlineData("print(Log)", "`Log`", "(P1, V10)")]
+    [InlineData("print(Hint)", "`Hint`", "(F18, V10)")]
+    [InlineData("print(Sha256)", "`Sha256`", "(H1 to H4, V10)")]
+    [InlineData("print(Md5)", "`Md5`", "(H1 to H4, V10)")]
+    [InlineData("print(Crc32)", "`Crc32`", "(H1 to H4, V10)")]
+    [InlineData("print(Hmac)", "`Hmac`", "(H1 to H4, V10)")]
+    [InlineData("print(Hex)", "`Hex`", "(H2, H7, V10)")]
+    [InlineData("print(FixedTime)", "`FixedTime`", "(H4, V10)")]
     public void The_text_of_a_type_s_name_or_of_args_where_no_value_of_it_stands_cites_its_rules(string program, string shown, string cited)
     {
         var message = Assert.Single(Check(program).Diagnostics.Items).Message;
         Assert.Contains(shown, message, StringComparison.Ordinal);
         Assert.EndsWith(cited, message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_every_file_sees_whose_functions_are_called_on_it_is_unknown_name_at_its_line_as_a_value()
+    {
+        // V10, as `Stdin` (S22) and the names of R18 are: the id and the line of the name, which its text does not change
+        string[] names = ["File", "Directory", "TcpListener", "TcpStream", "Environment", "Log", "Hint", "Sha256", "Md5", "Crc32", "Hmac", "Hex", "FixedTime"];
+        Assert.All(names, name => Assert.Equal([(ErrorIds.UnknownName, 2)], Errors($"print(1)\nx = {name}\nprint(2)")));
     }
 
     // ---- intrinsics (R18) ----------------------------------------------------------------------------------------

@@ -999,6 +999,10 @@ public sealed partial class Checker
         { Type: NamedType n } when dataTypes.TryGetValue(n.Name, out var data) && data.IsGeneric => "a generic data type as a base (T19)",
         { Type: NamedType n } when unreadData.Contains(n.Name) => "",
         { Type: NamedType n } when unsupportedBases.TryGetValue(n.Name, out var construct) => construct,
+        // D16 with D6: a body in a relation of inheritance is not read (section 14), and the checker of `std/` sees no type of the file
+        // that derives from one of its types with a body, `HttpError` among them (W2)
+        { Type: NamedType n } when dataTypes.TryGetValue(n.Name, out var data) && data.Declaration.Members is { Count: > 0 } && !dataDeclared.Contains(data)
+            => "a data type of `std/` with a body as a base (D16, D6)",
         _ => null,
     };
 
