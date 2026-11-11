@@ -2339,7 +2339,7 @@ No case: a case runs one actor, and two holders that pull at once need two.
 `Command.New(program)` names a program to run, and the members of a `Command` set its arguments,
 `Arg(x)` and `Args(list)`, its working directory, `Dir(path)`, its environment, `Env(name, value)`,
 `EnvRemove(name)` and `EnvClear()`, its three streams, `Stdin(s)`, `Stdout(s)` and `Stderr(s)`, each a
-value of `enum Stdio { Inherit, Piped, Null }`, its input, `Input(bytes)` (S19), and a bound on its time,
+value of `enum Stdio { Inherit, Piped, Null }`, its input, `Input(bytes)` or `Input(text)` (S19), and a bound on its time,
 `Timeout(d)` (S20); `Output()` (S18), `Status()` (S18) and `Spawn()` (S19) run it (§12, the owner,
 2026-11-01, "Chain, each step a new value"). Each member gives a new `Command` and leaves the one it was
 called on as it was, so that a chain needs no `mut` and a loop writes `cmd = cmd.Arg(x)` on a `mut`
@@ -2423,7 +2423,7 @@ print(base)
 ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the child wrote as bytes, which
 `string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A read of the child's
 output that fails ends `Output()` with an `IoError` (S1) whose path is the program, once the call has closed
-both pipes and waited for the child's end (§12, the owner, 2026-11-11, "The program" and "Close pipes,
+every pipe it holds to the child, the input's of `Input` (S19) among them, and waited for the child's end (§12, the owner, 2026-11-11, "The program" and "Close pipes,
 wait"). The read's `IoError` is the call's error whatever status the child ends with, and where the command
 has a bound the wait after it is held to the bound (S20) *(assumed, §12: the order of the errors and the bound
 of the wait)*. A child that ends
@@ -2506,10 +2506,13 @@ end and gives `void | IoError | ExitError`, `WaitWithOutput()` gives `ProcessOut
 ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoError`, and `Id` is its
 process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
 while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
-forms"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
+forms"). `Input` takes `Bytes` or a `string`, whose UTF-8 bytes are the input, so that a call that fits
+neither is `argument-mismatch` (F13) (§12, the owner, 2026-11-11, "Bytes and string"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
 starts the child, so that a spawned child takes its input through `child.Stdin`, and `Status()` writes
 the input and closes the child's input (§12, the owner, 2026-11-02, "`Input` beside `Spawn()` or beside
-a `Stdin` member is `InvalidInput` at the start"). `Status()` with a `Stdout` set to `Stdio.Piped`
+a `Stdin` member is `InvalidInput` at the start"). An empty input is closed at once, a NUL byte in an
+input is data, the bound of `Timeout(d)` holds the writing (S20), and a write of the input that fails, but for a child that
+ended its input, is the call's `IoError` named by the program (S18). `Status()` with a `Stdout` set to `Stdio.Piped`
 closes the program's end of that pipe at once, so that a child that writes there is ended by `SIGPIPE`
 (S21) and the call gives an `ExitError` (§12, the owner, 2026-11-02, "`Status()` with a piped Stdout
 closes the program's end of that pipe at once"). A second wait of either kind gives the status the
@@ -2517,8 +2520,9 @@ first gave, and `WaitWithOutput()` reads each pipe from where the program stoppe
 end or closed giving empty `Bytes`; `Kill()` on a child that ended or was waited for gives `void` and
 sends no signal; a child let go of without a `Wait()` is neither waited for nor killed. *(assumed, §12:
 the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
-end, the child let go of, `Id`'s type, `Status()` writing the input under `poll`, and a piped `Stderr`
-under `Status()` closed as a piped `Stdout` is)*
+end, the child let go of, `Id`'s type, `Status()` writing the input under `poll`, an empty input closed
+at once, a NUL byte in an input, the bound over the writing, a write that fails, and a piped `Stderr` under `Status()` closed
+as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 ```kurz
@@ -2573,8 +2577,10 @@ Run() else {
 Case: [system/command-input.kz](../corpus/system/command-input.kz)
 ```kurz
 void | IoError | ExitError | InvalidUtf8 Run() {
-    small = Command.New("cat").Input("hi".Bytes).Output()
+    small = Command.New("cat").Input("hi").Output()
     print(string.FromUtf8(small.Stdout))
+    accented = Command.New("cat").Input("é").Output()
+    print(accented.Stdout.Count)
     mut big = Bytes()
     while big.Count < 1048576 {
         big.Add(120)
@@ -2582,6 +2588,10 @@ void | IoError | ExitError | InvalidUtf8 Run() {
 
     echoed = Command.New("cat").Input(big).Output()
     print(echoed.Stdout.Count)
+    Command.New("cat").Input("x").Stdin(Stdio.Null).Status() else {
+        IoError e => print(e)
+        ExitError e => print(e)
+    }
 }
 
 Run() else {
@@ -2589,6 +2599,11 @@ Run() else {
     ExitError e => print(e)
     InvalidUtf8 e => print(e)
 }
+```
+
+Case: [system/command-input-mismatch.kz](../corpus/system/command-input-mismatch.kz)
+```kurz
+c = Command.New("cat").Input(1)
 ```
 
 Case: [system/spawn-input.kz](../corpus/system/spawn-input.kz)
@@ -2635,8 +2650,9 @@ where a process it left behind still holds a pipe (§12, the owner, 2026-11-11, 
 held by `Wait()` and `WaitWithOutput()`, so that a read of the child's pipe before them and a child let go
 of are not bounded. After a read of the output that failed (S18), the wait is held to the bound, and when
 it passes the child is killed and the read's `IoError` stays the call's error. Where the system refuses
-`pidfd_open`, through which the call waits for the child's end, the call kills the child, waits for its end
-and gives the system's error at once. *(assumed, §12: the bound under `Spawn()`, the bound after a failed
+`pidfd_open`, through which a call whose command has a bound waits for the child's end, the call kills the
+child, waits for its end and gives the system's error at once, with the program as its path (S1 gives its
+kind and number). *(assumed, §12: the bound under `Spawn()`, the bound after a failed
 read and a refused `pidfd_open`)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)

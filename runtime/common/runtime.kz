@@ -3189,8 +3189,8 @@ long LogStamp(byte* p, long at, long nanoseconds) {
 // strings for each member in the order of its calls, the member's tag and its two values: `a` an
 // argument, `d` the working directory, `e` a variable of the environment and its value, `r` a variable
 // taken away, `c` the environment cleared, and `0`, `1` and `2` standard input, output and error with
-// the letter of their `Stdio`, `i`, `p` or `n`, and `t` a bound on its time in nanoseconds. A member
-// appends to the list the emitted code gives it: a command no other value holds, the result of the
+// the letter of their `Stdio`, `i`, `p` or `n`, `b` the child's input, as `CommandInput` writes it, and `t`
+// a bound on its time in nanoseconds. A member appends to the list the emitted code gives it: a command no other value holds, the result of the
 // member before it in a chain or the variable that `cmd = cmd.Arg(x)` writes, is changed in place, and
 // one another value holds is copied by the first `Add`, as any list a write finds shared (M3), so that
 // the command the member was called on stays as it was.
@@ -3225,6 +3225,46 @@ pub void CommandStream(mut List<string> command, int stream, Stdio mode) {
     }
 
     CommandAdd(mut command, "{stream}", letter, "")
+}
+
+// The child's input, `Input(bytes)` (S19), held in the command as a string, since the command is a list of
+// strings and a string holds UTF-8 alone (R15): each byte below 128 as it is, and each other one as the two
+// bytes of the code point of its number, as Latin-1 reads a byte, so that text of ASCII takes no byte more.
+pub void CommandInput(mut List<string> command, Bytes bytes) {
+    mut long size = 0
+    for b in bytes {
+        size = size + 1
+        if b >= 128 {
+            size = size + 1
+        }
+    }
+
+    mut string text = ""
+    if size > 0 {
+        raw {
+            byte* p = string.Allocate(size)
+            mut long at = 0
+            for b in bytes {
+                if b < 128 {
+                    p[at] = b
+                    at = at + 1
+                } else {
+                    p[at] = byte(192 | (int(b) >> 6))
+                    p[at + 1] = byte(128 | (int(b) & 63))
+                    at = at + 2
+                }
+            }
+
+            text = string.FromRaw(p, size)
+        }
+    }
+
+    CommandAdd(mut command, "b", text, "")
+}
+
+// S19: the input as a `string`, whose UTF-8 bytes the child reads (the owner, 2026-11-11, "Bytes and string")
+pub void CommandInputText(mut List<string> command, string text) {
+    CommandInput(mut command, text.Bytes)
 }
 
 // A bound on the command's time, its nanoseconds, a `duration` as the emitted code gives it (`Timeout`,

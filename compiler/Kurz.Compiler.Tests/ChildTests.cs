@@ -6,7 +6,7 @@ using Xunit;
 namespace Kurz.Compiler.Tests;
 
 /// <summary>
-/// The decisions on running a program (S17, S18, S20, S21; design record, section 12) that no corpus case pins, since a case runs with no
+/// The decisions on running a program (S17 to S21; design record, section 12) that no corpus case pins, since a case runs with no
 /// file of its own, no variable of its own and no descriptor but its three streams: a chain and <c>cmd = cmd.Arg(x)</c> build one
 /// command with no copy, and a command another value holds is copied; <c>Output()</c> reads both pipes as they fill;
 /// a child gets the program's environment less and with what its members took away and set, in the order of their calls; a program
@@ -19,8 +19,10 @@ namespace Kurz.Compiler.Tests;
 /// input where the program's own native code closed its own; <c>Status()</c> gives it the program's streams, and a stream set
 /// to <c>Stdio.Piped</c> that the call does not read is closed at once; a bound that passes kills a child still running and gives
 /// <c>TimedOut</c>, at the start where it is 0 or below, and a child that ends before its bound gives its own status, at the bound
-/// where a process it left behind holds a pipe; and a build for Windows says <c>not supported</c> at the first call on a command.
-/// Each program that <see cref="Ran"/> starts runs under the runtime it is given, this machine's unless a
+/// where a process it left behind holds a pipe; <c>Input(bytes)</c> gives the child every byte and then the end of its input, a child
+/// that ends before it read it leaves the rest unwritten, one that does not read it holds the call to its bound, and <c>Input</c>
+/// beside a member <c>Stdin</c> is <c>InvalidInput</c>; and a build for Windows says <c>not supported</c> at the first call on a
+/// command. Each program that <see cref="Ran"/> starts runs under the runtime it is given, this machine's unless a
 /// test edits it, through <c>/bin/sh</c>, whose command <c>setup</c> makes the files a
 /// program finds, so that no file the test host wrote is started (<c>knowledge/a-file-this-process-wrote-does-not-start-beside-a-fork.md</c>);
 /// on Windows the tests hold the build's refusal instead.
@@ -77,7 +79,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_chain_and_an_assignment_of_a_member_to_its_variable_build_one_command_in_place()
     {
         // S17, section 12, the owner, 2026-11-01, P1: each step of a chain, whose command no other value holds, and `cmd = cmd.Arg(x)`,
-        // which keeps no earlier command, `Timeout(d)` among its members (S20), write into the one block, so that a runtime whose every
+        // which keeps no earlier command, `Input(bytes)` and `Timeout(d)` among its members (S19, S20), write into the one block, so that a runtime whose every
         // copy of a list fails runs them, and
         // an argument of such an assignment reads the command as it was before the assignment; a command another value holds is
         // copied, which that runtime ends with `allocation-failed`, the positive control
@@ -86,7 +88,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 print(string.FromUtf8(out.Stdout))
                 mut d = Command.New("printf").Arg("%s,")
                 for w in ["p", "q"] {
-                    d = d.Arg(w).Timeout(10s).Arg("{w}{w}")
+                    d = d.Arg(w).Timeout(10s).Input("{w}".Bytes).Arg("{w}{w}")
                 }
 
                 print(string.FromUtf8(d.Output().Stdout))
@@ -541,11 +543,138 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    /// <summary>A line of a program that fills <c>big</c>, a <c>mut</c> variable of <c>Bytes</c>, with a MiB of <c>x</c>, more than a pipe holds.</summary>
+    private const string Big = """
+                mut big = Bytes()
+                while big.Count < 1048576 {
+                    big.Add(120)
+                }
+
+            """;
+
+    [Fact]
+    public void Input_gives_the_child_every_byte_and_then_the_end_of_its_input()
+    {
+        // S19: the input reaches the child byte for byte, a NUL byte and every byte above 127 among them, which the command holds in a
+        // string (`CommandInput`), and its end after the last byte, under `Output()` and under `Status()`, whose child reads a MiB to its
+        // end and then writes; a string gives its UTF-8 bytes (the owner, 2026-11-11, "Bytes and string"); a second `Input` replaces the
+        // first (S21), of either form, and an empty one is an input closed at once
+        var text = Program(Big + """
+                mut all = Bytes()
+                mut int v = 0
+                while v < 256 {
+                    all.Add(byte(v))
+                    v = v + 1
+                }
+
+                o = Command.New("cat").Input(all).Output()
+                print("{o.Stdout.Count} {o.Stdout == all}")
+                print(string.FromUtf8(Command.New("cat").Input("a".Bytes).Input("bc".Bytes).Output().Stdout))
+                t = Command.New("cat").Input("héllo").Output()
+                print("{t.Stdout.Count} {t.Stdout == "héllo".Bytes}")
+                print(string.FromUtf8(Command.New("cat").Input("a").Input("bc".Bytes).Output().Stdout))
+                print(Command.New("cat").Input(Bytes()).Output().Stdout.Count)
+                Command.New("sh").Args(["-c", "cat > /dev/null; echo read"]).Input(big).Status()
+            """);
+        if (Ran(text, "child-input") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["256 true", "bc", "6 true", "bc", "0", "read"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_read_of_the_output_that_fails_closes_the_input_too_so_that_the_child_reads_its_end()
+    {
+        // S18 with S19 (the owner, 2026-11-11, "Close pipes, wait"): a read that fails closes every pipe the call holds to the child, the
+        // input's among them, so that a child that reads its input to the end gets the end at once and the call ends; `wc` counts what
+        // reached it, and the call that writes on after the failure would give it the whole MiB. The positive control, under this
+        // machine's runtime, reads the byte, and `wc` counts the whole MiB
+        var text = Program(Big + """
+                match Command.New("sh").Args(["-c", "printf a; wc -c > kurz-count"]).Input(big).Output() {
+                    ProcessOutput o => print(o.Stdout.Count)
+                    IoError e => print("{e.Kind} [{e.Path}]")
+                    ExitError e => print(e)
+                }
+
+                Command.New("sh").Args(["-c", "test $(cat kurz-count) -lt 1048576"]).Status() else {
+                    IoError e => print(e)
+                    ExitError e => print(e)
+                }
+
+                print("checked")
+            """);
+        if (Ran(text, "child-read-fails-input", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sh]", "checked"], ran.Output);
+            var control = Ran(text, "child-read-input-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["1", "exit status 1: sh", "checked"], control.Output);
+        }
+    }
+
+    [Fact]
+    public void A_child_that_ends_before_it_read_its_input_leaves_the_rest_unwritten()
+    {
+        // S19, the record's assumed clause: a child that ends before it read the whole input, or reads a part of it, leaves the rest
+        // unwritten, and the call gives the child's status, under `Output()` and under `Status()`
+        var text = Program(Big + """
+                print(Tried(Command.New("true").Input(big)))
+                print(Tried(Command.New("head").Args(["-c", "1"]).Input(big)))
+                print(Waited(Command.New("true").Input(big)))
+            """) + Cases;
+        if (Ran(text, "child-input-unread") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["0", "1", "ended"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_child_that_does_not_read_its_input_holds_the_call_to_its_bound()
+    {
+        // S19, S20: an input the child does not read fills the pipe, and the write that waits for room is held to the bound
+        var text = Program(Big + """
+                start = instant.Now
+                print(Tried(Command.New("sleep").Arg("10").Input(big).Timeout(300ms)))
+                print(Waited(Command.New("sleep").Arg("10").Input(big).Timeout(300ms)))
+                print(start.Elapsed < 8s)
+            """) + Cases;
+        if (Ran(text, "child-input-bound") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["TimedOut [sleep] 0", "TimedOut [sleep] 0", "true"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void Input_beside_a_stdin_member_is_invalid_input_at_the_start()
+    {
+        // S19, the owner, 2026-11-02: `Input` beside a member `Stdin`, of any `Stdio` and in either order, is `InvalidInput` with the
+        // number 0 and the program as its path, under `Output()` and under `Status()`, and no child starts; the same command without its
+        // `Stdin` member is the positive control
+        var text = Program("""
+                for c in [Command.New("cat").Input("hi".Bytes).Stdin(Stdio.Inherit), Command.New("cat").Stdin(Stdio.Null).Input("hi".Bytes), Command.New("cat").Input("hi".Bytes).Stdin(Stdio.Piped)] {
+                    print(Tried(c))
+                    print(Waited(c))
+                }
+
+                print(Tried(Command.New("cat").Input("hi".Bytes)))
+            """) + Cases;
+        if (Ran(text, "child-input-refused") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal([.. Enumerable.Repeat("InvalidInput [cat] 0", 6), "2"], ran.Output);
+        }
+    }
+
     [Theory]
     [InlineData("print(1)\nCommand.New(\"true\").Arg(\"x\").Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    Command.New(\"true\").Status()\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    print(1)\n    out = Command.New(\"true\").Output()\n    print(out.Stdout.Count)\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 3)]
     [InlineData("print(1)\nCommand.New(\"sleep\").Arg(\"1\").Timeout(1s).Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
+    [InlineData("print(1)\nCommand.New(\"cat\").Input(\"hi\".Bytes).Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     public void A_build_for_windows_says_not_supported_at_the_first_call_on_a_command(string text, int line)
     {
         // S17 to S21 with S11: as `Stdin` is, the first call on `Command` or on a command, where the build stops
@@ -566,7 +695,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(1)\nc = Command.New(1)\n", "type-mismatch", 2)] // T1
     [InlineData("print(1)\nc = Command.New(\"a\").Stdout(1)\n", "type-mismatch", 2)]
     [InlineData("print(1)\nc = Command.New(\"a\").Spawn()\n", "", 2)] // S19, `not supported`
-    [InlineData("print(1)\nc = Command.New(\"a\").Input([1])\n", "", 2)] // S19
+    [InlineData("print(1)\nc = Command.New(\"a\").Input(1)\n", "argument-mismatch", 2)] // S19, an `int` is neither `Bytes` nor a `string`, F13 for its two forms
     [InlineData("print(1)\nc = Command.New(\"a\").Timeout(1)\n", "type-mismatch", 2)] // S20, a number is no `duration`
     [InlineData("print(1)\nChildProcess c = null\n", "", 2)] // S19
     [InlineData("void Command() {\n}\n", "redeclared", 1)] // V9: a name every file sees
@@ -576,8 +705,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("data ExitError(int A)\n", "redeclared", 1)]
     public void A_use_of_a_command_outside_its_members_is_refused_where_it_stands(string text, string id, int line)
     {
-        // S17: a command has the members of S17, S18 and S20 and no text and no `==`; S19 stays `not supported` (an empty id); and
-        // a file declares none of the five names of S17 and S18 (V9)
+        // S17: a command has the members of S17 to S20 and no text and no `==`; `Spawn()` and `ChildProcess` (S19) stay `not supported`
+        // (an empty id); and a file declares none of the five names of S17 and S18 (V9)
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
