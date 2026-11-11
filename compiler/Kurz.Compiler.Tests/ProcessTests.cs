@@ -27,14 +27,15 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0" &lt;words&gt;</c> after the shell command
     /// <paramref name="setup"/>, with <c>KURZ_TRACE</c> set to <paramref name="trace"/>, or taken away where it is null; its exit code,
-    /// its lines and its error stream, with the executable's path. Null on Windows, where the build is held to its refusal, and a
-    /// program that <paramref name="reads"/> none of the five to its build.
+    /// its lines and its error stream, with the executable's path. Null on Windows, where a <paramref name="refused"/> program, one the
+    /// build says <c>not supported</c> to (a read of the command line, the environment or the clock, S11), is held to no program built,
+    /// and any other to its build.
     /// </summary>
-    private (int Code, IReadOnlyList<string> Output, string Error, string Executable)? Ran(string text, string name, string words, string setup = "", string? trace = "0", bool reads = true)
+    private (int Code, IReadOnlyList<string> Output, string Error, string Executable)? Ran(string text, string name, string words, string setup = "", string? trace = "0", bool refused = true)
     {
         if (Builder.HostTarget == Target.Windows)
         {
-            Assert.Equal(reads, Compile(text, toolchain.Runtime).Program is null);
+            Assert.Equal(refused, Compile(text, toolchain.Runtime).Program is null);
             return null;
         }
 
@@ -119,7 +120,7 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         // a program that reads no argument does not look at them
-        if (Ran("print(1)\n", "argument-unread", bad, reads: false) is { } unread)
+        if (Ran("print(1)\n", "argument-unread", bad, refused: false) is { } unread)
         {
             Assert.Equal((0, ""), (unread.Code, unread.Error));
             Assert.Equal(["1"], unread.Output);
@@ -316,30 +317,50 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // S23 and F17: the exit code, which no corpus case pins, since a case that expects output ends with 0 (section 12, the owner,
     // 2026-11-01, "Top-level return n + Exit" and "0, silently"): `Environment.Exit(code)` ends the process at once, from the top level
     // or from a function, with what was printed before it kept and nothing after it run; a `return` with an `int` among the top-level
-    // statements ends it with that code, a narrower integer widened into it; Linux takes the low 8 bits of either.
+    // statements ends it with that code, a narrower integer widened into it; Linux takes the low 8 bits of either, and Windows its 32 bits,
+    // -1 as 4294967295, which .NET reads back as -1 (the owner, 2026-11-11, "Build it for Windows"). On Windows the program runs as the
+    // corpus runner starts one; a row that reads `args` stays `not supported` there (S11), its Windows code null.
     [Theory]
-    [InlineData("print(\"a\")\nEnvironment.Exit(3)\nprint(\"b\")\n", "exit-top", 3, "a")]
-    [InlineData("int Stop(int code) {\n    print(\"stop\")\n    Environment.Exit(code)\n}\n\nprint(Stop(4))\n", "exit-function", 4, "stop")]
-    [InlineData("Environment.Exit(256)\n", "exit-256", 0, "")]
-    [InlineData("Environment.Exit(257)\n", "exit-257", 1, "")]
-    [InlineData("Environment.Exit(-1)\n", "exit-minus-one", 255, "")]
-    [InlineData("print(\"a\")\nif args.Count == 0 {\n    return 5\n}\nprint(\"b\")\n", "return-five", 5, "a")]
-    [InlineData("return 300\n", "return-300", 44, "")]
-    [InlineData("byte b = 7\nreturn b\n", "return-byte", 7, "")]
-    [InlineData("print(\"a\")\nreturn\n", "return-bare", 0, "a", false)]
-    public void A_program_ends_with_the_code_its_exit_or_its_top_level_return_gives(string text, string name, int code, string output, bool refusedOnWindows = true)
+    [InlineData("print(\"a\")\nEnvironment.Exit(3)\nprint(\"b\")\n", "exit-top", 3, "a", 3)]
+    [InlineData("int Stop(int code) {\n    print(\"stop\")\n    Environment.Exit(code)\n}\n\nprint(Stop(4))\n", "exit-function", 4, "stop", 4)]
+    [InlineData("Environment.Exit(256)\n", "exit-256", 0, "", 256)]
+    [InlineData("Environment.Exit(257)\n", "exit-257", 1, "", 257)]
+    [InlineData("Environment.Exit(-1)\n", "exit-minus-one", 255, "", -1)]
+    [InlineData("print(\"a\")\nif args.Count == 0 {\n    return 5\n}\nprint(\"b\")\n", "return-five", 5, "a", null)]
+    [InlineData("return 300\n", "return-300", 44, "", 300)]
+    [InlineData("byte b = 7\nreturn b\n", "return-byte", 7, "", 7)]
+    [InlineData("print(\"a\")\nreturn\n", "return-bare", 0, "a", 0)]
+    public void A_program_ends_with_the_code_its_exit_or_its_top_level_return_gives(string text, string name, int code, string output, int? windowsCode)
     {
-        // a bare `return` sets no code, so a build for Windows builds it
-        if (Ran(text, name, "", reads: refusedOnWindows) is { } run)
+        string[] lines = output == "" ? [] : [output];
+        if (Builder.HostTarget == Target.Windows)
+        {
+            var compilation = Compile(text, toolchain.Runtime);
+            if (windowsCode is not { } expected)
+            {
+                Assert.Null(compilation.Program);
+                return;
+            }
+
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var executable = toolchain.Build(compilation.Program, name);
+            var (exit, printed, error) = Processes.Capture(executable, [], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" });
+            Assert.Equal((expected, ""), (exit, error));
+            Assert.Equal(lines, Toolchain.Lines(printed));
+            return;
+        }
+
+        if (Ran(text, name, "") is { } run)
         {
             Assert.Equal((code, ""), (run.Code, run.Error));
-            string[] lines = output == "" ? [] : [output];
             Assert.Equal(lines, run.Output);
         }
     }
 
     [Theory]
     [InlineData("long code = 3\nreturn code\n", "narrowing-conversion", 2)]
+    [InlineData("ulong code = 3\nreturn code\n", "narrowing-conversion", 2)] // T7, whatever the signedness
+    [InlineData("uint code = 3\nreturn code\n", "sign-mix", 2)] // T23
     [InlineData("return \"stop\"\n", "type-mismatch", 1)]
     [InlineData("void Stop() {\n}\n\nreturn Stop()\n", "syntax", 4)] // O10
     [InlineData("Environment.Exit(\"stop\")\n", "type-mismatch", 1)]
@@ -351,20 +372,35 @@ public sealed class ProcessTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Null(refused.Program);
         var error = Assert.Single(refused.Diagnostics.Items);
         Assert.Equal((id, line), (error.Id, error.Line));
-        Assert.NotNull(Compile(text.Replace("long code", "int code", StringComparison.Ordinal).Replace("\"stop\"", "3", StringComparison.Ordinal).Replace("return Stop()", "return 3", StringComparison.Ordinal),
+        Assert.NotNull(Compile(text.Replace("long code", "int code", StringComparison.Ordinal).Replace("uint code", "int code", StringComparison.Ordinal).Replace("\"stop\"", "3", StringComparison.Ordinal).Replace("return Stop()", "return 3", StringComparison.Ordinal),
             Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
     [Theory]
-    [InlineData("print(1)\nEnvironment.Exit(3)\n", 2)]
-    [InlineData("x = 2\nif x > 1 {\n    return 3\n}\n", 3)]
-    public void A_build_for_windows_says_not_supported_at_the_exit_code(string text, int line)
+    [InlineData("mut xs = List<int>()\nreturn xs\n    .Add(2)\n", "syntax")] // O10
+    [InlineData("s = \"ab\"\nreturn s\n    .Trim()\n", "type-mismatch")]
+    public void Both_refusals_of_a_top_level_return_stand_at_the_line_of_its_value(string text, string id)
     {
-        var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
+        // E1: the line of the smallest part that is wrong, the value, which starts on the line after the `return`
+        var refused = Compile(text, Builder.CheckRuntime(Target.Linux));
+        Assert.Null(refused.Program);
+        var error = Assert.Single(refused.Diagnostics.Items);
+        Assert.Equal((id, 3), (error.Id, error.Line));
+        Assert.NotNull(Compile("xs = [1]\nreturn xs\n    .Count\n", Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+    }
+
+    [Theory]
+    [InlineData("print(1)\nEnvironment.Exit(3)\n")]
+    [InlineData("x = 2\nif x > 1 {\n    return 3\n}\n")]
+    public void A_build_for_windows_takes_the_exit_code(string text)
+    {
+        // S23, F17: a build for Windows, made on any machine, emits both forms (the owner, 2026-11-11, "Build it for Windows"); the
+        // control is a read of the command line, which it still says `not supported` to, at its line (S11)
+        var built = Compile(text, Builder.CheckRuntime(Target.Windows));
+        Assert.True(built.Program is not null, string.Join("; ", built.Diagnostics.Sorted));
+        var refused = Compile("print(args.Count)\n" + text, Builder.CheckRuntime(Target.Windows));
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((line, Emitter.ExitNotOnWindows), (diagnostic.Line, diagnostic.Message));
-        Assert.StartsWith($"program.kz:{line}: not supported: the exit code", diagnostic.At("program.kz"), StringComparison.Ordinal);
-        Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
+        Assert.Equal((DiagnosticKind.NotSupported, 1), (diagnostic.Kind, diagnostic.Line));
     }
 }

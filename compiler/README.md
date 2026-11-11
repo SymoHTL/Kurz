@@ -554,7 +554,7 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
 standard output; where its write failed, the report of the error goes to standard error too and is
-dropped where that write is refused, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
+dropped where that write is refused or takes no byte, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
 size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
 thread's first map on a system that gives no randomness for the keys of its hash ends the process with
@@ -1165,12 +1165,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
-- the exit code (S23, F17), in a build for Linux: `Environment.Exit(code)` and a `return` with an `int` among the
-  top-level statements call the target's `Exit` with the code, the C library's `_exit`, which runs none of its handlers, and the
-  block ends there; a wider integer is `narrowing-conversion` (T7) and a value of another type `type-mismatch`, as for the
-  value any function returns (F3). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
-  from the top level and from a function, the low 8 bits of 256, 257 and -1, a narrower integer widened, a bare `return`, the
-  lines printed before the end and none after it, the refusals, and the refusal for Windows at either form;
+- the exit code (S23, F17), in a build for Linux and for Windows: `Environment.Exit(code)` and a `return` with an `int` among
+  the top-level statements call the target's `Exit` with the code, on Linux the C library's `_exit`, which runs none of its
+  handlers, on Windows `ExitProcess`, which takes the code's 32 bits, read through a pointer so that no conversion checks a
+  negative one, and the block ends there; the code is held to `int` as anywhere an `int` is required, a narrower integer widened (T23), a wider
+  one `narrowing-conversion` (T7), a `uint` `sign-mix` (T23) and a value of any other type `type-mismatch` (T1), each
+  refusal at the line of the value (E1). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
+  from the top level and from a function, the low 8 bits of 256, 257 and -1 and on Windows their 32 bits, a narrower integer
+  widened, a bare `return`, the lines printed before the end and none after it, the refusals, and a build for Windows of either
+  form, made on any machine;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -1655,9 +1658,11 @@ ask about it.
 
 - A `print` or an `eprint` hands its line to one write call, called again for what a call did not
   take, through a
-  buffer per thread that holds the line until that call returns. Pinned for `print` by the corpus
-  runner, and for `eprint`, whose writes no case holds (A17), by
-  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`.
+  buffer per thread that holds the line until that call returns. Pinned in the lines it gives, their
+  text and their stream, and not in the count of write calls: for `print` by the corpus runner, and
+  for `eprint`, whose writes no case holds (A17), by
+  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`,
+  which holds its lines on standard error and none of them on standard output.
 - P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
