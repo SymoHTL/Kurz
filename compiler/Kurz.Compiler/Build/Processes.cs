@@ -14,7 +14,7 @@ public static class Processes
 
     /// <summary>
     /// Runs a program to its end with both of its streams captured, or ends it when the time is up;
-    /// the exit code with what it wrote. Its standard input is a pipe closed at its start, so that it
+    /// the exit code with what it wrote. Its standard input is an empty pipe whose writing end is closed, so that it
     /// runs with nothing on it, as chapter 0 runs a case, and a read of it ends at once, wherever the
     /// caller's own input comes from (S22). A program that is not there or does not start answers with
     /// the code -1 and says so on its error stream. The variables given are set for it, a null one

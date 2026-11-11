@@ -554,7 +554,7 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
 standard output; where its write failed, the report of the error goes to standard error too and is
-dropped where that write is refused, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
+dropped where that write is refused or takes no byte, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
 size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
 thread's first map on a system that gives no randomness for the keys of its hash ends the process with
@@ -1145,11 +1145,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the process goes through: `Stdin.Read` reads as a file's `Read` does, `for line in Stdin.Lines()` pulls as a loop over a file's
   lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
   the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
-  its end, with room for 8192 more bytes made before each read; each is a call in flight. The module declares the handle where a
-  file of the program calls a member of `Stdin`, and a build for Windows says `not supported` to each such call and loop.
-  `StdinTests` pins what no case can: lines given on standard input and read across a loop, `ReadLine`, `Read` and `ReadAll`; a
-  line that is not UTF-8; a closed descriptor 0; and the refusal for Windows. The suite runs every program with a standard input
-  closed at its start (`Processes.Capture`), as chapter 0 runs a case;
+  its end, with room for 8192 more bytes made before each read; each is a call in flight. A read that gives the system's error 9,
+  of a descriptor 0 the caller closed, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does. Where the
+  read of `ReadAll` fails otherwise, the bytes it took go back to the reader's buffer from its start (`KeepRest`), made again with
+  room for them where it has less, and the handle keeps that room after a handle's fields, so that the next one frees it with its
+  size. The module declares the handle where a file of the program calls a member of `Stdin`, and a build for Windows says
+  `not supported` to each such call and loop. `StdinTests` pins what no case can: lines given on standard input and read across a
+  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a closed descriptor 0, and a directory, whose read fails; a
+  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
+  whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1165,12 +1169,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
-- the exit code (S23, F17), in a build for Linux: `Environment.Exit(code)` and a `return` with an `int` among the
-  top-level statements call the target's `Exit` with the code, the C library's `_exit`, which runs none of its handlers, and the
-  block ends there; a wider integer is `narrowing-conversion` (T7) and a value of another type `type-mismatch`, as for the
-  value any function returns (F3). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
-  from the top level and from a function, the low 8 bits of 256, 257 and -1, a narrower integer widened, a bare `return`, the
-  lines printed before the end and none after it, the refusals, and the refusal for Windows at either form;
+- the exit code (S23, F17), in a build for Linux and for Windows: `Environment.Exit(code)` and a `return` with an `int` among
+  the top-level statements call the target's `Exit` with the code, on Linux the C library's `_exit`, which runs none of its
+  handlers, on Windows `ExitProcess`, which takes the code's 32 bits, read through a pointer so that no conversion checks a
+  negative one, and the block ends there; the code is held to `int` as anywhere an `int` is required, a narrower integer widened (T23), a wider
+  one `narrowing-conversion` (T7), a `uint` `sign-mix` (T23) and a value of any other type `type-mismatch` (T1), each
+  refusal at the line of the value (E1). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
+  from the top level and from a function, the low 8 bits of 256, 257 and -1 and on Windows their 32 bits, a narrower integer
+  widened, a bare `return`, the lines printed before the end and none after it, the refusals, and a build for Windows of either
+  form, made on any machine;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -1655,9 +1662,11 @@ ask about it.
 
 - A `print` or an `eprint` hands its line to one write call, called again for what a call did not
   take, through a
-  buffer per thread that holds the line until that call returns. Pinned for `print` by the corpus
-  runner, and for `eprint`, whose writes no case holds (A17), by
-  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`.
+  buffer per thread that holds the line until that call returns. Pinned in the lines it gives, their
+  text and their stream, and not in the count of write calls: for `print` by the corpus runner, and
+  for `eprint`, whose writes no case holds (A17), by
+  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`,
+  which holds its lines on standard error and none of them on standard output.
 - P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
@@ -1903,7 +1912,7 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16 and S22; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16, S22 and S25; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an

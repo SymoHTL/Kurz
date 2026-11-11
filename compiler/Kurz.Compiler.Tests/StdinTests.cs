@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Text;
@@ -11,8 +13,9 @@ namespace Kurz.Compiler.Tests;
 /// taken off it, and the next read goes on where a loop that stopped left the one buffer of the process, through
 /// <c>Stdin.ReadLine()</c>, <c>Stdin.Read(mut into, max)</c> and <c>Stdin.ReadAll()</c>, <c>ReadLine</c> giving <c>null</c> at the
 /// end; a line that is not UTF-8 is <c>InvalidUtf8</c> and is taken, so that the next read gives the line after it; a closed
-/// descriptor 0 is a failed read, an <c>IoError</c> naming <c>&lt;stdin&gt;</c>; and a build for Windows says <c>not supported</c>
-/// at each of the four. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, which gives it its input; on
+/// descriptor 0 is the end of the input, as Rust's <c>handle_ebadf</c> reads it, and another failed read an <c>IoError</c> naming
+/// <c>&lt;stdin&gt;</c>, after which the bytes a <c>ReadAll</c> took are the next read's; and a build for Windows says
+/// <c>not supported</c> at each of the four. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, which gives it its input; on
 /// Windows the tests hold the build's refusal instead.
 /// </summary>
 public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -22,13 +25,18 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0"</c> after <paramref name="input"/>, a shell
     /// command whose output is piped into it, or with the redirections <paramref name="redirect"/> given; its exit code, its lines and
-    /// its error stream. Null on Windows, where the build is held to its refusal.
+    /// its error stream. Null on Windows, where the build is held to its refusal: <c>not supported</c>, on lines that call on
+    /// <c>Stdin</c> and at none other (S11, S22), by the id and the line, never the message (section 8).
     /// </summary>
     private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string input, string redirect = "")
     {
         if (Builder.HostTarget == Target.Windows)
         {
-            Assert.Null(Compile(text, toolchain.Runtime).Program);
+            var refused = Compile(text, toolchain.Runtime);
+            Assert.Null(refused.Program);
+            var lines = text.Split('\n').Select((line, i) => (line, i + 1)).Where(l => l.line.Contains("Stdin.", StringComparison.Ordinal)).Select(l => l.Item2).ToHashSet();
+            Assert.NotEmpty(refused.Diagnostics.Items);
+            Assert.All(refused.Diagnostics.Items, d => Assert.True(d.Kind == DiagnosticKind.NotSupported && lines.Contains(d.Line), $"{d.Id} at line {d.Line}"));
             return null;
         }
 
@@ -142,7 +150,10 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
                             print("end")
                             more = false
                         }
-                        IoError e => print(e)
+                        IoError e => {
+                            print(e)
+                            more = false
+                        }
                         InvalidUtf8 e => print("bad at {e.At}")
                     }
                 }
@@ -160,10 +171,12 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_closed_standard_input_is_a_failed_read_that_names_stdin()
+    public void A_closed_standard_input_is_the_end_of_the_input_and_another_failed_read_names_stdin()
     {
-        // S22: a read of descriptor 0, which the program's caller closed, is the system's error of a descriptor that is not open, 9,
-        // whose `IoError` names the path `<stdin>`; the positive control reads the same program with an empty input, which is no failure
+        // S22: a read of descriptor 0, which the program's caller closed, gives the system's error of a descriptor that is not open, 9,
+        // which is the end of the input, as Rust's `handle_ebadf` reads it (the owner, 2026-11-11, "End of input"): the program prints
+        // what it prints with an empty input. The control is a read that fails otherwise, of a directory, 21, whose `IoError` names the
+        // path `<stdin>` at each of the three
         const string text = """
             match Stdin.ReadLine() {
                 string l => print(l)
@@ -198,7 +211,13 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         if (Ran(text, "stdin-closed", "", "<&-") is { } closed)
         {
             Assert.True((0, "") == (closed.Code, closed.Error), $"exit {closed.Code}: {closed.Error}");
-            Assert.Equal(["other (os error 9): <stdin>", "other (os error 9): <stdin>", "other (os error 9): <stdin>"], closed.Output);
+            Assert.Equal(["end", "0", "0", "no line"], closed.Output);
+        }
+
+        if (Ran(text, "stdin-directory", "", "< /") is { } directory)
+        {
+            Assert.True((0, "") == (directory.Code, directory.Error), $"exit {directory.Code}: {directory.Error}");
+            Assert.Equal(["is a directory: <stdin>", "is a directory: <stdin>", "is a directory: <stdin>"], directory.Output);
         }
 
         if (Ran(text, "stdin-closed-control", "") is { } empty)
@@ -209,9 +228,82 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_ReadAll_that_fails_part_way_keeps_the_bytes_it_took_for_the_next_read()
+    {
+        // S22: standard input a stream whose other end sends a line and more, then resets it: `ReadLine` takes the line and leaves the
+        // rest in the reader's buffer, `ReadAll` takes that rest, and its read fails on the reset; the bytes it took go back to the buffer,
+        // so that the next `ReadLine` gives them as the last line, and the one after it the end (the owner, 2026-11-11, "Keep for next
+        // read"). The control ends the stream with no reset, where `ReadAll` gives the rest and each `ReadLine` after it the end
+        const string text = """
+            void Line() {
+                match Stdin.ReadLine() {
+                    string l => print(l)
+                    null => print("end")
+                    IoError e => print(e)
+                    InvalidUtf8 e => print(e)
+                }
+            }
+
+            Line()
+            match Stdin.ReadAll() {
+                Bytes b => print(b.Count)
+                IoError e => print(e)
+            }
+
+            Line()
+            Line()
+            """;
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(Ran(text, "stdin-kept", ""));
+            return;
+        }
+
+        var reset = OverStream(text, "stdin-kept", reset: true);
+        Assert.True((0, "") == (reset.Code, reset.Error), $"exit {reset.Code}: {reset.Error}");
+        Assert.Equal(["first", "connection reset: <stdin>", "rest of it", "end"], reset.Output);
+
+        var ended = OverStream(text, "stdin-ended", reset: false);
+        Assert.True((0, "") == (ended.Code, ended.Error), $"exit {ended.Code}: {ended.Error}");
+        Assert.Equal(["first", "10", "end", "end"], ended.Output);
+    }
+
+    /// <summary>
+    /// The program built for this machine and started with a stream as its standard input: <c>python3</c> connects to a listener of the
+    /// test, puts the connection on descriptor 0 and runs the program in its place. The listener sends <c>first\nrest of it</c>, waits
+    /// half a second, so that the program's <c>ReadAll</c> waits on its read, and then resets the connection (<paramref name="reset"/>,
+    /// a close that lingers 0 seconds) or closes it.
+    /// </summary>
+    private (int Code, IReadOnlyList<string> Output, string Error) OverStream(string text, string name, bool reset)
+    {
+        var compilation = Compile(text, toolchain.Runtime);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var executable = toolchain.Build(compilation.Program, name);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var other = Task.Run(() =>
+        {
+            using var stream = listener.AcceptSocket();
+            stream.Send("first\nrest of it"u8);
+            Thread.Sleep(500);
+            if (reset)
+            {
+                stream.LingerState = new LingerOption(true, 0);
+            }
+
+            stream.Close();
+        });
+        const string wrapper = "import os, socket, sys; s = socket.create_connection(('127.0.0.1', int(sys.argv[2]))); os.dup2(s.fileno(), 0); os.execv(sys.argv[1], [sys.argv[1]])";
+        var (code, output, error) = Processes.Capture("python3", ["-c", wrapper, executable, port.ToString(System.Globalization.CultureInfo.InvariantCulture)], Path.GetDirectoryName(executable), TimeSpan.FromSeconds(30), new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" });
+        Assert.True(other.Wait(TimeSpan.FromSeconds(30)), "the listener did not end");
+        return (code, Toolchain.Lines(output), error);
+    }
+
+    [Fact]
     public void A_captured_program_runs_with_nothing_on_its_standard_input()
     {
-        // chapter 0 with S22: `Processes.Capture`, which runs every case, gives the program a pipe closed at its start, not the caller's
+        // chapter 0 with S22: `Processes.Capture`, which runs every case, gives the program an empty pipe whose writing end is closed, not the caller's
         // own standard input, so that a read of it ends at once wherever the suite runs; Linux names the descriptor's file in `/proc`
         if (!OperatingSystem.IsLinux())
         {
@@ -239,7 +331,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((line, Emitter.StdinNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.Equal((DiagnosticKind.NotSupported, line), (diagnostic.Kind, diagnostic.Line)); // section 8: the id and the line of an error, never its message
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
