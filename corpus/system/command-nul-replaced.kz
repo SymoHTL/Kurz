@@ -1,0 +1,28 @@
+// expect: output
+// | invalid input: true
+// | 0
+// | started
+// rules: S21
+
+void | IoError | ExitError Replaced() {
+    Command.New("true").Dir("kurz-case\0").Dir(".").Status()
+    print("not reached")
+}
+
+void | IoError | ExitError Removed() {
+    Command.New("true").Env("KURZ_CASE", "1\0").EnvRemove("KURZ_CASE").Status()
+    print("started")
+}
+
+Replaced() else {
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
+    ExitError e => print(e)
+}
+
+Removed() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

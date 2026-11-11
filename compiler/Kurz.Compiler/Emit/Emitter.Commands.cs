@@ -49,8 +49,12 @@ public sealed partial class Emitter
         return fn.Value($"load ptr, ptr {slot}");
     }
 
-    /// <summary>The arguments of a member of S17, read in the order they are written; the callee borrows them.</summary>
-    private List<string> MemberArguments(CallExpression c, CallInfo info)
+    /// <summary>
+    /// The arguments of a member of S17, read in the order they are written; the callee borrows them. With <paramref name="held"/> each
+    /// one that is no temporary of a region is counted once more, a temporary of the region being emitted, whose end, a <c>return</c> or a
+    /// <c>break</c> lets go of it, so that it outlives a change of the place it was read from (<see cref="EmitCommandInPlace"/>).
+    /// </summary>
+    private List<string> MemberArguments(CallExpression c, CallInfo info, bool held = false)
     {
         KurzType[] slots = ((MemberAccess)c.Callee).Member switch
         {
@@ -60,7 +64,19 @@ public sealed partial class Emitter
             "Stdin" or "Stdout" or "Stderr" => [TypeOf(c.Arguments[0].Value)],
             _ => [],
         };
-        return Arguments(c, info, j => slots[j], _ => false, _ => null, cConvention: false, owned: false);
+        var arguments = Arguments(c, info, j => slots[j], _ => false, _ => null, cConvention: false, owned: false);
+        for (var j = 0; held && j < arguments.Count; j++)
+        {
+            var type = Sub(slots[j]);
+            var value = arguments[j][(Ir(type).Length + 1)..]; // `Arguments` writes each as its type and its value
+            if (Counted(type) && !regions.Any(r => r.Exists(t => t.Value == value)))
+            {
+                Retain(value, type);
+                Temp(value, type);
+            }
+        }
+
+        return arguments;
     }
 
     /// <summary>
@@ -92,7 +108,13 @@ public sealed partial class Emitter
     /// to the variable itself, so that a command no other value holds changes in place, since the assignment keeps no earlier command,
     /// and one another value holds is copied once, by the first <c>Add</c>. The arguments of every member are read first, in the order
     /// they are written, so that an argument that reads the variable reads the command before any member is appended, and a case an
-    /// argument passes on (O2) leaves the variable as it was. False, with nothing emitted, where the value is no such chain.
+    /// argument passes on (O2) leaves the variable as it was. The checker holds a borrowed argument unchanged only across its own call
+    /// (M7), while here the arguments of a member stay read until the members after it have read theirs, which can change the place it
+    /// was read from, <c>cmd = cmd.Arg(s).Arg(Take(mut s))</c>: so each argument of a member before the last is counted for the
+    /// statement (<see cref="MemberArguments"/>), as the line <c>command-chain-fenced</c> of <c>ListTests</c> holds. An argument that
+    /// changes the variable itself, <c>cmd = cmd.Arg(Reset(mut cmd))</c>, is refused by the checker, <c>changed-while-held</c>, since a
+    /// <c>Command</c> is not copied (M7), so the command the members are appended to is the one read before the arguments; a field takes
+    /// the ordinary path, since this one takes a variable alone. False, with nothing emitted, where the value is no such chain.
     /// </summary>
     private bool EmitCommandInPlace(Expression assigned, VariableSymbol variable, string place)
     {
@@ -109,7 +131,7 @@ public sealed partial class Emitter
             return false;
         }
 
-        var arguments = chain.Select(c => MemberArguments(c, Model.CallOf(c))).ToList();
+        var arguments = chain.Select((c, i) => MemberArguments(c, Model.CallOf(c), held: i < chain.Count - 1)).ToList();
         for (var i = 0; i < chain.Count; i++)
         {
             Append(chain[i], Model.CallOf(chain[i]), place, arguments[i]);

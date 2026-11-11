@@ -1185,24 +1185,38 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   appends through a `mut` list. A member takes over the result of the member before it in a chain, which no other value holds,
   and changes it in place, and `cmd = cmd.Arg(x)` appends to the variable itself, its members' arguments read before the first
   append; a command another value holds is copied by the first `Add`, as a list a write finds shared is (M3), so that it stays as
-  it was (section 12, the owner, 2026-11-01, P1).
+  it was (section 12, the owner, 2026-11-01, P1). The checker holds a borrowed argument unchanged across its own call alone
+  (M7), so in `cmd = cmd.Arg(s).Arg(Take(mut s))` each argument of a member before the last is counted for the statement, since
+  an argument of a later member can give its place another block (the line `command-chain-fenced` of `ListTests`); an argument
+  that changes the variable itself, `cmd = cmd.Arg(Reset(mut cmd))`, is `changed-while-held`, since a `Command` is not copied
+  (M7, a row of `CheckerTests`), so the command the members are appended to is the one read before the arguments.
   `Output()` and `Status()` call `CommandOutput` and `CommandStatus` of the Linux file, which apply the members in their order,
-  the later one winning, refuse a NUL byte before any call of the system, lay out the arguments, the environment and the places
-  the program is looked up in in one region mapped before the `fork`, so that the child allocates nothing, move a descriptor
-  they open below 3, which a program started with one of its streams closed gets, to 3 or above, and start the child with
-  `fork` and `execve`: the child takes back the default action of `SIGPIPE`, takes its three streams with `dup2`, marks
-  every other descriptor close-on-exec with `close_range`, changes its directory with `chdir` and tries each place in turn as
-  `execvp` does, a directory that refuses the program passed over, and writes a failure to the program through a pipe that its
-  `execve` closes, as Rust's `Command` does. `Output()` reads standard output and standard error under `poll` as they fill,
-  each to its end, as Rust's `output()` does, so that a process the child leaves behind holding a pipe holds the call too;
-  a pipe the call does not read is closed at once (S19). The program waits for the child on every path. The result is a
-  union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
-  `runtime/common/`. A build for Windows says `not supported` to each call on a command. `ChildTests` pins what no case can: a
-  chain and `cmd = cmd.Arg(x)` built with no copy, under a runtime whose copy of a list fails; both pipes filled past what a
-  pipe holds; the environment a child gets; the places a program is looked up in; the path of a start that fails, and a second
-  `Dir` that replaces the first; a NUL byte in each string of a command; the descriptors a child gets; its standard input
-  where the program started with its own closed; the streams of `Status()` and those `Output()` does not read; the refusal for
-  Windows; and a use of a command outside its members;
+  the later one winning, refuse a NUL byte in the program, an argument, any directory `Dir` was given and the environment the
+  child gets before any call of the system, lay out the arguments, the environment and the places the program is looked up in,
+  from the `PATH` the child gets (S21), which comes from the environment the program started with, as the rest of the child's
+  environment does, so that native code that changes the program's own environment changes neither, in one region mapped before
+  the `fork`, so that the child allocates nothing, move a descriptor they open below 3, which the system gives where the
+  program's own native code closed one of its streams (the start opens `/dev/null` in place of one closed before it), to 3 or
+  above, and start the child with `fork` and `execve`: the child takes back the default action of `SIGPIPE`, takes its three
+  streams with `dup2`, marks every other descriptor close-on-exec with `close_range`, or, where the system refuses that call,
+  with `fcntl` on each descriptor up to the soft limit of open files, changes its directory with `chdir` and tries each place
+  in turn as `execvp` does, a directory that refuses the program passed over, and writes a failure to the program through a
+  pipe that its `execve` closes, as Rust's `Command` does. `Output()` reads standard output and standard error under `poll` as
+  they fill, each to its end, as Rust's `output()` does, so that a process the child leaves behind holding a pipe holds the
+  call too; a read that fails ends the call with an `IoError` named by the program, once both pipes are closed and the child
+  waited for (S18), where Rust's `output()` panics; a pipe the call does not read is closed at once (S19). The program waits
+  for the child on every path. The result is a union the runtime makes, whose tags are the program's (D9, above);
+  `ExitError`'s text is `ExitErrorText` of `runtime/common/`. `Command`, `Stdio`, `ExitStatus`, `ProcessOutput` and
+  `ExitError` are names every file sees, so that a file's own declaration of one is `redeclared` (V9). A build for Windows
+  says `not supported` at the first call on a command, where the build stops. `ChildTests` pins what no case can: a chain and
+  `cmd = cmd.Arg(x)` built with no copy, under a runtime whose copy of a list fails; both pipes filled past what a pipe holds;
+  the environment a child gets; the places a program is looked up in; the path of a start that fails, and a second `Dir` that
+  replaces the first; a NUL byte in each string the child gets and in a replaced directory, and none in a variable taken away;
+  a read of the output that fails, under a runtime whose read fails, and the call's close of both pipes and its wait for the
+  child after it; a lookup where the program's native code cleared its environment; the descriptors a child gets, also under a
+  runtime whose `close_range` the system does not have; its standard input where the program's native code closed its own; the
+  streams of `Status()` and those `Output()` does not read; the refusal for Windows; and a use of a command outside its members
+  and a declaration of one of its names;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
