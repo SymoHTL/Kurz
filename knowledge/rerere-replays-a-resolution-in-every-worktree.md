@@ -48,7 +48,8 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
     else of that file, resolved by that tool on the merged tree with the gate `knowledge` green
     (2026-11-09, pull request 385, comment 6735260898);
   - a chain of calls or a list whose two sides added or removed different whole lines at its
-    end, the line that was last or lines next to it, and changed no other line but by its end mark,
+    end alone, the line that was last or lines next to it, and none elsewhere, and changed no other
+    line but by its end mark,
     taken off the line that was last or put on the line that became last, every added line kept,
     every removed one dropped, the end mark on the line that ends up last and on no other
     (2026-11-11, comment 6792362885, on the take of pull request 460).
