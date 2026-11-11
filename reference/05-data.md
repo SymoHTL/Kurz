@@ -1205,9 +1205,12 @@ tells which is meant: `Plan.From(2)`, a call, is D18's conversion and `Plan.From
 `p.Number` on a value is its number and `Plan.Number` on the type the value (§4, the owner,
 2026-10-30). A comparison with `<`, `<=`, `>` or `>=` of values of an
 enum whose declaration writes no number is `enum-number`, and so is a number that is not a constant
-expression, while a number of another type gets the error a value of that type gets where an `int`
+expression, while a constant of another type gets the error a value of that type gets where an `int`
 is required (T1): `type-mismatch` for `1.5` or `"two"`, `narrowing-conversion` for `5L` and
-`sign-mix` for `2u` *(assumed: as §4 marks them)*.
+`sign-mix` for `2u` *(assumed: as §4 marks them)*. The text of a number that is not a constant says
+so, then the rule: "the number of `Pro` is no constant: a name's number is a constant expression of
+type `int`, a literal or literals that T6 folds (D20)" (§4, the owner, 2026-11-11, issue 452, "'is no
+constant', both").
 
 Case: [data/enum-number-twice.kz](../corpus/data/enum-number-twice.kz)
 ```kurz
@@ -1348,18 +1351,21 @@ built"). `From` and `Has` take arguments named `number` and `flag` (D11). A flag
 without names is a type, whose one set is `None` (§4, the owner, 2026-11-11, issue 452, "All as
 built"). A declaration of 32 names that also writes a wrong number gets that one `flags-number`
 alone, at its 32nd name (§4, the owner, 2026-11-11, issue 452, "All as built, decided"), a number of
-another type or outside the range of an `int` among the wrong numbers, with no
-`narrowing-conversion` and no `constant-overflow` (§4, the owner, 2026-11-11, issue 452, "Count
-alone, as built"). A negative number is `flags-number`, `-4` and `-2147483648` among them, the
+another type or outside the range of an `int` among the wrong numbers, with no `type-mismatch`,
+`narrowing-conversion`, `sign-mix` or `constant-overflow` (§4, the owner, 2026-11-11, issue 452,
+"Count alone, as built"). A negative number is `flags-number`, `-4` and `-2147483648` among them, the
 minus before a literal being part of the literal (L17) (§4, the owner, 2026-11-11, issue 452, "All as
 built, decided").
 
 The rest of a declaration is read as D20 reads an `enum`'s. A number that is no constant is
 `flags-number` before its type is read, `Write = Two()` with `long Two()` among them, as D20 reads an
-`enum`'s (§4, the owner, 2026-11-11, issue 452, "Constant first"). A constant's type and range are
-read before its bit. A constant of another type gets the error a value of that type gets where an
-`int` is required (T1), whether or not its value is one bit: `type-mismatch` for `1.5` or `"two"`,
-`narrowing-conversion` for `5L` and `3L` and `sign-mix` for `2u` and `3u`. A number outside the
+`enum`'s (§4, the owner, 2026-11-11, issue 452, "Constant first"), and its text says so, then the
+rule: "the number of `Write` is no constant: a name's number is a constant expression of type
+`int`, a literal or literals that T6 folds (D19)" (§4, the owner, 2026-11-11, issue 452, "'is no
+constant', both"). In a declaration of at most 31 names, a constant's type and range are read
+before its bit: a constant of another type gets the error a value of that type gets where an `int`
+is required (T1), whether or not its value is one bit, `type-mismatch` for `1.5` or `"two"`,
+`narrowing-conversion` for `5L` and `3L` and `sign-mix` for `2u` and `3u`, and a number outside the
 range of an `int` is `constant-overflow` (L10, T6), `2147483648`, the bit of the sign, among them,
 while a negative number inside it is `flags-number`. A call on the type by any name other than
 `From`, `Access.Has(x)` and `Access.Number(...)` among them, is `unknown-name` (V10) whatever names
@@ -1446,7 +1452,7 @@ print(Access.Has(Access.Read))
 Case: [data/flags-number-count-first.kz](../corpus/data/flags-number-count-first.kz)
 ```kurz
 flags Many {
-    F1 = 3,
+    F1 = 3, // not one bit, a number error the count comes before
     F2 = 2,
     F3 = 4,
     F4 = 8,
@@ -1477,7 +1483,7 @@ flags Many {
     F29 = 268435456,
     F30 = 536870912,
     F31 = 1073741824,
-    F32 = 1
+    F32 = 1 // bit 1, which no other name holds, since F1 writes 3
 }
 
 print(Many.F2)
