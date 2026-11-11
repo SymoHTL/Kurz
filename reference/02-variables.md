@@ -163,8 +163,12 @@ rules of its functions, "`File` is no value: its functions are called on it (S2,
 Every name of a group gets the same parenthesis, which §12 gives for each of the thirteen:
 "(S2, S6 to S9, S15, V10)" for `File`, `Directory`, `TcpListener` and `TcpStream`, "(S13, S14, V10)"
 for `Environment`, "(P1, V10)" for `Log`, "(F18, V10)" for `Hint`, "(H1 to H4, V10)" for `Sha256`,
-`Md5`, `Crc32` and `Hmac`, "(H2, H7, V10)" for `Hex` and "(H4, V10)" for `FixedTime`; `Stdin`'s text
-names S22 *(decided, §12: the owner, 2026-11-11, "As built, 13 names")*.
+`Md5`, `Crc32` and `Hmac`, "(H2, H7, V10)" for `Hex` and "(H4, V10)" for `FixedTime` *(decided, §12:
+the owner, 2026-11-11, "As built, 13 names")*. `Stdin`'s text names its four calls too, the same list
+as its text for a function it does not have, and ends with "(S22, V10)": "`Stdin` is no value: its
+functions are called on it, `Stdin.Lines()` as the collection of a `for` loop, `Stdin.ReadLine()`,
+`Stdin.Read(mut into, max)` and `Stdin.ReadAll()` (S22, V10)" *(decided, §12: the owner, 2026-11-11,
+"Calls, as built")*.
 
 Case: [variables/block-scope.kz](../corpus/variables/block-scope.kz)
 ```kurz
