@@ -3635,18 +3635,40 @@ public sealed class CheckerTests
         Assert.Equal(written, Types.A(name));
 
     // a type's name where a value stands cites the rule of the type, D2, D12 or T10, and E4 for its `syntax` id; D12: a value of the
-    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; a row holds the
-    // citations and leaves the wording free (E2)
+    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; V10: a name every
+    // file sees whose functions are called on it is no value, and its text cites the rules of those functions, as the text of a
+    // function the name does not have cites them; a row holds the citations and leaves the wording free (E2)
     [Theory]
     [InlineData("data User(string Name)\n\nprint(User)", "`User`", "(D2; E4)")]
     [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan.Free`", "(D12; E4)")]
     [InlineData("print(List)", "`List`", "(T10; E4)")]
     [InlineData("int Count() => args.Count\n\nprint(Count())", "`Environment.Args()`", "(S13, V10)")]
+    [InlineData("print(File)", "`File`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Directory)", "`Directory`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpListener)", "`TcpListener`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpStream)", "`TcpStream`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Environment)", "`Environment`", "(S13, S14, V10)")]
+    [InlineData("print(Log)", "`Log`", "(P1, V10)")]
+    [InlineData("print(Hint)", "`Hint`", "(F18, V10)")]
+    [InlineData("print(Sha256)", "`Sha256`", "(H1 to H4, V10)")]
+    [InlineData("print(Md5)", "`Md5`", "(H1 to H4, V10)")]
+    [InlineData("print(Crc32)", "`Crc32`", "(H1 to H4, V10)")]
+    [InlineData("print(Hmac)", "`Hmac`", "(H1 to H4, V10)")]
+    [InlineData("print(Hex)", "`Hex`", "(H2, H7, V10)")]
+    [InlineData("print(FixedTime)", "`FixedTime`", "(H4, V10)")]
     public void The_text_of_a_type_s_name_or_of_args_where_no_value_of_it_stands_cites_its_rules(string program, string shown, string cited)
     {
         var message = Assert.Single(Check(program).Diagnostics.Items).Message;
         Assert.Contains(shown, message, StringComparison.Ordinal);
         Assert.EndsWith(cited, message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_every_file_sees_whose_functions_are_called_on_it_is_unknown_name_at_its_line_as_a_value()
+    {
+        // V10, as `Stdin` (S22) and the names of R18 are: the id and the line of the name, which its text does not change
+        string[] names = ["File", "Directory", "TcpListener", "TcpStream", "Environment", "Log", "Hint", "Sha256", "Md5", "Crc32", "Hmac", "Hex", "FixedTime"];
+        Assert.All(names, name => Assert.Equal([(ErrorIds.UnknownName, 2)], Errors($"print(1)\nx = {name}\nprint(2)")));
     }
 
     // ---- intrinsics (R18) ----------------------------------------------------------------------------------------

@@ -623,6 +623,12 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
+        if (FunctionsOnly(n.Name) is { } rules)
+        {
+            Report(ErrorIds.UnknownName, n.Line, $"`{n.Name}` is no value: its functions are called on it ({rules}, V10)");
+            return Typed.Error;
+        }
+
         if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;

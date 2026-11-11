@@ -22,13 +22,18 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0"</c> after <paramref name="input"/>, a shell
     /// command whose output is piped into it, or with the redirections <paramref name="redirect"/> given; its exit code, its lines and
-    /// its error stream. Null on Windows, where the build is held to its refusal.
+    /// its error stream. Null on Windows, where the build is held to its refusal: <c>not supported</c>, on lines that call on
+    /// <c>Stdin</c> and at none other (S11, S22), by the id and the line, never the message (section 8).
     /// </summary>
     private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string input, string redirect = "")
     {
         if (Builder.HostTarget == Target.Windows)
         {
-            Assert.Null(Compile(text, toolchain.Runtime).Program);
+            var refused = Compile(text, toolchain.Runtime);
+            Assert.Null(refused.Program);
+            var lines = text.Split('\n').Select((line, i) => (line, i + 1)).Where(l => l.line.Contains("Stdin.", StringComparison.Ordinal)).Select(l => l.Item2).ToHashSet();
+            Assert.NotEmpty(refused.Diagnostics.Items);
+            Assert.All(refused.Diagnostics.Items, d => Assert.True(d.Kind == DiagnosticKind.NotSupported && lines.Contains(d.Line), $"{d.Id} at line {d.Line}"));
             return null;
         }
 
@@ -142,7 +147,10 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
                             print("end")
                             more = false
                         }
-                        IoError e => print(e)
+                        IoError e => {
+                            print(e)
+                            more = false
+                        }
                         InvalidUtf8 e => print("bad at {e.At}")
                     }
                 }
@@ -211,7 +219,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_captured_program_runs_with_nothing_on_its_standard_input()
     {
-        // chapter 0 with S22: `Processes.Capture`, which runs every case, gives the program a pipe closed at its start, not the caller's
+        // chapter 0 with S22: `Processes.Capture`, which runs every case, gives the program an empty pipe whose writing end is closed, not the caller's
         // own standard input, so that a read of it ends at once wherever the suite runs; Linux names the descriptor's file in `/proc`
         if (!OperatingSystem.IsLinux())
         {
@@ -239,7 +247,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((line, Emitter.StdinNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.Equal((DiagnosticKind.NotSupported, line), (diagnostic.Kind, diagnostic.Line)); // section 8: the id and the line of an error, never its message
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
