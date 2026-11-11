@@ -789,23 +789,25 @@ public sealed partial class Checker
     /// expression of type <c>int</c> read as an enum's is (D18), written for every name or for none, as D20 says of an enum. A number that
     /// is not one bit (0, 3, a negative one), a bit that two names write, a name without a number beside one with a number, a number that
     /// is no constant, and more names than the 31 bits of an <c>int</c> below its sign, are <c>flags-number</c>; one past the range of an
-    /// <c>int</c> is <c>constant-overflow</c>, which its folding reports (T6, L10).
+    /// <c>int</c> is <c>constant-overflow</c>, which its folding reports (T6, L10). The names are counted before their numbers are read,
+    /// so that a declaration of 32 names that numbers them all is <c>flags-number</c> at its 32nd name, as one that numbers none is, and
+    /// not <c>constant-overflow</c> at the number of that name (D19, the owner, 2026-11-11, "All as built").
     /// </summary>
     private void CheckFlagsNumbers()
     {
         foreach (var symbol in flagsTypes.Values)
         {
             var flags = symbol.Declaration.Values.Where(v => symbol.Names.Contains(v.Name)).DistinctBy(v => v.Name).ToList();
+            if (flags.Count > 31)
+            {
+                Report(ErrorIds.FlagsNumber, flags[31].Line, $"`{symbol.Name}` has more than 31 names, and an `int` has 31 bits below its sign, one for each name (D19)");
+                symbol.Refused = true;
+                continue;
+            }
+
             var numbered = flags.Where(v => v.Number is not null).ToList();
             if (numbered.Count == 0)
             {
-                if (flags.Count > 31)
-                {
-                    Report(ErrorIds.FlagsNumber, flags[31].Line, $"`{symbol.Name}` has more than 31 names, and an `int` has 31 bits below its sign, one for each name (D19)");
-                    symbol.Refused = true;
-                    continue;
-                }
-
                 if (!symbol.Refused)
                 {
                     symbol.Bits.AddRange(flags.Select((_, i) => 1 << i));

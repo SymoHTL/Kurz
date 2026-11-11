@@ -1,0 +1,6 @@
+// expect: error narrowing-conversion at 4
+// rules: D19
+
+flags Access { Read = 1, Write = 2L }
+
+print(Access.Write)

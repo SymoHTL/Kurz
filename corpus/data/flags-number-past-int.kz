@@ -1,0 +1,6 @@
+// expect: error constant-overflow at 4
+// rules: D19
+
+flags Access { Read = 1, Write = 2147483648 }
+
+print(Access.Write.Number)

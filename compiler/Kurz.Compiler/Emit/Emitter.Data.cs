@@ -394,8 +394,8 @@ public sealed partial class Emitter
                 return fn.Value($"call i1 {RuntimeFunction("Same")}(%kz.str {left}, %kz.str {right})");
             case PrimitiveType p when Types.IsInteger(p) || Types.IsTime(p) || p.Kind is Primitive.Char or Primitive.Bool:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}");
-            case EnumType:
-                return fn.Value($"icmp eq {Ir(type)} {left}, {right}"); // D12: the same value
+            case EnumType or FlagsType:
+                return fn.Value($"icmp eq {Ir(type)} {left}, {right}"); // D12: the same value; D13: a set, the same names
             case PrimitiveType p when Types.IsFloating(p):
                 {
                     var same = fn.Value($"fcmp oeq {Ir(type)} {left}, {right}");

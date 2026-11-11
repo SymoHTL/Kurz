@@ -144,11 +144,11 @@ public sealed partial class Emitter
         }
     }
 
-    /// <summary>A key of one word as an <c>i64</c>: a signed integer widened by its sign, an unsigned one, a <c>bool</c>, a <c>char</c> and an enum's value by zeros.</summary>
+    /// <summary>A key of one word as an <c>i64</c>: a signed integer widened by its sign, an unsigned one, a <c>bool</c>, a <c>char</c>, an enum's value and a set of flags by zeros.</summary>
     private string Word(string value, KurzType type) => type switch
     {
         _ when Ir(type) == "i64" => value,
-        PrimitiveType { Kind: Primitive.Bool or Primitive.Char } or EnumType => fn.Value($"zext {Ir(type)} {value} to i64"),
+        PrimitiveType { Kind: Primitive.Bool or Primitive.Char } or EnumType or FlagsType => fn.Value($"zext {Ir(type)} {value} to i64"),
         _ => Resize(value, type, Types.IsSigned(type) ? Types.Long : Types.ULong),
     };
 

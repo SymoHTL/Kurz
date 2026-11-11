@@ -1,0 +1,19 @@
+// expect: output
+// | true
+// | false
+// | false
+// | read and write
+// | none
+// rules: D13
+
+flags Access { Read, Write, Run }
+
+a = Access.Read | Access.Write
+b = Access.Write | Access.Read
+print(a == b)
+print(a != b)
+print(a == Access.Read)
+mut names = Map<Access, string>()
+names[a] = "read and write"
+print(names[b] ?? "none")
+print(names[Access.Run] ?? "none")

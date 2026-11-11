@@ -1086,7 +1086,7 @@ public sealed partial class Checker
     {
         switch (type)
         {
-            case ErrorType or EnumType:
+            case ErrorType or EnumType or FlagsType: // D13: a set by the names it holds (section 4, the owner, 2026-11-11)
                 return null;
             case TypeParameterType when textFieldTypes.ContainsValue(type):
                 return null; // T34: the field's type on a function's text, which the walk alone reads (KeepFieldTypeOfText)
@@ -1200,7 +1200,7 @@ public sealed partial class Checker
     {
         switch (type)
         {
-            case ErrorType or EnumType or NullType or VoidType:
+            case ErrorType or EnumType or FlagsType or NullType or VoidType:
                 return null;
             case PrimitiveType:
                 return null;
@@ -1268,7 +1268,7 @@ public sealed partial class Checker
     {
         switch (item)
         {
-            case ErrorType or EnumType:
+            case ErrorType or EnumType or FlagsType:
                 return null;
             case PrimitiveType:
                 return null;

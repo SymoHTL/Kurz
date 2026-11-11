@@ -1,0 +1,6 @@
+// expect: error sign-mix at 4
+// rules: D19
+
+flags Access { Read = 1, Write = 2u }
+
+print(Access.Write)
