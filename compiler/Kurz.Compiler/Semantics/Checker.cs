@@ -841,8 +841,9 @@ public sealed partial class Checker
 
                 if (typed.Constant is null)
                 {
-                    // the constant before the type, as D20 reads an enum's (D19, the owner, 2026-11-11, "Constant first")
-                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D19)");
+                    // the constant before the type, as D20 reads an enum's (D19, the owner, 2026-11-11, "Constant first"); the text says
+                    // what is wrong, then the rule (the owner, 2026-11-11, issue 452, "'is no constant', both")
+                    Report(ErrorIds.FlagsNumber, flag.Number.Line, $"the number of `{flag.Name}` is no constant: a name's number is a constant expression of type `int`, a literal or literals that T6 folds (D19)");
                     symbol.Refused = true;
                     continue;
                 }
@@ -927,7 +928,9 @@ public sealed partial class Checker
 
                 if (typed.Constant is null)
                 {
-                    Report(ErrorIds.EnumNumber, value.Number.Line, $"the number of `{value.Name}` is a constant expression of type `int`: a literal, or literals that T6 folds (D20)");
+                    // the text says what is wrong, then the rule, as a flags name's does (the owner, 2026-11-11, issue 452, "'is no
+                    // constant', both")
+                    Report(ErrorIds.EnumNumber, value.Number.Line, $"the number of `{value.Name}` is no constant: a name's number is a constant expression of type `int`, a literal or literals that T6 folds (D20)");
                     symbol.Refused = true;
                     continue;
                 }
