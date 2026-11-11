@@ -765,7 +765,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   at the end of one, `Add`, `Clear`, `Remove`, `list[i] = value` and `map[key] = value` (M5, M9), a value of a
   derived type where its base is required (D6, D7), `==` field by field, a `float` or a `double` field as C#'s `Equals`
   compares it, NaN equal to NaN (D3), and never equal across types (D3, D15), and their
-  text, a generic type's under the name its declaration gives (A3);
+  text, a generic type's under the name its declaration gives (A3), or the `Text()` its body declares (A5);
+  the methods of a body, each a function of the module whose first parameter is the value, the place of
+  the variable or the path that holds it for a `mut` method, as Rust passes `&mut self`, and the value
+  itself for another, as Rust passes `self` by reference, borrowed as an argument is (D16, M5, M7);
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
@@ -1872,7 +1875,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
-a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14, D15, D18 and D20), 6 (values: M1 to M5, M7,
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14 to D16, D18 and D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), and its `Text()`), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
@@ -2011,8 +2014,8 @@ function does not write, the type of a C function with a type that cannot cross 
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
 type (A4, R10, R17); the text of an `HttpError` of `std/` and of a value that holds one, by `print`, a hole of a string and
-`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body of a `data` type the checker does
-not read (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+`string.Join`, and a call of an `HttpError`'s `Text()`, which W2 gives as its detail alone through a `Text()` in the body of the type, a body `std/` does
+not declare (D16, A5, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, while `Arm.AdvSimd`'s `Add`, which the checker's table holds, is read on every target and
 compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a test of it is
 `not supported`, as an intrinsic of a class under `X86` is there), a function of a built class and a lane operation it does not build, an immediate that is
@@ -2047,9 +2050,12 @@ value of a type parameter or a pointer, at any depth (D3, M9), and `==` on a bas
 generic, whose fields of a type parameter it does not read, and such a base as a key, where a generic
 `data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values are pointers or of `void`, which have no nullable type the checker reads (N1, R10); an assignment into a map or a list
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
-on an element of a list and an element of a list passed as `mut` (M7, M9); the body of a `data`
-type and its members, after a value of the type or of one derived from it and after the type's
-name (D16), and `equal by` (K8); among the bases of a `data` type a class, an interface or a
+on an element of a list and an element of a list passed as `mut` (M7, M9); of the body of a `data`
+type (D16), a property, which section 14 leaves open, a field, a constructor, a `static`, `virtual` or
+`override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
+type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
+or that another names as its base, a member of the type after the type's name and a method named without a
+call, and `equal by` (K8); among the bases of a `data` type a class, an interface or a
 flags type (chapter 7, K10, D13), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
@@ -2301,8 +2307,9 @@ round can ask about it by the rule's id.
   what changes a place inside one is a `mut` argument. Either side of `??` is its value (N4). A statement inside an arm is read on its own, while
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
-  however many reads it meets and statements it stands in (E1). `Add`, the one `mut` method the
-  checker reads (a method of a data type is not, D16), changes its receiver after its argument ran,
+  however many reads it meets and statements it stands in (E1). A `mut` method of a `data` type
+  (D16) changes its receiver while the call holds its arguments, as an argument after `mut` does. `Add`
+  changes its receiver after its argument ran,
   so a read of the receiver in its argument meets no change (the owner, 2026-10-25, "Allow, as Rust's
   clone"), while a call in its argument that changes the receiver is the error; the emitter's `Add`
   counts its item before the list grows. Having a `void` success (O10), it stands only as a

@@ -324,6 +324,8 @@ public sealed partial class Checker
             ResolveData(symbol);
         }
 
+        DeclareDataBodies(); // D16: before the signatures, which its methods' functions join
+
         foreach (var symbol in classDeclared)
         {
             ResolveClass(symbol); // K1
@@ -341,6 +343,7 @@ public sealed partial class Checker
         ResolveMethods(); // K7
         RefuseModifiedFunctions();
         CheckDuplicateFunctions();
+        MakeDataMethodViews(); // D16: of the methods no duplicate took out (F12)
         CheckStates();
         CheckEnumNumbers();
         CheckDefaults();
@@ -1025,11 +1028,9 @@ public sealed partial class Checker
             symbol.Fields.Add(new FieldSymbol(p.Name, type, p.Default is not null, p.Mut, p.Line)); // kept, so that the constructor's arity stays what is written
         }
 
-        if (d.Members is { Count: > 0 } members)
+        if (d.Members is { Count: > 0 } && !refusedTypes.Contains(symbol))
         {
-            // its members are not declared: a member that is no field, of a value of the type or of one derived from it, or after the
-            // type's name, is `not supported` where it is used (MemberOf, CheckMember), so nothing more is reported (E1)
-            NotSupported(members[0].Line, "the body of a data type (D16)");
+            dataBodies.Add(symbol); // D16: declared once every base is known (DeclareDataBodies)
         }
 
         typeContext = null;
@@ -2440,7 +2441,9 @@ public sealed partial class Checker
             }
             else if (!variable.Mut)
             {
-                Report(ErrorIds.AssignImmutable, a.Line, $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
+                Report(ErrorIds.AssignImmutable, a.Line, IsDataThis(variable)
+                    ? "a method without `mut` changes no field of the value it was called on: mark it `mut` (M5, M6, D16)"
+                    : $"`{name.Name}` was declared without `mut`: nothing reachable through it changes (D4, M4)");
             }
             else
             {
