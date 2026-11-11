@@ -670,6 +670,74 @@ public sealed partial class Emitter
         return fn.Value($"load {Ir(union)}, ptr {slot}");
     }
 
+    /// <summary>
+    /// A13: the text of a set, its names in the order of the declaration with <c>" | "</c> between them, written in one block as an
+    /// interpolation writes its pieces (<see cref="InOneBlock"/>), each name and each <c>" | "</c> a piece where the set holds it and the empty
+    /// string where not; the set that holds nothing shows <c>None</c>, a literal.
+    /// </summary>
+    private string FlagsText(string value, FlagsType type)
+    {
+        var name = Helper($"text.{Lower.Mangle(type)}", "%kz.str", ["i32"], () =>
+        {
+            var symbol = type.Symbol;
+            if (symbol.Names.Count == 0)
+            {
+                fn.Return($"%kz.str {StringValue("None")}"); // no name, so no set but the one that holds nothing
+                return;
+            }
+
+            var none = fn.Label("none");
+            var names = fn.Label("names");
+            fn.CondBranch(fn.Value("icmp eq i32 %a0, 0"), none, names);
+            fn.Block(none);
+            fn.Return($"%kz.str {StringValue("None")}");
+            fn.Block(names);
+            var empty = StringValue(string.Empty);
+            var pieces = new List<InterpolationPiece>();
+            var before = 0;
+            for (var i = 0; i < symbol.Names.Count; i++)
+            {
+                var holds = fn.Value($"icmp ne i32 {fn.Value($"and i32 %a0, {Number(symbol.Bits[i])}")}, 0");
+                if (before != 0)
+                {
+                    // `" | "` before a name the set holds where it holds a name declared before it
+                    var after = fn.Value($"and i1 {holds}, {fn.Value($"icmp ne i32 {fn.Value($"and i32 %a0, {Number(before)}")}, 0")}");
+                    pieces.Add(TextPiece(fn.Value($"select i1 {after}, %kz.str {StringValue(" | ")}, %kz.str {empty}")));
+                }
+
+                pieces.Add(TextPiece(fn.Value($"select i1 {holds}, %kz.str {StringValue(symbol.Names[i])}, %kz.str {empty}")));
+                before |= symbol.Bits[i];
+            }
+
+            fn.Return($"%kz.str {InOneBlock(pieces)}");
+        });
+        return fn.Value($"call %kz.str {name}(i32 {value})");
+    }
+
+    /// <summary>D13, D17: <c>set.Has(flag)</c>, whether the set holds every name of <c>flag</c>: the bits they share are those of <c>flag</c>.</summary>
+    private string EmitFlagsHas(CallExpression c)
+    {
+        var member = (MemberAccess)Unwrap(c.Callee);
+        var set = EmitExpression(member.Target);
+        var flag = EmitExpression(c.Arguments[0].Value);
+        return fn.Value($"icmp eq i32 {fn.Value($"and i32 {set}, {flag}")}, {flag}");
+    }
+
+    /// <summary>
+    /// D19: <c>Access.From(n)</c>, the set whose number is <c>n</c>, where <c>n</c> holds no bit that no name has, the sign's among them,
+    /// or the case <c>Invalid</c>.
+    /// </summary>
+    private string EmitFlagsFrom(CallExpression c, CallInfo info)
+    {
+        var type = (FlagsType)info.Target!;
+        var number = Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false).Single()["i32 ".Length..];
+        var union = (UnionType)Sub(info.Result);
+        var named = fn.Value($"icmp eq i32 {fn.Value($"and i32 {number}, {Number(~type.Symbol.All)}")}, 0");
+        var set = MakeUnion(union, type, number);
+        var invalid = MakeUnion(union, union.Cases.Single(c => !Types.Same(c, type)), "zeroinitializer");
+        return fn.Value($"select i1 {named}, {Ir(union)} {set}, {Ir(union)} {invalid}");
+    }
+
     /// <summary>A3: `Name { Field = text, ... }`, or the name alone for a type without fields, its pieces in one block (<see cref="Joined"/>).</summary>
     private string RecordText(DataType type, List<string> values, int line)
     {

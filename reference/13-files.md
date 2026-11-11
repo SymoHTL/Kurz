@@ -1672,10 +1672,11 @@ the system completes without the accept.
 ### S11 (decided, §12) Not on Windows
 
 In a build for Windows, a call of this chapter is `not supported`, and the runtime of Windows gives
-none of these calls, and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
+none of these calls, but for `Environment.Exit` (S23; §12, the owner, 2026-11-11, "Build it for
+Windows"), and so are `args`, `Environment.Args()`, `Environment.Variable`, `timestamp.Now`
 and `File.Modified` (S13 to S15; §12, assumed), `instant.Now` and `t.Elapsed` (S25; §12, the owner,
-2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls, `Stdin` and `Environment.Exit`
-(S17 to S23; §12, assumed), and a log call (P6; §12, the owner, 2026-11-05, L2). A build for any other target whose runtime lacks them says `not supported` at the
+2026-11-04, the monotonic clock, Q6 (a)), and a `Command`'s calls and `Stdin` (S17 to S22; §12,
+assumed), and a log call (P6; §12, the owner, 2026-11-05, L2). A build for any other target whose runtime lacks them says `not supported` at the
 call as well, as the record says of a call of the program that reaches a function a target's runtime
 lacks (§2, §12, the owner, 2026-10-30).
 
@@ -2776,11 +2777,12 @@ owner, 2026-11-01, "Top-level return n + Exit"). `Environment.Exit(code)` ends t
 and nothing a write that returned before the call wrote is lost, since `print` and `f.Write` keep no
 buffer, while a write in progress in another actor can be cut short. No path
 goes on after the call, so that no `return` follows it, as after a `throw`; Linux takes the low 8 bits
-of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build for
-Windows says `not supported` to it (S11). A `return` with an `int` among the top-level statements ends
-the program with that code, of which Linux takes the low 8 bits too, and a build for Windows says
-`not supported` to it (F17). *(assumed, §12: the name, the end at once and what it keeps and cuts,
-the path after the call, the low 8 bits, any actor and Windows)*
+of the code, `Environment.Exit(256)` ending with 0; a call in any actor ends the process; and a build
+for Windows takes the call, and Windows the code's 32 bits (§12, the owner, 2026-11-11, "Build it for
+Windows"), a negative code as its bits, `-1` ending with 4294967295 (assumed, below). A `return` with an `int` among the top-level statements ends the program with that code, of
+which Linux takes the low 8 bits too and Windows its 32 bits (F17). *(assumed, §12: the name, the end at
+once and what it keeps and cuts, the path after the call, the low 8 bits, any actor and a negative
+code's bits on Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 

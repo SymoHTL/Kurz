@@ -362,3 +362,33 @@ public sealed class EnumSymbol(string name, TypeDeclaration declaration)
 
     public int IndexOf(string value) => Values.IndexOf(value);
 }
+
+/// <summary>
+/// A <c>flags</c> type (D13) with its names in the order written, each once, and the bit of each, the number its declaration writes
+/// or 1, 2, 4 and so on in their order (D19); a declaration that breaks D19's shape keeps its names and has its uses read without a
+/// second error (E1).
+/// </summary>
+public sealed class FlagsSymbol(string name, TypeDeclaration declaration)
+{
+    public string Name { get; } = name;
+
+    public TypeDeclaration Declaration { get; } = declaration;
+
+    public List<string> Names { get; } = [];
+
+    /// <summary>The bit of each name, in the order of <see cref="Names"/>; empty until the numbers are read, and where they were refused.</summary>
+    public List<int> Bits { get; } = [];
+
+    /// <summary>Set where the declaration breaks D19's shape, which was reported at the declaration.</summary>
+    public bool Refused { get; set; }
+
+    public int Line => Declaration.Line;
+
+    public int IndexOf(string flag) => Names.IndexOf(flag);
+
+    /// <summary>The set of every name, whose bits <c>~</c> keeps (D17).</summary>
+    public int All => Bits.Aggregate(0, (all, bit) => all | bit);
+
+    /// <summary>A13: the text of a set, the names it holds in the order of the declaration with <c>" | "</c> between them, or <c>None</c>.</summary>
+    public string Text(int set) => set == 0 ? "None" : string.Join(" | ", Names.Where((_, i) => (set & Bits[i]) != 0));
+}

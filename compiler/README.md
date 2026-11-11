@@ -554,7 +554,7 @@ to `Print`, which raises `print-failed` there where the system refuses the write
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
 standard output; where its write failed, the report of the error goes to standard error too and is
-dropped where that write is refused, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
+dropped where that write is refused or takes no byte, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
 size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
 thread's first map on a system that gives no randomness for the keys of its hash ends the process with
@@ -682,6 +682,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   data type every file sees, and the text of a value is a literal of its name (A4); a value named
   `From` or `Number` is the value where no call follows `Plan.From` and where `Number` follows the
   type's name (D20);
+- `flags` (D13, D17, D19): a set is an `i32` that holds the bits of its names, each name's bit 1, 2, 4
+  and so on in their order or the number its declaration writes, the 31 bits below the sign at most;
+  `|`, `&` and `^` are the bit operations, `~` flips the bits and keeps those of the type's names (D17,
+  assumed there), `Has(flag)` tests that the set holds every bit of `flag`, `.Number` is the set
+  itself, `Access.From(n)` is the set where `n` holds no bit that no name has, the sign's among them,
+  so that `From(0)` is `Access.None`, and the case `Invalid` where it holds one; the text of a set is
+  its names in the order of the declaration with ` | ` between them, written in one block as an
+  interpolation writes its pieces, or `None` (A13). No rule gives two sets `==` or an order, so `==`,
+  `!=`, `<`, `<=`, `>` and `>=` on two sets and a sort of them are `type-mismatch`, and a set in the
+  key of a map or in a `data` value that `==` compares is `not supported`; a `flags` type's kind for
+  `T.Kind` is `TypeKind.Enum`, as a file's is `TypeKind.Class` (T33, assumed there), since C#'s
+  `[Flags]` type is an enum;
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27); a call in a generic function's body whose type argument holds a type
@@ -1157,12 +1169,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
-- the exit code (S23, F17), in a build for Linux: `Environment.Exit(code)` and a `return` with an `int` among the
-  top-level statements call the target's `Exit` with the code, the C library's `_exit`, which runs none of its handlers, and the
-  block ends there; a wider integer is `narrowing-conversion` (T7) and a value of another type `type-mismatch`, as for the
-  value any function returns (F3). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
-  from the top level and from a function, the low 8 bits of 256, 257 and -1, a narrower integer widened, a bare `return`, the
-  lines printed before the end and none after it, the refusals, and the refusal for Windows at either form;
+- the exit code (S23, F17), in a build for Linux and for Windows: `Environment.Exit(code)` and a `return` with an `int` among
+  the top-level statements call the target's `Exit` with the code, on Linux the C library's `_exit`, which runs none of its
+  handlers, on Windows `ExitProcess`, which takes the code's 32 bits, read through a pointer so that no conversion checks a
+  negative one, and the block ends there; the code is held to `int` as anywhere an `int` is required, a narrower integer widened (T23), a wider
+  one `narrowing-conversion` (T7), a `uint` `sign-mix` (T23) and a value of any other type `type-mismatch` (T1), each
+  refusal at the line of the value (E1). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
+  from the top level and from a function, the low 8 bits of 256, 257 and -1 and on Windows their 32 bits, a narrower integer
+  widened, a bare `return`, the lines printed before the end and none after it, the refusals, and a build for Windows of either
+  form, made on any machine;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,
@@ -1647,9 +1662,11 @@ ask about it.
 
 - A `print` or an `eprint` hands its line to one write call, called again for what a call did not
   take, through a
-  buffer per thread that holds the line until that call returns. Pinned for `print` by the corpus
-  runner, and for `eprint`, whose writes no case holds (A17), by
-  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`.
+  buffer per thread that holds the line until that call returns. Pinned in the lines it gives, their
+  text and their stream, and not in the count of write calls: for `print` by the corpus runner, and
+  for `eprint`, whose writes no case holds (A17), by
+  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`,
+  which holds its lines on standard error and none of them on standard output.
 - P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
@@ -1722,9 +1739,8 @@ reads as the section below says. The checker produces it for the constructs its 
 says nothing else about a program that uses one. Both sides raise `syntax`, so a case that expects it
 is the front end's when the front end reports an error on it, and the checker's when the front end
 reads it clean. One such case, `data/flags-match.kz`, expects a `syntax` that depends on the type
-of the matched value (D13), which the front end cannot see and the checker does not read; the
-corpus theories check that it parses with no diagnostic and that the checker says `not supported`
-on its `flags` type, and no test holds its expected error.
+of the matched value (D13), which the front end cannot see; the corpus theories check that it parses
+with no diagnostic and that the checker reports that `syntax` at the line of the `match`.
 
 The third kind, a lint, is a warning with an id of its own, outside the table, and builds the program: the checker
 raises `md5-insecure` at every call of a function of `Md5` (H5), once for each call in the source, and the command
@@ -1889,7 +1905,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
-a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D12, D14 to D16, D18 and D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), and its `Text()`), 6 (values: M1 to M7,
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), and its `Text()`), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
@@ -1903,7 +1919,7 @@ types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, 
 `HttpError`, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
-these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11, A12, A14 and A15, of a class's `Text()` the
+these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
 of its `// allow:` line, and a program given none has none, as one without a project file; a
@@ -1951,8 +1967,7 @@ comes from the construct (E1), but where the construct holds an error of its own
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
-which is the complete one: a `flags` type and a value of one (D13, D17, D19, and the A-rules of
-their text); of an interface, type parameters (T19, K6), and of a method of one a modifier, type
+which is the complete one: of an interface, type parameters (T19, K6), and of a method of one a modifier, type
 parameters of its own or a default of a parameter, and a member that is no method (K7, T19, F12), each
 of which leaves the interface and every value of it unread; `weak` before an interface (R3), and the
 name of an interface where a value, a member or a call stands (K6); of a class,
@@ -2069,8 +2084,8 @@ type (D16), a property, which section 14 leaves open, a field, a constructor, a 
 `override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
 type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
 or that another names as its base, a member of the type after the type's name and a method named without a
-call, and `equal by` (K8); among the bases of a `data` type a class, an interface or a
-flags type (chapter 7, K10, D13), the explicit form of inheritance (K17) and a
+call, and `equal by` (K8); among the bases of a `data` type a class or an interface
+(chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
 unread; the limit of a type parameter and a member of a type parameter with one (T19); a function
 or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` value, which no
