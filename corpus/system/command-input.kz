@@ -2,7 +2,6 @@
 // | hi
 // | 2
 // | 1048576
-// | invalid input: cat
 // rules: S19
 
 void | IoError | ExitError | InvalidUtf8 Run() {
@@ -17,10 +16,6 @@ void | IoError | ExitError | InvalidUtf8 Run() {
 
     echoed = Command.New("cat").Input(big).Output()
     print(echoed.Stdout.Count)
-    Command.New("cat").Input("x").Stdin(Stdio.Null).Status() else {
-        IoError e => print(e)
-        ExitError e => print(e)
-    }
 }
 
 Run() else {

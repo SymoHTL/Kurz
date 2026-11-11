@@ -3000,7 +3000,7 @@ pub ProcessOutput | IoError | ExitError CommandOutput(List<string> command) {
     mut out = List<byte>()
     mut err = List<byte>()
     mut int at = 0
-    long result = RunCommand(command, true, mut out, mut err, mut at)
+    long result = RunCommand(command, 1, mut out, mut err, mut at, null)
     if result < 0 {
         return StartFailure(command, result, at)
     }
@@ -3018,7 +3018,7 @@ pub void | IoError | ExitError CommandStatus(List<string> command) {
     mut out = List<byte>()
     mut err = List<byte>()
     mut int at = 0
-    long result = RunCommand(command, false, mut out, mut err, mut at)
+    long result = RunCommand(command, 0, mut out, mut err, mut at, null)
     if result < 0 {
         return StartFailure(command, result, at)
     }
@@ -3027,6 +3027,167 @@ pub void | IoError | ExitError CommandStatus(List<string> command) {
     if !childStatus.Success {
         return ExitError(command[0], ProcessOutput(childStatus, out, err))
     }
+}
+
+// S19: the command started beside the program: 0, with the child's number, the program's ends of its piped
+// standard input, output and error, -1 where a stream is not piped, and the deadline of its bound, -1 where
+// it has none, at `spawned` (the deadline a `long` from its 24th byte), or a failure below 0 with what failed
+// in `spawned[4]`, as `RunCommand` gives them.
+pub long CommandSpawn(List<string> command, int* spawned) {
+    mut out = List<byte>()
+    mut err = List<byte>()
+    mut int at = 0
+    long result = RunCommand(command, 2, mut out, mut err, mut at, spawned)
+    raw {
+        spawned[4] = at
+    }
+
+    return result
+}
+
+// The `IoError` of a `Spawn()` that failed (S19, S21), as `StartFailure` gives it.
+pub IoError SpawnFailure(List<string> command, long result, int at) {
+    return StartFailure(command, result, at)
+}
+
+// S19: `Wait()` on the child whose state is at `state`, as the emitter lays it out: its number, whether it was
+// waited for, 0 not, 1 yes and 2 at a bound that passed, the deadline of its bound from the 8th byte, -1 where
+// it has none, and the status `waitpid` gave from the 16th; `program` is the path of its errors.
+pub void | IoError | ExitError ChildWait(int* state, string program) {
+    mut out = List<byte>()
+    mut err = List<byte>()
+    long result = WaitSpawned(state, -1, -1, mut out, mut err)
+    if result < 0 {
+        return IoError(ErrorKind(result), ErrorCode(result), program)
+    }
+
+    childStatus = ExitOf(result)
+    if !childStatus.Success {
+        return ExitError(program, ProcessOutput(childStatus, out, err))
+    }
+}
+
+// S19: `WaitWithOutput()` on the child at `state`, as `ChildWait` reads it: what the pipes `outFd` and `errFd`
+// still give, -1 where the child's `File` is `null` or closed, read to their ends after the `outCount` and
+// `errCount` bytes their `File` read ahead, at `outAhead` and `errAhead`.
+pub ProcessOutput | IoError | ExitError ChildWaitWithOutput(int* state, string program, int outFd, byte* outAhead, long outCount, int errFd, byte* errAhead, long errCount) {
+    mut out = AheadBytes(outAhead, outCount)
+    mut err = AheadBytes(errAhead, errCount)
+    long result = WaitSpawned(state, outFd, errFd, mut out, mut err)
+    if result < 0 {
+        return IoError(ErrorKind(result), ErrorCode(result), program)
+    }
+
+    output = ProcessOutput(ExitOf(result), out, err)
+    if !output.Status.Success {
+        return ExitError(program, output)
+    }
+
+    return output
+}
+
+// S19: `Kill()` on the child at `state`, `SIGKILL` (9), as Rust's `Child::kill` sends it; none to a child
+// that was waited for, whose number the system may have given to another process.
+pub void | IoError ChildKill(int* state, string program) {
+    mut long failure = 0
+    raw {
+        if state[1] == 0 && kill(state[0], 9) < 0 {
+            failure = -long(*__errno_location())
+        }
+    }
+
+    if failure < 0 {
+        return IoError(ErrorKind(failure), ErrorCode(failure), program)
+    }
+}
+
+// The child at `state` waited for, its pipes `outFd` and `errFd` read into `out` and `err` until their ends
+// (`Drive`), under its bound: the status `waitpid` gave, or a failure below 0, -4100 where the bound passed,
+// the child killed and waited for. A child waited for before gives the status it gave, or -4100 again,
+// with what its pipes still give, read to their ends or to the deadline.
+long WaitSpawned(int* state, int outFd, int errFd, mut Bytes out, mut Bytes err) {
+    mut long failure = 0
+    raw {
+        if state[1] == 2 {
+            return -4100
+        }
+    }
+
+    byte* memory = Memory(65536 + 128)
+    if memory == null {
+        return -12
+    }
+
+    raw {
+        long deadline = *Ptr<long>(Ptr<byte>(state) + 8)
+        mut int process = -1
+        if deadline >= 0 && state[1] == 0 {
+            process = int(syscall(434, long(state[0]), long(0)))
+            if process < 0 {
+                failure = -long(*__errno_location())
+            }
+        }
+
+        int* fds = Ptr<int>(memory + 65536)
+        mut long k = 0
+        while k < 9 {
+            fds[k] = -1
+            k = k + 1
+        }
+
+        fds[2] = outFd
+        fds[4] = errFd
+        if failure == 0 {
+            failure = Drive(memory, state[0], process, state[1] != 0, deadline >= 0, deadline, false, fds, null, "", false, mut out, mut err)
+        }
+
+        if process >= 0 {
+            close(process)
+        }
+
+        if state[1] == 0 && (failure == 0 || failure == -4100) {
+            mut int r = waitpid(state[0], state + 4, 0)
+            while r < 0 && *__errno_location() == 4 {
+                r = waitpid(state[0], state + 4, 0)
+            }
+
+            if r < 0 {
+                failure = -long(*__errno_location())
+            } else if failure == -4100 {
+                state[1] = 2
+            } else {
+                state[1] = 1
+            }
+        }
+    }
+
+    Release(memory, 65536 + 128)
+    if failure < 0 {
+        return failure
+    }
+
+    raw {
+        return long(state[4])
+    }
+}
+
+// The `aheadCount` bytes at `ahead`, which a `File` read ahead of `WaitWithOutput()`, as a list of their own (S19).
+Bytes AheadBytes(byte* ahead, long aheadCount) {
+    mut gathered = List<byte>()
+    raw {
+        if aheadCount > 0 {
+            byte* items = Bytes.Allocate(aheadCount)
+            mut long i = 0
+            while i < aheadCount {
+                items[i] = ahead[i]
+                i = i + 1
+            }
+
+            gathered.AddRange(Bytes.FromRaw(items, aheadCount))
+        }
+    }
+
+    return gathered
 }
 
 // The bound of `Timeout(d)` in nanoseconds, as `CommandTimeout` writes it in decimal; a bound below 0 is read
@@ -3217,17 +3378,20 @@ long Lift(int* fds, long k) {
 // at the end where no other took it. A start that fails in the child, its `chdir` or its `execve`, is
 // written back to the program through a pipe that its `execve` closes, as Rust's `Command` writes it.
 //
-// With `output`, standard input is `/dev/null` and standard output and standard error are pipes that `poll`
-// reads to their ends into `out` and `err`, so that a child that fills one does not wait while the program
-// reads the other; without it the child takes the program's three streams. A member's stream wins over
-// these, and a pipe the call does not read, a piped standard input among them, has the program's end
-// closed at once (S19), so that a child that writes there is ended by `SIGPIPE` and one that reads there
-// reads its end. With `Input(bytes)` standard input is a pipe whose end the program makes non-blocking and
+// With `purpose` 1, `Output()`, standard input is `/dev/null` and standard output and standard error are
+// pipes that `poll` reads to their ends into `out` and `err`, so that a child that fills one does not wait
+// while the program reads the other; with 0, `Status()`, and 2, `Spawn()`, the child takes the program's three
+// streams. A member's stream wins over these, and a pipe the call does not read, a piped standard input
+// among them, has the program's end closed at once (S19), so that a child that writes there is ended by
+// `SIGPIPE` and one that reads there reads its end; with 2 the program keeps the ends of every piped stream,
+// which the call gives at `spawned` with the child's number and the deadline of its bound, and returns 0 once
+// the child started, without waiting for it (`CommandSpawn`). With `Input(bytes)` standard input is a pipe whose end the program makes non-blocking and
 // writes, in pieces of the second buffer, under the same `poll` as it reads, so that neither side waits on a
 // full pipe, as Python's `communicate` writes it, and closes after the last byte, so that the child reads
 // its end; a child that ends before it read the whole input, `EPIPE`, leaves the rest unwritten (S19).
-// `Input` beside a member `Stdin` is `InvalidInput`, at 2 (S19). All that the child calls between `fork` and `execve` is written to memory mapped before
-// the `fork`, so that the child allocates nothing.
+// `Input` beside a member `Stdin`, or beside `Spawn()`, is `InvalidInput`, at 2 (S19). All that the child
+// calls between `fork` and `execve` is written to memory mapped before the `fork`, so that the child
+// allocates nothing.
 //
 // With `Timeout(d)` the bound runs from the start the child's report says, read on the monotonic clock and
 // held at the largest `long` where it passes it; the child's end is polled with its pipes through a
@@ -3235,8 +3399,9 @@ long Lift(int* fds, long k) {
 // bound has passed, a bound of 0 or below at the first look, the pipes are closed unread, so that a descriptor
 // another process still holds does not hold the call; a child that has not ended is killed with `SIGKILL` (9)
 // and waited for, and the call gives `TimedOut`, while one that ended gives its own status, the child's end
-// deciding.
-long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err, mut int at) {
+// deciding. With `purpose` 2 the deadline is given at `spawned`, and the wait for the child holds it
+// (`WaitSpawned`).
+long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err, mut int at, int* spawned) {
     string program = command[0]
     mut arguments = List<string>()
     mut string directory = ""
@@ -3253,7 +3418,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
     mut int input = 0
     mut int standard = 0
     mut int error = 0
-    if output {
+    if purpose == 1 {
         input = 2
         standard = 1
         error = 1
@@ -3326,7 +3491,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         i = i + 1
     }
 
-    if nul || (fed && stdinSet) {
+    if nul || (fed && (stdinSet || purpose == 2)) {
         at = 2
         return -22
     }
@@ -3427,10 +3592,8 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         // `clock_gettime` reads (104); then the three tables of addresses and their strings; and with an input,
         // the buffer of a write, 65536 bytes, at the end; the limits of open files are read into the buffer before
         // the `fork`, while no read uses it
-        byte* buffer = memory
         int* fds = Ptr<int>(memory + 65536)
         byte* report = memory + 65536 + 48
-        int* polled = Ptr<int>(memory + 65536 + 64)
         int* waited = Ptr<int>(memory + 65536 + 96)
         byte* clock = memory + 65536 + 104
         byte** argv = Ptr<byte*>(memory + 65536 + 128)
@@ -3570,7 +3733,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         // `close_range`; `RLIMIT_NOFILE` is 7, and no limit, or one past the kernel's default ceiling of open files,
         // `nr_open`, is read as that ceiling, 1048576
         mut long files = 1048576
-        long* limits = Ptr<long>(buffer)
+        long* limits = Ptr<long>(memory)
         if getrlimit(7, limits) == 0 && limits[0] > 0 && limits[0] < files {
             files = limits[0]
         }
@@ -3648,7 +3811,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         // the program: its ends of the child's descriptors closed, and a pipe it does not read
         k = 0
         while k < 9 {
-            bool kept = (k == 2 && standard == 1 && output) || (k == 4 && error == 1 && output) || k == 6 || (k == 1 && fed)
+            bool kept = (k == 2 && standard == 1 && purpose != 0) || (k == 4 && error == 1 && purpose != 0) || k == 6 || (k == 1 && (fed || (input == 1 && purpose == 2)))
             if fds[k] >= 0 && !kept {
                 close(fds[k])
                 fds[k] = -1
@@ -3674,7 +3837,7 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
         }
 
         // S20: the bound from the start, and the child's end as an entry of `poll`
-        mut long deadline = 0
+        mut long deadline = -1
         mut int process = -1
         if failure == 0 && bounded {
             clock_gettime(1, Ptr<void>(clock))
@@ -3684,203 +3847,31 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
                 deadline = now + bound
             }
 
-            process = int(syscall(434, long(pid), long(0)))
-            if process < 0 {
-                failure = -long(*__errno_location())
-                kill(pid, 9)
+            if purpose != 2 {
+                process = int(syscall(434, long(pid), long(0)))
+                if process < 0 {
+                    failure = -long(*__errno_location())
+                    kill(pid, 9)
+                }
             }
         }
 
+        // S19: a child beside the program, its number, the program's ends of its piped streams and the deadline
+        // of its bound given to the caller, which waits for it
+        if failure == 0 && purpose == 2 {
+            spawned[0] = pid
+            spawned[1] = fds[1]
+            spawned[2] = fds[2]
+            spawned[3] = fds[4]
+            *Ptr<long>(Ptr<byte>(spawned) + 24) = deadline
+            Release(memory, size)
+            return 0
+        }
+
         if failure == 0 {
-            // `poll` on the pipes still open, each read into its list until its end, and on the child's end
-            // while a bound holds, until the bound passes
-            mut int pending = 0
-            mut bool polling = true
-            mut bool exited = false
-            mut bool late = false
-            polled[0] = fds[2]
-            polled[1] = 1
-            polled[2] = fds[4]
-            polled[3] = 1
-            polled[4] = process
-            polled[5] = 1
-            // S19: the input, decoded from the command's string into the buffer of a write, piece by piece
-            byte* staging = memory + size - 65536
-            byte* text = Ptr<byte>(feed.Pointer)
-            long textCount = long(feed.Bytes.Count)
-            mut long decoded = 0
-            mut long sent = 0
-            mut long staged = 0
-            mut bool writing = fed && fds[1] >= 0
-            if writing && textCount == 0 {
-                close(fds[1])
-                fds[1] = -1
-                writing = false
-            }
-
-            if writing {
-                fcntl(fds[1], 4, 2048)
-            }
-
-            polled[6] = fds[1]
-            polled[7] = 4
-            if !writing {
-                polled[6] = -1
-            }
-            if fds[2] >= 0 {
-                pending = pending + 1
-            }
-
-            if fds[4] >= 0 {
-                pending = pending + 1
-            }
-
-            while polling && (pending > 0 || writing || (bounded && !exited)) {
-                mut int wait = -1
-                if bounded {
-                    clock_gettime(1, Ptr<void>(clock))
-                    long now = *Ptr<long>(clock) * 1000000000 + *Ptr<long>(clock + 8)
-                    if now >= deadline {
-                        late = true
-                        polling = false
-                    }
-
-                    // the time left in whole milliseconds, cut down, at least 1 and at most the largest `int`,
-                    // as `Connected` waits, the clock read again after each `poll`
-                    mut long remaining = (deadline - now) / 1000000
-                    if remaining < 1 {
-                        remaining = 1
-                    }
-
-                    if remaining > 2147483647 {
-                        remaining = 2147483647
-                    }
-
-                    wait = int(remaining)
-                }
-
-                *Ptr<short>(Ptr<byte>(polled) + 6) = 0
-                *Ptr<short>(Ptr<byte>(polled) + 14) = 0
-                *Ptr<short>(Ptr<byte>(polled) + 22) = 0
-                *Ptr<short>(Ptr<byte>(polled) + 30) = 0
-                mut int ready = 0
-                if polling {
-                    ready = poll(Ptr<void>(polled), 4, wait)
-                }
-
-                if ready < 0 && *__errno_location() != 4 {
-                    failure = -long(*__errno_location())
-                    polling = false
-                }
-
-                mut int s = 0
-                while ready > 0 && s < 2 && failure == 0 {
-                    int fd = polled[s * 2]
-                    short events = *Ptr<short>(Ptr<byte>(polled) + long(s) * 8 + 6)
-                    if fd >= 0 && events != 0 {
-                        long n = read(fd, buffer, 65536)
-                        if n > 0 {
-                            byte* items = Bytes.Allocate(n)
-                            mut long b = 0
-                            while b < n {
-                                items[b] = buffer[b]
-                                b = b + 1
-                            }
-
-                            if s == 0 {
-                                out.AddRange(Bytes.FromRaw(items, n))
-                            } else {
-                                err.AddRange(Bytes.FromRaw(items, n))
-                            }
-                        } else if n == 0 {
-                            close(fd)
-                            polled[s * 2] = -1
-                            fds[2 + s * 2] = -1 // closed once: the loop after this one closes what is still open
-                            pending = pending - 1
-                        } else if *__errno_location() != 4 {
-                            // S18: a read that fails is the call's `IoError`, named by the program, once every pipe it
-                            // holds to the child is closed and the child's end waited for (the owner, 2026-11-11, "The program" and "Close
-                            // pipes, wait", issue 174, comment 6802725183); Rust's `output` panics on it. The pipes are
-                            // closed here, the input's among them, so that a child that writes ends and none waits on a
-                            // write, and a bound still holds the wait (S20)
-                            failure = -long(*__errno_location())
-                            mut int p = 0
-                            while p < 2 {
-                                if polled[p * 2] >= 0 {
-                                    close(polled[p * 2])
-                                    polled[p * 2] = -1
-                                    fds[2 + p * 2] = -1
-                                }
-
-                                p = p + 1
-                            }
-
-                            if writing {
-                                close(fds[1])
-                                fds[1] = -1
-                                polled[6] = -1
-                                writing = false
-                            }
-
-                            pending = 0
-                        }
-                    }
-
-                    s = s + 1
-                }
-
-                if ready > 0 && *Ptr<short>(Ptr<byte>(polled) + 22) != 0 {
-                    exited = true
-                    polled[4] = -1
-                }
-
-                if ready > 0 && writing && *Ptr<short>(Ptr<byte>(polled) + 30) != 0 {
-                    if sent == staged {
-                        sent = 0
-                        staged = 0
-                        while staged < 65536 && decoded < textCount {
-                            byte lead = text[decoded]
-                            if lead < 128 {
-                                staging[staged] = lead
-                                decoded = decoded + 1
-                            } else {
-                                staging[staged] = byte(((int(lead) & 31) << 6) | (int(text[decoded + 1]) & 63))
-                                decoded = decoded + 2
-                            }
-
-                            staged = staged + 1
-                        }
-                    }
-
-                    long wrote = write(fds[1], staging + sent, staged - sent)
-                    mut bool done = false
-                    if wrote > 0 {
-                        sent = sent + wrote
-                        done = sent == staged && decoded == textCount
-                    } else if wrote < 0 && *__errno_location() == 32 {
-                        done = true // the child ended its input, `EPIPE`: the rest unwritten
-                    } else if wrote < 0 && *__errno_location() != 11 && *__errno_location() != 4 {
-                        failure = -long(*__errno_location())
-                        polling = false
-                    }
-
-                    if done {
-                        close(fds[1])
-                        fds[1] = -1
-                        polled[6] = -1
-                        writing = false
-                    }
-                }
-            }
-
-            // the child's end deciding (S20): one that ended before the bound gives its own status, with what the
-            // call read of the pipes a process it left behind still holds
-            if late && !exited {
-                kill(pid, 9)
-                if failure == 0 {
-                    failure = -4100 // a read that failed before the bound passed stays the call's failure (S18)
-                    at = 0
-                }
+            failure = Drive(memory, pid, process, false, bounded, deadline, true, fds, memory + size - 65536, feed, fed, mut out, mut err)
+            if failure == -4100 {
+                at = 0
             }
         }
 
@@ -3923,4 +3914,241 @@ long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err,
 
     Release(memory, size)
     return waitResult
+}
+
+// The pipes at `fds[2]` and `fds[4]` read into `out` and `err` until their ends, with `fed` the input `feed`
+// written to `fds[1]` as `RunCommand` says, and while a bound holds the child's end polled through `process`
+// until `deadline` passes on the monotonic clock, `endSeen` where the child's end was seen before: 0, -errno
+// where `poll` or a write fails, or -4100, `TimedOut`, where the bound passed before the child's end, the
+// child killed with `SIGKILL` (S19, S20). `memory` holds the buffer of a read, 65536 bytes, then the room
+// `RunCommand` lays out, and `staging` the buffer of a write. With `owned` a pipe read to its end is closed;
+// without, it is a `File` the program holds, which is left open (S19).
+long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long deadline, bool owned, int* fds, byte* staging, string feed, bool fed, mut Bytes out, mut Bytes err) {
+    mut long failure = 0
+    raw {
+        byte* buffer = memory
+        int* polled = Ptr<int>(memory + 65536 + 64)
+        byte* clock = memory + 65536 + 104
+        // `poll` on the pipes still open, each read into its list until its end, and on the child's end
+        // while a bound holds, until the bound passes
+        mut int pending = 0
+        mut bool polling = true
+        mut bool exited = endSeen
+        mut bool late = false
+        polled[0] = fds[2]
+        polled[1] = 1
+        polled[2] = fds[4]
+        polled[3] = 1
+        polled[4] = process
+        polled[5] = 1
+        // S19: the input, decoded from the command's string into the buffer of a write, piece by piece
+        byte* text = Ptr<byte>(feed.Pointer)
+        long textCount = long(feed.Bytes.Count)
+        mut long decoded = 0
+        mut long sent = 0
+        mut long staged = 0
+        mut bool writing = fed && fds[1] >= 0
+        if writing && textCount == 0 {
+            close(fds[1])
+            fds[1] = -1
+            writing = false
+        }
+
+        if writing {
+            fcntl(fds[1], 4, 2048)
+        }
+
+        polled[6] = fds[1]
+        polled[7] = 4
+        if !writing {
+            polled[6] = -1
+        }
+        if fds[2] >= 0 {
+            pending = pending + 1
+        }
+
+        if fds[4] >= 0 {
+            pending = pending + 1
+        }
+
+        while polling && (pending > 0 || writing || (bounded && !exited)) {
+            mut int wait = -1
+            if bounded {
+                clock_gettime(1, Ptr<void>(clock))
+                long now = *Ptr<long>(clock) * 1000000000 + *Ptr<long>(clock + 8)
+                if now >= deadline {
+                    late = true
+                    polling = false
+                }
+
+                // the time left in whole milliseconds, cut down, at least 1 and at most the largest `int`,
+                // as `Connected` waits, the clock read again after each `poll`
+                mut long remaining = (deadline - now) / 1000000
+                if remaining < 1 {
+                    remaining = 1
+                }
+
+                if remaining > 2147483647 {
+                    remaining = 2147483647
+                }
+
+                wait = int(remaining)
+                if late {
+                    wait = 0 // a last look at the bound, so that a child that ended before it gives its own status
+                }
+            }
+
+            *Ptr<short>(Ptr<byte>(polled) + 6) = 0
+            *Ptr<short>(Ptr<byte>(polled) + 14) = 0
+            *Ptr<short>(Ptr<byte>(polled) + 22) = 0
+            *Ptr<short>(Ptr<byte>(polled) + 30) = 0
+            int ready = poll(Ptr<void>(polled), 4, wait)
+
+            if ready < 0 && *__errno_location() != 4 {
+                failure = -long(*__errno_location())
+                polling = false
+            }
+
+            mut int s = 0
+            while ready > 0 && s < 2 && failure == 0 {
+                int fd = polled[s * 2]
+                short events = *Ptr<short>(Ptr<byte>(polled) + long(s) * 8 + 6)
+                if fd >= 0 && events != 0 {
+                    long n = read(fd, buffer, 65536)
+                    if n > 0 {
+                        byte* items = Bytes.Allocate(n)
+                        mut long b = 0
+                        while b < n {
+                            items[b] = buffer[b]
+                            b = b + 1
+                        }
+
+                        if s == 0 {
+                            out.AddRange(Bytes.FromRaw(items, n))
+                        } else {
+                            err.AddRange(Bytes.FromRaw(items, n))
+                        }
+                    } else if n == 0 {
+                        if owned {
+                            close(fd)
+                        }
+
+                        polled[s * 2] = -1
+                        fds[2 + s * 2] = -1 // closed once: the loop after this one closes what is still open
+                        pending = pending - 1
+                    } else if *__errno_location() != 4 {
+                        // S18: a read that fails is the call's `IoError`, named by the program, once every pipe it
+                        // holds to the child is closed and the child's end waited for (the owner, 2026-11-11, "The program" and "Close
+                        // pipes, wait", issue 174, comment 6802725183); Rust's `output` panics on it. With `owned`
+                        // the pipes are closed here, the input's among them, so that a child that writes ends and
+                        // none waits on a write, and a bound still holds the wait (S20); without, they are the
+                        // program's `File`s, which stay open and are read no further, and the wait of a spawned
+                        // child ends here, under a bound as without one, waiting for no child (S19, the owner,
+                        // 2026-11-11, "Error, no wait", issue 174, comment 6806240267)
+                        failure = -long(*__errno_location())
+                        if !owned {
+                            polling = false
+                        }
+
+                        mut int p = 0
+                        while p < 2 {
+                            if polled[p * 2] >= 0 {
+                                if owned {
+                                    close(polled[p * 2])
+                                }
+
+                                polled[p * 2] = -1
+                                fds[2 + p * 2] = -1
+                            }
+
+                            p = p + 1
+                        }
+
+                        if writing {
+                            close(fds[1])
+                            fds[1] = -1
+                            polled[6] = -1
+                            writing = false
+                        }
+
+                        pending = 0
+                    }
+                }
+
+                s = s + 1
+            }
+
+            if ready > 0 && *Ptr<short>(Ptr<byte>(polled) + 22) != 0 {
+                exited = true
+                polled[4] = -1
+            }
+
+            if ready > 0 && writing && *Ptr<short>(Ptr<byte>(polled) + 30) != 0 {
+                if sent == staged {
+                    sent = 0
+                    staged = 0
+                    while staged < 65536 && decoded < textCount {
+                        byte lead = text[decoded]
+                        if lead < 128 {
+                            staging[staged] = lead
+                            decoded = decoded + 1
+                        } else {
+                            staging[staged] = byte(((int(lead) & 31) << 6) | (int(text[decoded + 1]) & 63))
+                            decoded = decoded + 2
+                        }
+
+                        staged = staged + 1
+                    }
+                }
+
+                long wrote = write(fds[1], staging + sent, staged - sent)
+                mut bool done = false
+                if wrote > 0 {
+                    sent = sent + wrote
+                    done = sent == staged && decoded == textCount
+                } else if wrote < 0 && *__errno_location() == 32 {
+                    done = true // the child ended its input, `EPIPE`: the rest unwritten
+                } else if wrote < 0 && *__errno_location() != 11 && *__errno_location() != 4 {
+                    // S19, as a read that fails (S18): every pipe the call holds to the child is closed, so that a
+                    // child that writes ends and none waits on a write, and its end is waited for under the bound
+                    // (S20), the write's `IoError` the call's whatever status it ends with (assumed, §12)
+                    failure = -long(*__errno_location())
+                    mut int p = 0
+                    while p < 2 {
+                        if polled[p * 2] >= 0 {
+                            if owned {
+                                close(polled[p * 2])
+                            }
+
+                            polled[p * 2] = -1
+                            fds[2 + p * 2] = -1
+                        }
+
+                        p = p + 1
+                    }
+
+                    pending = 0
+                    done = true
+                }
+
+                if done {
+                    close(fds[1])
+                    fds[1] = -1
+                    polled[6] = -1
+                    writing = false
+                }
+            }
+        }
+
+        // the child's end deciding (S20): one that ended before the bound gives its own status, with what the
+        // call read of the pipes a process it left behind still holds
+        if late && !exited {
+            kill(pid, 9)
+            if failure == 0 {
+                failure = -4100 // a read that failed before the bound passed stays the call's failure (S18)
+            }
+        }
+    }
+
+    return failure
 }

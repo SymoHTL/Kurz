@@ -45,7 +45,7 @@ internal static class Lower
         NullType => "{}", // N1: one value, of no size
         EnumType e => $"i{EnumBits(e.Symbol).ToString(CultureInfo.InvariantCulture)}",
         FlagsType => "i32", // D13, D19: the bits of its names, 31 at most, below the sign of an `int`
-        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType => "ptr",
+        PointerType or CFunctionType or ListType or MapType or HandleType or HasherType or CommandType or ChildProcessType => "ptr",
         UnionType u when Types.NonNull(u) is CFunctionType => "ptr", // R17: its `null` is the address 0 (Layout.Niche)
         UnionType u when Types.NonNull(u) is FunctionType => "%kz.fn", // N1: its `null` is the pair of no code and no environment (Layout.Niche)
         FunctionType => "%kz.fn",
@@ -76,7 +76,7 @@ internal static class Lower
         PrimitiveType p => p.Kind is Primitive.SByte or Primitive.Byte or Primitive.Short or Primitive.UShort or Primitive.Int or Primitive.UInt
             or Primitive.Long or Primitive.ULong or Primitive.Float or Primitive.Double or Primitive.Decimal or Primitive.Bool or Primitive.Char or Primitive.String
             or Primitive.Duration or Primitive.Timestamp or Primitive.LongDuration or Primitive.LongTimestamp or Primitive.Instant,
-        VoidType or NullType or EnumType or FlagsType or HandleType or HasherType or CommandType or VectorType => true,
+        VoidType or NullType or EnumType or FlagsType or HandleType or HasherType or CommandType or ChildProcessType or VectorType => true,
         PointerType p => Supported(p.Pointee),
         CFunctionType f => f.Parameters.All(Supported) && Supported(f.Result),
         _ => false,

@@ -450,15 +450,15 @@ public sealed partial class Checker
     /// types of <see cref="BuiltInTypes"/>.</summary>
     private static bool IsProcessName(string name) => name is "Command" or "ChildProcess";
 
-    /// <summary>S19: <c>ChildProcess</c>, which the checker does not read: a use of it is <c>not supported</c>.</summary>
-    private bool UnreadProcessName(string name, int line)
+    /// <summary>S19: <c>ChildProcess</c> where a value stands, a type with no functions and no value, whose child a command's <c>Spawn()</c> starts.</summary>
+    private bool ProcessNameAsValue(string name, int line)
     {
         if (name != "ChildProcess")
         {
             return false;
         }
 
-        NotSupported(line, $"a child beside the program, `{name}` (S19)");
+        Report(ErrorIds.UnknownName, line, "`ChildProcess` is a type with no functions: a command's `Spawn()` starts a child (S19, V10)");
         return true;
     }
 
@@ -1292,6 +1292,17 @@ public sealed partial class Checker
             return Types.Command;
         }
 
+        if (n.Name == "ChildProcess")
+        {
+            if (n.TypeArguments.Count > 0)
+            {
+                Report(ErrorIds.Syntax, n.Line, "`ChildProcess` takes no type arguments (S19, T17)");
+                return Types.Error;
+            }
+
+            return Types.ChildProcess;
+        }
+
         if (n.Name is "File" or "TcpListener" or "TcpStream")
         {
             if (n.TypeArguments.Count > 0)
@@ -1419,7 +1430,7 @@ public sealed partial class Checker
             return vector; // R18, where no declaration gives the name
         }
 
-        if (UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+        if (UnreadRegexName(n.Name, n.Line))
         {
             return Types.Error;
         }

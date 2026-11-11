@@ -43,11 +43,211 @@ public sealed partial class Emitter
             return fn.Value($"call {Ir(Sub(info.Result))} {SysFunction(info.Kind == CallKind.CommandOutput ? "CommandOutput" : "CommandStatus")}(ptr {run})");
         }
 
+        if (info.Kind == CallKind.CommandSpawn)
+        {
+            return EmitSpawn(EmitExpression(m.Target), (Semantics.UnionType)Sub(info.Result));
+        }
+
         var slot = fn.Alloca("ptr", "command");
         fn.Emit($"store ptr {Owned(m.Target)}, ptr {slot}"); // the command before its arguments, as written
         Append(c, info, slot, MemberArguments(c, info));
         return fn.Value($"load ptr, ptr {slot}");
     }
+
+    // ---- a child beside the program (S19) ----------------------------------------------------------------
+
+    /// <summary>S19: the offset in a child's block of the handle of its piped standard input, a <c>File</c>'s block or null.</summary>
+    private const int ChildStdin = 8;
+
+    /// <summary>S19: the offset of the handle of its piped standard output, and of its standard error 8 bytes after it.</summary>
+    private const int ChildStdout = 16;
+
+    /// <summary>S19: the offset of the program, the path of its errors and of its pipes' errors, a string of which the block holds a count.</summary>
+    private const int ChildProgram = 32;
+
+    /// <summary>
+    /// S19: the offset of the state the runtime reads and writes: the child's number, 4 bytes; whether it was waited for, 0 not, 1 yes and
+    /// 2 at a bound that passed, 4 bytes; the deadline of its bound on the monotonic clock, -1 where it has none, 8 bytes; and the status
+    /// <c>waitpid</c> gave, 4 bytes.
+    /// </summary>
+    private const int ChildPid = 48;
+
+    /// <summary>S19: the bytes of a child's block: its count, 8 bytes, its three handles, its program and its state.</summary>
+    private const string ChildSize = "72";
+
+    /// <summary>
+    /// S19: <c>Spawn()</c> on the command <paramref name="run"/>: the runtime's <c>CommandSpawn</c> starts the child as <c>Output()</c>
+    /// and <c>Status()</c> start theirs (S21), and gives its number, the program's end of each stream the command set to
+    /// <c>Stdio.Piped</c> and the deadline of its bound; the child is a new block held by one value, each end a <c>File</c> of its own
+    /// whose path is the program (S5), as a failed start names the program. A start that fails is the runtime's <c>SpawnFailure</c>.
+    /// </summary>
+    private string EmitSpawn(string run, Semantics.UnionType union)
+    {
+        var error = union.Cases.Single(IsIoError);
+        var slot = fn.Alloca(Ir(union), "spawn");
+        var spawned = fn.Alloca("[8 x i32]", "spawned");
+        var r = fn.Value($"call i64 {SysFunction("CommandSpawn")}(ptr {run}, ptr {spawned})");
+        var failed = fn.Label("spawn.failed");
+        var started = fn.Label("spawn.started");
+        var done = fn.Label("spawn.done");
+        fn.CondBranch(fn.Value($"icmp slt i64 {r}, 0"), failed, started);
+
+        fn.Block(failed);
+        var at = fn.Value($"load i32, ptr {HandleField(spawned, 16)}");
+        var e = fn.Value($"call {Ir(error)} {SysFunction("SpawnFailure")}(ptr {run}, i64 {r}, i32 {at})");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, error, e)}, ptr {slot}");
+        fn.Branch(done);
+
+        fn.Block(started);
+        var program = fn.Value($"load %kz.str, ptr {fn.Value($"call ptr {StdFunction("ListItems")}(ptr {run})")}");
+        var child = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {ChildSize})");
+        fn.Emit($"store i64 1, ptr {child}");
+        for (var stream = 0; stream < 3; stream++)
+        {
+            var fd = fn.Value($"load i32, ptr {HandleField(spawned, 4 + stream * 4)}");
+            var place = HandleField(child, ChildStdin + stream * 8);
+            var piped = fn.Label("spawn.piped");
+            var next = fn.Label("spawn.next");
+            fn.Emit($"store ptr null, ptr {place}");
+            fn.CondBranch(fn.Value($"icmp sge i32 {fd}, 0"), piped, next);
+            fn.Block(piped);
+            fn.Emit($"store ptr {NewHandle(fd, program)}, ptr {place}");
+            fn.Branch(next);
+            fn.Block(next);
+        }
+
+        Retain(program, Types.String);
+        fn.Emit($"store %kz.str {program}, ptr {HandleField(child, ChildProgram)}");
+        fn.Emit($"store i32 {fn.Value($"load i32, ptr {spawned}")}, ptr {HandleField(child, ChildPid)}");
+        fn.Emit($"store i32 0, ptr {HandleField(child, ChildPid + 4)}"); // not waited for
+        fn.Emit($"store i64 {fn.Value($"load i64, ptr {HandleField(spawned, 24)}")}, ptr {HandleField(child, ChildPid + 8)}");
+        fn.Emit($"store i32 0, ptr {HandleField(child, ChildPid + 16)}");
+        fn.Emit($"store {Ir(union)} {MakeUnion(union, Types.ChildProcess, child)}, ptr {slot}");
+        fn.Branch(done);
+
+        fn.Block(done);
+        return fn.Value($"load {Ir(union)}, ptr {slot}");
+    }
+
+    /// <summary>S19: the child's <c>Stdin</c>, <c>Stdout</c> or <c>Stderr</c>, its <c>File</c> where the command piped the stream, else <c>null</c>; the child holds it.</summary>
+    private string ChildStream(string child, string member)
+    {
+        var offset = member switch { "Stdin" => ChildStdin, "Stdout" => ChildStdout, _ => ChildStdout + 8 };
+        var handle = fn.Value($"load ptr, ptr {HandleField(child, offset)}");
+        var union = Types.Nullable(Types.File);
+        var piped = MakeUnion(union, Types.File, handle);
+        var none = MakeUnion(union, Types.Null, "zeroinitializer");
+        return fn.Value($"select i1 {fn.Value($"icmp eq ptr {handle}, null")}, {Ir(union)} {none}, {Ir(union)} {piped}");
+    }
+
+    /// <summary>
+    /// S19: <c>Wait()</c>, <c>WaitWithOutput()</c> and <c>Kill()</c>, the runtime's <c>ChildWait</c>, <c>ChildWaitWithOutput</c> and
+    /// <c>ChildKill</c> on the child's state. A wait closes the program's end of a piped standard input first, as Rust's <c>wait</c> drops
+    /// its <c>stdin</c>, so that a child that reads to its end ends (issue 174, Q6, assumed). <c>WaitWithOutput()</c> reads each pipe from
+    /// where the program stopped: the bytes its <c>File</c> read ahead first, taken from it, then what the pipe still gives; a <c>File</c>
+    /// that a <c>Close</c> marked gives none. Each call is <c>not supported</c> in a build for Windows (S11), where no child exists.
+    /// </summary>
+    private string EmitChildCall(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, CommandNotOnWindows);
+        }
+
+        var child = EmitExpression(((MemberAccess)c.Callee).Target);
+        var union = Ir(Sub(info.Result));
+        var program = fn.Value($"load %kz.str, ptr {HandleField(child, ChildProgram)}");
+        var state = HandleField(child, ChildPid);
+        if (info.Kind == CallKind.ChildKill)
+        {
+            return fn.Value($"call {union} {SysFunction("ChildKill")}(ptr {state}, %kz.str {program})");
+        }
+
+        var input = fn.Value($"load ptr, ptr {HandleField(child, ChildStdin)}");
+        var close = fn.Label("wait.close");
+        var closed = fn.Label("wait.closed");
+        fn.CondBranch(fn.Value($"icmp ne ptr {input}, null"), close, closed);
+        fn.Block(close);
+        fn.Emit($"call i64 {CloseHandle()}(ptr {input}, i1 false)"); // a `File` closed before gives its error, which the wait drops
+        fn.Branch(closed);
+        fn.Block(closed);
+        if (info.Kind == CallKind.ChildWait)
+        {
+            return fn.Value($"call {union} {SysFunction("ChildWait")}(ptr {state}, %kz.str {program})");
+        }
+
+        var (outFd, outAhead, outCount) = Ahead(child, ChildStdout);
+        var (errFd, errAhead, errCount) = Ahead(child, ChildStdout + 8);
+        return fn.Value($"call {union} {SysFunction("ChildWaitWithOutput")}(ptr {state}, %kz.str {program}, i32 {outFd}, ptr {outAhead}, i64 {outCount}, i32 {errFd}, ptr {errAhead}, i64 {errCount})");
+    }
+
+    /// <summary>
+    /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, -1 where it is null or a
+    /// <c>Close</c> marked it (S5), and the bytes its reader holds ahead of the program (S16), which are taken from it.
+    /// </summary>
+    private (string Fd, string Ahead, string Count) Ahead(string child, int offset)
+    {
+        var fd = fn.Alloca("i32", "pipe");
+        var ahead = fn.Alloca("ptr", "ahead");
+        var count = fn.Alloca("i64", "ahead.count");
+        fn.Emit($"store i32 -1, ptr {fd}");
+        fn.Emit($"store ptr null, ptr {ahead}");
+        fn.Emit($"store i64 0, ptr {count}");
+        var handle = fn.Value($"load ptr, ptr {HandleField(child, offset)}");
+        var held = fn.Label("pipe.held");
+        var open = fn.Label("pipe.open");
+        var buffered = fn.Label("pipe.buffered");
+        var done = fn.Label("pipe.done");
+        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), held, done);
+        fn.Block(held);
+        var word = fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4");
+        fn.CondBranch(fn.Value($"icmp eq i32 {fn.Value($"and i32 {word}, 1")}, 0"), open, done);
+        fn.Block(open);
+        fn.Emit($"store i32 {HandleDescriptor(handle)}, ptr {fd}");
+        var reader = HandleField(handle, ReaderAt);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
+        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, done);
+        fn.Block(buffered);
+        var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
+        var end = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
+        fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr {ahead}");
+        fn.Emit($"store i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}, ptr {count}");
+        fn.Emit($"store i32 {end}, ptr {ReaderField(reader, ReaderPosition)}"); // taken: the runtime copies them before anything frees the buffer
+        fn.Branch(done);
+        fn.Block(done);
+        return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {ahead}"), fn.Value($"load i64, ptr {count}"));
+    }
+
+    /// <summary>
+    /// S19: one value less holds the child's block; the last lets go of its three handles, each of which closes its pipe at its own last
+    /// holder (S5), and of its program, and frees the block, with neither a wait nor a kill, so that a child let go of runs on (S19).
+    /// </summary>
+    private string ReleaseChild() => Helper("release.ChildProcess", "void", ["ptr"], () =>
+    {
+        var count = fn.Value($"sub i64 {fn.Value("load i64, ptr %a0")}, 1");
+        fn.Emit($"store i64 {count}, ptr %a0");
+        var last = fn.Label("last");
+        var held = fn.Label("held");
+        fn.CondBranch(fn.Value($"icmp eq i64 {count}, 0"), last, held);
+        fn.Block(last);
+        for (var stream = 0; stream < 3; stream++)
+        {
+            var handle = fn.Value($"load ptr, ptr {HandleField("%a0", ChildStdin + stream * 8)}");
+            var piped = fn.Label("piped");
+            var next = fn.Label("next");
+            fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), piped, next);
+            fn.Block(piped);
+            fn.Emit($"call void {ReleaseHandle()}(ptr {handle})");
+            fn.Branch(next);
+            fn.Block(next);
+        }
+
+        Release(fn.Value($"load %kz.str, ptr {HandleField("%a0", ChildProgram)}"), Types.String);
+        fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {ChildSize})");
+        fn.Return(null);
+        fn.Block(held);
+        fn.Return(null);
+    });
 
     /// <summary>
     /// The arguments of a member of S17, read in the order they are written; the callee borrows them. With <paramref name="held"/> each

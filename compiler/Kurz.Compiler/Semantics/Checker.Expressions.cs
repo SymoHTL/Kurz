@@ -626,7 +626,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        if (IntrinsicNameAsValue(n) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+        if (IntrinsicNameAsValue(n) || ProcessNameAsValue(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
         {
             return Typed.Error;
         }
@@ -885,6 +885,10 @@ public sealed partial class Checker
                 return new Typed(Types.Int); // D19: the sum of the bits the set holds
             case HandleType { Kind: Handle.TcpListener } when member == "Port":
                 return new Typed(Types.Int); // S9
+            case ChildProcessType when member is "Stdin" or "Stdout" or "Stderr":
+                return new Typed(Types.Nullable(Types.File)); // S19: a stream where the command set it to `Stdio.Piped`, else `null`
+            case ChildProcessType when member == "Id":
+                return new Typed(Types.Int); // S19: its process's number
             case UnionType when Types.NonNull(type) is not null:
                 Report(ErrorIds.NullableUnchecked, line, $"`{member}` is read from {Types.A(type)} without a check (N2)");
                 return Typed.Error;
