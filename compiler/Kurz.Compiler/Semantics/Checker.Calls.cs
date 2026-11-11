@@ -452,10 +452,6 @@ public sealed partial class Checker
         {
             // A9, A15: reported
         }
-        else if (HoldsHttpError(t.Type))
-        {
-            NotSupported(c.Line, HttpErrorText);
-        }
         else if (HoldsRaw(t.Type, []))
         {
             NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
@@ -1767,15 +1763,6 @@ public sealed partial class Checker
             return CheckHasherMethod(hasher, m, c); // H3
         }
 
-        if (m.Member == "Text" && IsHttpError(target.Type))
-        {
-            // W2: the `Text()` the body in `std/` declares gives that text, so a call of it has the answer and the place of printing
-            // one (the owner, 2026-11-02)
-            NotSupported(c.Line, HttpErrorText);
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
         var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)
         if (member.IsError)
         {
@@ -1883,12 +1870,6 @@ public sealed partial class Checker
         if (!HasText(item))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(item)} has no text for `string.Join` to write (X6, A4, A7, A10)");
-            return Typed.Error;
-        }
-
-        if (HoldsHttpError(item))
-        {
-            NotSupported(c.Line, HttpErrorText);
             return Typed.Error;
         }
 
