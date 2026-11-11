@@ -34,22 +34,11 @@ public sealed partial class Checker
     /// <c>Output()</c>, whose success is a <c>ProcessOutput</c>, and <c>Status()</c>, whose success is <c>void</c>, each with the cases
     /// <c>IoError</c> and <c>ExitError</c> (section 12, the owner, 2026-11-01, "Bytes, as Rust" and "A case of the call"); S19:
     /// <c>Input(bytes)</c> and <c>Input(text)</c>, the child's input (the owner, 2026-11-01, "Both forms", and 2026-11-11, "Bytes and string"); S20: <c>Timeout(d)</c>, a bound on the child's
-    /// time (the owner, 2026-11-01, "Optional .Timeout(d)"). <c>Spawn()</c> (S19) is <c>not supported</c>.
+    /// time (the owner, 2026-11-01, "Optional .Timeout(d)"); S19: <c>Spawn()</c>, whose success is a <c>ChildProcess</c>, with the case
+    /// <c>IoError</c>.
     /// </summary>
     private Typed CheckCommandMethod(MemberAccess m, CallExpression c)
     {
-        var unbuilt = m.Member switch
-        {
-            "Spawn" => "a child beside the program, `Spawn()` (S19)",
-            _ => null,
-        };
-        if (unbuilt is not null)
-        {
-            NotSupported(c.Line, unbuilt);
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
         Slot Text(string name) => new(name, Types.String, false, false, false);
         var stdio = new EnumType(enums["Stdio"]);
         var exitError = new DataType(dataTypes["ExitError"], []);
@@ -66,6 +55,7 @@ public sealed partial class Checker
             "Timeout" => (CallKind.CommandTimeout, [new Slot("d", Types.Duration, false, false, false)], Types.Command),
             "Output" => (CallKind.CommandOutput, [], Types.Union([new DataType(dataTypes["ProcessOutput"], []), IoError, exitError])),
             "Status" => (CallKind.CommandStatus, [], Types.Union([Types.Void, IoError, exitError])),
+            "Spawn" => (CallKind.CommandSpawn, [], Types.Union([Types.ChildProcess, IoError])),
             _ => null,
         };
         if (member is not { } f)
@@ -89,5 +79,37 @@ public sealed partial class Checker
         }
 
         return Record(c, f.Kind, Call(candidates, c, null, out var picked), picked);
+    }
+
+    /// <summary>
+    /// S19: a child's members that are calls: <c>Wait()</c>, whose success is <c>void</c>, and <c>WaitWithOutput()</c>, whose success is
+    /// a <c>ProcessOutput</c>, each with the cases <c>IoError</c> and <c>ExitError</c>, as <c>Status()</c> and <c>Output()</c> give them,
+    /// and <c>Kill()</c>, whose success is <c>void</c>, with the case <c>IoError</c>. <c>Stdin</c>, <c>Stdout</c>, <c>Stderr</c> and
+    /// <c>Id</c> are read, not called.
+    /// </summary>
+    private Typed CheckChildMethod(MemberAccess m, CallExpression c)
+    {
+        var exitError = new DataType(dataTypes["ExitError"], []);
+        (CallKind Kind, KurzType Result)? member = m.Member switch
+        {
+            "Wait" => (CallKind.ChildWait, Types.Union([Types.Void, IoError, exitError])),
+            "WaitWithOutput" => (CallKind.ChildWaitWithOutput, Types.Union([new DataType(dataTypes["ProcessOutput"], []), IoError, exitError])),
+            "Kill" => (CallKind.ChildKill, Types.Union([Types.Void, IoError])),
+            _ => null,
+        };
+        if (member is not { } f)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"a `ChildProcess` has no member `{m.Member}` to call (S19, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, $"`{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = [], Result = f.Result };
+        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
     }
 }

@@ -1650,7 +1650,7 @@ makes for a function checked in its copies alone, so not at all where no call re
 with the build: each is reported once, at the declaration, however many copies give it (below))* *(assumed, §4: `T.Kind` is a value of `enum TypeKind`, a name every file sees, so that a
 file's own `TypeKind` is `redeclared` (V9); it has a value for each built-in type, named as the
 type, `TypeKind.Int` and `TypeKind.Char` among them, and one for each other kind, `TypeKind.Data`
-and `TypeKind.List` among them, a file, a socket, a hasher and a command being of the kind `TypeKind.Class`; an arm of a `match`
+and `TypeKind.List` among them, a file, a socket, a hasher, a command and a child being of the kind `TypeKind.Class`; an arm of a `match`
 on `T.Kind` is checked only in the copies whose kind it names; `Kind`, `Fields` and `Make` are
 members of a type parameter alone; `f.Get(value)` reads as `value.Field`; `f` stands in `f.Name`, `f.Type` and
 `f.Get(value)` alone, and anywhere else is `syntax`; `f.Get` takes a value of `T` or of a type derived from it, and one of

@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a command (S17), the block of a list of strings, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or CommandType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or CommandType or ChildProcessType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when layout.IsBlock(d) => true,
         DataType d => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
@@ -202,7 +202,7 @@ public sealed partial class Emitter
             return;
         }
 
-        if (type is HandleType)
+        if (type is HandleType or ChildProcessType) // S19: a child's block holds its count where a handle's does
         {
             fn.Emit($"call void {RetainHandle()}(ptr {value})");
             return;
@@ -270,6 +270,12 @@ public sealed partial class Emitter
         if (type is HandleType)
         {
             fn.Emit($"call void {ReleaseHandle()}(ptr {value})");
+            return;
+        }
+
+        if (type is ChildProcessType)
+        {
+            fn.Emit($"call void {ReleaseChild()}(ptr {value})");
             return;
         }
 

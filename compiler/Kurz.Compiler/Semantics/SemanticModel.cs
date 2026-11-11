@@ -242,6 +242,18 @@ public enum CallKind
     /// <summary><c>c.Status()</c> (S18).</summary>
     CommandStatus,
 
+    /// <summary><c>c.Spawn()</c> (S19).</summary>
+    CommandSpawn,
+
+    /// <summary><c>child.Wait()</c> (S19).</summary>
+    ChildWait,
+
+    /// <summary><c>child.WaitWithOutput()</c> (S19).</summary>
+    ChildWaitWithOutput,
+
+    /// <summary><c>child.Kill()</c> (S19).</summary>
+    ChildKill,
+
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
 

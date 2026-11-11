@@ -2507,20 +2507,28 @@ ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoE
 process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
 while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
 forms"). `Input` takes `Bytes` or a `string`, whose UTF-8 bytes are the input, so that a call that fits
-neither is `argument-mismatch` (F13) (§12, the owner, 2026-11-11, "Bytes and string"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
+neither is `argument-mismatch` (F13) (§12, the owner, 2026-11-11, "Bytes and string"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1), with the program as its path and the number 0 (S1, S21), at the call that
 starts the child, so that a spawned child takes its input through `child.Stdin`, and `Status()` writes
 the input and closes the child's input (§12, the owner, 2026-11-02, "`Input` beside `Spawn()` or beside
 a `Stdin` member is `InvalidInput` at the start"). An empty input is closed at once, a NUL byte in an
 input is data, the bound of `Timeout(d)` holds the writing (S20), and a write of the input that fails, but for a child that
-ended its input, is the call's `IoError` named by the program (S18). `Status()` with a `Stdout` set to `Stdio.Piped`
+closed its input (`EPIPE`), is handled as a read that fails is (S18): every pipe the call holds to the child is closed, the child's end is waited for under the bound, and the write's `IoError`, named by the program, is the call's whatever status the child ends with, the first failure of a read or a write being the one that stays. `Status()` with a `Stdout` set to `Stdio.Piped`
 closes the program's end of that pipe at once, so that a child that writes there is ended by `SIGPIPE`
 (S21) and the call gives an `ExitError` (§12, the owner, 2026-11-02, "`Status()` with a piped Stdout
 closes the program's end of that pipe at once"). A second wait of either kind gives the status the
 first gave, and `WaitWithOutput()` reads each pipe from where the program stopped, a pipe read to its
 end or closed giving empty `Bytes`; `Kill()` on a child that ended or was waited for gives `void` and
-sends no signal; a child let go of without a `Wait()` is neither waited for nor killed. *(assumed, §12:
+sends no signal; a child let go of without a `Wait()` is neither waited for nor killed, and a pipe's `File`
+outlives it, a holder of its own (S5). `Id` stays the number after the wait; `Kill()`'s `IoError` has the
+program as its path; a `ChildProcess` has no text and no `==`; and a later wait after a bound that passed
+gives `TimedOut` again (S20). A copy of a `ChildProcess` holds the one child; `Wait()` and `WaitWithOutput()`
+close a piped `Stdin` before they wait; and a pipe's `File` has the program as its path (§12, the owner,
+2026-11-11, "All three as built"). `WaitWithOutput()` whose read of a pipe fails gives that `IoError`, with
+the program as its path, at once and waits for no child, so that a later `Wait()` or `Kill()` still reaches
+it (§12, the owner, 2026-11-11, "Error, no wait"). *(assumed, §12:
 the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
-end, the child let go of, `Id`'s type, `Status()` writing the input under `poll`, an empty input closed
+end, the child let go of, `Id`'s type, a pipe's `File` after the child, `Id` after the wait, `Kill()`'s
+error, no text and no `==`, the wait after a bound, `Status()` writing the input under `poll`, an empty input closed
 at once, a NUL byte in an input, the bound over the writing, a write that fails, and a piped `Stderr` under `Status()` closed
 as a piped `Stdout` is)*
 
@@ -2588,16 +2596,20 @@ void | IoError | ExitError | InvalidUtf8 Run() {
 
     echoed = Command.New("cat").Input(big).Output()
     print(echoed.Stdout.Count)
-    Command.New("cat").Input("x").Stdin(Stdio.Null).Status() else {
-        IoError e => print(e)
-        ExitError e => print(e)
-    }
 }
 
 Run() else {
     IoError e => print(e)
     ExitError e => print(e)
     InvalidUtf8 e => print(e)
+}
+```
+
+Case: [system/command-input-stdin.kz](../corpus/system/command-input-stdin.kz)
+```kurz
+Command.New("cat").Input("x").Stdin(Stdio.Null).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
 }
 ```
 
