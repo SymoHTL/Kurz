@@ -2421,7 +2421,10 @@ print(base)
 
 `Output()` runs the command to its end and gives `ProcessOutput | IoError | ExitError`, where `data
 ProcessOutput(ExitStatus Status, Bytes Stdout, Bytes Stderr)` holds what the child wrote as bytes, which
-`string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A child that ends
+`string.FromUtf8` (T15) turns into text (§12, the owner, 2026-11-01, "Bytes, as Rust"). A read of the child's
+output that fails ends `Output()` with an `IoError` (S1) whose path is the program, once the call has closed
+both pipes and waited for the child's end (§12, the owner, 2026-11-11, "The program" and "Close pipes,
+wait"). A child that ends
 with a code other than 0, or that a signal ends, is a case of the call, which the unwrap rule sends to
 the caller unless an `else` takes it (O2, O5) (§12, the owner, 2026-11-01, "A case of the call"); that
 case is `data ExitError(string Program, ProcessOutput Output)`. `ExitStatus` holds `Code`, an `int` that is 128 and
@@ -2660,9 +2663,11 @@ child its input (S19); `Output()` gives empty `Bytes` for a stream set to `Stdio
 A call that waits for a child blocks its thread in a program without actors, and in an actor parks it
 while the wait runs on the pool of threads for blocking calls, as a call on a file does (S10). A start that fails is an
 `IoError` (S1) whose path is the program, or the directory where that is what does not exist, and never
-an argument, the input or the output. A NUL byte in the program, an argument, the directory, or a name
-or a value of the environment is `InvalidInput` with the number 0 at the call that starts the child. A
-build for Windows says `not supported` to each of these calls, as to a call on a file (S11).
+an argument, the input or the output. A NUL byte in the program, an argument, any directory `Dir` was given,
+one a later `Dir` replaced among them, or a name or a value of the environment the child gets is
+`InvalidInput` with the number 0 at the call that starts the child, and a variable `EnvRemove` or `EnvClear`
+took away is none the child gets (§12, the owner, 2026-11-11, "Rust's split"). A build for Windows says
+`not supported` to each of these calls, as to a call on a file (S11).
 
 Case: [system/command-not-found.kz](../corpus/system/command-not-found.kz)
 
@@ -2705,6 +2710,32 @@ match Command.New("printf").Arg("a\0b").Output() {
         print(e)
         print(e.Code)
     }
+    ExitError e => print(e)
+}
+```
+
+Case: [system/command-nul-replaced.kz](../corpus/system/command-nul-replaced.kz)
+```kurz
+void | IoError | ExitError Replaced() {
+    Command.New("true").Dir("kurz-case\0").Dir(".").Status()
+    print("not reached")
+}
+
+void | IoError | ExitError Removed() {
+    Command.New("true").Env("KURZ_CASE", "1\0").EnvRemove("KURZ_CASE").Status()
+    print("started")
+}
+
+Replaced() else {
+    IoError e => {
+        print(e)
+        print(e.Code)
+    }
+    ExitError e => print(e)
+}
+
+Removed() else {
+    IoError e => print(e)
     ExitError e => print(e)
 }
 ```

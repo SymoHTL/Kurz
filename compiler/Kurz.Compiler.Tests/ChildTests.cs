@@ -10,33 +10,38 @@ namespace Kurz.Compiler.Tests;
 /// file of its own, no variable of its own and no descriptor but its three streams: a chain and <c>cmd = cmd.Arg(x)</c> build one
 /// command with no copy, and a command another value holds is copied; <c>Output()</c> reads both pipes as they fill;
 /// a child gets the program's environment less and with what its members took away and set, in the order of their calls; a program
-/// named without a <c>/</c> is looked up in the <c>PATH</c> the child gets, a directory that refuses it passed over, and in the
-/// default path where the child gets none; a start that fails names the program, or the directory <c>Dir</c> named where that is
-/// what failed, a second <c>Dir</c> replacing the first; a NUL byte in any string of a command is <c>InvalidInput</c>; a child gets no descriptor but its three streams, and its standard input where the program started with its own
-/// closed; <c>Status()</c> gives it the program's streams, and a stream set
-/// to <c>Stdio.Piped</c> that the call does not read is closed at once; and a build for Windows says <c>not supported</c> at each
-/// call. Each program runs under the runtime of this machine, through <c>/bin/sh</c>, whose command <c>setup</c> makes the files a
+/// named without a <c>/</c> is looked up in the <c>PATH</c> the child gets, a directory that refuses it passed over, also where
+/// the program's native code cleared its own environment, and in the default path where the child gets none; a start that fails
+/// names the program, or the directory <c>Dir</c> named where that is
+/// what failed, a second <c>Dir</c> replacing the first; a NUL byte in the program, an argument, any directory <c>Dir</c> was given
+/// or the environment the child gets is <c>InvalidInput</c>; a read of the output that fails is the call's <c>IoError</c>, named by
+/// the program, once both pipes are closed and the child waited for; a child gets no descriptor but its three streams, where the system refuses <c>close_range</c> too, and its standard
+/// input where the program's own native code closed its own; <c>Status()</c> gives it the program's streams, and a stream set
+/// to <c>Stdio.Piped</c> that the call does not read is closed at once; and a build for Windows says <c>not supported</c> at the
+/// first call on a command. Each program that <see cref="Ran"/> starts runs under the runtime it is given, this machine's unless a
+/// test edits it, through <c>/bin/sh</c>, whose command <c>setup</c> makes the files a
 /// program finds, so that no file the test host wrote is started (<c>knowledge/a-file-this-process-wrote-does-not-start-beside-a-fork.md</c>);
 /// on Windows the tests hold the build's refusal instead.
 /// </summary>
 public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
-    private static Compilation Compile(string text, CheckedRuntime runtime) => Builder.Compile(SourceText.FromString("program.kz", text), [], runtime, testBuild: true);
+    private static Compilation Compile(string text, CheckedRuntime runtime, params string[] grants) => Builder.Compile(SourceText.FromString("program.kz", text), grants, runtime, testBuild: true);
 
     /// <summary>
     /// The program built for this machine and started by <c>/bin/sh</c> as <c>exec "$0"</c> after the shell command
     /// <paramref name="setup"/>, in the directory of its build, with <c>KURZ_TRACE=0</c> and the variables of
-    /// <paramref name="variables"/>; its exit code, its lines and its error stream. Null on Windows, where the build is held to its refusal.
+    /// <paramref name="variables"/>, built with the <paramref name="grants"/> under <paramref name="runtime"/>, or this machine's
+    /// runtime; its exit code, its lines and its error stream. Null on Windows, where the build is held to its refusal.
     /// </summary>
-    private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string setup = "", IReadOnlyDictionary<string, string?>? variables = null)
+    private (int Code, IReadOnlyList<string> Output, string Error)? Ran(string text, string name, string setup = "", IReadOnlyDictionary<string, string?>? variables = null, CheckedRuntime? runtime = null, string[]? grants = null)
     {
         if (Builder.HostTarget == Target.Windows)
         {
-            Assert.Null(Compile(text, toolchain.Runtime).Program);
+            Assert.Null(Compile(text, toolchain.Runtime, grants ?? []).Program);
             return null;
         }
 
-        var compilation = Compile(text, toolchain.Runtime);
+        var compilation = Compile(text, runtime ?? toolchain.Runtime, grants ?? []);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         var executable = toolchain.Build(compilation.Program, name);
         var environment = new Dictionary<string, string?> { ["KURZ_TRACE"] = "0" };
@@ -181,6 +186,24 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_program_is_looked_up_in_the_path_the_child_gets_where_the_programs_native_code_cleared_its_environment()
+    {
+        // S21: the path the child gets is the `PATH` of the environment the program started with, of which the child's environment
+        // is made, so that native code that clears the program's environment (`clearenv`) changes neither: `kurz-case-echo`, found
+        // only in the directory the program's `PATH` starts with, is found; a lookup in the environment the native code changed
+        // finds no `PATH` there, looks in the default path and gives `NotFound`
+        const string setup = "mkdir -p first && cp /bin/echo first/kurz-case-echo && PATH=\"$PWD/first:$PATH\" && export PATH && ";
+        var text = "extern \"C\" {\n    int clearenv()\n}\n\nraw {\n    clearenv()\n}\n\n" + Program("""
+                print(string.FromUtf8(Command.New("kurz-case-echo").Arg("found").Output().Stdout).Split("\n")[0])
+            """);
+        if (Ran(text, "child-path-cleared", setup, grants: ["raw", "native"]) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["found"], ran.Output);
+        }
+    }
+
+    [Fact]
     public void A_start_that_fails_names_the_program_or_the_directory_dir_named()
     {
         // S21: the path of a failed start is the program, or the directory where that is what failed, never an argument; an empty
@@ -203,12 +226,15 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_nul_byte_in_any_string_of_a_command_is_invalid_input_with_the_number_0()
+    public void A_nul_byte_in_a_string_the_child_gets_or_in_any_directory_is_invalid_input_with_the_number_0()
     {
-        // S21: in the program, an argument, the directory, and a name or a value of the environment, each refused before any call of
-        // the system, so that no directory is entered and no program is looked up; the positive control runs the same command clean
+        // S21 (the owner, 2026-11-11, "Rust's split", issue 174, comment 6802725183): in the program, an argument, a directory `Dir`
+        // was given, a replaced one among them, and a name or a value of the environment the child gets, each refused before any call
+        // of the system, so that no directory is entered and no program is looked up; a variable taken away or cleared is none the
+        // child gets, so its NUL starts the child, as Rust checks the environment it captured; the positive control runs the same
+        // command clean
         const string body = """
-                for c in [Command.New("tr\0ue"), Command.New("true").Arg("a\0"), Command.New("true").Dir("kurz-case-no-dir\0"), Command.New("true").Env("KURZ\0CASE", "1"), Command.New("true").Env("KURZ_CASE", "1\0"), Command.New("true").EnvRemove("KURZ\0CASE"), Command.New("true").Env("KURZ_CASE", "1")] {
+                for c in [Command.New("tr\0ue"), Command.New("true").Arg("a\0"), Command.New("true").Dir("kurz-case-no-dir\0"), Command.New("true").Dir("kurz-case-no-dir\0").Dir("."), Command.New("true").Env("KURZ\0CASE", "1"), Command.New("true").Env("KURZ_CASE", "1\0"), Command.New("true").EnvRemove("KURZ\0CASE"), Command.New("true").Env("KURZ_CASE", "1\0").EnvRemove("KURZ_CASE"), Command.New("true").Env("KURZ_CASE", "1\0").EnvClear(), Command.New("true").Env("KURZ_CASE", "1")] {
                     c.Status() else {
                         IoError e => print("{e.Kind} {e.Code}")
                         ExitError e => print(e)
@@ -220,7 +246,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         if (Ran(Program(body), "child-nul") is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
-            Assert.Equal(["InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "called"], ran.Output);
+            Assert.Equal(["InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "InvalidInput 0", "called", "called", "called", "called", "called"], ran.Output);
         }
     }
 
@@ -235,6 +261,84 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["[0, 1, 2, ]"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_child_gets_no_descriptor_but_its_three_streams_where_the_system_refuses_close_range()
+    {
+        // S21: a kernel before 5.11, or a filter, refuses `close_range`, here a runtime whose call is one the system does not have
+        // (`ENOSYS`); the child marks each descriptor up to the soft limit of open files instead; the positive control, a runtime that
+        // marks none, gives the child the program's descriptor 7
+        const string call = "if syscall(436, long(3), long(4294967295), long(4)) < 0 {";
+        var text = Program("""
+                print(string.FromUtf8(Command.New("sh").Args(["-c", "ls /proc/$$/fd"]).Output().Stdout).Split("\n"))
+            """);
+        if (Ran(text, "child-descriptors-refused", "exec 7</dev/null && ", runtime: ListTests.Edited(("runtime/linux/linux.kz", call, "if syscall(long(-1)) < 0 {"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["[0, 1, 2, ]"], ran.Output);
+            var leaked = Ran(text, "child-descriptors-leaked", "exec 7</dev/null && ", runtime: ListTests.Edited(("runtime/linux/linux.kz", call, "if syscall(long(-1)) < -1 {")))!.Value;
+            Assert.Equal((0, ""), (leaked.Code, leaked.Error));
+            Assert.Equal(["[0, 1, 2, 7, ]"], leaked.Output);
+        }
+    }
+
+    [Fact]
+    public void A_read_of_the_output_that_fails_is_the_calls_io_error_named_by_the_program()
+    {
+        // S18 (the owner, 2026-11-11, "The program" and "Close pipes, wait", issue 174, comment 6802725183): a runtime whose read of
+        // a pipe fails (`EBADF`) gives the `IoError` of the call, with the program as its path, where a read that failed was the
+        // pipe's end before; the call closes both pipes and waits for the child, so that the next call runs; the positive control
+        // runs the same program under this machine's runtime
+        var text = Program("""
+                match Command.New("printf").Arg("x").Output() {
+                    ProcessOutput o => print(o.Stdout.Count)
+                    IoError e => print("{e.Kind} [{e.Path}]")
+                    ExitError e => print(e)
+                }
+
+                print(string.FromUtf8(Command.New("printf").Arg("y").Output().Stdout))
+            """);
+        if (Ran(text, "child-read-fails", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [printf]", "Other [printf]"], ran.Output);
+            var control = Ran(text, "child-read-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["1", "y"], control.Output);
+        }
+    }
+
+    [Fact]
+    public void A_read_of_the_output_that_fails_closes_both_pipes_and_waits_for_the_childs_end()
+    {
+        // S18 (the owner, 2026-11-11, "Close pipes, wait", issue 174, comment 6802725183): after a read that fails the call closes
+        // both pipes and waits for the child's end before it gives the `IoError`; the child marks `kurz-reached` a second after the
+        // byte the call failed to read and ends at its next write (`SIGPIPE`), before it marks `kurz-wrote`, so that a call that did
+        // not wait finds no `kurz-reached` and one that left the pipes open finds `kurz-wrote`; the positive control, under this
+        // machine's runtime, reads both bytes and finds both marks
+        var text = Program("""
+                match Command.New("sh").Args(["-c", "rm -f kurz-reached kurz-wrote; printf a; sleep 1; : > kurz-reached; printf b; : > kurz-wrote"]).Output() {
+                    ProcessOutput o => print(o.Stdout.Count)
+                    IoError e => print("{e.Kind} [{e.Path}]")
+                    ExitError e => print(e)
+                }
+
+                Command.New("sh").Args(["-c", "test -e kurz-reached && ! test -e kurz-wrote"]).Status() else {
+                    IoError e => print(e)
+                    ExitError e => print(e)
+                }
+
+                print("checked")
+            """);
+        if (Ran(text, "child-read-fails-waits", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sh]", "checked"], ran.Output); // `Status()` reads no pipe, so the edited read does not reach it
+            var control = Ran(text, "child-read-waits-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["2", "exit status 1: sh", "checked"], control.Output);
         }
     }
 
@@ -260,16 +364,18 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_child_gets_its_streams_where_the_program_started_with_standard_input_closed()
+    public void A_child_gets_its_streams_where_the_programs_native_code_closed_its_standard_input()
     {
-        // S21: the system gives the program descriptor 0 for `/dev/null` or a pipe it opens, which the runtime moves above 2, so that
-        // the child's `dup2` onto its standard input takes away the close-on-exec mark and `cat` reads its input to the end
-        var text = Program("""
+        // S21: the program's own native code closes descriptor 0, since the start opens `/dev/null` in place of one closed before it,
+        // and the system gives descriptor 0 to the `/dev/null` or the pipe the call opens, which the runtime moves above 2, so that
+        // the child's `dup2` onto its standard input takes away the close-on-exec mark and `cat` reads its input to the end; without
+        // the move `cat` finds its standard input closed and ends with 1
+        var text = "extern \"C\" {\n    int close(int fd)\n}\n\nraw {\n    close(0)\n}\n\n" + Program("""
                 a = Command.New("cat").Output()
                 b = Command.New("cat").Stdin(Stdio.Piped).Output()
                 print("{a.Status.Success} {b.Status.Success}")
             """);
-        if (Ran(text, "child-closed-input", "exec 0<&- && ") is { } ran)
+        if (Ran(text, "child-closed-input", grants: ["raw", "native"]) is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["true true"], ran.Output);
@@ -282,11 +388,11 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("void | IoError | ExitError Run() {\n    print(1)\n    out = Command.New(\"true\").Output()\n    print(out.Stdout.Count)\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 3)]
     public void A_build_for_windows_says_not_supported_at_the_first_call_on_a_command(string text, int line)
     {
-        // S17 to S21 with S11: as `Stdin` is, each call on `Command` and on a command
+        // S17 to S21 with S11: as `Stdin` is, the first call on `Command` or on a command, where the build stops
         var refused = Compile(text, Builder.CheckRuntime(Target.Windows));
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
-        Assert.Equal((line, Emitter.CommandNotOnWindows), (diagnostic.Line, diagnostic.Message));
+        Assert.Equal((line, true), (diagnostic.Line, diagnostic.IsNotSupported)); // section 8: the line of an error, never its message
         Assert.NotNull(Compile(text, Builder.CheckRuntime(Target.Linux)).Program); // the positive control
     }
 
@@ -303,9 +409,15 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(1)\nc = Command.New(\"a\").Input([1])\n", "", 2)] // S19
     [InlineData("print(1)\nc = Command.New(\"a\").Timeout(1)\n", "", 2)] // S20
     [InlineData("print(1)\nChildProcess c = null\n", "", 2)] // S19
+    [InlineData("void Command() {\n}\n", "redeclared", 1)] // V9: a name every file sees
+    [InlineData("data Stdio(int A)\n", "redeclared", 1)]
+    [InlineData("data ExitStatus(int A)\n", "redeclared", 1)]
+    [InlineData("data ProcessOutput(int A)\n", "redeclared", 1)]
+    [InlineData("data ExitError(int A)\n", "redeclared", 1)]
     public void A_use_of_a_command_outside_its_members_is_refused_where_it_stands(string text, string id, int line)
     {
-        // S17: a command has the members of S17 and S18 and no text and no `==`; S19 and S20 stay `not supported` (an empty id)
+        // S17: a command has the members of S17 and S18 and no text and no `==`; S19 and S20 stay `not supported` (an empty id); and
+        // a file declares none of the five names of S17 and S18 (V9)
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);

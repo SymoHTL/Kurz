@@ -31,7 +31,7 @@ public sealed partial class Emitter
     private List<List<(string Value, KurzType Type)>> regions = [];
     private List<List<(string Slot, KurzType Type)>> scopes = [];
 
-    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
+    /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a command (S17), the block of a list of strings, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
         ListType or MapType or FunctionType or HandleType or HasherType or CommandType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,

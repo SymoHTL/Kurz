@@ -4456,6 +4456,35 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Ran(BuildAndRun(HandleTarget, fenced, "handle-target-fenced"), 0, ["2", "3", "0", "3", "2", "0"], "");
         }
 
+        // `cmd = cmd.Arg(s).Arg(Take(mut s))`, a chain appended in place (S17), whose second argument gives `s` another block while
+        // the first argument still holds the one it read: the read is counted for the statement (`Emitter.EmitCommandInPlace`), so the
+        // child gets the string the first member read; a build for Windows refuses a command (S11)
+        if (Builder.HostTarget == Target.Linux)
+        {
+            const string commandChain = """
+                string Take(mut string t) {
+                    t = "{t}!"
+                    return "b"
+                }
+
+                void | IoError | ExitError | InvalidUtf8 Show() {
+                    mut s = "a{1}"
+                    mut cmd = Command.New("printf").Arg("[%s][%s]")
+                    cmd = cmd.Arg(s).Arg(Take(mut s))
+                    print(string.FromUtf8(cmd.Output().Stdout))
+                    print(s)
+                }
+
+                Show() else {
+                    IoError e => print(e)
+                    ExitError e => print(e)
+                    InvalidUtf8 e => print(e)
+                }
+
+                """;
+            Ran(BuildAndRun(commandChain, fenced, "command-chain-fenced"), 0, ["[a1][b]", "a1!"], "");
+        }
+
         // `with` on a block read from a field of a class instance, while a replaced value gives the field another block: through the
         // instance's path by a method, by the field's name alone in a method (K7), and through the path by a lambda that assigns it
         // (F11); the read takes a count held to the statement's end (K2), so the copy reads the block the field held when the `with`

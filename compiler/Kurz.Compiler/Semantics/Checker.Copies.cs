@@ -154,7 +154,7 @@ public sealed partial class Checker
         UnionType => "Union",
         DataType => "Data",
         EnumType or FlagsType => "Enum", // a flags type as C#'s `[Flags]` enum (T33, section 4, the owner, 2026-11-11, issue 452, "All as built")
-        ClassType or HandleType or HasherType or CommandType => "Class",
+        ClassType or HandleType or HasherType or CommandType => "Class", // a file, a socket, a hasher and a command (T33)
         FunctionType or CFunctionType => "Function",
         PointerType => "Pointer",
         _ => throw new InvalidOperationException($"`{type.Text}` has no kind of type"),
