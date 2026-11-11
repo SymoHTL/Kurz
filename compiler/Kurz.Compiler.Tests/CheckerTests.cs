@@ -2793,7 +2793,7 @@ public sealed class CheckerTests
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Run)", "unknown-name", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Parse(1))", "unknown-name", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == 1)", "type-mismatch", 3)] // a set is not an integer (D13, the owner, 2026-11-11, issue 452; its number is `Number`, D19)
-    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read == Mode.Read)", "type-mismatch", 4)] // two flags types are never equal (D13, the owner, 2026-11-11, issue 452)
+    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read == Mode.Read)", "type-mismatch", 4)] // `==` across two flags types is `type-mismatch` (D13, the owner, 2026-11-11, issue 452)
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read < Access.Write)", "type-mismatch", 3)] // sets have no order (D13, the owner, 2026-11-11, issue 452)
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read >= Access.Write)", "type-mismatch", 3)]
     [InlineData("flags Access { Read, Write }\n\nmut xs = [1]\nxs.SortBy(x => Access.Read)", "type-mismatch", 4)] // nor does a sort by a set (X8)
@@ -2809,6 +2809,7 @@ public sealed class CheckerTests
     [InlineData("flags Access { Read = 2, Write = 2 }\n\nprint(Access.Read)", "flags-number", 1)]
     [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum (D19, the owner, 2026-11-11, "All as built")
     [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant (D19, the owner, 2026-11-11, "All as built")
+    [InlineData("long One() {\n    return 1L\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant, whatever its type (D19, the owner, 2026-11-11, "Constant first")
     [InlineData("flags Access { Read = 1.5, Write = 2 }\n\nprint(Access.Read)", "type-mismatch", 1)] // a constant of another type, as of an enum (D19, D20)
     [InlineData("flags Access { Read = 5L, Write = 2 }\n\nprint(Access.Read)", "narrowing-conversion", 1)] // as of an enum (D19, D20)
     [InlineData("flags Access { Read = 2u, Write = 4 }\n\nprint(Access.Read)", "sign-mix", 1)] // as of an enum (D19, D20)

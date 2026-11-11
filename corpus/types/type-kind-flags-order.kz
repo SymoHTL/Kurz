@@ -1,5 +1,5 @@
 // expect: error type-mismatch at 7
-// rules: T33, D13
+// rules: T33
 
 flags Access { Read, Write }
 
