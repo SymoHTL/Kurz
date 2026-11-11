@@ -1913,7 +1913,8 @@ public sealed partial class Checker
     /// X6: <c>string.Join(separator, values)</c>, a <c>string</c>, of a list of any item type, with a <c>string</c> or a <c>char</c>
     /// separator: <c>Join&lt;T&gt;(string separator, List&lt;T&gt; values)</c> and <c>Join&lt;T&gt;(char separator, List&lt;T&gt;
     /// values)</c>, two forms, picked as F13 picks one; an item type that has no text, the text <c>print</c> writes (A4, A7), is
-    /// <c>no-text</c>. The parameters take C#'s names.
+    /// <c>no-text</c>, and one whose text is a <c>Text()</c> without <c>pub</c> is <c>not-visible</c>, as <c>print</c> of it is (A9, A15; the
+    /// owner, 2026-11-11, "(a) Join refuses it"). The parameters take C#'s names.
     /// </summary>
     private Typed CheckStringJoin(CallExpression c)
     {
@@ -1944,6 +1945,11 @@ public sealed partial class Checker
         if (!HasText(item))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(item)} has no text for `string.Join` to write (X6, A4, A7, A10)");
+            return Typed.Error;
+        }
+
+        if (PrivateText(item, c.Line, join: true))
+        {
             return Typed.Error;
         }
 
