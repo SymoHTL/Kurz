@@ -7,7 +7,8 @@ namespace Kurz.Compiler.Tests;
 
 /// <summary>
 /// The decisions on running a program (S17, S18, S21; design record, section 12) that no corpus case pins, since a case runs with no
-/// file of its own, no variable of its own and no descriptor but its three streams: <c>Output()</c> reads both pipes as they fill;
+/// file of its own, no variable of its own and no descriptor but its three streams: a chain and <c>cmd = cmd.Arg(x)</c> build one
+/// command with no copy, and a command another value holds is copied; <c>Output()</c> reads both pipes as they fill;
 /// a child gets the program's environment less and with what its members took away and set, in the order of their calls; a program
 /// named without a <c>/</c> is looked up in the <c>PATH</c> the child gets, a directory that refuses it passed over, and in the
 /// default path where the child gets none; a start that fails names the program, or the directory <c>Dir</c> named where that is
@@ -61,6 +62,49 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
 
         """;
+
+    /// <summary>The runtime of this machine whose copy of a list's block for a write (M3) fails, so that a program that copies one ends with <c>allocation-failed</c>.</summary>
+    private static CheckedRuntime NoCopy() => ListTests.Edited(("std/std.kz", "pub byte* ListCopy(byte* block, long item, mut long asked) {\n", "pub byte* ListCopy(byte* block, long item, mut long asked) {\n    asked = 0\n    return null\n}\n\nbyte* CopiedList(byte* block, long item, mut long asked) {\n"));
+
+    [Fact]
+    public void A_chain_and_an_assignment_of_a_member_to_its_variable_build_one_command_in_place()
+    {
+        // S17, section 12, the owner, 2026-11-01, P1: each step of a chain, whose command no other value holds, and `cmd = cmd.Arg(x)`,
+        // which keeps no earlier command, write into the one block, so that a runtime whose every copy of a list fails runs them, and
+        // an argument of such an assignment reads the command as it was before the assignment; a command another value holds is
+        // copied, which that runtime ends with `allocation-failed`, the positive control
+        var text = Program("""
+                out = Command.New("printf").Arg("%s|").Arg("a").Args(["b", "c"]).Env("KURZ_CASE_K", "v").Stdin(Stdio.Null).Output()
+                print(string.FromUtf8(out.Stdout))
+                mut d = Command.New("printf").Arg("%s,")
+                for w in ["p", "q"] {
+                    d = d.Arg(w).Arg("{w}{w}")
+                }
+
+                print(string.FromUtf8(d.Output().Stdout))
+                mut e = Command.New("printf").Arg("%s;")
+                e = e.Arg("1").Arg(Shown(e))
+                print(string.FromUtf8(e.Output().Stdout))
+            """) + "string | IoError | ExitError | InvalidUtf8 Shown(Command c) {\n    return string.FromUtf8(c.Output().Stdout)\n}\n";
+        const string shared = "base = Command.New(\"printf\").Arg(\"%s\")\nmore = base.Arg(\"x\")\nmore.Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n";
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(Compile(text, toolchain.Runtime).Program);
+            return;
+        }
+
+        var runtime = NoCopy();
+        var inPlace = Compile(text, runtime);
+        Assert.True(inPlace.Program is not null, string.Join("; ", inPlace.Diagnostics.Sorted));
+        var ran = Toolchain.Run(toolchain.Build(inPlace.Program, "child-in-place"));
+        Assert.Equal((0, ""), (ran.Code, ran.Error));
+        Assert.Equal(["a|b|c|", "p,pp,q,qq,", "1;;;"], ran.Output); // `Shown(e)` read the command before the chain appended `1`
+        var copied = Compile(shared, runtime);
+        Assert.True(copied.Program is not null, string.Join("; ", copied.Diagnostics.Sorted));
+        var refused = Toolchain.Run(toolchain.Build(copied.Program, "child-copied"));
+        Assert.Equal(1, refused.Code);
+        Assert.StartsWith("error: allocation-failed", refused.Error, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void Output_reads_both_pipes_as_they_fill_so_a_child_that_fills_one_does_not_wait()

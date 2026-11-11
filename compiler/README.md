@@ -1182,8 +1182,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - running a program (S17, S18, S21), in a build for Linux: a `Command` is the block of a list of strings, the program and then
   three strings for each member in the order of its calls, its tag and its two values, which `CommandAdd` of `runtime/common/`
-  appends to a copy of the list, so that the command a member is called on stays as it was; the build copies the list at every
-  member, where S17 reads a change in place of a command no other value holds, which a program cannot tell from a copy.
+  appends through a `mut` list. A member takes over the result of the member before it in a chain, which no other value holds,
+  and changes it in place, and `cmd = cmd.Arg(x)` appends to the variable itself, its members' arguments read before the first
+  append; a command another value holds is copied by the first `Add`, as a list a write finds shared is (M3), so that it stays as
+  it was (section 12, the owner, 2026-11-01, P1).
   `Output()` and `Status()` call `CommandOutput` and `CommandStatus` of the Linux file, which apply the members in their order,
   the later one winning, refuse a NUL byte before any call of the system, lay out the arguments, the environment and the places
   the program is looked up in in one region mapped before the `fork`, so that the child allocates nothing, move a descriptor
@@ -1196,7 +1198,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a pipe the call does not read is closed at once (S19). The program waits for the child on every path. The result is a
   union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
   `runtime/common/`. A build for Windows says `not supported` to each call on a command. `ChildTests` pins what no case can:
-  both pipes filled past what a pipe holds; the environment a child gets; the places a program is looked up in; the path of a
+  a chain and `cmd = cmd.Arg(x)` built with no copy, under a runtime whose copy of a list fails; both pipes filled past what a
+  pipe holds; the environment a child gets; the places a program is looked up in; the path of a
   start that fails; the descriptors a child gets; its standard input where the program started with its own closed; the
   streams of `Status()` and those `Output()` does not read; the refusal
   for Windows; and a use of a command outside its members;
