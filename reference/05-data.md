@@ -1485,7 +1485,7 @@ flags Many {
     F29 = 268435456,
     F30 = 536870912,
     F31 = 1073741824,
-    F32 = 1 // the bit of 1, the one F1 would hold had it written 1, not 3
+    F32 = 1 // the bit 1, held by no name of one bit: F1's 3 is not one bit
 }
 
 print(Many.F2)
@@ -1534,7 +1534,7 @@ print(Many.F2)
 Case: [data/flags-number-count-unsigned.kz](../corpus/data/flags-number-count-unsigned.kz)
 ```kurz
 flags Many {
-    F1 = 3u,
+    F1 = 3u, // sign-mix in a declaration of at most 31 names, its type read before its bit
     F2 = 2,
     F3 = 4,
     F4 = 8,
@@ -1574,7 +1574,7 @@ print(Many.F2)
 Case: [data/flags-number-count-real.kz](../corpus/data/flags-number-count-real.kz)
 ```kurz
 flags Many {
-    F1 = 1.5,
+    F1 = 1.5, // type-mismatch in a declaration of at most 31 names, its type read before its bit
     F2 = 2,
     F3 = 4,
     F4 = 8,
