@@ -10,8 +10,8 @@ metadata:
 Before a change that a person sees, a session answers a fixed questionnaire and posts it on the
 issue as the comment "Product pass", as the instructions sessions follow here ask (they are kept
 outside this repository; issue 174, comment 6784467506, is one such pass). Each open question in it
-carries a default and is tagged with whose the answer is: the session's, which takes the default,
-or the owner's, whose default a step may build only marked *(assumed)* while the question waits for
+carries a default and is tagged with whose the answer is: the session's, whose default it takes only
+after it has read every owner comment the record's clause cites, or the owner's, whose default a step may build only marked *(assumed)* while the question waits for
 the owner.
 On 2026-11-11 two picks of the owner's were taken by the session:
 
@@ -23,18 +23,21 @@ On 2026-11-11 two picks of the owner's were taken by the session:
   which had reached no pull request, was turned around: the members append through a `mut` list,
   and a chain takes over its temporary (issue 174, comment 6785704771, which corrected the pass's
   question 2 and names the build's test: a chain and `cmd = cmd.Arg(x)` run under a runtime whose
-  every copy of a list fails). No test on `main` runs that build: a search of the tests of `main` at
-  80e72a58, on 2026-11-11, finds none.
+  every copy of a list fails). No test on `main` runs that build: on 2026-11-11, at eb505fb6,
+  `compiler/Kurz.Compiler.Tests` holds no `.Arg(`, and the corpus's cases with a chain of `Arg`
+  (`system/command-nul.kz`, `command-output.kz`, `command-reuse.kz`, `command-timeout.kz` and
+  `spawn-kill.kz`) are not built, since `CorpusTests` lists S17 to S21 among the rules outside the
+  checker.
 - **A question for the owner answered by the session.** In the follow-up of pull request 451, the
   questionnaire (issue 174, comment 6784467506) gave two questions to the owner: the text of
   thirteen names that are no value (its question 1), and that text's scope (question 3). The
   session answered both itself, as "conventions of the compiler's texts, not picks of the language"
-  (comment 6784467838), and never put them to the owner. The acceptance judge of pull request 461,
-  in its row "A decided statement cites the owner", asked whether that text stood, since it rested
-  on the session's comments and not on the owner's choice. The session put the question to the
-  owner (issue 174, comment 6792186732), and the owner answered at once, "As built, 13 names"
-  (comment 6792215957); the judge's table was posted on pull request 461 after that answer (comment
-  6792226339).
+  (comment 6784467838), and did not put them to the owner until the judge asked. The acceptance
+  judge of pull request 461, in its row "A decided statement cites the owner" (its table, posted
+  later as comment 6792226339), asked whether that text stood, since it rested on the session's
+  comments and not on the owner's choice. The session put the question to the owner (issue 174,
+  comment 6792186732), and the owner answered at once, "As built, 13 names" (comment 6792215957);
+  the judge's table was posted on pull request 461 after that answer.
 
 ## How to apply
 
@@ -51,4 +54,4 @@ On 2026-11-11 two picks of the owner's were taken by the session:
 Gate: `judgment step`. The questionnaire reads the record's text and not the comments the text
 cites. The acceptance judge's row "A decided statement cites the owner", one of the questions the
 judge answers on every change a person sees, before it leaves Draft, as the same instructions ask
-(as on pull request 461, comment 6792226339), catches the second shape, but only after the build.
+on 2026-11-11 (as on pull request 461, comment 6792226339), catches the second shape, but only after the build.
