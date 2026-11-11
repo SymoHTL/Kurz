@@ -1208,7 +1208,7 @@ enum whose declaration writes no number is `enum-number`, and so is a number tha
 expression, while a constant of another type gets the error a value of that type gets where an `int`
 is required (T1): `type-mismatch` for `1.5` or `"two"`, `narrowing-conversion` for `5L` and
 `sign-mix` for `2u` *(assumed: as §4 marks them)*. The text of a number that is not a constant says
-so, then the rule: "the number of `Gold` is no constant: a name's number is a constant expression of
+so, then the rule: "the number of `Pro` is no constant: a name's number is a constant expression of
 type `int`, a literal or literals that T6 folds (D20)" (§4, the owner, 2026-11-11, issue 452, "'is no
 constant', both").
 
