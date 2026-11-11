@@ -74,6 +74,12 @@ public enum CallKind
     /// <summary><c>Plan.From(n)</c> (D18), the value of the <c>enum</c> whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the enum.</summary>
     EnumFrom,
 
+    /// <summary><c>Access.From(n)</c> (D19), the set of the <c>flags</c> type whose number is <c>n</c> or the case <c>Invalid</c>; <see cref="CallInfo.Target"/> is the flags type.</summary>
+    FlagsFrom,
+
+    /// <summary>A set's <c>Has(flag)</c> (D13, D17): whether it holds every name of <c>flag</c>.</summary>
+    FlagsHas,
+
     /// <summary>A list's <c>Clear</c> (M9).</summary>
     ListClear,
 
@@ -199,6 +205,18 @@ public enum CallKind
 
     /// <summary>A file's <c>Lines()</c>, the collection of a <c>for</c> loop (S16).</summary>
     FileLines,
+
+    /// <summary><c>Stdin.Lines()</c>, the collection of a <c>for</c> loop (S22).</summary>
+    StdinLines,
+
+    /// <summary><c>Stdin.Read(mut into, max)</c> (S22).</summary>
+    StdinRead,
+
+    /// <summary><c>Stdin.ReadLine()</c> (S22).</summary>
+    StdinReadLine,
+
+    /// <summary><c>Stdin.ReadAll()</c> (S22).</summary>
+    StdinReadAll,
 
     /// <summary><c>TcpListener.Bind(address)</c> (S9).</summary>
     TcpBind,
@@ -483,6 +501,9 @@ public sealed class SemanticModel
 
     /// <summary>Whether the file holds a log call the checker read, so that the program reads <c>KURZ_LOG</c> at its start (P4).</summary>
     public bool HasLogSites => logSites.Count > 0;
+
+    /// <summary>Whether the file holds a call on <c>Stdin</c> the checker read, so that the program declares the handle of its standard input (S22).</summary>
+    public bool ReadsStdin => calls.Values.Any(i => i.Kind is CallKind.StdinLines or CallKind.StdinRead or CallKind.StdinReadLine or CallKind.StdinReadAll);
 
     internal void RecordLogSite(CallExpression call, LogSite site) => logSites[call] = site;
 

@@ -97,9 +97,9 @@ public sealed partial class Checker
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
 
-        if (model.HasCall(c) && model.CallOf(c).Kind == CallKind.FileLines)
+        if (model.HasCall(c) && model.CallOf(c).Kind is CallKind.FileLines or CallKind.StdinLines)
         {
-            return result; // S16: the loop takes the cases of `f.Lines()`, after its `else` (CheckForIn)
+            return result; // S16, S22: the loop takes the cases of `f.Lines()` and `Stdin.Lines()`, after its `else` (CheckForIn)
         }
 
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
@@ -244,6 +244,13 @@ public sealed partial class Checker
                         // D18: the value of a number is `Plan.From(n)`, against C#'s cast, which the option wrote `Plan(2)` and C# writes
                         // `(Plan)2` (section 4, the owner, 2026-10-02)
                         Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is an enum, and the value of a number is `{n.Name}.From(n)` (D18)");
+                        CheckArgumentsLoosely(c);
+                        return Typed.Error;
+                    }
+
+                    if (flagsTypes.ContainsKey(n.Name))
+                    {
+                        Report(ErrorIds.Syntax, n.Line, $"`{n.Name}` is a flags type, and the set of a number is `{n.Name}.From(n)` (D19)");
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
                     }
@@ -893,6 +900,41 @@ public sealed partial class Checker
         return symbol.Refused ? Typed.Error : typed;
     }
 
+    /// <summary>
+    /// D19: <c>Access.From(n)</c>, the set whose number is <c>n</c>, an <c>int</c>, or the case <c>Invalid</c> where <c>n</c> has a bit
+    /// that no name has, an outcome (O1); 0 has no such bit, so it gives the set that holds nothing.
+    /// </summary>
+    private Typed CheckFlagsFrom(FlagsSymbol symbol, CallExpression c)
+    {
+        if (RefusesTypeArguments(c, $"`{symbol.Name}.From`"))
+        {
+            return Typed.Error;
+        }
+
+        var type = new FlagsType(symbol);
+        var result = new UnionType([type, new DataType(dataTypes["Invalid"], [])]);
+        var candidate = new Candidate { Slots = [new Slot("number", Types.Int, false, false, false)], Result = result };
+        var typed = Call([candidate], c, null, out var picked);
+        if (picked is not null && !typed.IsError)
+        {
+            model.RecordCall(c, new CallInfo(CallKind.FlagsFrom, null, null, type, NoMap, picked.Binding, 1, result));
+        }
+
+        return symbol.Refused ? Typed.Error : typed;
+    }
+
+    /// <summary>D13, D17: <c>set.Has(flag)</c>, true when the set holds every name of <c>flag</c>, as C#'s <c>HasFlag</c>, whose parameter's name it takes.</summary>
+    private Typed CheckFlagsHas(CallExpression c, FlagsType flags)
+    {
+        if (RefusesTypeArguments(c, "`Has`"))
+        {
+            return Typed.Error;
+        }
+
+        var candidate = new Candidate { Slots = [new Slot("flag", flags, false, false, false)], Result = Types.Bool, Form = $"bool Has({flags} flag)" };
+        return Record(c, CallKind.FlagsHas, Call([candidate], c, null, out var picked), picked);
+    }
+
     /// <summary>M9: <c>List&lt;T&gt;()</c> makes an empty list.</summary>
     private Typed CheckListConstruction(CallExpression c)
     {
@@ -1455,6 +1497,11 @@ public sealed partial class Checker
                 return CheckEnvironmentFunction(m, c); // S13, S14
             }
 
+            if (n.Name == "Stdin")
+            {
+                return CheckStdinFunction(m, c); // S22
+            }
+
             if (n.Name == "Log")
             {
                 return CheckLogFunction(m, c); // P1, P2
@@ -1478,6 +1525,18 @@ public sealed partial class Checker
                 }
 
                 Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no function `{m.Member}`: an enum's one is `From` (D18, V10)");
+                CheckArgumentsLoosely(c);
+                return Typed.Error;
+            }
+
+            if (flagsTypes.TryGetValue(n.Name, out var flagsSymbol))
+            {
+                if (m.Member == "From")
+                {
+                    return CheckFlagsFrom(flagsSymbol, c); // D19
+                }
+
+                Report(ErrorIds.UnknownName, m.Line, $"`{n.Name}` has no function `{m.Member}`: a flags type's one is `From` (D19, V10)");
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
             }
@@ -1525,6 +1584,11 @@ public sealed partial class Checker
         if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Contains" or "StartsWith" or "EndsWith" or "IndexOf")
         {
             return CheckStringSearch(c, m);
+        }
+
+        if (target.Type is FlagsType flags && m.Member == "Has")
+        {
+            return CheckFlagsHas(c, flags); // D13, D17
         }
 
         if (target.Type is PrimitiveType { Kind: Primitive.String } && m.Member is "Trim" or "TrimStart" or "TrimEnd" or "TrimAscii" or "TrimStartAscii" or "TrimEndAscii" or "Split" or "Replace" or "ToLower" or "ToUpper" or "ToLowerAscii" or "ToUpperAscii" or "Substring")

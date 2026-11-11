@@ -35,6 +35,9 @@ public sealed record UnitConstant : Constant;
 /// <summary>A value of an <c>enum</c> (D12), by its place among the values its declaration writes, which F12 counts as a constant as it counts the value of a <c>data</c> type without fields (section 4).</summary>
 public sealed record EnumConstant(int Index) : Constant;
 
+/// <summary>A set of a <c>flags</c> type (D13, D17), by the bits of the names it holds, which F12 counts as a constant as it counts the value of an <c>enum</c>.</summary>
+public sealed record FlagsConstant(int Bits) : Constant;
+
 /// <summary><c>null</c>, which F12 counts as a constant; the checker types it as a pointer alone (R10).</summary>
 public sealed record NullConstant : Constant;
 

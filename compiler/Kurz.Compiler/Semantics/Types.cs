@@ -160,6 +160,16 @@ public sealed record EnumType(EnumSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>A <c>flags</c> type (D13), one type per declaration, whose value is a set of its names, held as the bits of an <c>int</c>.</summary>
+public sealed record FlagsType(FlagsSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(FlagsType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>The handles of chapter 13, each a name every file sees.</summary>
 public enum Handle
 {
@@ -494,6 +504,7 @@ public static class Types
             (MapType x, MapType y) => Same(x.Key, y.Key) && Same(x.Value, y.Value),
             (DataType x, DataType y) => ReferenceEquals(x.Symbol, y.Symbol) && AllSame(x.TypeArguments, y.TypeArguments),
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (FlagsType x, FlagsType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (InterfaceType x, InterfaceType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),

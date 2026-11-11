@@ -164,6 +164,7 @@ public sealed partial class Emitter
             DefineStatic(v); // after the layout knows which data types are blocks
         }
 
+        DeclareStdin(); // S22: the handle of standard input, of a program that reads it, before any code that reads it
         unit = program;
         Begin(new IrFunction("internal void @kz.main()"), NoMap, Types.Void);
         topLevel = fn;
@@ -859,6 +860,12 @@ public sealed partial class Emitter
         if (Unwrap(f.Collection) is CallExpression call && Model.CallOf(call).Kind == CallKind.FileLines)
         {
             EmitForInLines(f, call);
+            return;
+        }
+
+        if (Unwrap(f.Collection) is CallExpression stdin && Model.CallOf(stdin).Kind == CallKind.StdinLines)
+        {
+            EmitForInStdinLines(f, stdin);
             return;
         }
 

@@ -1289,8 +1289,10 @@ declaration can write the number of each name, which is the value of its bit, as
 and so on, in their order. `set.Number` is the sum of the numbers the set holds.
 `Access.From(5)` is the set with that number, and `Invalid` when the number has a bit that no
 name has. A number written for a name that is not one bit (`0`, `3`), a bit written for two
-names, a declaration with more names than the `int` has bits (31 names, the sign bit excluded),
-and a name `None`, which D17 gives every flags type, are the compile error `flags-number`.
+names, a declaration that writes a number for some names and not for all or a number that is not
+a constant expression (as D20 says of an `enum`), a declaration with more names than the `int` has
+bits (31 names, the sign bit excluded), and a name `None`, which D17 gives every flags type, are
+the compile error `flags-number`.
 *(proposed)*
 
 Case: [data/flags-not-one-bit.kz](../corpus/data/flags-not-one-bit.kz)
