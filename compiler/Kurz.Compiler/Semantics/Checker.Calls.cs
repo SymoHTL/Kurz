@@ -187,9 +187,9 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (n.Name == "print")
+                    if (n.Name is "print" or "eprint")
                     {
-                        return CheckPrint(c);
+                        return CheckPrint(c, n.Name);
                     }
 
                     if (Types.ByName.TryGetValue(n.Name, out var primitive))
@@ -419,16 +419,17 @@ public sealed partial class Checker
         return Record(c, CallKind.Value, Call([candidate], c, null, out var picked), picked);
     }
 
-    private Typed CheckPrint(CallExpression c)
+    /// <summary>A1, A17: <c>print(value)</c> and <c>eprint(value)</c>, which the same rules hold; <paramref name="name"/> is the one called.</summary>
+    private Typed CheckPrint(CallExpression c, string name)
     {
-        if (RefusesTypeArguments(c, "`print`"))
+        if (RefusesTypeArguments(c, $"`{name}`"))
         {
             return new Typed(Types.Void);
         }
 
         if (c.Arguments.Count != 1 || c.Arguments[0].Name is not null)
         {
-            Report(ErrorIds.ArgumentMismatch, c.Line, "`print` takes one value (A1)");
+            Report(ErrorIds.ArgumentMismatch, c.Line, $"`{name}` takes one value (A1)");
             CheckArgumentsLoosely(c);
             return new Typed(Types.Void);
         }
@@ -436,7 +437,7 @@ public sealed partial class Checker
         var argument = c.Arguments[0];
         if (argument.Mut)
         {
-            Report(ErrorIds.MutAtCall, argument.Line, "`print` changes nothing: no `mut` before its argument (M7)");
+            Report(ErrorIds.MutAtCall, argument.Line, $"`{name}` changes nothing: no `mut` before its argument (M7)");
             CheckArgumentsLoosely(c); // the call's own error: nothing more about it (E1)
             return new Typed(Types.Void);
         }
@@ -467,7 +468,7 @@ public sealed partial class Checker
             NotSupported(c.Line, "the text of a raw pointer or of a C function value, which no rule gives (A4, R10, R17)");
         }
 
-        model.RecordCall(c, new CallInfo(CallKind.Print, null, null, null, NoMap, [0], 1, Types.Void));
+        model.RecordCall(c, new CallInfo(name == "print" ? CallKind.Print : CallKind.ErrorPrint, null, null, null, NoMap, [0], 1, Types.Void));
         return new Typed(Types.Void);
     }
 

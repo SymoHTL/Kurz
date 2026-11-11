@@ -550,7 +550,9 @@ run-time table, the file named as the command line gave it, and `error: thrown a
 a `throw`, with the thrown value's text on the line below it. A `print` passes its file and its line
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
-2026-10-23, "Caller passes it"). An allocation the system refuses ends the process with
+2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
+standard output; where its write failed, the write of the error line fails too and is dropped, and the
+process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
 size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
 thread's first map on a system that gives no randomness for the keys of its hash ends the process with
@@ -1209,7 +1211,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of its environment, which holds the values the lambda read when it was made (F15); a lambda that
   reads no variable has none and allocates nothing, and a call of a function value calls its code
   with its environment (section 4, the owner, 2026-10-25, "Pair + heap env");
-- `print` and the text of a value in a string's holes (A1, A2, A8, L6), `==` on strings by
+- `print`, `eprint`, which writes the same line to standard error (A17), and the text of a value in
+  a string's holes (A1, A2, A8, L6), `==` on strings by
   their bytes (T18), and `<`, `<=`, `>` and `>=` on strings by the first byte in which they differ,
   the shorter first where one starts the other, which in UTF-8 is the order of their code points (T32), the
   runtime's `Same` and `Order` comparing the first byte first, `Order` taking the difference of two that differ
@@ -1629,7 +1632,8 @@ every function for both targets.
 Each is a reading of this directory, not a decision. A test pins each one, and a design round can
 ask about it.
 
-- A `print` hands its line to one write call, called again for what a call did not take, through a
+- A `print` or an `eprint` hands its line to one write call, called again for what a call did not
+  take, through a
   buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
 - P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
@@ -2015,8 +2019,8 @@ compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a t
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
-`ExitStatus`, `Stdio`, `ExitError`, `Stdin` and `eprint`, under which processes, standard input and standard
-error stand, and which every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22, A17);
+`ExitStatus`, `Stdio`, `ExitError` and `Stdin`, under which processes and standard input stand, and which
+every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22);
 `Environment.Exit`, after which no path goes on (S23); a `return` with a value among the top-level statements (F17); a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of

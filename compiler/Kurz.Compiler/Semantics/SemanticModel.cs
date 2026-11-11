@@ -17,6 +17,9 @@ public enum CallKind
     /// <summary><c>print(value)</c> (A1).</summary>
     Print,
 
+    /// <summary><c>eprint(value)</c>, which writes to standard error (A17).</summary>
+    ErrorPrint,
+
     /// <summary>A conversion written as a call of a number or time type (T10); <see cref="CallInfo.Target"/> is that type.</summary>
     Conversion,
 

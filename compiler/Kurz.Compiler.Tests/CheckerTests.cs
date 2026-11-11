@@ -456,6 +456,19 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void An_eprint_takes_what_a_print_takes_and_refuses_what_it_refuses()
+    {
+        // A17 with A1: `print`'s rules, each refusal naming `eprint`; V9 and F11: a name every file sees, and no value
+        Clean("eprint(1)\nx = 2\neprint(\"text {x}\")\neprint(x)");
+        Assert.Equal("`eprint` takes one value (A1)", ErrorText("eprint(1, 2)"));
+        Assert.Equal("`eprint` changes nothing: no `mut` before its argument (M7)", ErrorText("mut x = 1\neprint(mut x)"));
+        Assert.Equal([(ErrorIds.NoText, 2)], Errors("f = (int x) => x\neprint(f)"));
+        Assert.Equal([(ErrorIds.Syntax, 3)], Errors("void Say() {\n}\neprint(Say())")); // O10
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("f = eprint\nprint(1)"));
+        Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("eprint = 1\nprint(1)"));
+    }
+
+    [Fact]
     public void A_conversion_is_a_call_of_a_number_type_with_one_argument()
     {
         // T10, T13, T20, T26, T29; L17: the target reaches the integer literals inside, so `double(1 / 2)` is 0.5; M7: `mut` before the argument
