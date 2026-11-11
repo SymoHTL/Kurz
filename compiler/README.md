@@ -1145,11 +1145,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the process goes through: `Stdin.Read` reads as a file's `Read` does, `for line in Stdin.Lines()` pulls as a loop over a file's
   lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
   the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
-  its end, with room for 8192 more bytes made before each read; each is a call in flight. The module declares the handle where a
-  file of the program calls a member of `Stdin`, and a build for Windows says `not supported` to each such call and loop.
-  `StdinTests` pins what no case can: lines given on standard input and read across a loop, `ReadLine`, `Read` and `ReadAll`; a
-  line that is not UTF-8; a closed descriptor 0; and the refusal for Windows. The suite runs every program with a standard input
-  closed at its start (`Processes.Capture`), as chapter 0 runs a case;
+  its end, with room for 8192 more bytes made before each read; each is a call in flight. A read that gives the system's error 9,
+  of a descriptor 0 the caller closed, gives the end of the input (`EndAtClosedStdin`), as Rust's `handle_ebadf` does. Where the
+  read of `ReadAll` fails otherwise, the bytes it took go back to the reader's buffer from its start (`KeepRest`), made again with
+  room for them where it has less, and the handle keeps that room after a handle's fields, so that the next one frees it with its
+  size. The module declares the handle where a file of the program calls a member of `Stdin`, and a build for Windows says
+  `not supported` to each such call and loop. `StdinTests` pins what no case can: lines given on standard input and read across a
+  loop, `ReadLine`, `Read` and `ReadAll`; a line that is not UTF-8; a closed descriptor 0, and a directory, whose read fails; a
+  `ReadAll` whose stream is reset after a line and more, which `python3` puts on descriptor 0; and the refusal for Windows. The suite runs every program with an empty pipe
+  whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1908,7 +1912,7 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16 and S22; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16, S22 and S25; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
