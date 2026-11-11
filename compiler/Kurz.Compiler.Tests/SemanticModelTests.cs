@@ -761,9 +761,12 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case TypeDeclaration t:
                     Need(Try(() => model.DataTypeOf(t)), t.Line, $"type `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
-                    foreach (var member in t.Members ?? [])
+                    if (Try(() => model.DataTypeOf(t)))
                     {
-                        Statement(member);
+                        foreach (var method in model.DataTypeOf(t).Methods.Values.SelectMany(m => m))
+                        {
+                            Statement(method.Real!.Declaration!); // D16: a code generator reads the function each method is checked as, never the body as written
+                        }
                     }
 
                     break;

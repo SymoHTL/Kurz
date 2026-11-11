@@ -25,6 +25,14 @@ public static class SyntaxCopy
     public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
         (Block)new Copier(null, rewrite, copied).Statement(b);
 
+    /// <summary>
+    /// As the block's copy above, where <paramref name="statements"/> also gives a statement its own: it is shown each statement before
+    /// its copy, with the copier for the expressions inside it, and returns the statement to stand in its place or null for the copy.
+    /// D16: the body of a method of a <c>data</c> type, in which <c>Count = Count + 1</c> assigns the field of the value it was called on.
+    /// </summary>
+    public static Block Copy(Block b, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Func<Statement, Func<Expression, Expression>, Statement?> statements) =>
+        (Block)new Copier(null, rewrite, statementRewrite: statements).Statement(b);
+
     /// <summary>As the block's copy above, of an expression: T33, an argument of the call <c>T.Make(f => ...)</c> becomes, its lambda's body for one field.</summary>
     public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Action<Expression, Expression>? copied = null) =>
         new Copier(null, rewrite, copied).Expression(e);
@@ -38,7 +46,7 @@ public static class SyntaxCopy
     /// <summary>Shows <paramref name="visit"/> every expression of a statement.</summary>
     public static void Walk(Statement s, Action<Expression> visit) => new Copier(visit).Statement(s);
 
-    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Expression, Expression>? copied = null, Action<Statement>? statements = null)
+    private sealed class Copier(Action<Expression>? visit, Func<Expression, Func<Expression, Expression>, Expression?>? rewrite = null, Action<Expression, Expression>? copied = null, Action<Statement>? statements = null, Func<Statement, Func<Expression, Expression>, Statement?>? statementRewrite = null)
     {
         public FunctionDeclaration Function(FunctionDeclaration d) => d with
         {
@@ -133,7 +141,9 @@ public static class SyntaxCopy
 
         private Block Block(Block b) => b with { Statements = b.Statements.Select(Statement).ToList() };
 
-        public Statement Statement(Statement s) => Seen(s) switch
+        public Statement Statement(Statement s) => statementRewrite?.Invoke(s, Expression) ?? Copied(Seen(s));
+
+        private Statement Copied(Statement s) => s switch
         {
             Block b => Block(b),
             VariableDeclaration v => v with { Type = OptionalType(v.Type), Value = Optional(v.Value) },
