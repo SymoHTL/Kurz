@@ -32,7 +32,7 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
   takes a resolution made for another branch without anyone reading it.
 - **The standing approval covers a conflict only of the kinds it names.** The over-red rule of
   `CLAUDE.md` names them, and it is their definition; each came with an answer of the owner's on
-  issue 39, the last on pull request 385:
+  issue 39, the last on pull request 460:
   - text whose two sides changed different words, every word kept (2026-11-06, comment
     6680237539);
   - the floor of `RunTests` (2026-11-06, comment 6680659012), held to the bound the rule sets:
@@ -44,6 +44,9 @@ On 2026-11-05 two takes of `main` came out with conflicts that git had already r
   - a block whose sides have different line counts, read line by line, in which the sides changed
     different lines or both added items at the end of one list, every line kept (2026-11-07,
     comment 6710283110);
+  - a chain of calls or a list whose two sides only added or removed different whole lines at its
+    end, every added line kept, every removed one dropped, the end mark moved to the line that ends
+    up last (2026-11-11, pull request 460, comment 6792362885);
   - the numbers `tools/quality_evidence.py` generates in `guides/quality-bar-evidence.md`, nothing
     else of that file, resolved by that tool on the merged tree with the gate `knowledge` green
     (2026-11-09, pull request 385, comment 6735260898).
