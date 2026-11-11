@@ -113,7 +113,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets and the reads of the command line, the environment and the clock. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 467 : 572;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 468 : 572;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -151,9 +151,6 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
     ];
 
-    /// <summary>The cases of the exit code that expect a run and read no argument, which a build for Windows says <c>not supported</c> to (S11, S23); the cases of F17 read the command line, and are among <see cref="ProcessCases"/>.</summary>
-    private static readonly string[] ExitCases = ["system/exit-in-function.kz"];
-
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>
     private static readonly string[] LogCases = ["logging/off-runs-no-hole.kz"];
 
@@ -165,8 +162,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
     }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
-        .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : [])
-        .Concat(OperatingSystem.IsWindows() ? ExitCases.Select(c => KeyValuePair.Create(c, Emitter.ExitNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
+        .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : []).ToDictionary(StringComparer.Ordinal);
 
     /// <summary>Cases the emitter lays out whose expectation the build does not hold, each with why.</summary>
     private static readonly Dictionary<string, string> NotRun = OperatingSystem.IsWindows()

@@ -1143,13 +1143,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a variable set, empty, not set, not UTF-8 and of a name that is empty or holds `=` or a NUL byte,
   the clock against the test's, the time of a file and of a directory at both edges of a
   `timestamp`, and the refusal for Windows;
-- the exit code (S23, F17), in a build for Linux: `Environment.Exit(code)` and a `return` with an `int` among the
-  top-level statements call the target's `Exit` with the code, the C library's `_exit`, which runs none of its handlers, and the
-  block ends there; the code is held to `int` as anywhere an `int` is required, a narrower integer widened (T23), a wider
+- the exit code (S23, F17), in a build for Linux and for Windows: `Environment.Exit(code)` and a `return` with an `int` among
+  the top-level statements call the target's `Exit` with the code, on Linux the C library's `_exit`, which runs none of its
+  handlers, on Windows `ExitProcess`, which takes the code's 32 bits, read through a pointer so that no conversion checks a
+  negative one, and the block ends there; the code is held to `int` as anywhere an `int` is required, a narrower integer widened (T23), a wider
   one `narrowing-conversion` (T7), a `uint` `sign-mix` (T23) and a value of any other type `type-mismatch` (T1), each
   refusal at the line of the value (E1). `ProcessTests` pins what no case can, since a case that expects output ends with 0: the code
-  from the top level and from a function, the low 8 bits of 256, 257 and -1, a narrower integer widened, a bare `return`, the
-  lines printed before the end and none after it, the refusals, and the refusal for Windows at either form;
+  from the top level and from a function, the low 8 bits of 256, 257 and -1 and on Windows their 32 bits, a narrower integer
+  widened, a bare `return`, the lines printed before the end and none after it, the refusals, and a build for Windows of either
+  form, made on any machine;
 - logging (P1 to P7 and P9), in a build for Linux: a program with a log call in one of its files reads
   `KURZ_LOG` alone, since the compiler builds no settings type whose `Logging` part P4 has win, through
   `Variable` before its first statement, after `args`, and hands it to `LogFilter`,

@@ -2774,8 +2774,8 @@ public sealed partial class Checker
     /// F17: a <c>return</c> with a value among the top-level statements ends the program with that value as its exit code, an <c>int</c>
     /// (section 12, the owner, 2026-11-01, "Top-level return n + Exit"), held to it as anywhere an <c>int</c> is required: a narrower integer
     /// widens (T23), a wider one is <c>narrowing-conversion</c> (T7), a <c>uint</c> <c>sign-mix</c> (T23) and any other type
-    /// <c>type-mismatch</c> (T1), the record's assumed clause of section 12, whose <c>narrowing-conversion</c> is put to the owner on pull
-    /// request 449 (comment 6781469089). Both refusals stand at the value's line, the smallest part that is wrong (E1).
+    /// <c>type-mismatch</c> (T1) (section 12, the owner, 2026-11-11, "narrowing-conversion", pull request 449, comment 6781469089). Both
+    /// refusals stand at the value's line, the smallest part that is wrong (E1).
     /// </summary>
     private void CheckExitCode(ReturnStatement r)
     {

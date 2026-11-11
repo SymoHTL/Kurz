@@ -1252,9 +1252,10 @@ its exit code, and the end of the top-level code, and a bare `return` among its 
 return n + Exit" and "0, silently"). The value is held to `int` as anywhere an `int` is required: a
 narrower integer widens into it, `byte`, `short` and `ushort` (T23); a wider integer is
 `narrowing-conversion`, whatever its signedness (T7); a `uint` is `sign-mix` (T23); and a value of any
-other type is `type-mismatch` (T1). Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
-for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
-`Environment.Exit`. *(assumed, §12: the type, held as any `int` is, a wider integer's `narrowing-conversion` among it, put to the owner on pull request 449 and unanswered, the low 8 bits and Windows)*
+other type is `type-mismatch` (T1) (§12, the owner, 2026-11-11, "narrowing-conversion"). Linux takes the
+low 8 bits of the value, as of `Environment.Exit`'s (S23), and Windows its 32 bits (§12, the owner,
+2026-11-11, "Build it for Windows"). *(assumed, §12: the low 8 bits, and a negative value's bits on
+Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 
