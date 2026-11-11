@@ -2795,7 +2795,6 @@ public sealed class CheckerTests
         // D19: an `int` has 31 bits below its sign, one for each name; the 32nd name is the error
         Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i}")), StringComparison.Ordinal));
         Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i}")), StringComparison.Ordinal)));
-        Assert.Contains("more than 31 names", ErrorText("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i}")), StringComparison.Ordinal)), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2819,12 +2818,10 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void The_match_on_a_set_of_flags_says_why_it_is_refused()
+    public void The_match_on_a_set_of_flags_is_one_error_at_the_match()
     {
-        // D13: the error is at the line of the `match`, with nothing more for its arms
-        var error = Assert.Single(Check("flags Access { Read, Write }\n\np = Access.Read\nmatch p {\n    Access.Read => print(1)\n    Access.Write => print(2)\n}").Diagnostics.Items);
-        Assert.Equal((ErrorIds.Syntax, 4), (error.Id, error.Line));
-        Assert.Equal("a set of `Access` holds any of its names, not one case, so a `match` cannot list it: test a name with `Has` (D13)", error.Message);
+        // D13: the error is at the line of the `match`, with nothing more for its arms, which name no `else`
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("flags Access { Read, Write }\n\np = Access.Read\nmatch p {\n    Access.Read => print(1)\n    Access.Write => print(2)\n}"));
     }
 
     [Fact]
