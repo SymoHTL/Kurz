@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 6
+// rules: D13
+
+flags Access { Read, Write, Run }
+
+print(Access.Read < Access.Write)

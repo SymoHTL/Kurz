@@ -320,7 +320,7 @@ public sealed class StdinTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var text = $"{refused}(\"into nothing\")\n{after}(\"after\")\n";
         if (Builder.HostTarget == Target.Windows)
         {
-            // the owner's answer names Linux: on Windows the program builds, and a refused write stays `print-failed`
+            // Linux alone, assumed in section 12: on Windows this checks only that the program builds
             Assert.NotNull(Compile(text, toolchain.Runtime).Program);
             return;
         }

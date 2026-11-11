@@ -1606,7 +1606,8 @@ Report(Find(2))
 A generic function (T19) reads the type each of its copies is made for, while the program compiles,
 through members of a type parameter, as Zig's `@typeInfo` reads a type. `T.Kind` is the kind of the
 type: a number type, `string`, `bool`, a list, a map, a nullable form, a `data` type, an `enum` or a
-union, and a `match` on it tells the kinds apart. A loop over `T.Fields` walks a `data` type's
+union, and a `match` on it tells the kinds apart; a `flags` type is of the kind `TypeKind.Enum`, as
+C#'s `[Flags]` type is an enum (§4, the owner, 2026-11-11, issue 452, "All as built"). A loop over `T.Fields` walks a `data` type's
 fields in the order of their declaration, unrolled in each copy: `f.Name` is a constant `string`,
 `f.Type` stands as a type argument, and `f.Get(value)` is the field's value, typed as the field.
 `T.Make(f => ...)` makes a value of a `data` type: it is unrolled into one call of the type's

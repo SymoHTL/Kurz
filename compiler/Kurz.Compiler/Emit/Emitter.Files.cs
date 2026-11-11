@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
@@ -43,7 +44,7 @@ public sealed partial class Emitter
     /// buffer a <c>ReadAll</c> that failed part-way made for what it kept (<see cref="KeepRest"/>), so that the next one frees it with its
     /// size.
     /// </summary>
-    private const int StdinRoom = 56;
+    private static readonly int StdinRoom = int.Parse(HandleSize, CultureInfo.InvariantCulture);
 
     /// <summary>S22: the path an <c>IoError</c> of standard input names (section 12, assumed).</summary>
     private const string StdinPath = "<stdin>";
