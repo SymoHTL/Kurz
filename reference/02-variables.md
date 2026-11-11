@@ -156,7 +156,11 @@ A variable is visible from its declaration to the end of the block that holds th
 A name that is not visible is the compile error `unknown-name`. This differs from C#, where a
 local is in scope in its whole block, the text before its declaration included, so that a `y`
 declared inside an inner block and a `y` declared after it in the outer block collide; here they
-are two variables, because the first is no longer visible when the second is declared.
+are two variables, because the first is no longer visible when the second is declared. A name every
+file sees that is called on and is no value, `Stdin` (S22) and the thirteen of §12, `File` among them,
+written as a value is `unknown-name` with a text of its own, "`File` is no value: its functions are
+called on it (S2, S6 to S9, S15, V10)", not this one *(decided, §12: the owner, 2026-11-11, "As built,
+13 names")*.
 
 Case: [variables/block-scope.kz](../corpus/variables/block-scope.kz)
 ```kurz
