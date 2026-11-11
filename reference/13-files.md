@@ -2717,12 +2717,16 @@ goes on where the loop stopped. A read waits until the other end writes or close
 runs as a call on a file does (S10). `Stdin` has no `Close`; its `IoError` names the path `<stdin>`; a read
 needs no grant (S12); a file's own declaration of `Stdin` is `redeclared` (V9); and a build for Windows
 says `not supported` to it (S11). *(assumed, §12: the reading of the lines as a file's, `ReadAll`'s
-result, the wait of a read, no `Close`, the path, the grant, the name and Windows)* A read of a
-descriptor 0 that the program's caller closed is the end of the input: `ReadLine` gives `null`,
-`ReadAll` an empty `Bytes`, `Read` 0, and a loop runs no round, as Rust's `handle_ebadf` reads it
-(§12, the owner, 2026-11-11, "End of input"). A `ReadAll` whose read fails gives its `IoError` and
-consumes nothing: the bytes it took are the next read's (§12, the owner, 2026-11-11, "Keep for next
-read").
+result, the wait of a read, no `Close`, the path, the grant, the name and Windows)* A read of
+standard input that the system fails with its error 9 (`EBADF`), a descriptor 0 open for writing
+alone among them, is the end of the input: `ReadLine` gives `null`, `ReadAll` an empty `Bytes`,
+`Read` 0, and a loop runs no round, as Rust's `handle_ebadf` reads it *(decided, §12: the owner,
+2026-11-11, "End of input" and "End of input, as Rust")*. A descriptor 0 that the program's caller
+closed is `/dev/null` from the start on Linux, so that no file the program opens takes its number,
+and a read of it is the end, as of an empty input *(decided, §12: the owner, 2026-11-11, "0, 1, 2 as
+Rust"; assumed there: Linux alone, the check, and the end of the process where `/dev/null` cannot be
+opened)*. A `ReadAll` whose read fails gives its `IoError` and consumes nothing: the bytes it took
+are the next read's *(decided, §12: the owner, 2026-11-11, "Keep for next read")*.
 
 Both cases read the standard input a case is given, which holds nothing (chapter 0).
 

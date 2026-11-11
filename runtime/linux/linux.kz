@@ -13,6 +13,9 @@ extern "C" {
     void* signal(int number, void* handler)
     int* __errno_location()
     int open(byte* path, int mode, ...)
+    int fcntl(int fd, int command, ...)
+    int dup(int fd)
+    void abort()
     long pread(int fd, byte* bytes, long count, long offset)
     long lseek(int fd, long offset, int whence)
     byte* getenv(byte* name)
@@ -67,15 +70,50 @@ extern "C" in "gcc_s" {
 static mut int argumentCount = 0
 static mut byte* argumentValues = null
 
-// The start of the process: the arguments kept, then the signal of a closed pipe, `SIGPIPE` (13), set to
+// The start of the process: first a closed standard descriptor opened again on `/dev/null`
+// (`Standard`), then the arguments kept, then the signal of a closed pipe, `SIGPIPE` (13), set to
 // ignored, so that a write to a closed pipe returns an error, which `print` raises as `print-failed`
 // (design record, section 6); `SIG_IGN` is the handler 1. Then the handler of a fault, `Faults`.
 pub void Start(int count, byte* values) {
+    Standard()
     raw {
         argumentCount = count
         argumentValues = values
         signal(13, Ptr<void>(1))
         Faults()
+    }
+}
+
+// Each of the standard descriptors 0, 1 and 2 that is closed, opened again on `/dev/null` for reading and
+// writing (`O_RDWR`, 2), so that no file the program opens takes one of their numbers, and a read of
+// `Stdin` or a `print` reaches `/dev/null` and not that file (S22, A1, A17; design record, section 12:
+// the owner, 2026-11-11, "0, 1, 2 as Rust"), as Rust's `sanitize_standard_fds` does at the start of a
+// process (`library/std/src/sys/pal/unix/mod.rs` of rust-lang/rust, read on 2026-11-11). A descriptor is
+// closed where `fcntl` with `F_GETFD` (1) fails with `EBADF` (9), the check Rust falls back to where its
+// one `poll` of the three cannot run: three calls of the system where Rust's `poll` makes one, since the
+// runtime has no place for the three structures `poll` takes before the program's first allocation. The
+// `/dev/null` opened first is taken again by `dup` for the next closed one, as Rust takes it; `open` and
+// `dup` give the lowest free number, the closed one, since the lower ones are open by then. Where
+// neither can be had the process ends by `abort`, as Rust's does, with no report, since the descriptor
+// the report would go to may be the closed one.
+void Standard() {
+    raw {
+        int* error = __errno_location()
+        string path = "/dev/null\0"
+        mut int opened = -1
+        mut int fd = 0
+        while fd < 3 {
+            if fcntl(fd, 1) == -1 && *error == 9 {
+                if opened < 0 || dup(opened) == -1 {
+                    opened = open(path.Pointer, 2)
+                    if opened == -1 {
+                        abort()
+                    }
+                }
+            }
+
+            fd = fd + 1
+        }
     }
 }
 
@@ -89,6 +127,21 @@ pub long Write(int fd, byte* bytes, long count) {
         written = write(fd, bytes, count)
         while written < 0 && *error == 4 {
             written = write(fd, bytes, count)
+        }
+    }
+
+    return written
+}
+
+// `Write` to standard output or standard error for `print` and `eprint` (A1, A17): a write the system
+// fails with `EBADF` (9), a descriptor open but not for writing, counts as written whole, as Rust's
+// `handle_ebadf` reads it for its `Stdout` and `Stderr` (`library/std/src/io/stdio.rs` of rust-lang/rust,
+// read on 2026-11-11; design record, section 12: the owner, 2026-11-11, "Success, as Rust").
+pub long WriteOut(int fd, byte* bytes, long count) {
+    mut long written = Write(fd, bytes, count)
+    raw {
+        if written < 0 && *__errno_location() == 9 {
+            written = count
         }
     }
 
