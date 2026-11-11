@@ -1,0 +1,7 @@
+// expect: error narrowing-conversion at 6
+// rules: F17
+
+long code = 3
+if args.Count == 0 {
+    return code
+}

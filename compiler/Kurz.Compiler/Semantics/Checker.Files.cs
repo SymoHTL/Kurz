@@ -83,7 +83,7 @@ public sealed partial class Checker
     {
         if (m.Member == "Lines" && handle.Kind == Handle.File)
         {
-            return CheckLines(c);
+            return CheckLines(c, CallKind.FileLines, "`f.Lines()`");
         }
 
         var bytes = new ListType(Types.Byte);
@@ -126,13 +126,15 @@ public sealed partial class Checker
     /// <summary>
     /// S16: <c>f.Lines()</c>, which stands as the collection of a <c>for</c> loop alone (section 12, the owner, 2026-11-01, "Loop source
     /// only"): there its result is the loop's outcome, <c>void</c> with the cases a pull fails with, <c>IoError</c> and <c>InvalidUtf8</c>,
-    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is <c>syntax</c>, E4's id, which S16 proposes.
+    /// which the loop takes whole (<see cref="CheckForIn"/>); anywhere else it is <c>syntax</c>, E4's id, which S16 proposes. S22:
+    /// <c>Stdin.Lines()</c>, of <paramref name="kind"/> <see cref="CallKind.StdinLines"/>, the same (section 12, assumed: "as the owner's
+    /// answers of 2026-11-01 read a file's").
     /// </summary>
-    private Typed CheckLines(CallExpression c)
+    private Typed CheckLines(CallExpression c, CallKind kind, string call)
     {
         if (!ReferenceEquals(c, loopSource))
         {
-            Report(ErrorIds.Syntax, c.Line, "`f.Lines()` stands as the collection of a `for` loop alone (S16)");
+            Report(ErrorIds.Syntax, c.Line, $"{call} stands as the collection of a `for` loop alone (S16{(kind == CallKind.StdinLines ? ", S22" : "")})");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
@@ -143,7 +145,63 @@ public sealed partial class Checker
         }
 
         var candidate = new Candidate { Slots = [], Result = Types.Union([Types.Void, IoError, new DataType(dataTypes["InvalidUtf8"], [])]) };
-        return Record(c, CallKind.FileLines, Call([candidate], c, null, out var picked), picked);
+        return Record(c, kind, Call([candidate], c, null, out var picked), picked);
+    }
+
+    /// <summary>S22: the four functions of <c>Stdin</c>, as the refusals of a name it does not have and of <c>Stdin</c> as a value list them.</summary>
+    private const string StdinFunctions = "`Stdin.Lines()` as the collection of a `for` loop, `Stdin.ReadLine()`, `Stdin.Read(mut into, max)` and `Stdin.ReadAll()`";
+
+    /// <summary>
+    /// V10: the rules of the functions of a name every file sees (<see cref="IsBuiltInName"/>) that is called on and is no value, as the
+    /// texts of an unknown function of the name cite them; null for every other name. <c>Stdin</c> lists its functions (S22), the names
+    /// of R18 have texts of their own (<c>IntrinsicNameAsValue</c>), and a type's or a function's name is <c>syntax</c> (E4, F11).
+    /// </summary>
+    private static string? FunctionsOnly(string name) => name switch
+    {
+        "File" or "Directory" or "TcpListener" or "TcpStream" => "S2, S6 to S9, S15",
+        "Environment" => "S13, S14",
+        "Log" => "P1",
+        "Hint" => "F18",
+        "Sha256" or "Md5" or "Crc32" or "Hmac" => "H1 to H4",
+        "Hex" => "H2, H7",
+        "FixedTime" => "H4",
+        _ => null,
+    };
+
+    /// <summary>
+    /// S22: the members of <c>Stdin</c>, Rust's <c>io::stdin()</c> in Kurz's casing (section 12, the owner, 2026-11-01, "A type Stdin" and
+    /// "Also Stdin.ReadLine()"): <c>Stdin.Lines()</c>, as a file's (<see cref="CheckLines"/>); <c>Stdin.ReadAll()</c>, what is left, a
+    /// <c>Bytes | IoError</c>; <c>Stdin.Read(mut into, max)</c>, which appends as <c>f.Read</c> does (S3); and <c>Stdin.ReadLine()</c>, one
+    /// line, a <c>string? | IoError | InvalidUtf8</c>, <c>null</c> at the end, which a call yields whole, its success being nullable (N8).
+    /// </summary>
+    private Typed CheckStdinFunction(MemberAccess m, CallExpression c)
+    {
+        if (m.Member == "Lines")
+        {
+            return CheckLines(c, CallKind.StdinLines, "`Stdin.Lines()`");
+        }
+
+        var bytes = new ListType(Types.Byte);
+        (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
+        {
+            "ReadAll" => (CallKind.StdinReadAll, [], Types.Union([bytes, IoError])),
+            "Read" => (CallKind.StdinRead, [new Slot("into", bytes, true, false, false), new Slot("max", Types.Int, false, false, false)], Types.Union([Types.Int, IoError])),
+            "ReadLine" => (CallKind.StdinReadLine, [], Types.Union([Types.Nullable(Types.String), IoError, new DataType(dataTypes["InvalidUtf8"], [])])),
+            _ => null,
+        };
+        if (function is not { } f)
+        {
+            Report(ErrorIds.UnknownName, m.Line, $"`Stdin` has no function `{m.Member}`: its functions are {StdinFunctions} (S22, V10)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
+        if (RefusesTypeArguments(c, $"`Stdin.{m.Member}`"))
+        {
+            return Typed.Error;
+        }
+
+        return Record(c, f.Kind, Call([new Candidate { Slots = f.Slots, Result = f.Result }], c, null, out var picked), picked);
     }
 
     // ---- the command line and the environment (chapter 13) -----------------------------------------------
@@ -151,21 +209,17 @@ public sealed partial class Checker
     /// <summary>
     /// S13: <c>Environment.Args()</c>, the program's arguments with its name first, as Rust's <c>std::env::args()</c> (section 12, the
     /// owner, 2026-10-30, "Both"); S14: <c>Environment.Variable(name)</c>, a variable of the environment or the case <c>EnvError</c>, as
-    /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust").
+    /// Rust's <c>env::var</c> (section 12, the owner, 2026-10-30, "An outcome, as Rust"); S23: <c>Environment.Exit(code)</c>, the end of the
+    /// process with an <c>int</c> code, as C#'s <c>Environment.Exit</c> and Rust's <c>std::process::exit</c> (section 12, the owner, 2026-11-01,
+    /// "Top-level return n + Exit"), after which no path goes on (<see cref="IsExit"/>).
     /// </summary>
     private Typed CheckEnvironmentFunction(MemberAccess m, CallExpression c)
     {
-        if (m.Member == "Exit")
-        {
-            NotSupported(m.Line, "`Environment.Exit`, the exit code (S23)");
-            CheckArgumentsLoosely(c);
-            return Typed.Error;
-        }
-
         (CallKind Kind, List<Slot> Slots, KurzType Result)? function = m.Member switch
         {
             "Args" => (CallKind.EnvironmentArgs, [], new ListType(Types.String)),
             "Variable" => (CallKind.EnvironmentVariable, [new Slot("name", Types.String, false, false, false)], Types.Union([Types.String, new DataType(dataTypes["EnvError"], [])])),
+            "Exit" => (CallKind.EnvironmentExit, [new Slot("code", Types.Int, false, false, false)], Types.Void),
             _ => null,
         };
         if (function is not { } f)
