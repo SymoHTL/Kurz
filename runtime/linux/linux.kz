@@ -56,6 +56,12 @@ extern "C" {
     void freeaddrinfo(void* list)
     long getrandom(byte* bytes, long count, uint options)
     long syscall(long number, ...)
+    int fork()
+    int execve(byte* path, void* arguments, void* environment)
+    int pipe2(int* fds, int options)
+    int dup2(int from, int to)
+    int chdir(byte* path)
+    int waitpid(int pid, int* status, int options)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
@@ -2982,4 +2988,681 @@ pub int ErrorCode(long failure) {
     }
 
     return int(-failure)
+}
+
+// ---- running a program (design record, section 12) -------------------------------------------------
+
+// A command as `runtime/common/` lays it out (`CommandNew`), run to its end and read: what its child
+// wrote, or the case of the call (S17, S18, S21).
+pub ProcessOutput | IoError | ExitError CommandOutput(List<string> command) {
+    mut out = List<byte>()
+    mut err = List<byte>()
+    mut int at = 0
+    long result = RunCommand(command, true, mut out, mut err, mut at)
+    if result < 0 {
+        return StartFailure(command, result, at)
+    }
+
+    output = ProcessOutput(ExitOf(result), out, err)
+    if !output.Status.Success {
+        return ExitError(command[0], output)
+    }
+
+    return output
+}
+
+// A command run to its end with the program's three streams, unless a member set them (S18).
+pub void | IoError | ExitError CommandStatus(List<string> command) {
+    mut out = List<byte>()
+    mut err = List<byte>()
+    mut int at = 0
+    long result = RunCommand(command, false, mut out, mut err, mut at)
+    if result < 0 {
+        return StartFailure(command, result, at)
+    }
+
+    childStatus = ExitOf(result)
+    if !childStatus.Success {
+        return ExitError(command[0], ProcessOutput(childStatus, out, err))
+    }
+}
+
+// The `IoError` of a start that failed (S21): its path is the program, or the directory `Dir` named where
+// that is what failed (`at` 1); a NUL byte in a string of the command (`at` 2) is `InvalidInput` with the
+// number 0, as Rust's `CString::new` refuses it before any call of the system.
+IoError StartFailure(List<string> command, long result, int at) {
+    if at == 2 {
+        return IoError(IoKind.InvalidInput, 0, command[0])
+    }
+
+    mut string path = command[0]
+    if at == 1 {
+        mut int i = 1
+        while i + 2 < command.Count {
+            if command[i] == "d" {
+                path = command[i + 1]
+            }
+
+            i = i + 3
+        }
+    }
+
+    return IoError(ErrorKind(result), ErrorCode(result), path)
+}
+
+// The status `waitpid` gave, read as `ExitStatus` (S18): an end by `exit` gives its code and no signal, an end
+// by a signal the code 128 and the signal's number, as a shell gives it, and the signal.
+ExitStatus ExitOf(long waited) {
+    long ending = waited & 127
+    if ending == 0 {
+        int code = int((waited >> 8) & 255)
+        return ExitStatus(code, null, code == 0)
+    }
+
+    return ExitStatus(128 + int(ending), int(ending), false)
+}
+
+// Whether the string holds a NUL byte, which no C string can carry (S21).
+bool HoldsNul(string text) {
+    for b in text.Bytes {
+        if b == 0 {
+            return true
+        }
+    }
+
+    return false
+}
+
+// The bytes of `text` and a NUL byte, written at `at`: the address after them.
+byte* PutText(byte* at, string text) {
+    long count = long(text.Bytes.Count)
+    raw {
+        byte* from = text.Pointer
+        mut long i = 0
+        while i < count {
+            at[i] = from[i]
+            i = i + 1
+        }
+
+        at[count] = 0
+    }
+
+    return at + count + 1
+}
+
+// The bytes of `name`, `=`, `value` and a NUL byte, written at `at`: the address after them.
+byte* PutVariable(byte* at, string variable, string value) {
+    byte* end = PutText(at, variable)
+    raw {
+        end[-1] = 61
+    }
+
+    return PutText(end, value)
+}
+
+// Whether the variable `entry` of the environment, `NAME=value` and a NUL byte, is named `name`.
+bool Names(byte* entry, string variable) {
+    long count = long(variable.Bytes.Count)
+    raw {
+        byte* from = variable.Pointer
+        mut long i = 0
+        while i < count {
+            if entry[i] != from[i] || entry[i] == 0 {
+                return false
+            }
+
+            i = i + 1
+        }
+
+        return entry[count] == 61
+    }
+}
+
+// Where `variable` stands among the variables a command set or took away, or -1.
+int IndexOfName(List<string> names, string variable) {
+    mut int i = 0
+    while i < names.Count {
+        if names[i] == variable {
+            return i
+        }
+
+        i = i + 1
+    }
+
+    return -1
+}
+
+// A pipe for a stream the command pipes, mode 1, its two ends at `fds`: 0, or -errno where `pipe2` fails;
+// nothing for the other modes (S21).
+long StreamPipe(int mode, int* fds) {
+    mut long result = 0
+    raw {
+        if mode == 1 {
+            result = Checked(long(pipe2(fds, 524288)))
+        }
+    }
+
+    return result
+}
+
+// The descriptor `fds[k]` moved to 3 or above where it is below 3, which the system gives a program started
+// with one of its streams closed, so that the child's `dup2` onto its stream always changes the number and so
+// takes away the close-on-exec mark (S21): 0, or -errno where `fcntl` fails (`F_DUPFD_CLOEXEC` is 1030).
+long Lift(int* fds, long k) {
+    raw {
+        if fds[k] >= 0 && fds[k] < 3 {
+            int moved = fcntl(fds[k], 1030, 3)
+            if moved < 0 {
+                return -long(*__errno_location())
+            }
+
+            close(fds[k])
+            fds[k] = moved
+        }
+    }
+
+    return 0
+}
+
+// The command run: the child's status as `waitpid` gives it, 0 or above, or -errno where its start failed,
+// with `at` naming what failed, 0 the program, 1 the directory `Dir` named, 2 a NUL byte (S21).
+//
+// The members are applied in the order of their calls, the later one winning (S21). The child gets the
+// program's environment, less what `EnvRemove` and `EnvClear` took away and with what `Env` set, the
+// arguments as they are, with no shell, the default action of `SIGPIPE` back, and no descriptor but its three
+// streams: every descriptor this runtime opens is opened with `O_CLOEXEC`, and the child marks every other
+// one so with `close_range` (436, `CLOSE_RANGE_CLOEXEC` 4) before its `execve`. A program named without a `/`
+// is looked up in the `PATH` the child gets, or in the C library's default path, `/bin:/usr/bin`, where it
+// gets none, as `execvp` looks it up, a directory that refuses the program (`EACCES`) passed over and named
+// at the end where no other took it. A start that fails in the child, its `chdir` or its `execve`, is
+// written back to the program through a pipe that its `execve` closes, as Rust's `Command` writes it.
+//
+// With `output`, standard input is `/dev/null` and standard output and standard error are pipes that `poll`
+// reads to their ends into `out` and `err`, so that a child that fills one does not wait while the program
+// reads the other; without it the child takes the program's three streams. A member's stream wins over
+// these, and a pipe the call does not read, a piped standard input among them, has the program's end
+// closed at once (S19), so that a child that writes there is ended by `SIGPIPE` and one that reads there
+// reads its end. All that the child calls between `fork` and `execve` is written to memory mapped before
+// the `fork`, so that the child allocates nothing.
+long RunCommand(List<string> command, bool output, mut Bytes out, mut Bytes err, mut int at) {
+    string program = command[0]
+    mut arguments = List<string>()
+    mut string directory = ""
+    mut bool moved = false
+    mut names = List<string>()
+    mut values = List<string>()
+    mut sets = List<bool>()
+    mut bool cleared = false
+    mut int input = 0
+    mut int standard = 0
+    mut int error = 0
+    if output {
+        input = 2
+        standard = 1
+        error = 1
+    }
+
+    mut int i = 1
+    while i + 2 < command.Count {
+        string tag = command[i]
+        string first = command[i + 1]
+        if tag == "a" {
+            arguments.Add(first)
+        } else if tag == "d" {
+            directory = first
+            moved = true
+        } else if tag == "e" || tag == "r" {
+            int held = IndexOfName(names, first)
+            if held >= 0 {
+                names.RemoveAt(held)
+                values.RemoveAt(held)
+                sets.RemoveAt(held)
+            }
+
+            names.Add(first)
+            values.Add(command[i + 2])
+            sets.Add(tag == "e")
+        } else if tag == "c" {
+            cleared = true
+            names = List<string>()
+            values = List<string>()
+            sets = List<bool>()
+        } else {
+            mut int mode = 2
+            if first == "i" {
+                mode = 0
+            } else if first == "p" {
+                mode = 1
+            }
+
+            if tag == "0" {
+                input = mode
+            } else if tag == "1" {
+                standard = mode
+            } else {
+                error = mode
+            }
+        }
+
+        i = i + 3
+    }
+
+    // S21: a NUL byte in the program, an argument, the directory or the environment, before any call
+    mut bool nul = HoldsNul(program) || HoldsNul(directory)
+    for a in arguments {
+        nul = nul || HoldsNul(a)
+    }
+
+    i = 0
+    while i < names.Count {
+        nul = nul || HoldsNul(names[i]) || HoldsNul(values[i])
+        i = i + 1
+    }
+
+    if nul {
+        at = 2
+        return -22
+    }
+
+    if program.Bytes.Count == 0 {
+        at = 0
+        return -2 // S21: an empty program is `NotFound`, with the empty path
+    }
+
+    // the path the program is looked up in: the child's `PATH`, or the default path, read as bytes where it
+    // is laid out
+    mut bool slash = false
+    for b in program.Bytes {
+        slash = slash || b == 47
+    }
+
+    mut string path = "/bin:/usr/bin"
+    mut bool inheritedPath = false
+    int named = IndexOfName(names, "PATH")
+    if named >= 0 {
+        if sets[named] {
+            path = values[named]
+        }
+    } else if !cleared {
+        raw {
+            inheritedPath = getenv(Ptr<byte>("PATH\0".Pointer)) != null
+        }
+    }
+
+    // the environment the child gets: the program's, less what the command named or cleared, then what it set
+    mut long inherited = 0
+    mut long size = 65536 + 128
+    raw {
+        byte** environment = Ptr<byte*>(argumentValues + (long(argumentCount) + 1) * 8)
+        if !cleared {
+            while environment[inherited] != null {
+                size = size + 8
+                inherited = inherited + 1
+            }
+        }
+    }
+
+    size = size + long(arguments.Count + 2) * 8 + long(program.Bytes.Count) + 1 + long(directory.Bytes.Count) + 1
+    for a in arguments {
+        size = size + long(a.Bytes.Count) + 1
+    }
+
+    size = size + long(names.Count + 1) * 8
+    i = 0
+    while i < names.Count {
+        size = size + long(names[i].Bytes.Count) + long(values[i].Bytes.Count) + 2
+        i = i + 1
+    }
+
+    mut long parts = 1
+    raw {
+        mut byte* source = Ptr<byte>(path.Pointer)
+        mut long sourceCount = long(path.Bytes.Count)
+        if inheritedPath {
+            source = getenv(Ptr<byte>("PATH\0".Pointer))
+            sourceCount = strlen(source)
+        }
+
+        if !slash {
+            mut long x = 0
+            while x < sourceCount {
+                if source[x] == 58 {
+                    parts = parts + 1
+                }
+
+                x = x + 1
+            }
+
+            size = size + sourceCount
+        }
+    }
+
+    size = size + (parts + 1) * 8 + parts * (long(program.Bytes.Count) + 3)
+
+    byte* memory = Memory(size)
+    if memory == null {
+        at = 0
+        return -12
+    }
+
+    mut long waitResult = 0
+    raw {
+        // the layout of the memory: the buffer of a read, 65536 bytes; 128 bytes for the nine descriptors (0),
+        // the child's report (48), the two entries of `poll` (64) and the status of `waitpid` (80); then the three
+        // tables of addresses and their strings
+        byte* buffer = memory
+        int* fds = Ptr<int>(memory + 65536)
+        byte* report = memory + 65536 + 48
+        int* polled = Ptr<int>(memory + 65536 + 64)
+        int* waited = Ptr<int>(memory + 65536 + 80)
+        byte** argv = Ptr<byte*>(memory + 65536 + 128)
+        byte** envp = argv + long(arguments.Count + 2)
+        byte** paths = envp + (inherited + long(names.Count) + 1)
+        mut byte* at2 = Ptr<byte>(paths + (parts + 1))
+        argv[0] = at2
+        at2 = PutText(at2, program)
+        mut long k = 0
+        while k < long(arguments.Count) {
+            argv[k + 1] = at2
+            at2 = PutText(at2, arguments[int(k)])
+            k = k + 1
+        }
+
+        argv[k + 1] = null
+        mut long e = 0
+        if !cleared {
+            byte** environment = Ptr<byte*>(argumentValues + (long(argumentCount) + 1) * 8)
+            mut long j = 0
+            while j < inherited {
+                mut bool named2 = false
+                mut int n = 0
+                while n < names.Count {
+                    named2 = named2 || Names(environment[j], names[n])
+                    n = n + 1
+                }
+
+                if !named2 {
+                    envp[e] = environment[j]
+                    e = e + 1
+                }
+
+                j = j + 1
+            }
+        }
+
+        k = 0
+        while k < long(names.Count) {
+            if sets[int(k)] {
+                envp[e] = at2
+                at2 = PutVariable(at2, names[int(k)], values[int(k)])
+                e = e + 1
+            }
+
+            k = k + 1
+        }
+
+        envp[e] = null
+        // the places `execve` is given: the program where its name holds a `/`, else the program in each
+        // directory of the path, an empty directory read as the working directory, as `execvp` reads it
+        if slash {
+            paths[0] = at2
+            at2 = PutText(at2, program)
+            paths[1] = null
+        } else {
+            mut byte* source = Ptr<byte>(path.Pointer)
+            mut long sourceCount = long(path.Bytes.Count)
+            if inheritedPath {
+                source = getenv(Ptr<byte>("PATH\0".Pointer))
+                sourceCount = strlen(source)
+            }
+
+            mut long from = 0
+            mut long x = 0
+            k = 0
+            while x <= sourceCount {
+                if x == sourceCount || source[x] == 58 {
+                    paths[k] = at2
+                    if x == from {
+                        at2[0] = 46
+                        at2 = at2 + 1
+                    }
+
+                    while from < x {
+                        at2[0] = source[from]
+                        at2 = at2 + 1
+                        from = from + 1
+                    }
+
+                    at2[0] = 47
+                    at2 = PutText(at2 + 1, program)
+                    from = x + 1
+                    k = k + 1
+                }
+
+                x = x + 1
+            }
+
+            paths[k] = null
+        }
+        byte* where = at2
+        at2 = PutText(at2, directory)
+
+        // the descriptors: fds[0..1] standard input's pipe, [2..3] output's, [4..5] error's, [6..7] the report's,
+        // [8] `/dev/null`; -1 where none
+        k = 0
+        while k < 9 {
+            fds[k] = -1
+            k = k + 1
+        }
+
+        mut long failure = 0
+        if input == 2 || standard == 2 || error == 2 {
+            fds[8] = open(Ptr<byte>("/dev/null\0".Pointer), 2 + 524288)
+            if fds[8] < 0 {
+                failure = -long(*__errno_location())
+            }
+        }
+
+        if failure == 0 {
+            failure = StreamPipe(input, fds)
+        }
+
+        if failure == 0 {
+            failure = StreamPipe(standard, fds + 2)
+        }
+
+        if failure == 0 {
+            failure = StreamPipe(error, fds + 4)
+        }
+
+        if failure == 0 {
+            failure = Checked(long(pipe2(fds + 6, 524288)))
+        }
+
+        k = 0
+        while k < 9 {
+            if failure == 0 {
+                failure = Lift(fds, k)
+            }
+
+            k = k + 1
+        }
+
+        mut int pid = -1
+        if failure == 0 {
+            pid = fork()
+            if pid < 0 {
+                failure = -long(*__errno_location())
+            }
+        }
+
+        if pid == 0 {
+            // the child: from here to `execve` only calls that are safe after a `fork`, and no allocation
+            signal(13, Ptr<void>(0))
+            if input == 1 {
+                dup2(fds[0], 0)
+            } else if input == 2 {
+                dup2(fds[8], 0)
+            }
+
+            if standard == 1 {
+                dup2(fds[3], 1)
+            } else if standard == 2 {
+                dup2(fds[8], 1)
+            }
+
+            if error == 1 {
+                dup2(fds[5], 2)
+            } else if error == 2 {
+                dup2(fds[8], 2)
+            }
+
+            syscall(436, long(3), long(4294967295), long(4))
+            int* number = __errno_location()
+            if moved && chdir(where) < 0 {
+                *Ptr<int>(report) = *number
+                *Ptr<int>(report + 4) = 1
+                write(fds[7], report, 8)
+                _exit(127)
+            }
+
+            mut int last = 2
+            mut bool refused = false
+            mut long c = 0
+            while paths[c] != null {
+                execve(paths[c], Ptr<void>(argv), Ptr<void>(envp))
+                last = *number
+                if last == 13 {
+                    refused = true
+                } else if !(last == 2 || last == 20 || last == 19 || last == 110 || last == 116) {
+                    paths[c + 1] = null
+                }
+
+                c = c + 1
+            }
+
+            if refused && (last == 2 || last == 20 || last == 19 || last == 110 || last == 116) {
+                last = 13
+            }
+
+            *Ptr<int>(report) = last
+            *Ptr<int>(report + 4) = 0
+            write(fds[7], report, 8)
+            _exit(127)
+        }
+
+        // the program: its ends of the child's descriptors closed, and a pipe it does not read
+        k = 0
+        while k < 9 {
+            bool kept = (k == 2 && standard == 1 && output) || (k == 4 && error == 1 && output) || k == 6
+            if fds[k] >= 0 && !kept {
+                close(fds[k])
+                fds[k] = -1
+            }
+
+            k = k + 1
+        }
+
+        if failure == 0 {
+            mut long got = read(fds[6], report, 8)
+            while got < 0 && *__errno_location() == 4 {
+                got = read(fds[6], report, 8)
+            }
+
+            if got == 8 {
+                failure = -long(*Ptr<int>(report))
+                at = *Ptr<int>(report + 4)
+            }
+        }
+
+        if fds[6] >= 0 {
+            close(fds[6])
+        }
+
+        if failure == 0 {
+            // `poll` on the pipes still open, each read into its list until its end
+            mut int pending = 0
+            polled[0] = fds[2]
+            polled[1] = 1
+            polled[2] = fds[4]
+            polled[3] = 1
+            if fds[2] >= 0 {
+                pending = pending + 1
+            }
+
+            if fds[4] >= 0 {
+                pending = pending + 1
+            }
+
+            while pending > 0 {
+                *Ptr<short>(Ptr<byte>(polled) + 6) = 0
+                *Ptr<short>(Ptr<byte>(polled) + 14) = 0
+                int ready = poll(Ptr<void>(polled), 2, -1)
+                if ready < 0 && *__errno_location() != 4 {
+                    failure = -long(*__errno_location())
+                    pending = 0
+                }
+
+                mut int s = 0
+                while ready > 0 && s < 2 {
+                    int fd = polled[s * 2]
+                    short events = *Ptr<short>(Ptr<byte>(polled) + long(s) * 8 + 6)
+                    if fd >= 0 && events != 0 {
+                        long n = read(fd, buffer, 65536)
+                        if n > 0 {
+                            byte* items = Bytes.Allocate(n)
+                            mut long b = 0
+                            while b < n {
+                                items[b] = buffer[b]
+                                b = b + 1
+                            }
+
+                            if s == 0 {
+                                out.AddRange(Bytes.FromRaw(items, n))
+                            } else {
+                                err.AddRange(Bytes.FromRaw(items, n))
+                            }
+                        } else if n == 0 || *__errno_location() != 4 {
+                            close(fd)
+                            polled[s * 2] = -1
+                            pending = pending - 1
+                        }
+                    }
+
+                    s = s + 1
+                }
+            }
+        }
+
+        k = 2
+        while k < 6 {
+            if fds[k] >= 0 {
+                close(fds[k])
+            }
+
+            k = k + 2
+        }
+
+        if pid > 0 {
+            mut int r = waitpid(pid, waited, 0)
+            while r < 0 && *__errno_location() == 4 {
+                r = waitpid(pid, waited, 0)
+            }
+
+            if r < 0 && failure == 0 {
+                failure = -long(*__errno_location())
+            }
+
+            if failure == 0 {
+                waitResult = long(*waited)
+            }
+        }
+
+        if failure < 0 {
+            waitResult = failure
+        }
+    }
+
+    Release(memory, size)
+    return waitResult
 }

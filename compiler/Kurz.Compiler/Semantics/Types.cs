@@ -207,6 +207,17 @@ public sealed record HasherType(Hasher Kind) : KurzType
 }
 
 /// <summary>
+/// A command (S17): a program to run with its arguments, its working directory, the changes of its environment and its streams, each
+/// member giving a new command (section 12, the owner, 2026-11-01, "Chain, each step a new value"), laid out as a list of strings (the
+/// emitter's choice): the program, then three strings for each member in the order of the calls. It has no text and no <c>==</c> (S17,
+/// assumed), as a file has none.
+/// </summary>
+public sealed record CommandType : KurzType
+{
+    public override string Text => "Command";
+}
+
+/// <summary>
 /// A union (D9). The cases are flat and distinct, in the order written; the first is the success
 /// case of a result (O1). Two unions are one type when they have the same first case and the same
 /// other cases, in whatever order (D9, the owner, 2026-10-21): <c>List&lt;A | B | C&gt;</c> and
@@ -347,6 +358,7 @@ public static class Types
     public static readonly HandleType File = new(Handle.File);
     public static readonly HandleType TcpListener = new(Handle.TcpListener);
     public static readonly HandleType TcpStream = new(Handle.TcpStream);
+    public static readonly CommandType Command = new();
 
     /// <summary>The built-in types by the names L19 reserves.</summary>
     public static readonly IReadOnlyDictionary<string, PrimitiveType> ByName = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal)
@@ -510,6 +522,7 @@ public static class Types
             (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,
             (HasherType x, HasherType y) => x.Kind == y.Kind,
+            (CommandType, CommandType) => true,
             (UnionType x, UnionType y) => x.Cases.Count == y.Cases.Count && Same(x.Cases[0], y.Cases[0]) && x.Cases.Skip(1).All(c => y.Cases.Skip(1).Any(d => Same(c, d))),
             (FunctionType x, FunctionType y) => AllSame(x.Parameters, y.Parameters) && Same(x.Result, y.Result),
             (PointerType x, PointerType y) => Same(x.Pointee, y.Pointee),

@@ -3182,3 +3182,59 @@ long LogStamp(byte* p, long at, long nanoseconds) {
 
     return at + 24
 }
+
+// ---- running a program (design record, section 12) ---------------------------------------------------
+
+// A command (S17), as the emitted code lays it out: a list of strings, the program first, then three
+// strings for each member in the order of its calls, the member's tag and its two values: `a` an
+// argument, `d` the working directory, `e` a variable of the environment and its value, `r` a variable
+// taken away, `c` the environment cleared, and `0`, `1` and `2` standard input, output and error with
+// the letter of their `Stdio`, `i`, `p` or `n`. A member appends to the list the emitted code gives it:
+// a command no other value holds, the result of the member before it in a chain or the variable that
+// `cmd = cmd.Arg(x)` writes, is changed in place, and one another value holds is copied by the first
+// `Add`, as any list a write finds shared (M3), so that the command the member was called on stays as
+// it was.
+pub List<string> CommandNew(string program) {
+    mut command = List<string>()
+    command.Add(program)
+    return command
+}
+
+// One member more on the command, its tag and its two values.
+pub void CommandAdd(mut List<string> command, string tag, string first, string second) {
+    command.Add(tag)
+    command.Add(first)
+    command.Add(second)
+}
+
+// An argument more on the command for each word of the list, in its order (`Args`, S17).
+pub void CommandArgs(mut List<string> command, List<string> words) {
+    for word in words {
+        CommandAdd(mut command, "a", word, "")
+    }
+}
+
+// One of the command's streams set, 0 standard input, 1 output and 2 error (`Stdin`, `Stdout` and
+// `Stderr`, S17).
+pub void CommandStream(mut List<string> command, int stream, Stdio mode) {
+    mut letter = "n"
+    if mode == Stdio.Inherit {
+        letter = "i"
+    } else if mode == Stdio.Piped {
+        letter = "p"
+    }
+
+    CommandAdd(mut command, "{stream}", letter, "")
+}
+
+// The text of an `ExitError` (S18): what ended the child and the program, `exit status 3: sh` or
+// `signal 15: sh`.
+pub string ExitErrorText(ExitError e) {
+    mut text = "exit status {e.Output.Status.Code}: {e.Program}"
+    match e.Output.Status.Signal {
+        int signal => text = "signal {signal}: {e.Program}"
+        null => {}
+    }
+
+    return text
+}

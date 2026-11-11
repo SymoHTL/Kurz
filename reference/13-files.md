@@ -2411,6 +2411,12 @@ data Command(string Program)
 print(1)
 ```
 
+Case: [system/command-no-text.kz](../corpus/system/command-no-text.kz)
+```kurz
+base = Command.New("printf")
+print(base)
+```
+
 ### S18 (decided, §12) Output, status and a code other than 0
 
 `Output()` runs the command to its end and gives `ProcessOutput | IoError | ExitError`, where `data

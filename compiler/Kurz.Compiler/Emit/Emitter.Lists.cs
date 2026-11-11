@@ -34,7 +34,7 @@ public sealed partial class Emitter
     /// <summary>Whether a value of the type holds the block of a list, of a map, of a string, of an instance, of a data value or of a file's handle or the environment of a lambda: a list, a map, a string, a file or a socket, a hasher, a function value, an instance, a data value laid out as a block, a plain data value with a field that does, a union with a case that does.</summary>
     private bool Counted(KurzType type) => type switch
     {
-        ListType or MapType or FunctionType or HandleType or HasherType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
+        ListType or MapType or FunctionType or HandleType or HasherType or CommandType or ClassType or InterfaceType or WeakRefType or PrimitiveType { Kind: Primitive.String } => true,
         DataType d when layout.IsBlock(d) => true,
         DataType d => Layout.Fields(d).Any(Counted),
         UnionType u => u.Cases.Any(c => c is not VoidType && Counted(c)),
@@ -184,7 +184,7 @@ public sealed partial class Emitter
     /// <summary>One more holder of every block the value holds.</summary>
     private void Retain(string value, KurzType type)
     {
-        if (type is ListType or HasherType) // H3: a hasher's state is the block of a list of bytes
+        if (type is ListType or HasherType or CommandType) // H3: a hasher's state is the block of a list of bytes; S17: a command's, of a list of strings
         {
             fn.Emit($"call void {StdFunction("ListRetain")}(ptr {value})");
             return;
@@ -252,6 +252,12 @@ public sealed partial class Emitter
         if (type is HasherType)
         {
             Release(value, new ListType(Types.Byte)); // H3: a hasher's state is the block of a list of bytes
+            return;
+        }
+
+        if (type is CommandType)
+        {
+            Release(value, new ListType(Types.String)); // S17: a command is the block of a list of strings
             return;
         }
 
