@@ -91,7 +91,8 @@ pub void Start(int count, byte* values) {
 // process (`library/std/src/sys/pal/unix/mod.rs` of rust-lang/rust, read on 2026-11-11). A descriptor is
 // closed where `fcntl` with `F_GETFD` (1) fails with `EBADF` (9), the check Rust falls back to where its
 // one `poll` of the three cannot run: three calls of the system where Rust's `poll` makes one, since the
-// runtime has no place for the three structures `poll` takes before the program's first allocation. The
+// runtime has no place for the three structures `poll` takes before the program's first allocation (the
+// owner, 2026-11-11, "Three fcntl, as built"). The
 // `/dev/null` opened first is taken again by `dup` for the next closed one, as Rust takes it; `open` and
 // `dup` give the lowest free number, the closed one, since the lower ones are open by then. Where
 // neither can be had the process ends by `abort`, as Rust's does, with no report, since the descriptor
