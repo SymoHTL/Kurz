@@ -158,8 +158,11 @@ local is in scope in its whole block, the text before its declaration included, 
 declared inside an inner block and a `y` declared after it in the outer block collide; here they
 are two variables, because the first is no longer visible when the second is declared. A name every
 file sees that is called on and is no value, `Stdin` (S22) and the thirteen of §12, `File` among them,
-written as a value is `unknown-name` with a text of its own, "`File` is no value: its functions are
-called on it (S2, S6 to S9, S15, V10)", not this one *(decided, §12: the owner, 2026-11-11, "As built,
+written as a value is `unknown-name` with a text of its own, not this one, that says so and names the
+rules of its functions, "`File` is no value: its functions are called on it (S2, S6 to S9, S15, V10)":
+S2, S6 to S9 and S15 for `File`, `Directory`, `TcpListener` and `TcpStream`, S13 and S14 for
+`Environment`, P1 for `Log`, F18 for `Hint`, H1 to H4 for `Sha256`, `Md5`, `Crc32` and `Hmac`, H2 and
+H7 for `Hex`, H4 for `FixedTime`, and S22 for `Stdin` *(decided, §12: the owner, 2026-11-11, "As built,
 13 names")*.
 
 Case: [variables/block-scope.kz](../corpus/variables/block-scope.kz)
