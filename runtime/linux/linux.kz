@@ -62,7 +62,6 @@ extern "C" {
     int dup2(int from, int to)
     int chdir(byte* path)
     int waitpid(int pid, int* status, int options)
-    int fcntl(int fd, int command, ...)
 }
 
 // The platform's unwinder, libgcc_s's, which the trace walks the stack with (design record, section 6),
