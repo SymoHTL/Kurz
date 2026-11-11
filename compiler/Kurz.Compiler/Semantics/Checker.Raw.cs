@@ -266,13 +266,6 @@ public sealed partial class Checker
     /// <summary>A4 with R10 and R17: whether a value of the type holds a raw pointer or a C function value, whose text no rule gives.</summary>
     private static bool HoldsRaw(KurzType type, List<DataSymbol> seen) => Holds(type, t => t is PointerType or CFunctionType, seen);
 
-    /// <summary>W2: whether a value of the type holds an <c>HttpError</c> of <c>std/</c>, whose text the compiler does not give.</summary>
-    private bool HoldsHttpError(KurzType type) => preludeSeen.Contains("HttpError") && Holds(type, IsHttpError, []);
-
-    /// <summary>W1, W2: whether the type is the <c>HttpError</c> of <c>std/</c>.</summary>
-    private bool IsHttpError(KurzType type) =>
-        preludeSeen.Contains("HttpError") && type is DataType d && ReferenceEquals(d.Symbol, dataTypes["HttpError"]);
-
     /// <summary>
     /// Whether a value of the type is or holds one of a type <paramref name="leaf"/> picks, as the text of a value shows it: an item, a
     /// map's key or value, a case of a union or a field of a data type.

@@ -2637,15 +2637,30 @@ public sealed class CheckerTests
     [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
     [InlineData("print(Held(e))")]
     [InlineData("print(e.Text())")]
-    [InlineData("print(e.Text() + \"!\")")]
-    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    [InlineData("print(\"{e.Text()}!\")")]
+    [InlineData("string | IoError | HttpError o = e\nprint(o)")]
+    [InlineData("HttpError? n = null\nprint(n)\nprint(e)")]
+    [InlineData("print(List<HttpError>())\nprint(e)")]
+    public void The_text_of_an_HttpError_is_taken_wherever_a_text_is(string use)
     {
-        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
-        // not read (D16), so it takes no text of one, nor of a value that holds one, and a call of that `Text()` has the same answer
-        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
-        var refused = Assert.Single(diagnostics.Items);
-        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
-        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
+        // W2 (the owner, 2026-11-02, Q15 (a)): `std/` declares the `Text()` of `HttpError` in its body (A5, D16), so its text, and the text
+        // of a value that holds one, is taken as any other's, and a call of that `Text()` is a call of a method of a data type
+        Assert.Empty(CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n").Diagnostics.Items);
+    }
+
+    [Fact]
+    public void A_data_type_of_the_file_that_derives_from_a_data_type_of_std_with_a_body_is_not_supported_at_its_base()
+    {
+        // D16 with D6: a body in a relation of inheritance is not read (section 14), and the checker of std/ sees no type of the file that
+        // derives from `HttpError`; one error, at the base, and a type that derives from the refused one carries none (E1)
+        var program = "data Mine(int Code) : HttpError\ndata Deeper(int More) : Mine\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n";
+        var refused = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
+        Assert.Equal((true, 1), (refused.IsNotSupported, refused.Line));
+
+        // the positive controls: the same type over an `HttpError` of std/ without its body, and over a data type of the file
+        var bodiless = ListTests.Edited(("std/std.kz", "pub data HttpError(HttpKind Kind, string Detail) {\n    pub string Text() => Detail\n}\n", "pub data HttpError(HttpKind Kind, string Detail)\n"));
+        Assert.Empty(CheckSeeingStd(program, bodiless).Diagnostics.Items);
+        Assert.Empty(CheckSeeingStd("data Base(HttpKind Kind, string Detail)\ndata Mine(int Code) : Base\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n").Diagnostics.Items);
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------

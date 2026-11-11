@@ -485,8 +485,9 @@ Gate: review rule "rules for sessions".
   case. The second: a head that took `main` after the round at the cap carries the owner's approval of
   2026-11-02 (issue 39, comments 6577407245 and 6577439799), widened on 2026-11-06 (comment
   6680237539, for the floor comment 6680659012, and for an append at one end comment 6694541027) and on
-  2026-11-07 (for lines, comment 6710283110, and for the floor's bound comment 6711916489), to merge
-  over red for the check `review` at that head, when all of these hold:
+  2026-11-07 (for lines, comment 6710283110, and for the floor's bound comment 6711916489) and on
+  2026-11-11 (for the end mark of a chain, comment 6792362885), to merge over red for the check
+  `review` at that head, when all of these hold:
   - its round at the cap completed, as in the first case;
   - the merge of `main` was made with rerere off (comment 6680237539), since a conflict that rerere
     resolves is still a conflict
@@ -500,6 +501,10 @@ Gate: review rule "rules for sessions".
       which the two sides changed different lines, one side's whole lines standing between lines the
       other side changed, or only added items or table rows, both at the end of one list, in either
       order, and the merge keeps every line of both;
+    - a chain of calls or a list whose two sides only added or removed different whole lines at its
+      end, and the merge keeps every line either side added, drops every line either side removed,
+      and moves the end mark (a closing call such as `.ToDictionary(...)`, or a `;`) to the line
+      that ends up last (comment 6792362885);
     - the floor of `RunTests` (`RunFloor`), held on each system to a bound: `main`'s floor plus the
       pull request's own change to it, its floor less the merge base's, so that a merge that lost the
       cases either side added is caught. On Linux the floor is the count of cases measured on the
@@ -513,9 +518,10 @@ Gate: review rule "rules for sessions".
       nothing else of that file, resolved by running that tool on the merged tree, with the gate
       `knowledge` green there (pull request 385, comment 6735260898);
   - the pull request's own diff is the one its round read, line for line, but for `main`'s words in
-    the lines a conflict block joined, for the floor and for the numbers that tool generates (this
-    rule's reading of comment 6735260898, which approved a take with the evidence guide generated
-    again, not the owner's own words);
+    the lines a conflict block joined, for the end mark the merge of such a chain moved (comment
+    6792362885), for the floor and for the numbers that tool generates (this rule's reading of
+    comment 6735260898, which approved a take with the evidence guide generated again, not the
+    owner's own words);
   - after a conflict, `tools/gates.py` passed on the merge commit in the image the `gates` job runs in,
     before its push: every word kept does not keep every test
     ([knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md](knowledge/a-merge-of-main-with-every-word-kept-can-fail-a-test.md));
@@ -539,7 +545,8 @@ Gate: review rule "rules for sessions".
   count pull request 362 bounded; and on 2026-11-07 by pull request 377, to the same-end append
   (comment 6694541027, of 2026-11-06) and the line verdicts (comment 6710283110), with the floor's
   bound that the owner chose that day (comment 6711916489); and on 2026-11-09 to the numbers the
-  evidence guide's tool generates (pull request 385, comment 6735260898). The tool switches the whole ruleset off for the one merge and restores it; while it is off
+  evidence guide's tool generates (pull request 385, comment 6735260898); and on 2026-11-11 to the
+  end mark of a chain (pull request 460, comment 6792362885). The tool switches the whole ruleset off for the one merge and restores it; while it is off
   nothing on the server holds any pull request or any push to `main`, so the tool reads the checks and the threads again once it
   is off and merges nothing when they changed (exit 1, the ruleset restored; the approval is
   given again for the new state, or not at all). What changes between that reading and the
