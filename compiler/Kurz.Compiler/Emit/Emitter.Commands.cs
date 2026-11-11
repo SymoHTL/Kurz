@@ -6,7 +6,7 @@ namespace Kurz.Compiler.Emit;
 
 public sealed partial class Emitter
 {
-    // ---- running a program (S17, S18, S20, S21) --------------------------------------------------------
+    // ---- running a program (S17 to S21) ----------------------------------------------------------------
 
     /// <summary>What a build for Windows says <c>not supported</c> with at a call on a command (S11, S17 to S21).</summary>
     internal const string CommandNotOnWindows = "running a program, `Command`, which the runtime of Windows does not give (S11, S17 to S21)";
@@ -62,6 +62,7 @@ public sealed partial class Emitter
             "Env" => [Types.String, Types.String],
             "Args" => [new ListType(Types.String)],
             "Stdin" or "Stdout" or "Stderr" => [TypeOf(c.Arguments[0].Value)],
+            "Input" => [TypeOf(c.Arguments[0].Value) is PrimitiveType { Kind: Primitive.String } ? Types.String : new ListType(Types.Byte)], // S19's two forms
             "Timeout" => [Types.Duration],
             _ => [],
         };
@@ -100,6 +101,7 @@ public sealed partial class Emitter
                 _ => $"call void {RuntimeFunction("CommandAdd")}(ptr {slot}, %kz.str {StringValue("c")}, {empty}, {empty})",
             },
             CallKind.CommandArgs => $"call void {RuntimeFunction("CommandArgs")}(ptr {slot}, {arguments[0]})",
+            CallKind.CommandInput => $"call void {RuntimeFunction(TypeOf(c.Arguments[0].Value) is PrimitiveType { Kind: Primitive.String } ? "CommandInputText" : "CommandInput")}(ptr {slot}, {arguments[0]})",
             CallKind.CommandTimeout => $"call void {RuntimeFunction("CommandTimeout")}(ptr {slot}, {arguments[0]})", // a `duration` is its nanoseconds, the `long` the runtime takes
             _ => $"call void {RuntimeFunction("CommandStream")}(ptr {slot}, i32 {(member == "Stdin" ? "0" : member == "Stdout" ? "1" : "2")}, {arguments[0]})",
         });
@@ -122,7 +124,7 @@ public sealed partial class Emitter
     {
         var chain = new List<CallExpression>();
         var value = Unwrap(assigned);
-        while (value is CallExpression c && Model.CallOf(c).Kind is CallKind.CommandAdd or CallKind.CommandArgs or CallKind.CommandStream or CallKind.CommandTimeout)
+        while (value is CallExpression c && Model.CallOf(c).Kind is CallKind.CommandAdd or CallKind.CommandArgs or CallKind.CommandStream or CallKind.CommandInput or CallKind.CommandTimeout)
         {
             chain.Insert(0, c);
             value = Unwrap(((MemberAccess)c.Callee).Target);

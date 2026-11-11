@@ -1,0 +1,4 @@
+// expect: error argument-mismatch at 4
+// rules: S19
+
+c = Command.New("cat").Input(1)

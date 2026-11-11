@@ -32,16 +32,15 @@ public sealed partial class Checker
     /// S17: a command's members, each of which gives a new command: <c>Arg(x)</c>, <c>Args(list)</c>, <c>Dir(path)</c>,
     /// <c>Env(name, value)</c>, <c>EnvRemove(name)</c>, <c>EnvClear()</c>, <c>Stdin(s)</c>, <c>Stdout(s)</c> and <c>Stderr(s)</c>; S18:
     /// <c>Output()</c>, whose success is a <c>ProcessOutput</c>, and <c>Status()</c>, whose success is <c>void</c>, each with the cases
-    /// <c>IoError</c> and <c>ExitError</c> (section 12, the owner, 2026-11-01, "Bytes, as Rust" and "A case of the call"); S20:
-    /// <c>Timeout(d)</c>, a bound on the child's time (the owner, 2026-11-01, "Optional .Timeout(d)"). <c>Spawn()</c> and
-    /// <c>Input(bytes)</c> (S19) are <c>not supported</c>.
+    /// <c>IoError</c> and <c>ExitError</c> (section 12, the owner, 2026-11-01, "Bytes, as Rust" and "A case of the call"); S19:
+    /// <c>Input(bytes)</c> and <c>Input(text)</c>, the child's input (the owner, 2026-11-01, "Both forms", and 2026-11-11, "Bytes and string"); S20: <c>Timeout(d)</c>, a bound on the child's
+    /// time (the owner, 2026-11-01, "Optional .Timeout(d)"). <c>Spawn()</c> (S19) is <c>not supported</c>.
     /// </summary>
     private Typed CheckCommandMethod(MemberAccess m, CallExpression c)
     {
         var unbuilt = m.Member switch
         {
             "Spawn" => "a child beside the program, `Spawn()` (S19)",
-            "Input" => "the input of a child, `Input(bytes)` (S19)",
             _ => null,
         };
         if (unbuilt is not null)
@@ -63,6 +62,7 @@ public sealed partial class Checker
             "EnvRemove" => (CallKind.CommandAdd, [Text("name")], Types.Command),
             "EnvClear" => (CallKind.CommandAdd, [], Types.Command),
             "Stdin" or "Stdout" or "Stderr" => (CallKind.CommandStream, [new Slot("s", stdio, false, false, false)], Types.Command),
+            "Input" => (CallKind.CommandInput, [new Slot("bytes", new ListType(Types.Byte), false, false, false)], Types.Command),
             "Timeout" => (CallKind.CommandTimeout, [new Slot("d", Types.Duration, false, false, false)], Types.Command),
             "Output" => (CallKind.CommandOutput, [], Types.Union([new DataType(dataTypes["ProcessOutput"], []), IoError, exitError])),
             "Status" => (CallKind.CommandStatus, [], Types.Union([Types.Void, IoError, exitError])),
@@ -80,7 +80,14 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var candidate = new Candidate { Slots = f.Slots, Result = f.Result };
-        return Record(c, f.Kind, Call([candidate], c, null, out var picked), picked);
+        List<Candidate> candidates = [new Candidate { Slots = f.Slots, Result = f.Result }];
+        if (m.Member == "Input")
+        {
+            // S19: `Bytes` or a `string`, whose UTF-8 bytes are the input (the owner, 2026-11-11, "Bytes and string"), two forms, so that a
+            // call that fits neither is `argument-mismatch` with a line for each (F13)
+            candidates = [new Candidate { Slots = f.Slots, Result = f.Result, Form = "Command Input(Bytes bytes)" }, new Candidate { Slots = [Text("text")], Result = f.Result, Form = "Command Input(string text)" }];
+        }
+
+        return Record(c, f.Kind, Call(candidates, c, null, out var picked), picked);
     }
 }

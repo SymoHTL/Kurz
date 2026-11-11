@@ -1180,7 +1180,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `gates` job runs in, which no file pins (HAZARD #15); a closed descriptor 0, 1 or 2, which a file the program opens does not
   take; a `print` and an `eprint` whose write fails with error 9; and the refusal for Windows. The suite runs every program with an empty pipe
   whose writing end is closed as its standard input (`Processes.Capture`), as chapter 0 runs a case;
-- running a program (S17, S18, S20, S21), in a build for Linux: a `Command` is the block of a list of strings, the program and then
+- running a program (S17 to S21, but for `Spawn()` and `ChildProcess`), in a build for Linux: a `Command` is the block of a list of strings, the program and then
   three strings for each member in the order of its calls, its tag and its two values, which `CommandAdd` of `runtime/common/`
   appends through a `mut` list. A member takes over the result of the member before it in a chain, which no other value holds,
   and changes it in place, and `cmd = cmd.Arg(x)` appends to the variable itself, its members' arguments read before the first
@@ -1206,7 +1206,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   call too, up to the bound of `Timeout(d)`; a read that fails ends the call with an `IoError` named by the program, once both
   pipes are closed and the child waited for, under its bound where it has one, whatever status the child ends with (S18),
   where Rust's `output()` panics; a pipe the
-  call does not read is closed at once (S19). `Timeout(d)` appends the tag `t` and its nanoseconds; with it the call takes its
+  call does not read is closed at once (S19). `Input(bytes)` appends the tag `b` and the input as a string, `Input(text)` the
+  text's UTF-8 bytes so (`CommandInputText`), each byte above 127
+  as the two bytes of its code point, as Latin-1 reads it, since a string holds UTF-8 alone (R15); with it standard input is a
+  pipe whose end the program makes non-blocking and writes under the same `poll`, in pieces decoded into a second buffer, so
+  that neither side waits on a full pipe, as Python's `communicate` writes it, and closes after the last byte; a child that ends
+  before it read the whole input leaves the rest unwritten (`EPIPE`), and `Input` beside a member `Stdin` is `InvalidInput`
+  before any call of the system (S19). `Timeout(d)` appends the tag `t` and its nanoseconds; with it the call takes its
   bound from the start the child's report says, held at the largest `long`, polls the child's end beside its pipes through a
   descriptor `pidfd_open` gives, killing the child and giving the system's error where the system refuses it, and where the bound passes, a bound of 0 or below at the first look, closes the pipes unread; a
   child still running is killed with `SIGKILL` and the call gives `TimedOut` with the program as its path, while a child that
@@ -1218,14 +1224,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   whose copy of a list fails; both pipes filled past what a pipe holds; the environment a child gets; the places a program is
   looked up in; the path of a start that fails, and a second `Dir` that replaces the first; a NUL byte in each string the child
   gets and in a replaced directory, and none in a variable taken away; a read of the output that fails, under a runtime whose
-  read fails, and the call's close of both pipes and its wait for the child after it; a lookup where the program's native code
+  read fails, and the call's close of both pipes, and of the input's, and its wait for the child after it; a lookup where the program's native code
   cleared its environment; the descriptors a child gets, also under a runtime whose `close_range` the system does not have; its
   standard input where the program's native code closed its own; the streams of `Status()` and those `Output()` does not read; a
   bound that passes, of 0 and below among them, and one that passes after a read of the output failed, whose `IoError` stays
   the call's error, as where the child ends before it; a kill at the bound that reaches the child alone, a process it started
   living on; two bounds, the later holding; a bound where the system refuses `pidfd_open`; a child that ends before its bound, the largest bound among them, and one whose
-  pipe a process it left behind holds past the bound; the refusal for Windows; and a use of a command outside its members and a
-  declaration of one of its names;
+  pipe a process it left behind holds past the bound; every byte of an input and its end, an input given as a string, the rest of an input a child did not
+  read, an input that holds the call to its bound, and `Input` beside a `Stdin` member; the refusal for Windows; and a use of a
+  command outside its members and a declaration of one of its names;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1984,7 +1991,7 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S18, S20 to S22 and S25; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S18, S19 but for `Spawn()` and `ChildProcess`, and S20 to S22 and S25; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H7, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
@@ -2122,7 +2129,7 @@ compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a t
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
 whose lanes are a type parameter (T19); a child beside the program,
-`Spawn()` and `ChildProcess`, and the input of a child, `Input(bytes)`, whose names
+`Spawn()` and `ChildProcess`, whose names
 every file sees, so that a file's own declaration of `ChildProcess` is `redeclared` (S19);
 a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
