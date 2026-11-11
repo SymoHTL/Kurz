@@ -791,7 +791,7 @@ public sealed partial class Checker
     /// is no constant, and more names than the 31 bits of an <c>int</c> below its sign, are <c>flags-number</c>; one past the range of an
     /// <c>int</c> is <c>constant-overflow</c>, which its folding reports (T6, L10). The names are counted before their numbers are read,
     /// so that a declaration of 32 names that numbers them all is <c>flags-number</c> at its 32nd name, as one that numbers none is, and
-    /// not <c>constant-overflow</c> at the number of that name (D19, a proposed reading there).
+    /// not <c>constant-overflow</c> at the number of that name (D19, the owner, 2026-11-11, "All as built").
     /// </summary>
     private void CheckFlagsNumbers()
     {

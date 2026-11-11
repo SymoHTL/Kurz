@@ -153,7 +153,7 @@ public sealed partial class Checker
         UnionType u when u.Cases.Any(c => c is NullType) => "Nullable",
         UnionType => "Union",
         DataType => "Data",
-        EnumType or FlagsType => "Enum", // a flags type as C#'s `[Flags]` enum (D13): T33 lists no flags type, so this is the default of Q4 on issue 452 (comment 6781723153)
+        EnumType or FlagsType => "Enum", // a flags type as C#'s `[Flags]` enum (T33, section 4, the owner, 2026-11-11, issue 452, "All as built")
         ClassType or HandleType or HasherType => "Class",
         FunctionType or CFunctionType => "Function",
         PointerType => "Pointer",

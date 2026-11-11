@@ -691,11 +691,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   itself, `Access.From(n)` is the set where `n` holds no bit that no name has, the sign's among them,
   so that `From(0)` is `Access.None`, and the case `Invalid` where it holds one; the text of a set is
   its names in the order of the declaration with ` | ` between them, written in one block as an
-  interpolation writes its pieces, or `None` (A13). No rule gives two sets `==` or an order, so `==`,
-  `!=`, `<`, `<=`, `>` and `>=` on two sets and a sort of them are `type-mismatch`, and a set in the
-  key of a map or in a `data` value that `==` compares is `not supported`; a `flags` type's kind for
-  `T.Kind` is `TypeKind.Enum`, since C#'s `[Flags]` type is an enum: T33 lists no `flags` type, and
-  the kind is the default of Q4 on issue 452 (comment 6781723153);
+  interpolation writes its pieces, or `None` (A13); two sets of one type are equal when their bits are,
+  one compare of the two `i32`s, a set is the key of a map, hashed by its bits widened to a word, and a
+  field of a `data` value that `==` compares and a map hashes, and `<`, `<=`, `>` and `>=` on two sets
+  and a sort by a set are `type-mismatch` (D13, the owner, 2026-11-11, issue 452); a `flags` type's
+  kind for `T.Kind` is `TypeKind.Enum`, since C#'s `[Flags]` type is an enum (T33, the owner,
+  2026-11-11, issue 452);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27); a call in a generic function's body whose type argument holds a type

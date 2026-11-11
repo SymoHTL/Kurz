@@ -1636,6 +1636,10 @@ public sealed partial class Checker
         {
             ok = true; // T32: two strings in the order of their code points
         }
+        else if (equality && left.Type is FlagsType && Types.Same(left.Type, right.Type))
+        {
+            ok = true; // D13: two sets of one flags type are equal when they hold the same names, and have no order (section 4, the owner, 2026-11-11)
+        }
         else if (equality)
         {
             ok = (left.Type is PrimitiveType { Kind: Primitive.String or Primitive.Bool } && Types.Same(left.Type, right.Type))
@@ -1676,7 +1680,7 @@ public sealed partial class Checker
 
         if (!ok)
         {
-            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : "D3")})");
+            Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}` (T18, {(Types.IsInstant(left.Type) || Types.IsInstant(right.Type) ? "T36" : left.Type is FlagsType || right.Type is FlagsType ? "D13" : "D3")})");
             return new Typed(Types.Bool);
         }
 

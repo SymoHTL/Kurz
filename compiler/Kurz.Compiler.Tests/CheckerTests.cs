@@ -2778,8 +2778,10 @@ public sealed class CheckerTests
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Run)", "unknown-name", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Parse(1))", "unknown-name", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == 1)", "type-mismatch", 3)] // a set is not an integer (D19: its number is `Number`)
-    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == Access.Write)", "type-mismatch", 3)] // the equality of two sets, an assumed refusal (issue 452)
-    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read < Access.Write)", "type-mismatch", 3)] // an order of sets, as above
+    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read == Mode.Read)", "type-mismatch", 4)] // two flags types are never equal (D15)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read < Access.Write)", "type-mismatch", 3)] // sets have no order (D13, the owner, 2026-11-11, issue 452)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read >= Access.Write)", "type-mismatch", 3)]
+    [InlineData("flags Access { Read, Write }\n\nmut xs = [1]\nxs.SortBy(x => Access.Read)", "type-mismatch", 4)] // nor does a sort by a set (X8)
     [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read | Mode.Read)", "type-mismatch", 4)] // D17 combines sets of one type
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read | 1)", "type-mismatch", 3)]
     [InlineData("flags Access { Read, Write }\n\nprint(Access.Read.Has(1))", "type-mismatch", 3)]
@@ -2790,8 +2792,8 @@ public sealed class CheckerTests
     [InlineData("flags Access { Read = 1, Write = 0 }\n\nprint(Access.Read)", "flags-number", 1)]
     [InlineData("flags Access { Read = 1, Write = -2 }\n\nprint(Access.Read)", "flags-number", 1)]
     [InlineData("flags Access { Read = 2, Write = 2 }\n\nprint(Access.Read)", "flags-number", 1)]
-    [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum (D19, a proposed reading there)
-    [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant (D19, a proposed reading there)
+    [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum (D19, the owner, 2026-11-11, "All as built")
+    [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant (D19, the owner, 2026-11-11, "All as built")
     [InlineData("flags Access { Read = 1.5, Write = 2 }\n\nprint(Access.Read)", "type-mismatch", 1)] // a constant of another type, as of an enum (D19, D20)
     [InlineData("flags Access { Read = 5L, Write = 2 }\n\nprint(Access.Read)", "narrowing-conversion", 1)] // as of an enum (D19, D20)
     [InlineData("flags Access { Read = 2u, Write = 4 }\n\nprint(Access.Read)", "sign-mix", 1)] // as of an enum (D19, D20)
@@ -2813,7 +2815,7 @@ public sealed class CheckerTests
         Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i}")), StringComparison.Ordinal));
         Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i}")), StringComparison.Ordinal)));
 
-        // the names are counted before their numbers are read (D19, a proposed reading there): 32 numbered names are the same error,
+        // the names are counted before their numbers are read (D19, the owner, 2026-11-11, "All as built"): 32 numbered names are the same error,
         // not the `constant-overflow` of the 32nd number, 2147483648
         Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i} = {1L << i}")), StringComparison.Ordinal));
         Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i} = {1L << i}")), StringComparison.Ordinal)));
@@ -2822,8 +2824,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_flags_type_reads_its_names_as_an_enum_does()
     {
-        // D19, proposed readings there, as D20 says of an enum: a name may be `From`, `Number` or `Has`, the place of the name telling
-        // which is meant, and a flags type without names is a type whose one set is `None`
+        // D19: a name may be `From`, `Number` or `Has`, the place of the name telling which is meant, as D20 says of an enum (a
+        // proposed reading there), and a flags type without names is a type whose one set is `None` (D19, the owner, 2026-11-11, "All as built")
         Clean("flags Access { From, Number, Has }\n\ns = Access.From | Access.Has\nprint(s.Number)\nprint(s.Has(Access.Has))\nprint(Access.Number)");
         Clean("flags Access { }\n\nprint(Access.None)");
     }
@@ -2855,13 +2857,18 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Syntax, 4)], Errors("flags Access { Read, Write }\n\np = Access.Read\nmatch p {\n    Access.Read => print(1)\n    Access.Write => print(2)\n}"));
     }
 
-    [Fact]
-    public void A_set_of_flags_as_a_map_key_or_in_the_equality_of_a_data_value_is_not_supported()
+    [Theory]
+    [InlineData("print(Access.Read == Access.Write)\nprint(Access.Read != Access.None)")]
+    [InlineData("m = Map<Access, int>()\nprint(m.Count)")]
+    [InlineData("print([Access.Read].IndexOf(Access.Write))")]
+    [InlineData("print(Grant(Access.Read) == Grant(Access.Write))")]
+    [InlineData("m = Map<Grant, int>()\nprint(m.Count)")]
+    public void A_set_of_flags_compares_by_its_names_and_is_a_key_of_a_map(string text)
     {
-        // the equality and the hash of a set are the owner's question (issue 452): the checker says `not supported`, not an error
-        const string Flags = "flags Access { Read, Write }\n";
-        Assert.StartsWith("3: ", Assert.Single(NotSupported(Flags + "\nm = Map<Access, int>()\nprint(m.Count)")), StringComparison.Ordinal);
-        Assert.StartsWith("4: ", Assert.Single(NotSupported(Flags + "data Grant(Access A)\n\nprint(Grant(Access.Read) == Grant(Access.Write))")), StringComparison.Ordinal);
+        // D13 (section 4, the owner, 2026-11-11, issue 452, "Equal by names, key, no order"): `==` and `!=` on two sets of one type, a
+        // set as a map's key and in a list's `IndexOf`, and a field of a set in a `data` value that `==` compares and a map hashes; the
+        // order of sets stays `type-mismatch` (the rows above); `Errors` holds the program to no `not supported` either
+        Assert.Empty(Errors("flags Access { Read, Write }\ndata Grant(Access A)\n\n" + text));
     }
 
     // ---- null (chapter 4) --------------------------------------------------------------------------------------
@@ -5845,7 +5852,7 @@ public sealed class CheckerTests
     [InlineData("int | string", "Union")]
     [InlineData("Order", "Data")]
     [InlineData("Shape", "Enum")]
-    [InlineData("Access", "Enum")] // a `flags` type, of C#'s `[Flags]` enum: the default of Q4 on issue 452 (comment 6781723153), which T33 does not list
+    [InlineData("Access", "Enum")] // a `flags` type, of C#'s `[Flags]` enum (T33, the owner, 2026-11-11, issue 452)
     [InlineData("(int) => int", "Function")]
     [InlineData("Counter", "Class")]
     [InlineData("duration", "Duration")]

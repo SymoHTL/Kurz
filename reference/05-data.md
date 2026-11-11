@@ -962,7 +962,11 @@ enum, so the check is the type checker's (the owner, 2026-10-09, against an id o
 `match-on-flags`, the rejected option). The error is at the line of the `match`, as the case
 expects, the line E4 gives every error only the type checker can see (the owner, 2026-10-10,
 confirming the reading proposed after the review of round 13). How sets are combined is D17; the
-case tests a set of one name.
+case tests a set of one name. Two sets of one `flags` type are equal under `==` when they hold the
+same names, which is the same number (D19), and `!=` when they do not; a set is the key of a map,
+hashed by its number, and a field of a set counts in the `==` of a `data` value (D3). Sets have no
+order: `<`, `<=`, `>` and `>=` on two sets are `type-mismatch` (T18), and so is a sort by a set (X8)
+(§4, the owner, 2026-11-11, issue 452, "Equal by names, key, no order").
 
 Case: [data/flags.kz](../corpus/data/flags.kz)
 ```kurz
@@ -982,6 +986,28 @@ match p {
     Access.Read => print("read")
     else => print("other")
 }
+```
+
+Case: [data/flags-equal.kz](../corpus/data/flags-equal.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+a = Access.Read | Access.Write
+b = Access.Write | Access.Read
+print(a == b)
+print(a != b)
+print(a == Access.Read)
+mut names = Map<Access, string>()
+names[a] = "read and write"
+print(names[b] ?? "none")
+print(names[Access.Run] ?? "none")
+```
+
+Case: [data/flags-order.kz](../corpus/data/flags-order.kz)
+```kurz
+flags Access { Read, Write, Run }
+
+print(Access.Read < Access.Write)
 ```
 
 ### D14 (decided, §8) The fields of a primary constructor can be read from outside
@@ -1289,21 +1315,24 @@ declaration can write the number of each name, which is the value of its bit, as
 and so on, in their order. `set.Number` is the sum of the numbers the set holds.
 `Access.From(5)` is the set with that number, and `Invalid` when the number has a bit that no
 name has. A number written for a name that is not one bit (`0`, `3`), a bit written for two
-names, a declaration that writes a number for some names and not for all or a number that is not
-a constant expression (as D20 says of an `enum`), a declaration with more names than the `int` has
-bits (31 names, the sign bit excluded), and a name `None`, which D17 gives every flags type, are
-the compile error `flags-number`.
+names and a name `None`, which D17 gives every flags type, are the compile error `flags-number`.
 *(proposed)*
+
+A declaration that writes a number for some names and not for all, and a number that is not a
+constant expression, are `flags-number` too, as D20 says of an `enum`; so is a declaration with
+more names than the `int` has bits (31 names, the sign bit excluded), whose names are counted
+before their numbers are read, so that it is one `flags-number`, at its 32nd name, whether it
+writes numbers or not. `From` and `Has` take arguments named `number` and `flag` (D11). A flags
+type without names is a type, whose one set is `None` (§4, the owner, 2026-11-11, issue 452, "All
+as built").
 
 The rest of a declaration is read as D20 reads an `enum`'s. A number of another type gets the error
 a value of that type gets where an `int` is required (T1): `type-mismatch` for `1.5` or `"two"`,
 `narrowing-conversion` for `5L` and `sign-mix` for `2u`. One past the range of an `int` is
-`constant-overflow` (L10, T6), `2147483648`, the bit of the sign, among them. The names are counted
-before their numbers are read, so a declaration of more than 31 names is `flags-number` at its 32nd
-name whether it writes numbers or not. A name may be `From`, `Number` or `Has`, and the place of the
-name tells which is meant: `Access.From(5)`, a call, is the conversion and `Access.From` the set,
-`s.Has(x)` the test and `Access.Has` the set, `s.Number` on a set its number and `Access.Number` on
-the type the set. A flags type without names is a type, whose one set is `None`.
+`constant-overflow` (L10, T6), `2147483648`, the bit of the sign, among them. A name may be `From`,
+`Number` or `Has`, and the place of the name tells which is meant: `Access.From(5)`, a call, is the
+conversion and `Access.From` the set, `s.Has(x)` the test and `Access.Has` the set, `s.Number` on a
+set its number and `Access.Number` on the type the set.
 *(proposed)*
 
 Case: [data/flags-number-type.kz](../corpus/data/flags-number-type.kz)

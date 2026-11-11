@@ -777,6 +777,11 @@ public sealed partial class Emitter
             return fn.Value($"icmp {Condition(op, Lower.EnumSigned(e.Symbol))} {Ir(leftType)} {left}, {right}"); // D12, D18: by their numbers
         }
 
+        if (leftType is FlagsType)
+        {
+            return fn.Value($"icmp {Condition(op, signed: false)} {Ir(leftType)} {left}, {right}"); // D13: `==` and `!=` by the names held, the bits; the checker gives no order
+        }
+
         if (leftType is PointerType or CFunctionType && rightType is PointerType or CFunctionType)
         {
             return fn.Value($"icmp {Condition(op, signed: false)} ptr {left}, {right}"); // R10: the addresses, compared as numbers that are never negative

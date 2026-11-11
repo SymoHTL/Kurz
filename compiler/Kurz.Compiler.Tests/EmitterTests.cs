@@ -614,6 +614,19 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void Two_sets_of_flags_are_equal_by_their_names_and_a_set_is_a_key_by_them()
+    {
+        // D13 (section 4, the owner, 2026-11-11, issue 452): `==` compares the bits of two sets, written in any order; a list finds a set
+        // by them, a map hashes a set by them, and a `data` value compares and hashes a field of a set as the set compares
+        const string Program = "flags Access { Read, Write, Run }\ndata Grant(string Who, Access Can)\n\n"
+            + "a = Access.Read | Access.Write\nb = Access.Write | Access.Read\nprint(a == b)\nprint(a != b)\nprint(a == Access.Read)\n"
+            + "print([Access.Run, b].IndexOf(a))\nmut names = Map<Access, string>()\nnames[a] = \"rw\"\nprint(names[b] ?? \"none\")\nprint(names[Access.Run] ?? \"none\")\n"
+            + "print(Grant(\"x\", a) == Grant(\"x\", b))\nprint(Grant(\"x\", a) == Grant(\"x\", Access.Run))\n"
+            + "mut grants = Map<Grant, int>()\ngrants[Grant(\"x\", a)] = 1\nprint(grants[Grant(\"x\", b)] ?? 0)\nprint(grants[Grant(\"x\", Access.Run)] ?? 0)";
+        Ran(Toolchain.Run(toolchain.Build(Emit(Program), "flags-equal")), 0, ["true", "false", "false", "1", "rw", "none", "true", "false", "1", "0"], string.Empty);
+    }
+
+    [Fact]
     public void A_nullable_value_is_a_union_and_the_address_of_one_known_not_null_is_the_address_of_its_value()
     {
         // N1 with section 5, a reading of this directory: the tag beside the room of a `long`; N3, R10: where the checker reads a nullable
