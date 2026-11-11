@@ -67,8 +67,6 @@ public sealed class CorpusTests
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
-        ["http/http-error-text.kz"] = "the text of an `HttpError` (W2)",
-        ["http/http-error-text-call.kz"] = "the text of an `HttpError` (W2)",
     };
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
