@@ -25,6 +25,13 @@ pub void Start(int count, byte* values) {
     }
 }
 
+// `Write` for `print` and `eprint` (A1, A17), as it is: a refused write is `print-failed` on Windows,
+// where Linux counts a write that fails with `EBADF` as written (`WriteOut` of the Linux runtime;
+// design record, section 12, the owner's answer of 2026-11-11 names Linux).
+pub long WriteOut(int fd, byte* bytes, long count) {
+    return Write(fd, bytes, count)
+}
+
 // `count` bytes from `bytes` written to standard output (`fd` 1) or standard error (`fd` 2) in one
 // call of `WriteFile`: the count written, or -1 where the system refused the write, and for any other
 // `fd`, as Linux's `write` refuses a descriptor that is not open. One call takes at most the
