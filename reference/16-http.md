@@ -192,10 +192,9 @@ text (A5) (§12, the owner, 2026-11-02). `std/` declares that body, `pub string 
 of an `HttpError` and of a value that holds one as any other's, an HTTP outcome
 `string | IoError | HttpError` the text of the case it holds (A4), and `e.Text()` is a call of that
 method; a `data` type of a file that derives from `HttpError` is `not supported` at its base, as a body
-in a relation of inheritance is (D16, §14) *(assumed, §12: the `not supported` the owner chose on
-2026-11-02 and 2026-11-03, while the compiler read no body of a `data` type, read as lapsing with its
-cause, and with the body a type of a file that derives from `HttpError` `not supported` at its base,
-which a build without the body reads; issue 457, comments 6788452137 and 6788749684)*.
+in a relation of inheritance is (D16, §14) (§12, the owner, 2026-11-11, "(a) It lapses", issue 457,
+comment 6790380307: the `not supported` the owner chose on 2026-11-02 and 2026-11-03, while the
+compiler read no body of a `data` type, lapses with its cause).
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
