@@ -110,7 +110,7 @@ public sealed partial class Checker
             Modifiers = Modifiers.None,
             Name = $"{symbol.Name}.{f.Name}",
             Parameters = [self, .. f.Parameters],
-            ExpressionBody = f.ExpressionBody is null ? null : SyntaxCopy.Copy(f.ExpressionBody, (e, _) => OnThis(symbol, e)),
+            ExpressionBody = f.ExpressionBody is null ? null : SyntaxCopy.Copy(f.ExpressionBody, (e, _) => OnThis(symbol, e), (s, copy) => AssignedOnThis(symbol, s, copy)),
             BlockBody = f.BlockBody is null ? null : SyntaxCopy.Copy(f.BlockBody, (e, _) => OnThis(symbol, e), (s, copy) => AssignedOnThis(symbol, s, copy)),
         };
 

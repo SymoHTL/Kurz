@@ -1398,7 +1398,7 @@ public sealed partial class Checker
                 return Typed.Error;
             }
 
-            if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields && HasBody(data))
+            if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields && BodyDeclares(data, m.Member))
             {
                 NotSupported(m.Line, "a member of a data type named after the type's name (D16, K19)"); // its body has no `static` member the checker reads
                 CheckArgumentsLoosely(c);

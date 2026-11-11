@@ -145,9 +145,12 @@ public sealed partial class Emitter
     /// D16: a method of a data type, called as the function it was checked as, with the value before the dot first: the place that holds
     /// it where the method is <c>mut</c> (M5), which the call changes as a <c>mut</c> argument's (M7), and else the value, borrowed as an
     /// argument is: one read from a variable or a path of data fields from one is held while the call runs, so that a change of it in the
-    /// call's arguments is <c>changed-while-held</c> (M7) and the method, a function, reaches no variable of its caller; and one read
-    /// through a field of an instance holds a count of its own to the end of its statement (<c>InstanceField</c>, K2), so that the method
-    /// may replace that field while it runs.
+    /// call's arguments is <c>changed-while-held</c> (M7) and the method, a function, reaches no variable of its caller; one read from an
+    /// item of a list is kept by what keeps its list, so that a <c>mut</c> argument of the call that changes the list is
+    /// <c>changed-while-held</c> (M7); and one read through a field of an instance holds a count of its own to the end of its statement
+    /// (<c>InstanceField</c>, K2), so that the method may replace that field while it runs. The place of a <c>mut</c> receiver inside an
+    /// instance's block is kept so too: the instance it is taken from is read through <c>InstanceField</c>, whose count holds the block
+    /// to the end of the statement, so that a method that replaces the field that held the instance writes into a block still alive.
     /// </summary>
     private string EmitDataMethodCall(CallExpression c, CallInfo info)
     {

@@ -38,6 +38,13 @@ public static class SyntaxCopy
         new Copier(null, rewrite, copied).Expression(e);
 
     /// <summary>
+    /// As the block's copy with <paramref name="statements"/> above, of an expression: D16, the expression body of a method of a
+    /// <c>data</c> type, whose lambdas' blocks are read as a block body's are.
+    /// </summary>
+    public static Expression Copy(Expression e, Func<Expression, Func<Expression, Expression>, Expression?> rewrite, Func<Statement, Func<Expression, Expression>, Statement?> statements) =>
+        new Copier(null, rewrite, statementRewrite: statements).Expression(e);
+
+    /// <summary>
     /// Shows <paramref name="visit"/> every expression of the declaration, its parameters' default values among them, and
     /// <paramref name="statements"/> every statement of its body and of its lambdas' bodies.
     /// </summary>

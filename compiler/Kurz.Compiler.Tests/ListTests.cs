@@ -2491,7 +2491,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // copied before the changes, which keeps its fields (M3), a method that reads a field from a lambda, one that makes a new value with
     // `with`, overloads, a private method called from a public one, a `mut` method through a path of data fields (M4, M5), the text
     // the body declares in `print`, in an interpolation, in the text of a value that holds one and of a list (A5), a `mut` method on a
-    // `mut` field of an instance (K2), and a method on a value read from that field that replaces the field while it runs
+    // `mut` field of an instance (K2), a method on a value read from that field that replaces the field while it runs, and a `mut`
+    // method on a value inside an instance's block that replaces the instance holding it while it runs, whose place that instance's read
+    // keeps (K2)
     private const string DataBodies = """
         data Counter(int Count, string Name) {
             pub mut void Increment() {
@@ -2536,6 +2538,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             }
 
             pub string Text() => "<{Show()}>"
+
+            pub mut void Moved(Holder h) {
+                h.In = Box(Counter(9, "m"))
+                Count = Count + 1
+            }
         }
 
         data Outer(Counter C, List<string> Tags)
@@ -2570,6 +2577,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         bx.D.Rename("z")
         print(bx.D.Swapped(bx))
         print(bx.D.Name)
+
+        class Holder(mut Box In)
+
+        hd = Holder(Box(Counter(1, "h")))
+        hg = hd
+        hd.In.D.Moved(hg)
+        print(hd.In.D)
         """;
 
     private static readonly string[] DataBodiesPrint =
@@ -2588,6 +2602,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "l=1",
         "z!=2", // the value read from the instance's field, which the read holds while the method replaces the field (K2)
         "x",
+        "<m=9>", // the instance the method put in place of the one that held its receiver, whose block the read kept for the write (K2)
     ];
 
     // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets
