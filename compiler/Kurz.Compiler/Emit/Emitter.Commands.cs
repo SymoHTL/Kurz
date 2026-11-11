@@ -1,6 +1,7 @@
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
+using UnionType = Kurz.Compiler.Semantics.UnionType;
 
 namespace Kurz.Compiler.Emit;
 
@@ -143,9 +144,10 @@ public sealed partial class Emitter
     /// <summary>
     /// S19: <c>Wait()</c>, <c>WaitWithOutput()</c> and <c>Kill()</c>, the runtime's <c>ChildWait</c>, <c>ChildWaitWithOutput</c> and
     /// <c>ChildKill</c> on the child's state. A wait closes the program's end of a piped standard input first, as Rust's <c>wait</c> drops
-    /// its <c>stdin</c>, so that a child that reads to its end ends (issue 174, Q6, assumed). <c>WaitWithOutput()</c> reads each pipe from
-    /// where the program stopped: the bytes its <c>File</c> read ahead first, taken from it, then what the pipe still gives; a <c>File</c>
-    /// that a <c>Close</c> marked gives none. Each call is <c>not supported</c> in a build for Windows (S11), where no child exists.
+    /// its <c>stdin</c>, so that a child that reads to its end ends (issue 174, Q6: the owner, 2026-11-11, "All three as built", comment
+    /// 6790379522). <c>WaitWithOutput()</c> reads each pipe from where the program stopped: the bytes its <c>File</c> read ahead first,
+    /// taken from it once the wait gives no <c>IoError</c>, then what the pipe still gives; a <c>File</c> that a <c>Close</c> marked gives
+    /// none. Each call is <c>not supported</c> in a build for Windows (S11), where no child exists.
     /// </summary>
     private string EmitChildCall(CallExpression c, CallInfo info)
     {
@@ -176,23 +178,54 @@ public sealed partial class Emitter
             return fn.Value($"call {union} {SysFunction("ChildWait")}(ptr {state}, %kz.str {program})");
         }
 
-        var (outFd, outAhead, outCount) = Ahead(child, ChildStdout);
-        var (errFd, errAhead, errCount) = Ahead(child, ChildStdout + 8);
-        return fn.Value($"call {union} {SysFunction("ChildWaitWithOutput")}(ptr {state}, %kz.str {program}, i32 {outFd}, ptr {outAhead}, i64 {outCount}, i32 {errFd}, ptr {errAhead}, i64 {errCount})");
+        var (outFd, outAhead, outCount, outTaken) = Ahead(child, ChildStdout);
+        var (errFd, errAhead, errCount, errTaken) = Ahead(child, ChildStdout + 8);
+        var result = fn.Value($"call {union} {SysFunction("ChildWaitWithOutput")}(ptr {state}, %kz.str {program}, i32 {outFd}, ptr {outAhead}, i64 {outCount}, i32 {errFd}, ptr {errAhead}, i64 {errCount})");
+        var type = (UnionType)Sub(info.Result);
+        var take = fn.Label("ahead.take");
+        var kept = fn.Label("ahead.kept");
+        fn.CondBranch(IsCase(Tag(result, type), type, type.Cases.Single(IsIoError)), kept, take);
+        fn.Block(take);
+        Taken(outTaken);
+        Taken(errTaken);
+        fn.Branch(kept);
+        fn.Block(kept);
+        return result;
+    }
+
+    /// <summary>
+    /// S19: the reader's position moved past the bytes <see cref="Ahead"/> handed to a wait that read the pipes, once the wait gave no
+    /// <c>IoError</c>; a wait that gave one, a failed read's or <c>TimedOut</c>, leaves them to the <c>File</c>, which reads them next (for
+    /// a failed read, the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267; the rest is S19's assumed reading).
+    /// </summary>
+    private void Taken(string taken)
+    {
+        var position = fn.Value($"load ptr, ptr {taken}");
+        var move = fn.Label("ahead.move");
+        var moved = fn.Label("ahead.moved");
+        fn.CondBranch(fn.Value($"icmp ne ptr {position}, null"), move, moved);
+        fn.Block(move);
+        var reader = fn.Value($"getelementptr i8, ptr {position}, i64 {ReaderCount - ReaderPosition}");
+        fn.Emit($"store i32 {fn.Value($"load i32, ptr {reader}")}, ptr {position}");
+        fn.Branch(moved);
+        fn.Block(moved);
     }
 
     /// <summary>
     /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, -1 where it is null or a
-    /// <c>Close</c> marked it (S5), and the bytes its reader holds ahead of the program (S16), which are taken from it.
+    /// <c>Close</c> marked it (S5), the bytes its reader holds ahead of the program (S16), and the place of the reader's position,
+    /// null where it holds none, which <see cref="Taken"/> moves past them once the wait took them.
     /// </summary>
-    private (string Fd, string Ahead, string Count) Ahead(string child, int offset)
+    private (string Fd, string Ahead, string Count, string Taken) Ahead(string child, int offset)
     {
         var fd = fn.Alloca("i32", "pipe");
         var ahead = fn.Alloca("ptr", "ahead");
         var count = fn.Alloca("i64", "ahead.count");
+        var taken = fn.Alloca("ptr", "ahead.position");
         fn.Emit($"store i32 -1, ptr {fd}");
         fn.Emit($"store ptr null, ptr {ahead}");
         fn.Emit($"store i64 0, ptr {count}");
+        fn.Emit($"store ptr null, ptr {taken}");
         var handle = fn.Value($"load ptr, ptr {HandleField(child, offset)}");
         var held = fn.Label("pipe.held");
         var open = fn.Label("pipe.open");
@@ -212,10 +245,10 @@ public sealed partial class Emitter
         var end = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
         fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr {ahead}");
         fn.Emit($"store i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}, ptr {count}");
-        fn.Emit($"store i32 {end}, ptr {ReaderField(reader, ReaderPosition)}"); // taken: the runtime copies them before anything frees the buffer
+        fn.Emit($"store ptr {ReaderField(reader, ReaderPosition)}, ptr {taken}"); // the runtime copies them before anything frees the buffer
         fn.Branch(done);
         fn.Block(done);
-        return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {ahead}"), fn.Value($"load i64, ptr {count}"));
+        return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {ahead}"), fn.Value($"load i64, ptr {count}"), taken);
     }
 
     /// <summary>

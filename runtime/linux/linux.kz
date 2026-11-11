@@ -3935,6 +3935,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         mut bool polling = true
         mut bool exited = endSeen
         mut bool late = false
+        mut bool unread = false // a read of a pipe failed
         polled[0] = fds[2]
         polled[1] = 1
         polled[2] = fds[4]
@@ -4046,6 +4047,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
                         // child ends here, under a bound as without one, waiting for no child (S19, the owner,
                         // 2026-11-11, "Error, no wait", issue 174, comment 6806240267)
                         failure = -long(*__errno_location())
+                        unread = true
                         if !owned {
                             polling = false
                         }
@@ -4141,8 +4143,10 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         }
 
         // the child's end deciding (S20): one that ended before the bound gives its own status, with what the
-        // call read of the pipes a process it left behind still holds
-        if late && !exited {
+        // call read of the pipes a process it left behind still holds; a spawned child's wait whose read failed
+        // on the last look waits for no child and kills none, as one whose read failed before it (S19, the
+        // owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267)
+        if late && !exited && (owned || !unread) {
             kill(pid, 9)
             if failure == 0 {
                 failure = -4100 // a read that failed before the bound passed stays the call's failure (S18)

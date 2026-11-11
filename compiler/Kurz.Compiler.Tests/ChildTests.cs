@@ -834,7 +834,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_copy_of_a_child_holds_the_one_child_and_a_command_spawned_again_starts_another()
     {
-        // S19, issue 174, Q5 (assumed): a copy of a `ChildProcess` is one more holder of the one child, as a copy of a `File` is, so that
+        // S19, issue 174, Q5 (the owner, 2026-11-11, "All three as built", comment 6790379522): a copy of a `ChildProcess` is one more holder of the one child, as a copy of a `File` is, so that
         // a wait through the copy gives the status the first wait through the other holder gave; S17: `Spawn()` changes no member of its
         // command, so that the command spawned again starts a second child of the same program and arguments
         var text = Program("""
@@ -858,7 +858,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_write_through_a_pipe_whose_reader_ended_or_that_the_program_closed_is_an_error()
     {
-        // S19, S5, issue 174, Q9 (assumed): a write to the input of a child that ended is the system's `EPIPE`, `BrokenPipe`, since the
+        // S19, S5, issue 174, Q9 (the owner, 2026-11-11, "All three as built", comment 6790379522): a write to the input of a child that ended is the system's `EPIPE`, `BrokenPipe`, since the
         // runtime sets `SIGPIPE` aside, with the program as the path of the pipe's `File`; the child closed its input when it ended, which
         // the end of its output shows; a write through a `File` the program closed is the closed file's error
         var text = Program("""
@@ -907,7 +907,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_wait_closes_the_piped_input_first_so_that_a_child_that_reads_to_its_end_ends()
     {
-        // S19, issue 174, Q6 (assumed): `Wait()` closes the program's end of a piped standard input before it waits, as Rust's `wait`
+        // S19, issue 174, Q6 (the owner, 2026-11-11, "All three as built", comment 6790379522): `Wait()` closes the program's end of a piped standard input before it waits, as Rust's `wait`
         // drops `stdin`, so that `cat` reads its end; a write through the `File` after it is the closed file's error (S5). The bound of
         // five seconds turns a wait that holds into `TimedOut`, and the program's own clock shows that none held
         var text = Program("""
@@ -960,6 +960,81 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var control = Ran(text, "child-spawn-read-control")!.Value;
             Assert.Equal((0, ""), (control.Code, control.Error));
             Assert.Equal(["1 0", "ended", "1 0", "ended", "false"], control.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_with_output_whose_read_fails_leaves_the_bytes_the_file_read_ahead_to_the_file()
+    {
+        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a `WaitWithOutput()` that gives an `IoError` takes
+        // none of the bytes the pipe's `File` read ahead, so that the program reads them through the `File` after the error. The child
+        // writes `abc`, of which the program takes one byte through the buffer of S24, then reads its input to the end, which the wait
+        // closes first (Q6), and writes `d`, whose read fails; a wait that took the bytes ahead would leave the `File` to read `d`
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf abc; read x; printf d; exec sleep 3"]).Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
+                match child.Stdout {
+                    File out => {
+                        mut first = Bytes()
+                        n = out.Fill(mut first)
+                        print(n)
+                        out.Consume(1)
+                    }
+                    null => print("no output")
+                }
+
+                print(Gathered(child))
+                child.Kill()
+                print(Joined(child))
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no output")
+                }
+            """) + Children;
+        if (Ran(text, "child-spawn-read-fails-ahead", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["3", "Other [sh] 9", "signal 9: sh", "2", "bc"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_with_output_whose_read_fails_on_the_look_at_its_bound_kills_no_child()
+    {
+        // S19, S20 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a read that fails on the look a wait takes at
+        // its bound, which the runtime here takes at the first look, gives its `IoError`, waits for no child and kills none, as a read
+        // that fails before the bound does, so that the child still sleeps, as `/proc` shows. A wait that killed it and waited for none
+        // would leave a process that no longer sleeps, as `/proc` shows of the probe `Kill()` ended, the positive control
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf a; exec sleep 3"]).Stdout(Stdio.Piped).Timeout(10s).Spawn()
+                probe = Command.New("sleep").Arg("10").Spawn()
+                probe.Kill()
+                Command.New("sleep").Arg("0.3").Status()
+                print(Gathered(child))
+                Command.New("sleep").Arg("0.3").Status()
+                print(Sleeping(child.Id))
+                print(Sleeping(probe.Id))
+                child.Kill()
+                print(Joined(probe))
+            """) + Children + """
+            string Sleeping(int id) {
+                Command.New("grep").Args(["-q", "sleeping", "/proc/{id}/status"]).Status() else {
+                    IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+                    ExitError e => return "{e}"
+                }
+
+                return "sleeping"
+            }
+
+            """;
+        var last = ("runtime/linux/linux.kz", "                if now >= deadline {\n                    late = true\n", "                if now >= 0 {\n                    late = true\n");
+        if (Ran(text, "child-spawn-read-fails-last", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"), last)) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sh] 9", "sleeping", "exit status 1: grep", "signal 9: sleep"], ran.Output);
         }
     }
 
