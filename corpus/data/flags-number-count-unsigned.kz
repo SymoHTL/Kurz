@@ -2,7 +2,7 @@
 // rules: D19
 
 flags Many {
-    F1 = 3u,
+    F1 = 3u, // sign-mix in a declaration of at most 31 names, its type read before its bit
     F2 = 2,
     F3 = 4,
     F4 = 8,
