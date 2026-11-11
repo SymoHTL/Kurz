@@ -91,11 +91,14 @@ pub bool Random(byte* bytes, long count) {
     return true
 }
 
-// The end of the process with the exit code, at once (design record, section 6). The code is 0 or
-// above: `ExitProcess` takes a DWORD, and a negative `int` does not fit the `uint` it is converted to.
+// The end of the process with the exit code, at once (design record, section 6). `ExitProcess` takes a
+// DWORD: the code's 32 bits are passed on as one, read through a pointer so that no conversion checks
+// them, and -1 ends with 4294967295, as Rust's `process::exit` passes its `i32` on as a `u32` (design
+// record, section 12, assumed).
 pub void Exit(int code) {
+    int bits = code
     raw {
-        ExitProcess(uint(code))
+        ExitProcess(*Ptr<uint>(&bits))
     }
 }
 

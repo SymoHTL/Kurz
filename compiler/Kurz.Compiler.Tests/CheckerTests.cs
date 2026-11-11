@@ -2637,15 +2637,30 @@ public sealed class CheckerTests
     [InlineData("mut m = Map<HttpError, int>()\nm[e] = 1\nprint(m)")]
     [InlineData("print(Held(e))")]
     [InlineData("print(e.Text())")]
-    [InlineData("print(e.Text() + \"!\")")]
-    public void The_text_of_an_HttpError_is_not_supported_wherever_it_is_taken(string use)
+    [InlineData("print(\"{e.Text()}!\")")]
+    [InlineData("string | IoError | HttpError o = e\nprint(o)")]
+    [InlineData("HttpError? n = null\nprint(n)\nprint(e)")]
+    [InlineData("print(List<HttpError>())\nprint(e)")]
+    public void The_text_of_an_HttpError_is_taken_wherever_a_text_is(string use)
     {
-        // W2: the record gives its text, its detail alone, through a `Text()` in the body of the `data` type (A5), which the checker does
-        // not read (D16), so it takes no text of one, nor of a value that holds one, and a call of that `Text()` has the same answer
-        var (diagnostics, _) = CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n");
-        var refused = Assert.Single(diagnostics.Items);
-        Assert.Equal((true, 4 + use.Count(c => c == '\n')), (refused.IsNotSupported, refused.Line));
-        Assert.Equal("the text of an `HttpError`, which section 12 gives as its detail alone and the compiler does not give (W2)", refused.Message);
+        // W2 (the owner, 2026-11-02, Q15 (a)): `std/` declares the `Text()` of `HttpError` in its body (A5, D16), so its text, and the text
+        // of a value that holds one, is taken as any other's, and a call of that `Text()` is a call of a method of a data type
+        Assert.Empty(CheckSeeingStd($"data Held(HttpError Error)\n\ne = HttpError(HttpKind.Protocol, \"no request line\")\n{use}\n").Diagnostics.Items);
+    }
+
+    [Fact]
+    public void A_data_type_of_the_file_that_derives_from_a_data_type_of_std_with_a_body_is_not_supported_at_its_base()
+    {
+        // D16 with D6: a body in a relation of inheritance is not read (section 14), and the checker of std/ sees no type of the file that
+        // derives from `HttpError`; one error, at the base, and a type that derives from the refused one carries none (E1)
+        var program = "data Mine(int Code) : HttpError\ndata Deeper(int More) : Mine\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n";
+        var refused = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
+        Assert.Equal((true, 1), (refused.IsNotSupported, refused.Line));
+
+        // the positive controls: the same type over an `HttpError` of std/ without its body, and over a data type of the file
+        var bodiless = ListTests.Edited(("std/std.kz", "pub data HttpError(HttpKind Kind, string Detail) {\n    pub string Text() => Detail\n}\n", "pub data HttpError(HttpKind Kind, string Detail)\n"));
+        Assert.Empty(CheckSeeingStd(program, bodiless).Diagnostics.Items);
+        Assert.Empty(CheckSeeingStd("data Base(HttpKind Kind, string Detail)\ndata Mine(int Code) : Base\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n").Diagnostics.Items);
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------
@@ -2766,6 +2781,84 @@ public sealed class CheckerTests
         const string Program = "data Two(T A, int B)\n\nint Change(mut T p) {\n    p = V\n    return 1\n}\n\nmut q = W\nprint(Two(q, Change(mut q)))";
         Clean("enum Plan { Free, Pro }\n" + Program.Replace("T ", "Plan ", StringComparison.Ordinal).Replace("V", "Plan.Pro", StringComparison.Ordinal).Replace("W", "Plan.Free", StringComparison.Ordinal));
         Assert.Equal([(ErrorIds.ChangedWhileHeld, 9)], Errors(Program.Replace("T ", "string ", StringComparison.Ordinal).Replace("V", "\"b\"", StringComparison.Ordinal).Replace("W", "\"a\"", StringComparison.Ordinal)));
+    }
+
+    // ---- flags (D13, D17, D19) ------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("flags Access { Read, Write }\n\nprint(Access)", "syntax", 3)] // a type's name is no value, as an enum's (E4)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access(1))", "syntax", 3)] // D19: the set of a number is `From`
+    [InlineData("flags Access { Read, Write }\n\nf = Access.From\nprint(1)", "syntax", 3)]
+    [InlineData("extern \"C\" flags Access { Read, Write }\n\nprint(Access.Read)", "syntax", 1)]
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Run)", "unknown-name", 3)]
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Parse(1))", "unknown-name", 3)]
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == 1)", "type-mismatch", 3)] // a set is not an integer (D19: its number is `Number`)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read == Access.Write)", "type-mismatch", 3)] // the equality of two sets, an assumed refusal (issue 452)
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read < Access.Write)", "type-mismatch", 3)] // an order of sets, as above
+    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read | Mode.Read)", "type-mismatch", 4)] // D17 combines sets of one type
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read | 1)", "type-mismatch", 3)]
+    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read.Has(1))", "type-mismatch", 3)]
+    [InlineData("flags Access { Read, Write }\nflags Mode { Read, Write }\n\nprint(Access.Read.Has(Mode.Read))", "type-mismatch", 4)]
+    [InlineData("flags Access { Read, Write }\n\nmatch Access.Read {\n    Access.Read => print(1)\n    else => print(2)\n}", "syntax", 3)] // D13, at the `match`
+    [InlineData("flags Access { Read, None }\n\nprint(Access.Read)", "flags-number", 1)] // D17 gives every flags type `None`
+    [InlineData("flags Access { Read = 1, Write = 3 }\n\nprint(Access.Read)", "flags-number", 1)]
+    [InlineData("flags Access { Read = 1, Write = 0 }\n\nprint(Access.Read)", "flags-number", 1)]
+    [InlineData("flags Access { Read = 1, Write = -2 }\n\nprint(Access.Read)", "flags-number", 1)]
+    [InlineData("flags Access { Read = 2, Write = 2 }\n\nprint(Access.Read)", "flags-number", 1)]
+    [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum
+    [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant
+    [InlineData("flags Access { Read = 1.5, Write = 2 }\n\nprint(Access.Read)", "type-mismatch", 1)] // a constant of another type, as of an enum
+    [InlineData("flags Access { Read, Read }\n\nprint(Access.Read)", "redeclared", 1)]
+    [InlineData("flags Access { Read }\nflags Access { Write }\n\nprint(Access.Read)", "redeclared", 2)]
+    [InlineData("flags Access { Read }\nenum Access { Write }\n\nprint(1)", "redeclared", 2)]
+    [InlineData("flags Access { Read }\n\nextern \"C\" {\n    int abs(Access p)\n}\n\nprint(1)", "native-type", 4)] // its layout is the compiler's (R16), as an enum's
+    public void A_flags_shape_the_rules_do_not_give_is_its_one_error(string program, string id, int line)
+    {
+        Assert.Equal([(id, line)], Errors(program, grants: "native"));
+    }
+
+    [Fact]
+    public void A_flags_type_has_31_names_at_most()
+    {
+        // D19: an `int` has 31 bits below its sign, one for each name; the 32nd name is the error
+        Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i}")), StringComparison.Ordinal));
+        Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i}")), StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_set_of_flags_is_a_value_of_its_type_with_its_number_and_its_test()
+    {
+        // D13, D17, D19: a name, a combination and `~` are sets of the type; `Number` is an `int`, `Has` a `bool`, and `From` the set or
+        // `Invalid`
+        const string Flags = "flags Access { Read, Write, Run }\n";
+        Assert.Equal("Access", TypeOf(Flags + "p = Access.Read | Access.Write\nprint(p)", "p"));
+        Assert.Equal("Access", TypeOf(Flags + "p = ~Access.Read & Access.Write ^ Access.None\nprint(p)", "p"));
+        Assert.Equal("int", TypeOf(Flags + "n = (Access.Read | Access.Run).Number\nprint(n)", "n"));
+        Assert.Equal("bool", TypeOf(Flags + "b = Access.Read.Has(Access.Read | Access.Run)\nprint(b)", "b"));
+        Clean(Flags + "match Access.From(3) {\n    Access a => print(a.Has(Access.Read))\n    Invalid => print(0)\n}");
+        Assert.Equal([(ErrorIds.UnlistedCase, 2)], Errors(Flags + "s = Access.From(3)\nprint(s)")); // `Invalid` is a case of the call (O9), as of an enum's `From`
+
+        // F12: a default can be a set, the constant of a combination among them, as an enum's value
+        Clean(Flags + "\nvoid Show(Access a = Access.Read | Access.Write) {\n    print(a)\n}\n\nShow()");
+
+        // M7: a read of a set that a `mut` argument changes in the same expression is a copy, as an enum value's is
+        Clean(Flags + "data Two(Access A, int B)\n\nint Change(mut Access p) {\n    p = Access.Run\n    return 1\n}\n\nmut q = Access.Read\nprint(Two(q, Change(mut q)))");
+    }
+
+    [Fact]
+    public void The_match_on_a_set_of_flags_is_one_error_at_the_match()
+    {
+        // D13: the error is at the line of the `match`, with nothing more for its arms, which name no `else`
+        Assert.Equal([(ErrorIds.Syntax, 4)], Errors("flags Access { Read, Write }\n\np = Access.Read\nmatch p {\n    Access.Read => print(1)\n    Access.Write => print(2)\n}"));
+    }
+
+    [Fact]
+    public void A_set_of_flags_as_a_map_key_or_in_the_equality_of_a_data_value_is_not_supported()
+    {
+        // the equality and the hash of a set are the owner's question (issue 452): the checker says `not supported`, not an error
+        const string Flags = "flags Access { Read, Write }\n";
+        Assert.StartsWith("3: ", Assert.Single(NotSupported(Flags + "\nm = Map<Access, int>()\nprint(m.Count)")), StringComparison.Ordinal);
+        Assert.StartsWith("4: ", Assert.Single(NotSupported(Flags + "data Grant(Access A)\n\nprint(Grant(Access.Read) == Grant(Access.Write))")), StringComparison.Ordinal);
     }
 
     // ---- null (chapter 4) --------------------------------------------------------------------------------------
@@ -3635,18 +3728,40 @@ public sealed class CheckerTests
         Assert.Equal(written, Types.A(name));
 
     // a type's name where a value stands cites the rule of the type, D2, D12 or T10, and E4 for its `syntax` id; D12: a value of the
-    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; a row holds the
-    // citations and leaves the wording free (E2)
+    // enum by one of its names; S13: `Environment.Args()` puts the program's name first, where `args` does not; V10: a name every
+    // file sees whose functions are called on it is no value, and its text cites the rules of those functions, as the text of a
+    // function the name does not have cites them; a row holds the citations and leaves the wording free (E2)
     [Theory]
     [InlineData("data User(string Name)\n\nprint(User)", "`User`", "(D2; E4)")]
     [InlineData("enum Plan { Free, Pro }\n\nprint(Plan)", "`Plan.Free`", "(D12; E4)")]
     [InlineData("print(List)", "`List`", "(T10; E4)")]
     [InlineData("int Count() => args.Count\n\nprint(Count())", "`Environment.Args()`", "(S13, V10)")]
+    [InlineData("print(File)", "`File`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Directory)", "`Directory`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpListener)", "`TcpListener`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(TcpStream)", "`TcpStream`", "(S2, S6 to S9, S15, V10)")]
+    [InlineData("print(Environment)", "`Environment`", "(S13, S14, V10)")]
+    [InlineData("print(Log)", "`Log`", "(P1, V10)")]
+    [InlineData("print(Hint)", "`Hint`", "(F18, V10)")]
+    [InlineData("print(Sha256)", "`Sha256`", "(H1 to H4, V10)")]
+    [InlineData("print(Md5)", "`Md5`", "(H1 to H4, V10)")]
+    [InlineData("print(Crc32)", "`Crc32`", "(H1 to H4, V10)")]
+    [InlineData("print(Hmac)", "`Hmac`", "(H1 to H4, V10)")]
+    [InlineData("print(Hex)", "`Hex`", "(H2, H7, V10)")]
+    [InlineData("print(FixedTime)", "`FixedTime`", "(H4, V10)")]
     public void The_text_of_a_type_s_name_or_of_args_where_no_value_of_it_stands_cites_its_rules(string program, string shown, string cited)
     {
         var message = Assert.Single(Check(program).Diagnostics.Items).Message;
         Assert.Contains(shown, message, StringComparison.Ordinal);
         Assert.EndsWith(cited, message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_every_file_sees_whose_functions_are_called_on_it_is_unknown_name_at_its_line_as_a_value()
+    {
+        // V10, as `Stdin` (S22) and the names of R18 are: the id and the line of the name, which its text does not change
+        string[] names = ["File", "Directory", "TcpListener", "TcpStream", "Environment", "Log", "Hint", "Sha256", "Md5", "Crc32", "Hmac", "Hex", "FixedTime"];
+        Assert.All(names, name => Assert.Equal([(ErrorIds.UnknownName, 2)], Errors($"print(1)\nx = {name}\nprint(2)")));
     }
 
     // ---- intrinsics (R18) ----------------------------------------------------------------------------------------
@@ -5207,7 +5322,6 @@ public sealed class CheckerTests
     // ---- what the checker does not read ---------------------------------------------------------------------
 
     [Theory]
-    [InlineData("flags Access { Read, Write }\n\nprint(Access.Read)", "1: a flags type (D13)")]
     [InlineData("data User(List<int> Items)\n\nUser? Find() => null\n\nprint(Find()?.Items[0])", "5: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0][1])", "3: an index after `?.` or `?[` (N5)")]
     [InlineData("List<int>? Find() => null\n\nprint(Find()?[0..<1])", "3: a part after `?[` (N5, M9)")]
@@ -5800,6 +5914,7 @@ public sealed class CheckerTests
     [InlineData("int | string", "Union")]
     [InlineData("Order", "Data")]
     [InlineData("Shape", "Enum")]
+    [InlineData("Access", "Enum")] // a `flags` type, of C#'s `[Flags]` enum (issue 452)
     [InlineData("(int) => int", "Function")]
     [InlineData("Counter", "Class")]
     [InlineData("duration", "Duration")]
@@ -5814,7 +5929,7 @@ public sealed class CheckerTests
     public void T_Kind_in_a_copy_is_the_constant_of_the_kind_of_its_type(string type, string kind)
     {
         // T33: each copy reads its type's kind, a constant of `TypeKind`, so that a `match` on it takes the arm of that value alone
-        var program = $"data Order(string Id)\nenum Shape {{ Round }}\nclass Counter(int Count)\n\nvoid Only<T>() {{\n    match T.Kind {{\n        TypeKind.{kind} => print(1)\n    }}\n}}\n\nOnly<{type}>()";
+        var program = $"data Order(string Id)\nenum Shape {{ Round }}\nflags Access {{ Read }}\nclass Counter(int Count)\n\nvoid Only<T>() {{\n    match T.Kind {{\n        TypeKind.{kind} => print(1)\n    }}\n}}\n\nOnly<{type}>()";
         Clean(program);
     }
 

@@ -24,6 +24,29 @@ public sealed partial class Emitter
     /// <summary>What a build for Windows says <c>not supported</c> with at a call on a file or a socket (S11).</summary>
     internal const string NotOnWindows = "a call on a file or a socket, which the runtime of Windows does not give (S11)";
 
+    /// <summary>What a build for Windows says <c>not supported</c> with at a call on <c>Stdin</c> (S11, S22).</summary>
+    internal const string StdinNotOnWindows = "standard input, `Stdin`, which the runtime of Windows does not give (S11, S22)";
+
+    /// <summary>
+    /// S22: the handle of the program's standard input, a block of a handle's layout (<see cref="HandleSize"/>) that the module holds:
+    /// descriptor 0, the path <c>&lt;stdin&gt;</c> its <c>IoError</c> names, and the one reader's state (<see cref="ReaderAt"/>) that every
+    /// read and pull of the process goes through, under the reader's lock, as Rust's <c>Stdin</c> holds one <c>BufReader</c> behind a
+    /// <c>Mutex</c> (section 12, the owner, 2026-11-01, "A type Stdin"). No value holds it and no <c>Close</c> marks it, so it lasts as
+    /// long as the process, with the buffer of its reader (section 12, assumed: "`Stdin` having no `Close`"). After a handle's fields it
+    /// holds the room of its reader's buffer (<see cref="StdinRoom"/>).
+    /// </summary>
+    private const string StdinHandle = "@kz.stdin";
+
+    /// <summary>
+    /// S22: where the handle of standard input holds the room of its reader's buffer, 8 bytes after a handle's fields: 0 while the buffer
+    /// is none or the <see cref="LineBuffer"/> bytes a fill makes, else the bytes of the buffer a <c>ReadAll</c> that failed part-way made
+    /// for what it kept (<see cref="KeepRest"/>), so that the next one frees it with its size.
+    /// </summary>
+    private const int StdinRoom = 56;
+
+    /// <summary>S22: the path an <c>IoError</c> of standard input names (section 12, assumed).</summary>
+    private const string StdinPath = "<stdin>";
+
     /// <summary>The bytes of a handle's block.</summary>
     private const string HandleSize = "56";
 
@@ -350,7 +373,7 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"or i1 {large}, {fn.Value($"icmp eq i32 {max}, 0")}"), straight, fill);
         fn.Block(straight);
         Unlock();
-        var r = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}"), kinds, read: true);
+        var r = EndAtClosedStdin(handle, Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {more}"), kinds, read: true));
         FailBelowZero(o, r, HandlePath(handle), kinds: kinds);
         fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
         Succeed(o, fn.Value($"trunc i64 {r} to i32"));
@@ -496,7 +519,7 @@ public sealed partial class Emitter
         fn.Branch(made);
         fn.Block(made);
         var filled = fn.Value($"load ptr, ptr {slot}");
-        var read = Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {filled}, i64 {LineBuffer}"), kinds, read: true);
+        var read = EndAtClosedStdin(handle, Woken(handle, SysCall("ReadFile", $"i32 {HandleDescriptor(handle)}, ptr {filled}, i64 {LineBuffer}"), kinds, read: true));
         FailBelowZero(o, read, HandlePath(handle), unlock, kinds);
         return (filled, read);
     }
@@ -789,6 +812,211 @@ public sealed partial class Emitter
         fn.Return($"i64 {fn.Value($"load i64, ptr {result}")}");
     });
 
+    // ---- standard input --------------------------------------------------------------------------------
+
+    /// <summary>
+    /// S22: the handle of standard input (<see cref="StdinHandle"/>), declared once, at the start of a program built for Linux in one of
+    /// whose files the checker read a call on <c>Stdin</c>, its value made in the module, so that no code runs to make it.
+    /// </summary>
+    private void DeclareStdin()
+    {
+        if (target != Target.Linux || !units.Any(u => u.Model.ReadsStdin))
+        {
+            return;
+        }
+
+        var (pointer, length) = module.String(StdinPath);
+        module.Global($"{StdinHandle} = internal global {{ i64, i32, i32, %kz.str, ptr, i32, i32, i32, i32, i64 }} {{ i64 1, i32 0, i32 0, %kz.str {{ ptr {pointer}, i64 {Number(length)} }}, ptr null, i32 0, i32 0, i32 0, i32 0, i64 0 }}, align 8");
+    }
+
+    /// <summary>S22: <c>Stdin.Read(mut into, max)</c>, <c>Stdin.ReadLine()</c> and <c>Stdin.ReadAll()</c>, each a call in flight on the handle of standard input (<see cref="StdinHandle"/>), as a call on a file's is (S5).</summary>
+    private string EmitStdinCall(CallExpression c, CallInfo info)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(c.Line, StdinNotOnWindows);
+        }
+
+        var union = (UnionType)Sub(info.Result);
+        var outcome = new FileOutcome(union, (DataType)union.Cases.Single(IsIoError), fn.Alloca(Ir(union), "stdin"), fn.Label("stdin.done"));
+        switch (info.Kind)
+        {
+            case CallKind.StdinRead:
+                EmitFileRead(c, info, outcome, StdinHandle, "ErrorKind"); // as `f.Read` does (S3)
+                break;
+            case CallKind.StdinReadLine:
+                EmitReadLine(outcome);
+                break;
+            default:
+                EmitReadRest(outcome);
+                break;
+        }
+
+        fn.Block(outcome.Done);
+        return fn.Value($"load {Ir(union)}, ptr {outcome.Slot}");
+    }
+
+    /// <summary>
+    /// S22: <c>Stdin.ReadLine()</c>, one pull of a line through the reader of standard input (<see cref="PullLine"/>), as a round of
+    /// <c>Stdin.Lines()</c> pulls it (section 12, assumed: "`ReadLine` reading a line as the loop does, from the same buffer"): the line;
+    /// <c>null</c> at the end; <c>InvalidUtf8</c> for bytes that are not UTF-8, which are taken, so that the next read goes on after them;
+    /// or the <c>IoError</c> of a failed read.
+    /// </summary>
+    private void EmitReadLine(FileOutcome outer)
+    {
+        var o = Enter(outer, StdinHandle, "ErrorKind");
+        var line = fn.Alloca("%kz.str", "line");
+        fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {line}");
+        var at = fn.Alloca("i32", "at");
+        var r = EndAtClosedStdin(StdinHandle, fn.Value($"call i64 {PullLine()}(ptr {HandleField(StdinHandle, 8)}, ptr {HandleField(StdinHandle, ReaderAt)}, ptr {line}, ptr {at})"));
+        FailBelowZero(o, r, HandlePath(StdinHandle));
+        var given = fn.Label("line.given");
+        var end = fn.Label("line.end");
+        var invalid = fn.Label("line.invalid");
+        fn.Terminate($"switch i64 {r}, label %{invalid} [ i64 1, label %{given} i64 0, label %{end} ]");
+        fn.Block(given);
+        Succeed(o, fn.Value($"load %kz.str, ptr {line}"));
+        fn.Block(end);
+        fn.Emit($"store {Ir(o.Union)} {MakeUnion(o.Union, Types.Null, "zeroinitializer")}, ptr {o.Slot}");
+        fn.Branch(o.Done);
+        fn.Block(invalid);
+        var data = o.Union.Cases.Single(c => c is DataType { Symbol.Name: "InvalidUtf8" });
+        var position = fn.Value($"insertvalue {Ir(data)} undef, i32 {fn.Value($"load i32, ptr {at}")}, 0");
+        fn.Emit($"store {Ir(o.Union)} {MakeUnion(o.Union, data, position)}, ptr {o.Slot}");
+        fn.Branch(o.Done);
+        Leave(o, outer, StdinHandle);
+    }
+
+    /// <summary>
+    /// S22: <c>Stdin.ReadAll()</c>, what is left of standard input, as Rust's <c>read_to_end</c> on <c>Stdin</c> reads it under the lock
+    /// (section 12, assumed: "`Stdin.ReadAll()` giving `Bytes | IoError`"): the bytes the reader's buffer holds first, all of them taken,
+    /// then the descriptor read to its end (<see cref="ReadRest"/>), with the reader's lock held throughout, so that no pull takes a line
+    /// from between them. A read that fails gives its <c>IoError</c>, and the bytes taken before it go back to the reader's buffer, which
+    /// the next read takes first (<see cref="KeepRest"/>), as Rust's <c>read_to_end</c> leaves them in its caller's <c>Vec</c> (section 12,
+    /// the owner, 2026-11-11, "Keep for next read").
+    /// </summary>
+    private void EmitReadRest(FileOutcome outer)
+    {
+        var o = Enter(outer, StdinHandle, "ErrorKind");
+        var list = fn.Alloca("ptr", "bytes");
+        fn.Emit($"store ptr null, ptr {list}");
+        var reader = HandleField(StdinHandle, ReaderAt);
+        var word = ReaderField(reader, ReaderLock);
+        fn.Emit($"call void {LockReader()}(ptr {word})");
+        var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
+        var count = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
+        var held = fn.Value($"sub i32 {count}, {at}");
+        var take = fn.Label("rest.held");
+        var read = fn.Label("rest.read");
+        fn.CondBranch(fn.Value($"icmp sgt i32 {held}, 0"), take, read);
+        fn.Block(take);
+        var bytes = fn.Value($"sext i32 {held} to i64");
+        var block = Reserve(list, bytes);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
+        AppendBytes(block, fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}"), bytes);
+        fn.Emit($"store i32 {count}, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Branch(read);
+        fn.Block(read);
+        var r = EndAtClosedStdin(StdinHandle, fn.Value($"call i64 {ReadRest()}(i32 {HandleDescriptor(StdinHandle)}, ptr {list})"));
+        var failed = fn.Label("rest.failed");
+        var through = fn.Label("rest.through");
+        fn.CondBranch(fn.Value($"icmp slt i64 {r}, 0"), failed, through);
+        fn.Block(failed);
+        KeepRest(reader, fn.Value($"load ptr, ptr {list}"));
+        fn.Branch(through);
+        fn.Block(through);
+        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        FailBelowZero(o, r, HandlePath(StdinHandle), () => Release(fn.Value($"load ptr, ptr {list}"), new ListType(Types.Byte)));
+        Succeed(o, fn.Value($"load ptr, ptr {list}"));
+        Leave(o, outer, StdinHandle);
+    }
+
+    /// <summary>
+    /// S22: the bytes of the list <paramref name="block"/> that a <c>ReadAll</c> took before its read failed, put in the reader's buffer of
+    /// standard input from its start, under the lock the caller holds, so that the next read, pull or <c>ReadAll</c> takes them first (section
+    /// 12, the owner, 2026-11-11, "Keep for next read"). The buffer took every byte it held before the read, so none is left in it. A buffer
+    /// with less room than the bytes, or none, is made again with the room of the larger of the bytes and <see cref="LineBuffer"/>, which a fill
+    /// reads into, and its room kept in the handle (<see cref="StdinRoom"/>), the old buffer freed with its own. No byte taken, nothing is put.
+    /// </summary>
+    private void KeepRest(string reader, string block)
+    {
+        var count = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("ListCount")}(ptr {block})")} to i64");
+        var some = fn.Label("keep.some");
+        var done = fn.Label("keep.done");
+        fn.CondBranch(fn.Value($"icmp sgt i64 {count}, 0"), some, done);
+        fn.Block(some);
+        var slot = ReaderField(reader, ReaderBuffer);
+        var roomField = HandleField(StdinHandle, StdinRoom);
+        var buffer = fn.Value($"load ptr, ptr {slot}");
+        var kept = fn.Value($"load i64, ptr {roomField}");
+        var room = fn.Value($"select i1 {fn.Value($"icmp eq i64 {kept}, 0")}, i64 {LineBuffer}, i64 {kept}");
+        var small = fn.Label("keep.small");
+        var fits = fn.Label("keep.fits");
+        fn.CondBranch(fn.Value($"or i1 {fn.Value($"icmp eq ptr {buffer}, null")}, {fn.Value($"icmp slt i64 {room}, {count}")}"), small, fits);
+        fn.Block(small);
+        var grown = fn.Value($"select i1 {fn.Value($"icmp sgt i64 {count}, {LineBuffer}")}, i64 {count}, i64 {LineBuffer}");
+        var made = fn.Value($"call ptr {RuntimeFunction("Allocate")}(i64 {grown})");
+        var free = fn.Label("keep.free");
+        var stored = fn.Label("keep.stored");
+        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), free, stored);
+        fn.Block(free);
+        fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {room})");
+        fn.Branch(stored);
+        fn.Block(stored);
+        fn.Emit($"store ptr {made}, ptr {slot}");
+        fn.Emit($"store i64 {grown}, ptr {roomField}");
+        fn.Branch(fits);
+        fn.Block(fits);
+        module.Declare("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+        fn.Emit($"call void @llvm.memcpy.p0.p0.i64(ptr {fn.Value($"load ptr, ptr {slot}")}, ptr {fn.Value($"call ptr {StdFunction("ListItems")}(ptr {block})")}, i64 {count}, i1 false)");
+        fn.Emit($"store i32 0, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Emit($"store i32 {fn.Value($"trunc i64 {count} to i32")}, ptr {ReaderField(reader, ReaderCount)}");
+        fn.Branch(done);
+        fn.Block(done);
+    }
+
+    /// <summary>
+    /// S22: the result of a read of standard input, where the system's error of a descriptor that is not open, <c>EBADF</c>, is the end of
+    /// the input, 0, as Rust's <c>handle_ebadf</c> reads a descriptor 0 the program's caller closed (section 12, the owner, 2026-11-11,
+    /// "End of input"); the result of a read of any other handle as it is. <c>Stdin</c> has no <c>Close</c>, so no mark of one gives
+    /// standard input that error (S5).
+    /// </summary>
+    private string EndAtClosedStdin(string handle, string result) =>
+        handle != StdinHandle ? result : fn.Value($"select i1 {fn.Value($"icmp eq i64 {result}, {ClosedResult}")}, i64 0, i64 {result}");
+
+    /// <summary>
+    /// S22: the helper that reads the descriptor in <c>%a0</c> to its end into the list of bytes at <c>%a1</c>, with room for
+    /// <see cref="ReadAllChunk"/> bytes made before each read, as Rust's <c>read_to_end</c> reads a stream whose size it does not know: 0
+    /// at the end, where a read gives no byte, or the failed read's result, below 0.
+    /// </summary>
+    private string ReadRest() => Helper("read.rest", "i64", ["i32", "ptr"], () =>
+    {
+        var loop = fn.Label("read");
+        fn.Branch(loop);
+        fn.Block(loop);
+        var block = Reserve("%a1", ReadAllChunk);
+        var r = SysCall("ReadFile", $"i32 %a0, ptr {fn.Value($"call ptr {StdFunction("BytesEnd")}(ptr {block})")}, i64 {ReadAllChunk}");
+        var end = fn.Label("end");
+        var added = fn.Label("added");
+        fn.CondBranch(fn.Value($"icmp sle i64 {r}, 0"), end, added);
+        fn.Block(added);
+        fn.Emit($"call void {StdFunction("BytesAdded")}(ptr {block}, i64 {r})");
+        fn.Branch(loop);
+        fn.Block(end);
+        fn.Return($"i64 {r}");
+    });
+
+    /// <summary>S22: <c>for line in Stdin.Lines() { } else { ... }</c>, the loop of a file's lines (<see cref="EmitLinesLoop"/>) over the handle of standard input (<see cref="StdinHandle"/>), whose reader the reads after the loop go on from.</summary>
+    private void EmitForInStdinLines(ForInStatement f, CallExpression call)
+    {
+        if (target != Target.Linux)
+        {
+            throw Unsupported(call.Line, StdinNotOnWindows);
+        }
+
+        EmitLinesLoop(f, (UnionType)Sub(Model.CallOf(call).Result), StdinHandle, HandleField(StdinHandle, 8), HandleField(StdinHandle, ReaderAt), HandlePath(StdinHandle));
+    }
+
     // ---- the lines of a file -------------------------------------------------------------------------
 
     /// <summary>
@@ -836,7 +1064,7 @@ public sealed partial class Emitter
         fn.Emit($"store %kz.str {StringValue(string.Empty)}, ptr {slot}");
         fn.CondBranch(fn.Value($"call i1 {EnterHandle()}(ptr {handle})"), open, closed);
         fn.Block(open);
-        fn.Emit($"store i64 {fn.Value($"call i64 {PullLine()}(ptr {descriptor}, ptr {reader}, ptr {slot}, ptr {at})")}, ptr {pulled}");
+        fn.Emit($"store i64 {EndAtClosedStdin(handle, fn.Value($"call i64 {PullLine()}(ptr {descriptor}, ptr {reader}, ptr {slot}, ptr {at})"))}, ptr {pulled}");
         fn.Emit($"call void {LeaveHandle()}(ptr {handle})");
         fn.Branch(done);
         fn.Block(closed);
@@ -1341,6 +1569,29 @@ public sealed partial class Emitter
 
     /// <summary>What a build for Windows says <c>not supported</c> with at a read of the command line, the environment or the clock (S11).</summary>
     internal const string ProcessNotOnWindows = "a read of the command line, the environment or the clock, which the runtime of Windows does not give (S11)";
+
+    /// <summary>
+    /// S23: <c>Environment.Exit(code)</c> ends the process at once with <c>code</c>, through the runtime's one exit: on Linux <c>_exit</c>,
+    /// which runs no handler of the C library, and Linux takes the low 8 bits of the code; on Windows <c>ExitProcess</c>, which takes the
+    /// code's 32 bits (section 12, the owner, 2026-11-11, "Build it for Windows"). No path goes on after the call.
+    /// </summary>
+    private string? EmitExit(CallExpression c, CallInfo info)
+    {
+        EndWith(Arguments(c, info, _ => Types.Int, _ => false, _ => null, cConvention: false, owned: false).Single()[(Ir(Types.Int).Length + 1)..]);
+        return null;
+    }
+
+    /// <summary>F17: a <c>return</c> with a value among the top-level statements ends the program with that <c>int</c>, at once, as S23's call does.</summary>
+    private void EmitExitCode(Expression value)
+    {
+        EndWith(Convert(EmitExpression(value), TypeOf(value), Types.Int, value.Line));
+    }
+
+    private void EndWith(string code)
+    {
+        fn.Emit($"call void {SysFunction("Exit")}({Ir(Types.Int)} {code})");
+        fn.Unreachable();
+    }
 
     /// <summary>Whether the data type is <c>EnvError</c>, which no file can declare beside the one every file sees (S14, V9).</summary>
     private static bool IsEnvError(KurzType type) => type is DataType { Symbol.Name: "EnvError" };

@@ -14,7 +14,9 @@ public static class Processes
 
     /// <summary>
     /// Runs a program to its end with both of its streams captured, or ends it when the time is up;
-    /// the exit code with what it wrote. A program that is not there or does not start answers with
+    /// the exit code with what it wrote. Its standard input is an empty pipe whose writing end is closed, so that it
+    /// runs with nothing on it, as chapter 0 runs a case, and a read of it ends at once, wherever the
+    /// caller's own input comes from (S22). A program that is not there or does not start answers with
     /// the code -1 and says so on its error stream. The variables given are set for it, a null one
     /// taken away. The streams are waited for within what remains of the limit: a child the program
     /// left running holds them past the program's end, and no end of the program's tree reaches it once
@@ -31,6 +33,7 @@ public static class Processes
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = workingDirectory ?? string.Empty,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8, // what clang and the command write, whatever the console's page
@@ -54,6 +57,7 @@ public static class Processes
                 return (-1, string.Empty, $"`{file}` did not start");
             }
 
+            process.StandardInput.Close(); // nothing on its standard input (S22)
             var clock = Stopwatch.StartNew();
             var pipes = Pipes(process);
             var output = process.StandardOutput.ReadToEndAsync();

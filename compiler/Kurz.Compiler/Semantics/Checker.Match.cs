@@ -26,6 +26,13 @@ public sealed partial class Checker
             Report(ErrorIds.Syntax, subject.Line, "a call with a `void` success used as a value (O10)");
             known = false; // the arms name cases of nothing: as for a subject the checker could not type (E1)
         }
+        else if (subjectType is FlagsType flags)
+        {
+            // D13: a set is not one case, so a `match` cannot list it case by case, the error for text no rule gives a meaning at the line
+            // of the `match` (E4; section 4, the owner, 2026-10-09 and 2026-10-10)
+            Report(ErrorIds.Syntax, line, $"a set of `{flags}` holds any of its names, not one case, so a `match` cannot list it: test a name with `Has` (D13)");
+            known = false; // the arms are read as for a subject the checker could not type (E1)
+        }
 
         var cases = subjectType is UnionType u ? u.Cases.ToList() : known ? [subjectType] : [];
         var covered = new List<KurzType>();
