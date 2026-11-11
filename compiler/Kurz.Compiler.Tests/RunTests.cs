@@ -151,7 +151,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/monotonic-clock.kz", "system/elapsed-order.kz", "functions/top-level-return.kz", "functions/top-level-return-end.kz",
     ];
 
-    /// <summary>The cases of the exit code that expect a run and read no argument, which a build for Windows says <c>not supported</c> to (S11, S23, F17).</summary>
+    /// <summary>The cases of the exit code that expect a run and read no argument, which a build for Windows says <c>not supported</c> to (S11, S23); the cases of F17 read the command line, and are among <see cref="ProcessCases"/>.</summary>
     private static readonly string[] ExitCases = ["system/exit-in-function.kz"];
 
     /// <summary>The cases of log calls that expect a run, which a build for Windows says <c>not supported</c> to (S11, P6).</summary>

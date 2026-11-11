@@ -1343,7 +1343,7 @@ public sealed partial class Emitter
     internal const string ProcessNotOnWindows = "a read of the command line, the environment or the clock, which the runtime of Windows does not give (S11)";
 
     /// <summary>What a build for Windows says <c>not supported</c> with at <c>Environment.Exit</c> and at a top-level <c>return</c> with a value (S11, S23, F17).</summary>
-    internal const string ExitNotOnWindows = "the exit code of `Environment.Exit` or of a top-level `return` with a value, which the runtime of Windows does not give (S11, S23, F17)";
+    internal const string ExitNotOnWindows = "the exit code of `Environment.Exit` or of a top-level `return` with a value, which a build for Windows does not take (S11, S23, F17)";
 
     /// <summary>
     /// S23: <c>Environment.Exit(code)</c> ends the process at once with <c>code</c>, through the runtime's one exit, <c>_exit</c>, which runs

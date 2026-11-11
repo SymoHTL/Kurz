@@ -1249,10 +1249,12 @@ print(f(4))
 A `return` with a value among the top-level statements, `return 2`, ends the program with that value as
 its exit code, and the end of the top-level code, and a bare `return` among its statements, end it with
 0, whether or not a `return` with a value stands beside them (§12, the owner, 2026-11-01, "Top-level
-return n + Exit" and "0, silently"). The value is an `int`: a wider integer is `narrowing-conversion`,
-as anywhere an `int` is required (T7), and a value of another type is `type-mismatch`. Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
+return n + Exit" and "0, silently"). The value is held to `int` as anywhere an `int` is required: a
+narrower integer widens into it, `byte`, `short` and `ushort` (T23); a wider integer is
+`narrowing-conversion`, whatever its signedness (T7); a `uint` is `sign-mix` (T23); and a value of any
+other type is `type-mismatch` (T1). Linux takes the low 8 bits of the value, as of `Environment.Exit`'s (S23), and a build
 for Windows says `not supported` to a `return` with a value among the top-level statements (S11), as to
-`Environment.Exit`. *(assumed, §12: the type, a wider integer's `narrowing-conversion` among it, the low 8 bits and Windows)*
+`Environment.Exit`. *(assumed, §12: the type, held as any `int` is, a wider integer's `narrowing-conversion` among it, put to the owner on pull request 449 and unanswered, the low 8 bits and Windows)*
 
 No case for a code other than 0: a case that expects output ends with 0.
 
