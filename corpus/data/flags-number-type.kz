@@ -1,0 +1,6 @@
+// expect: error type-mismatch at 4
+// rules: D19
+
+flags Access { Read = 1, Write = "two" }
+
+print(Access.Write)

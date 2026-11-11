@@ -1295,6 +1295,45 @@ bits (31 names, the sign bit excluded), and a name `None`, which D17 gives every
 the compile error `flags-number`.
 *(proposed)*
 
+The rest of a declaration is read as D20 reads an `enum`'s. A number of another type gets the error
+a value of that type gets where an `int` is required (T1): `type-mismatch` for `1.5` or `"two"`,
+`narrowing-conversion` for `5L` and `sign-mix` for `2u`. One past the range of an `int` is
+`constant-overflow` (L10, T6), `2147483648`, the bit of the sign, among them. The names are counted
+before their numbers are read, so a declaration of more than 31 names is `flags-number` at its 32nd
+name whether it writes numbers or not. A name may be `From`, `Number` or `Has`, and the place of the
+name tells which is meant: `Access.From(5)`, a call, is the conversion and `Access.From` the set,
+`s.Has(x)` the test and `Access.Has` the set, `s.Number` on a set its number and `Access.Number` on
+the type the set. A flags type without names is a type, whose one set is `None`.
+*(proposed)*
+
+Case: [data/flags-number-type.kz](../corpus/data/flags-number-type.kz)
+```kurz
+flags Access { Read = 1, Write = "two" }
+
+print(Access.Write)
+```
+
+Case: [data/flags-number-long.kz](../corpus/data/flags-number-long.kz)
+```kurz
+flags Access { Read = 1, Write = 2L }
+
+print(Access.Write)
+```
+
+Case: [data/flags-number-unsigned.kz](../corpus/data/flags-number-unsigned.kz)
+```kurz
+flags Access { Read = 1, Write = 2u }
+
+print(Access.Write)
+```
+
+Case: [data/flags-number-past-int.kz](../corpus/data/flags-number-past-int.kz)
+```kurz
+flags Access { Read = 1, Write = 2147483648 }
+
+print(Access.Write.Number)
+```
+
 Case: [data/flags-not-one-bit.kz](../corpus/data/flags-not-one-bit.kz)
 ```kurz
 flags Access { Read = 1, Write = 3 }

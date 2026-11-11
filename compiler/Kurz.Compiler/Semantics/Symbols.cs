@@ -389,6 +389,10 @@ public sealed class FlagsSymbol(string name, TypeDeclaration declaration)
     /// <summary>The set of every name, whose bits <c>~</c> keeps (D17).</summary>
     public int All => Bits.Aggregate(0, (all, bit) => all | bit);
 
-    /// <summary>A13: the text of a set, the names it holds in the order of the declaration with <c>" | "</c> between them, or <c>None</c>.</summary>
+    /// <summary>
+    /// A13: the text of a set, the names it holds in the order of the declaration with <c>" | "</c> between them, or <c>None</c>. No set
+    /// of a refused declaration reaches it: its names and <c>None</c> are the error type there (<c>Checker.FlagsValue</c>), so no
+    /// constant of it is folded, and <see cref="Bits"/> holds a bit for each name wherever it is read.
+    /// </summary>
     public string Text(int set) => set == 0 ? "None" : string.Join(" | ", Names.Where((_, i) => (set & Bits[i]) != 0));
 }

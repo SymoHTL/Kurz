@@ -683,17 +683,19 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `From` or `Number` is the value where no call follows `Plan.From` and where `Number` follows the
   type's name (D20);
 - `flags` (D13, D17, D19): a set is an `i32` that holds the bits of its names, each name's bit 1, 2, 4
-  and so on in their order or the number its declaration writes, the 31 bits below the sign at most;
-  `|`, `&` and `^` are the bit operations, `~` flips the bits and keeps those of the type's names (D17,
-  assumed there), `Has(flag)` tests that the set holds every bit of `flag`, `.Number` is the set
+  and so on in their order or the number its declaration writes, the 31 bits below the sign at most,
+  whose names are counted before their numbers are read; a name may be `From`, `Number` or `Has`, as
+  an enum's value may be `From` or `Number` (D20); `|`, `&` and `^` are the bit operations, `~` flips
+  the bits and keeps those of the type's names (D17, assumed there), `Has(flag)` tests that the set
+  holds every bit of `flag`, `.Number` is the set
   itself, `Access.From(n)` is the set where `n` holds no bit that no name has, the sign's among them,
   so that `From(0)` is `Access.None`, and the case `Invalid` where it holds one; the text of a set is
   its names in the order of the declaration with ` | ` between them, written in one block as an
   interpolation writes its pieces, or `None` (A13). No rule gives two sets `==` or an order, so `==`,
   `!=`, `<`, `<=`, `>` and `>=` on two sets and a sort of them are `type-mismatch`, and a set in the
   key of a map or in a `data` value that `==` compares is `not supported`; a `flags` type's kind for
-  `T.Kind` is `TypeKind.Enum`, as a file's is `TypeKind.Class` (T33, assumed there), since C#'s
-  `[Flags]` type is an enum;
+  `T.Kind` is `TypeKind.Enum`, since C#'s `[Flags]` type is an enum: T33 lists no `flags` type, and
+  the kind is the default of Q4 on issue 452 (comment 6781723153);
 - variables, assignments, functions with their defaults and arguments by name (D11), `mut`
   parameters given a variable (M7), and a generic function once per list of type arguments it is
   called with (T19, T27); a call in a generic function's body whose type argument holds a type

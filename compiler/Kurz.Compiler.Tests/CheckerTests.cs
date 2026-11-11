@@ -2790,9 +2790,13 @@ public sealed class CheckerTests
     [InlineData("flags Access { Read = 1, Write = 0 }\n\nprint(Access.Read)", "flags-number", 1)]
     [InlineData("flags Access { Read = 1, Write = -2 }\n\nprint(Access.Read)", "flags-number", 1)]
     [InlineData("flags Access { Read = 2, Write = 2 }\n\nprint(Access.Read)", "flags-number", 1)]
-    [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum
-    [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant
-    [InlineData("flags Access { Read = 1.5, Write = 2 }\n\nprint(Access.Read)", "type-mismatch", 1)] // a constant of another type, as of an enum
+    [InlineData("flags Access { Read = 1, Write }\n\nprint(Access.Read)", "flags-number", 1)] // every name or none, as D20 says of an enum (D19, a proposed reading there)
+    [InlineData("int One() {\n    return 1\n}\n\nflags Access { Read = One(), Write = 2 }\n\nprint(Access.Read)", "flags-number", 5)] // no constant (D19, a proposed reading there)
+    [InlineData("flags Access { Read = 1.5, Write = 2 }\n\nprint(Access.Read)", "type-mismatch", 1)] // a constant of another type, as of an enum (D19, D20)
+    [InlineData("flags Access { Read = 5L, Write = 2 }\n\nprint(Access.Read)", "narrowing-conversion", 1)] // as of an enum (D19, D20)
+    [InlineData("flags Access { Read = 2u, Write = 4 }\n\nprint(Access.Read)", "sign-mix", 1)] // as of an enum (D19, D20)
+    [InlineData("flags Access { Read = 1, Write = 2147483648 }\n\nprint(Access.Read)", "constant-overflow", 1)] // the bit of the sign, past the range of an `int` (D19, D20)
+    [InlineData("flags Access { Read, Write }\n\ndata Grant(int N) : Access\n\nprint(Grant(1).N)", "type-mismatch", 3)] // the base of a data type is a data type (D6)
     [InlineData("flags Access { Read, Read }\n\nprint(Access.Read)", "redeclared", 1)]
     [InlineData("flags Access { Read }\nflags Access { Write }\n\nprint(Access.Read)", "redeclared", 2)]
     [InlineData("flags Access { Read }\nenum Access { Write }\n\nprint(1)", "redeclared", 2)]
@@ -2808,6 +2812,20 @@ public sealed class CheckerTests
         // D19: an `int` has 31 bits below its sign, one for each name; the 32nd name is the error
         Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i}")), StringComparison.Ordinal));
         Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i}")), StringComparison.Ordinal)));
+
+        // the names are counted before their numbers are read (D19, a proposed reading there): 32 numbered names are the same error,
+        // not the `constant-overflow` of the 32nd number, 2147483648
+        Clean("flags Many { NAMES }\n\nprint(Many.F30)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 31).Select(i => $"F{i} = {1L << i}")), StringComparison.Ordinal));
+        Assert.Equal([(ErrorIds.FlagsNumber, 1)], Errors("flags Many { NAMES }\n\nprint(Many.F0)".Replace("NAMES", string.Join(", ", Enumerable.Range(0, 32).Select(i => $"F{i} = {1L << i}")), StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_flags_type_reads_its_names_as_an_enum_does()
+    {
+        // D19, proposed readings there, as D20 says of an enum: a name may be `From`, `Number` or `Has`, the place of the name telling
+        // which is meant, and a flags type without names is a type whose one set is `None`
+        Clean("flags Access { From, Number, Has }\n\ns = Access.From | Access.Has\nprint(s.Number)\nprint(s.Has(Access.Has))\nprint(Access.Number)");
+        Clean("flags Access { }\n\nprint(Access.None)");
     }
 
     [Fact]
@@ -5827,7 +5845,7 @@ public sealed class CheckerTests
     [InlineData("int | string", "Union")]
     [InlineData("Order", "Data")]
     [InlineData("Shape", "Enum")]
-    [InlineData("Access", "Enum")] // a `flags` type, of C#'s `[Flags]` enum (issue 452)
+    [InlineData("Access", "Enum")] // a `flags` type, of C#'s `[Flags]` enum: the default of Q4 on issue 452 (comment 6781723153), which T33 does not list
     [InlineData("(int) => int", "Function")]
     [InlineData("Counter", "Class")]
     [InlineData("duration", "Duration")]
