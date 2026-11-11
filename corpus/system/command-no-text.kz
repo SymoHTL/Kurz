@@ -1,0 +1,5 @@
+// expect: error no-text at 5
+// rules: S17
+
+base = Command.New("printf")
+print(base)

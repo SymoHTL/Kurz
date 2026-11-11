@@ -14,8 +14,10 @@ request and waits for the response in one call, and nothing else runs in the pro
 since the compiler builds no actors and a call blocks its thread (S10). A server in the same thread
 never gets to answer.
 
-A child process would serve it, but the emitter says `not supported` to `Command` and `ChildProcess`
-(S17 to S22): `kurz run` of a program that spawns `/proc/self/exe` stops at its build (2026-11-05).
+A child process would serve it, but the emitter says `not supported` to `Spawn()` and `ChildProcess`
+(S19): `kurz run` of a program that spawns `/proc/self/exe` stops at its build (2026-11-05). A
+`Command`'s `Output()` and `Status()` (S18) are built on Linux, and each waits for its child's end
+before the program goes on, so neither runs a server beside the client.
 
 ## What to do
 

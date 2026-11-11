@@ -1096,7 +1096,7 @@ public sealed partial class Checker
                 return (false, $"the hash of {Types.A(p)}, which reads 1.5 and 1.50 as one value, is not built");
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or HandleType or HasherType or CFunctionType or VoidType:
+            case FunctionType or HandleType or HasherType or CommandType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
@@ -1206,7 +1206,7 @@ public sealed partial class Checker
                 return null;
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType or HasherType:
+            case FunctionType or CFunctionType or HandleType or HasherType or CommandType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
                 return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
@@ -1280,7 +1280,7 @@ public sealed partial class Checker
                 return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType or HasherType or VoidType:
+            case FunctionType or CFunctionType or HandleType or HasherType or CommandType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             case ClassType or InterfaceType:
                 return HeldEquality(item, [], [], []);
@@ -1496,6 +1496,11 @@ public sealed partial class Checker
             if (n.Name == "Stdin")
             {
                 return CheckStdinFunction(m, c); // S22
+            }
+
+            if (n.Name == "Command")
+            {
+                return CheckCommandFunction(m, c); // S17
             }
 
             if (n.Name == "Log")
@@ -1825,6 +1830,11 @@ public sealed partial class Checker
         if (target.Type is HasherType hasher)
         {
             return CheckHasherMethod(hasher, m, c); // H3
+        }
+
+        if (target.Type is CommandType)
+        {
+            return CheckCommandMethod(m, c); // S17 to S21
         }
 
         var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)
