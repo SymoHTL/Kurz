@@ -1,0 +1,6 @@
+// expect: error unknown-name at 6
+// rules: D19
+
+flags Access { Read, Has }
+
+print(Access.Has(Access.Read))

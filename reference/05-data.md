@@ -968,7 +968,12 @@ hashed by its number, and a field that holds a set counts in the `==` of a `data
 have no order: `<`, `<=`, `>` and `>=` on two sets are `type-mismatch` (T18), and so is a sort by a
 set (X8) (§4, the owner, 2026-11-11, issue 452, "Equal by names, key, no order"). `==` and `!=` on
 sets of two `flags` types, or on a set and a value of another type, are `type-mismatch` (T18) as
-well (§4, the owner, 2026-11-11, issue 452, "All as built, decided").
+well (§4, the owner, 2026-11-11, issue 452, "All as built, decided"). A nullable form of the set's
+type and `null` are no other type there: `==` and `!=` with them are lifted as with every nullable
+value (N10), so that `s == null` and `s == Access.Read` compile for an `Access? s` (§4, the owner,
+2026-11-11, issue 452, "Not another type, as built"). In a generic function's copy for a set, `<` on
+two values of its type parameter is this `type-mismatch` too, as T33 says of the arm
+`TypeKind.Enum`, the kind of a `flags` type.
 
 Case: [data/flags.kz](../corpus/data/flags.kz)
 ```kurz
@@ -1018,18 +1023,6 @@ flags Access { Read, Write }
 flags Mode { Fast, Slow }
 
 print(Access.Read == Mode.Fast)
-```
-
-Case: [types/type-kind-flags-order.kz](../corpus/types/type-kind-flags-order.kz)
-```kurz
-flags Access { Read, Write }
-
-bool Before<T>(T a, T b) => match T.Kind {
-    TypeKind.Enum => a < b
-    else => false
-}
-
-print(Before(Access.Read, Access.Write))
 ```
 
 ### D14 (decided, §8) The fields of a primary constructor can be read from outside
@@ -1350,20 +1343,27 @@ A declaration that writes a number for some names and not for all, and a number 
 constant expression, are `flags-number` too, as D20 says of an `enum`; so is a declaration of
 more than 31 names, one for each bit of an `int` below its sign, whose names are counted before
 their numbers are read, so that it is one `flags-number`, at its 32nd name, whether it writes
-numbers or not. `From` and `Has` take arguments named `number` and `flag` (D11). A flags type
+numbers or not, however many names follow (§4, the owner, 2026-11-11, issue 452, "Same for 33+, as
+built"). `From` and `Has` take arguments named `number` and `flag` (D11). A flags type
 without names is a type, whose one set is `None` (§4, the owner, 2026-11-11, issue 452, "All as
 built"). A declaration of 32 names that also writes a wrong number gets that one `flags-number`
-alone, at its 32nd name, and a negative number, `-2147483648` among them, is not one bit, so it is
-`flags-number` (§4, the owner, 2026-11-11, issue 452, "All as built, decided").
+alone, at its 32nd name (§4, the owner, 2026-11-11, issue 452, "All as built, decided"), a number of
+another type or outside the range of an `int` among the wrong numbers, with no
+`narrowing-conversion` and no `constant-overflow` (§4, the owner, 2026-11-11, issue 452, "Count
+alone, as built"). A negative number is `flags-number`, `-4` and `-2147483648` among them, the
+minus before a literal being part of the literal (L17) (§4, the owner, 2026-11-11, issue 452, "All as
+built, decided").
 
-The rest of a declaration is read as D20 reads an `enum`'s, and a number's type and range are read
-before its bit. A number of another type gets the error a value of that type gets where an `int` is
-required (T1), though it is not one bit either: `type-mismatch` for `1.5` or `"two"`,
+The rest of a declaration is read as D20 reads an `enum`'s. A number that is no constant is
+`flags-number` before its type is read, `Write = Two()` with `long Two()` among them, as D20 reads an
+`enum`'s (§4, the owner, 2026-11-11, issue 452, "Constant first"). A constant's type and range are
+read before its bit. A constant of another type gets the error a value of that type gets where an
+`int` is required (T1), whether or not its value is one bit: `type-mismatch` for `1.5` or `"two"`,
 `narrowing-conversion` for `5L` and `3L` and `sign-mix` for `2u` and `3u`. A number outside the
 range of an `int` is `constant-overflow` (L10, T6), `2147483648`, the bit of the sign, among them,
-while a negative number inside it is `flags-number`, as above. A call on the type by another name
-than `From`, `Access.Has(x)` or `Access.Number(...)`, is `unknown-name` (V10) whatever names the type
-declares, since a flags type's one function is `From` (§4, the owner, 2026-11-11, issue 452, "All as
+while a negative number inside it is `flags-number`. A call on the type by any name other than
+`From`, `Access.Has(x)` and `Access.Number(...)` among them, is `unknown-name` (V10) whatever names
+the type declares, since a flags type's one function is `From` (§4, the owner, 2026-11-11, issue 452, "All as
 built, decided" and "As built: unknown-name").
 
 A name may be `From`, `Number` or `Has`, and the place of the name tells which is meant:
@@ -1413,7 +1413,30 @@ flags Access { Read = 1, Write = 3L }
 print(Access.Write)
 ```
 
+Case: [data/flags-number-minus.kz](../corpus/data/flags-number-minus.kz)
+```kurz
+flags Sign { Low = 1, High = -4 }
+
+print(Sign.Low)
+```
+
+Case: [data/flags-number-not-constant.kz](../corpus/data/flags-number-not-constant.kz)
+```kurz
+long Two() => 2L
+
+flags Access { Read = 1, Write = Two() }
+
+print(Access.Read)
+```
+
 Case: [data/flags-type-call.kz](../corpus/data/flags-type-call.kz)
+```kurz
+flags Access { Read, Write }
+
+print(Access.Has(Access.Read))
+```
+
+Case: [data/flags-type-call-declared.kz](../corpus/data/flags-type-call-declared.kz)
 ```kurz
 flags Access { Read, Has }
 
@@ -1454,7 +1477,88 @@ flags Many {
     F29 = 268435456,
     F30 = 536870912,
     F31 = 1073741824,
-    F32 = 2
+    F32 = 1
+}
+
+print(Many.F2)
+```
+
+Case: [data/flags-number-count-type.kz](../corpus/data/flags-number-count-type.kz)
+```kurz
+flags Many {
+    F1 = 3L,
+    F2 = 2,
+    F3 = 4,
+    F4 = 8,
+    F5 = 16,
+    F6 = 32,
+    F7 = 64,
+    F8 = 128,
+    F9 = 256,
+    F10 = 512,
+    F11 = 1024,
+    F12 = 2048,
+    F13 = 4096,
+    F14 = 8192,
+    F15 = 16384,
+    F16 = 32768,
+    F17 = 65536,
+    F18 = 131072,
+    F19 = 262144,
+    F20 = 524288,
+    F21 = 1048576,
+    F22 = 2097152,
+    F23 = 4194304,
+    F24 = 8388608,
+    F25 = 16777216,
+    F26 = 33554432,
+    F27 = 67108864,
+    F28 = 134217728,
+    F29 = 268435456,
+    F30 = 536870912,
+    F31 = 1073741824,
+    F32 = 1
+}
+
+print(Many.F2)
+```
+
+Case: [data/flags-number-count-many.kz](../corpus/data/flags-number-count-many.kz)
+```kurz
+flags Many {
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    F25,
+    F26,
+    F27,
+    F28,
+    F29,
+    F30,
+    F31,
+    F32,
+    F33
 }
 
 print(Many.F2)

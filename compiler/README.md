@@ -691,11 +691,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   type's name (D20);
 - `flags` (D13, D17, D19): a set is an `i32` that holds the bits of its names, each name's bit 1, 2, 4
   and so on in their order or the number its declaration writes, the 31 bits below the sign at most;
-  a declaration's names are counted before their numbers are read, and a number's type and range
-  before its bit, a negative number being no bit; a name may be `From`, `Number` or `Has`, as an
+  a declaration's names are counted before their numbers are read, then whether a number is a
+  constant, then a constant's type and range, then its bit, a negative number being no bit (D19, the
+  owner, 2026-11-11, "Constant first"); a name may be `From`, `Number` or `Has`, as an
   enum's value may be `From` or `Number` (D20, a proposed reading of D19), while a call on the type by
-  another name than `From`, `Access.Has(x)`, is `unknown-name` whatever names it declares (D19, the
-  owner, 2026-11-11, issue 452); `|`, `&` and `^` are the bit operations, `~` flips
+  any name other than `From`, `Access.Has(x)` and `Access.Number(...)` among them, is `unknown-name`
+  whatever names it declares (D19, the owner, 2026-11-11, issue 452); `|`, `&` and `^` are the bit operations, `~` flips
   the bits and keeps those of the type's names (D17, assumed there), `Has(flag)` tests that the set
   holds every bit of `flag`, `.Number` is the set
   itself, `Access.From(n)` is the set where `n` holds no bit that no name has, the sign's among them,
