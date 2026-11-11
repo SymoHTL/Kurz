@@ -19,6 +19,50 @@ public sealed class HttpTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return Toolchain.Run(toolchain.Build(compilation.Program, name));
     }
 
+    [Fact]
+    public void An_HttpError_prints_its_detail_alone_and_a_value_that_holds_one_prints_it_as_its_text()
+    {
+        // W2 (the owner, 2026-11-01, Q4 (a), and 2026-11-02, Q15 (a)): the `Text()` the body in std/ declares gives the detail alone, with
+        // no words of the kind, wherever a text is taken (A5, D16), and a list, a union, a nullable form, a map or a data value that holds
+        // one gives its text as A4 and A3 give theirs; equality, a key of a map and the fields stay a data type's (D3, D14)
+        const string program = """
+            data Held(HttpError Error)
+
+            e = HttpError(HttpKind.Protocol, "no request line")
+            print(e)
+            print("error: {e}")
+            print(string.Join(", ", [e, HttpError(HttpKind.TooLarge, "too large")]))
+            print([e])
+            string | IoError | HttpError o = e
+            print(o)
+            mut m = Map<string, HttpError>()
+            m["a"] = e
+            print(m)
+            mut k = Map<HttpError, int>()
+            k[e] = 1
+            print(k)
+            HttpError? n = null
+            print(n)
+            HttpError? s = e
+            print(s)
+            print(List<HttpError>())
+            print(Held(e))
+            print(e.Text())
+            print(e == HttpError(HttpKind.Protocol, "no request line"))
+            print(e.Kind)
+
+            """;
+        var run = BuildAndRun(program, "http-error-text");
+        Assert.Equal((0, ""), (run.Code, run.Error));
+        Assert.Equal(
+            [
+                "no request line", "error: no request line", "no request line, too large", "[no request line]", "no request line",
+                "[a: no request line]", "[no request line: 1]", "null", "no request line", "[]", "Held { Error = no request line }",
+                "no request line", "true", "Protocol",
+            ],
+            run.Output);
+    }
+
     [Theory]
     [InlineData("NameAt", "2", "Accept")]
     [InlineData("NameAt", "-1", "Accept")]
