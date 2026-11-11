@@ -38,6 +38,12 @@ public enum CallKind
     /// <summary>A method of a class (K7), on the value before the dot, or on <c>this</c> where the call names the method alone; <see cref="CallInfo.Function"/> is the method picked (F13).</summary>
     Method,
 
+    /// <summary>
+    /// A method of a <c>data</c> type (D16) on the value before the dot; <see cref="CallInfo.Function"/> is the method picked (F13), whose
+    /// <see cref="FunctionSymbol.Real"/> takes that value first: its place where the method is <c>mut</c> (M5), else the value.
+    /// </summary>
+    DataMethod,
+
     /// <summary>A list's <c>Add</c> (M9).</summary>
     ListAdd,
 
@@ -238,6 +244,9 @@ public enum CallKind
 
     /// <summary><c>Environment.Variable(name)</c> (S14).</summary>
     EnvironmentVariable,
+
+    /// <summary><c>Environment.Exit(code)</c> (S23).</summary>
+    EnvironmentExit,
 
     /// <summary><c>Sha256.Hash(bytes)</c>, <c>Md5.Hash(bytes)</c> or <c>Crc32.Hash(bytes)</c> (H1); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     Hash,

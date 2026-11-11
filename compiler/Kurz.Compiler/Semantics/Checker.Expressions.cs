@@ -436,6 +436,7 @@ public sealed partial class Checker
         ListType l => HasText(l.Element, seen),
         MapType m => HasText(m.Value, seen), // A6, M9: every type a map takes as its key has a text; a function value and a handle, which have none, are no key
         UnionType u => u.Cases.All(c => HasText(c, seen)),
+        DataType { Symbol.TextMethod: not null } => true, // A5, D16: the text its body declares, and not its fields'
         DataType d => ArgumentsHaveText(d, seen) && (seen.Contains(d.Symbol) || Fields(d.Symbol, seen)),
         ClassType c => c.Symbol.TextMethod is not null, // A4, A5: an instance has the text its class declares, and none else
         InterfaceType face => face.Symbol.TextMethod is not null, // A10: a value of an interface that declares `string Text()`
@@ -685,7 +686,7 @@ public sealed partial class Checker
             {
                 if (HasBody(data))
                 {
-                    NotSupported(m.Line, "a method of a data type (D16)"); // a member its body declares, which the checker does not read
+                    NotSupported(m.Line, "a member of a data type named after the type's name (D16, K19)"); // its body has no `static` member the checker reads
                     return Typed.Error;
                 }
 
@@ -807,9 +808,11 @@ public sealed partial class Checker
                         return new Typed(Types.Read(SubstituteData(d, field.Type))); // R3
                     }
 
-                    if (HasBody(d.Symbol))
+                    if (BodyDeclares(d.Symbol, member))
                     {
-                        NotSupported(line, "a method of a data type (D16)");
+                        NotSupported(line, d.Symbol.Methods.ContainsKey(member)
+                            ? "a method of a data type named without a call (D16, F11)"
+                            : "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared
                         return Typed.Error;
                     }
 
@@ -852,7 +855,21 @@ public sealed partial class Checker
         return Typed.Error;
     }
 
-    /// <summary>D16: whether the type or a base of it writes a body, whose members the checker does not read.</summary>
+    /// <summary>D16: whether the body of the type or of a base of it declares a member of the name, one the checker refused among them.</summary>
+    private static bool BodyDeclares(DataSymbol symbol, string member)
+    {
+        for (DataSymbol? s = symbol; s is not null; s = s.Base)
+        {
+            if (BodyNames(s).Contains(member))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>D16: whether the type or a base of it writes a body, which has no <c>static</c> member the checker reads.</summary>
     private static bool HasBody(DataSymbol symbol)
     {
         for (DataSymbol? s = symbol; s is not null; s = s.Base)

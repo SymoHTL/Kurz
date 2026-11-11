@@ -1239,7 +1239,9 @@ public sealed partial class Checker
     }
 
     /// <summary>K7, V9: inside a method, whether a name is a member of its class, which a declaration of the name would hide.</summary>
-    private bool IsMemberName(string name) => CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || MethodsOf(c, name) is not null);
+    private bool IsMemberName(string name) =>
+        (CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || MethodsOf(c, name) is not null))
+        || (CurrentData() is { } d && (d.Field(name) is not null || BodyNames(d).Contains(name))); // D16: a data type's fields and methods, as a class's
 
     /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10), and a <c>static</c> member has none (K19).</summary>
     private Typed CheckThis(ThisExpression t)
@@ -2465,13 +2467,15 @@ public sealed partial class Checker
             return false;
         }
 
-        Report(ErrorIds.NotVisible, line, $"the `Text()` of `{c.Name}` has no `pub`, and `print` and an interpolation reach it from outside the class, inside it too (A9, A15)");
+        Report(ErrorIds.NotVisible, line, $"the `Text()` of `{c}` has no `pub`, and `print` and an interpolation reach it from outside the type, inside it too (A9, A15, D16)");
         return true;
     }
 
-    private static ClassSymbol? PrivateTextClass(KurzType type, HashSet<DataSymbol> path) => type switch
+    private static string? PrivateTextClass(KurzType type, HashSet<DataSymbol> path) => type switch
     {
-        ClassType c when c.Symbol.TextMethod is { } text && (text.Declaration!.Modifiers & Modifiers.Pub) == 0 => c.Symbol,
+        ClassType c when c.Symbol.TextMethod is { } text && (text.Declaration!.Modifiers & Modifiers.Pub) == 0 => c.Symbol.Name,
+        DataType { Symbol.TextMethod: { } text } d => (text.Declaration!.Modifiers & Modifiers.Pub) == 0 ? d.Symbol.Name : null, // A5, D16: its own text, and not its fields'
+
         WeakRefType w => PrivateTextClass(w.Target, path), // A4 with R3: the text of what its read gives
         ListType l => PrivateTextClass(l.Element, path),
         MapType m => PrivateTextClass(m.Key, path) ?? PrivateTextClass(m.Value, path),
