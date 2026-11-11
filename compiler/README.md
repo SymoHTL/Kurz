@@ -553,8 +553,8 @@ a `throw`, with the thrown value's text on the line below it. A `print` passes i
 to `Print`, which raises `print-failed` there where the system refuses the write or a write takes
 no byte, as Rust's `write_all` fails on a write of zero bytes, in every build (the owner,
 2026-10-23, "Caller passes it"). An `eprint` passes the same to `Print`, with standard error in place of
-standard output; where its write failed, the write of the error line fails too and is dropped, and the
-process ends with the code 1 (A17). An allocation the system refuses ends the process with
+standard output; where its write failed, the report of the error goes to standard error too and is
+dropped where that write is refused, and the process ends with the code 1 (A17). An allocation the system refuses ends the process with
 `error: allocation-failed (<n> bytes)`, the size asked for, and no place (the owner, 2026-10-23, "Id +
 size"), for a string's block the 16 bytes of its counts among them (section 4, as for any allocation). A
 thread's first map on a system that gives no randomness for the keys of its hash ends the process with
@@ -1630,7 +1630,9 @@ ask about it.
 
 - A `print` or an `eprint` hands its line to one write call, called again for what a call did not
   take, through a
-  buffer per thread that holds the line until that call returns. Pinned by the corpus runner.
+  buffer per thread that holds the line until that call returns. Pinned for `print` by the corpus
+  runner, and for `eprint`, whose writes no case holds (A17), by
+  `EmitterTests.An_eprint_writes_its_line_to_standard_error_as_a_print_writes_to_standard_output`.
 - P9 with section 12: the runtime starts no thread, so a log line is written by the thread that logs,
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
