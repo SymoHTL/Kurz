@@ -692,9 +692,9 @@ public sealed partial class Checker
 
             if (dataTypes.TryGetValue(n.Name, out var data) && data.HasFields)
             {
-                if (HasBody(data))
+                if (BodyDeclares(data, m.Member))
                 {
-                    NotSupported(m.Line, "a member of a data type named after the type's name (D16, K19)"); // its body has no `static` member the checker reads
+                    NotSupported(m.Line, "a member of a data type read through the type's name (D16, K19)"); // its body has no `static` member the checker reads
                     return Typed.Error;
                 }
 
@@ -850,6 +850,11 @@ public sealed partial class Checker
 
                     if (BodyDeclares(d.Symbol, member))
                     {
+                        if (dataMethodErrors.Contains((d.Symbol, member)) && !d.Symbol.Methods.ContainsKey(member))
+                        {
+                            return Typed.Error; // its declaration reported the error (E1)
+                        }
+
                         NotSupported(line, d.Symbol.Methods.ContainsKey(member)
                             ? "a method of a data type named without a call (D16, F11)"
                             : "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared
@@ -903,20 +908,6 @@ public sealed partial class Checker
         for (DataSymbol? s = symbol; s is not null; s = s.Base)
         {
             if (BodyNames(s).Contains(member))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>D16: whether the type or a base of it writes a body, which has no <c>static</c> member the checker reads.</summary>
-    private static bool HasBody(DataSymbol symbol)
-    {
-        for (DataSymbol? s = symbol; s is not null; s = s.Base)
-        {
-            if (s.Declaration.Members is { Count: > 0 })
             {
                 return true;
             }

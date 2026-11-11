@@ -785,7 +785,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   text, a generic type's under the name its declaration gives (A3), or the `Text()` its body declares (A5);
   the methods of a body, each a function of the module whose first parameter is the value, the place of
   the variable or the path that holds it for a `mut` method, as Rust passes `&mut self`, and the value
-  itself for another, as Rust passes `self` by reference, borrowed as an argument is (D16, M5, M7);
+  itself for another, borrowed as an argument is, as Rust's `&self` borrows it (D16, M5, M7): one read
+  from an item of a list is kept by its list, so that a `mut` argument of the call that changes the list is
+  `changed-while-held` (M7), and the place of a `mut` receiver inside an instance's block is kept by the read
+  of that instance, whose count holds the block to the end of the statement (K2), so that a method that
+  replaces the field holding the instance writes into a block still alive; a new value as the receiver, a
+  construction or the result of a call, is a temporary of its statement (K7); a `mut` method on a value of a
+  map meets the map's nullable read first, which is `nullable-unchecked` (N2);
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
@@ -2090,7 +2096,8 @@ on an element of a list and an element of a list passed as `mut` (M7, M9); of th
 type (D16), a property, which section 14 leaves open, a field, a constructor, a `static`, `virtual` or
 `override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
 type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
-or that another names as its base, a member of the type after the type's name and a method named without a
+or that another names as its base, a member the body declares after the type's name, where a name it does
+not declare is `unknown-name` as after a type without a body (V10), and a method named without a
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a
 generic data type (T19), each of which leaves the data type, and every data type derived from it,
@@ -2344,7 +2351,8 @@ round can ask about it by the rule's id.
   what it changes, a `mut` argument, an assignment or a `mut` method, changes it within the
   expression around the arm; and one `changed-while-held` is reported for each change, at its line,
   however many reads it meets and statements it stands in (E1). A `mut` method of a `data` type
-  (D16) changes its receiver while the call holds its arguments, as an argument after `mut` does. `Add`
+  (D16) changes its receiver while the call holds its arguments, as an argument after `mut` does, since M7
+  takes the receiver of every `mut` method as what its call takes as `mut`. `Add`
   changes its receiver after its argument ran,
   so a read of the receiver in its argument meets no change (the owner, 2026-10-25, "Allow, as Rust's
   clone"), while a call in its argument that changes the receiver is the error; the emitter's `Add`
