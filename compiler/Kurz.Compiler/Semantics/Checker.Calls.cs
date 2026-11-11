@@ -97,9 +97,9 @@ public sealed partial class Checker
             return result; // N8: a `T?` is no outcome list, and a call that returns one yields it whole
         }
 
-        if (model.HasCall(c) && model.CallOf(c).Kind == CallKind.FileLines)
+        if (model.HasCall(c) && model.CallOf(c).Kind is CallKind.FileLines or CallKind.StdinLines)
         {
-            return result; // S16: the loop takes the cases of `f.Lines()`, after its `else` (CheckForIn)
+            return result; // S16, S22: the loop takes the cases of `f.Lines()` and `Stdin.Lines()`, after its `else` (CheckForIn)
         }
 
         // O2: the success case is the value; every other case leaves the calling function (O3, O9)
@@ -1495,6 +1495,11 @@ public sealed partial class Checker
             if (n.Name == "Environment")
             {
                 return CheckEnvironmentFunction(m, c); // S13, S14
+            }
+
+            if (n.Name == "Stdin")
+            {
+                return CheckStdinFunction(m, c); // S22
             }
 
             if (n.Name == "Log")

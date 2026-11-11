@@ -1140,6 +1140,16 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   longer than two reads and a last `\r` with no `\n`; a pull and a read after a close; a close in the block of a loop over its lines, which releases the
   descriptor at once, as `F_GETFD` shows, and the pull after it, the system's error 9; an assignment to the file in the block of a
   loop over its lines; and the refusal for Windows, at a call and at such a loop;
+- standard input (S22), in a build for Linux: `Stdin` is a handle of the layout above that the module holds, made with the program
+  and never freed or closed, its descriptor 0, its path `<stdin>`, which its `IoError` names, and the one reader that every read of
+  the process goes through: `Stdin.Read` reads as a file's `Read` does, `for line in Stdin.Lines()` pulls as a loop over a file's
+  lines does, and `Stdin.ReadLine()` pulls one line through the same helper, `null` where none is left, so that each goes on where
+  the one before it stopped; `Stdin.ReadAll()` takes, under the lock, the bytes the buffer holds and then reads the descriptor to
+  its end, with room for 8192 more bytes made before each read; each is a call in flight. The module declares the handle where a
+  file of the program calls a member of `Stdin`, and a build for Windows says `not supported` to each such call and loop.
+  `StdinTests` pins what no case can: lines given on standard input and read across a loop, `ReadLine`, `Read` and `ReadAll`; a
+  line that is not UTF-8; a closed descriptor 0; and the refusal for Windows. The suite runs every program with a standard input
+  closed at its start (`Processes.Capture`), as chapter 0 runs a case;
 - the command line, the environment and the clocks (S13 to S15, S25), in a build for Linux: `args` is a
   slot of `kz.main`, the list `Arguments` fills from the second argument on before the first
   statement of a top-level code that names `args`, and `Environment.Args()` the list from the first
@@ -1893,7 +1903,7 @@ and an interface with the signatures of its methods, a value of one and a call t
 flow), 11's raw forms (R7, R10 to R17), `weak` (R3, R5), its cycle rule judged by the types of the fields (R2, R4, R8) and, for a field whose type can hold a function value, by the lambdas of the program (R9), a class of `std/` the prelude names (W1) being a step of a ring of the file only through such a field, since its other fields name no class of the file and `std/`'s checker judges its own, and intrinsics (R18: `Vector128<T>` and `Vector256<T>` with
 the lane operations the emitter emits, `IsSupported` of every class of C#'s under `X86` and `Arm`, the
 functions of the classes the emitter emits, `X86.Sha`'s named as the owner chose (2026-11-01, #39),
-and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11 and S13 to S16; S12's grants, `env`'s
+and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (files, sockets and the process: S1 to S11, S13 to S16 and S22; S12's grants, `env`'s
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H6, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2 but for the text of an
@@ -2032,8 +2042,8 @@ compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a t
 no constant, which C# compiles with a slower path, an operator on a vector, which C# has, the text of a
 vector and of a value that holds one, which C# writes as its lanes and no rule gives (A4), and a vector
 whose lanes are a type parameter (T19); the names `Command`, `ChildProcess`, `ProcessOutput`,
-`ExitStatus`, `Stdio`, `ExitError` and `Stdin`, under which processes and standard input stand, and which
-every file sees, so that a file's own declaration of one is `redeclared` (S17 to S22);
+`ExitStatus`, `Stdio` and `ExitError`, under which processes stand, and which every file sees, so that a
+file's own declaration of one is `redeclared` (S17 to S21);
 a member of a type parameter that reads its type beyond `Kind`,
 `Fields` and `Make`, the parts beyond the fields, `T.Fields` anywhere but after `in` in a `for` loop and `T.Make` anywhere but
 in its call, in the copy that a call makes, a block as the body of the lambda `T.Make` takes, which no rule makes an argument, a `break` and a `continue` of a loop over `T.Fields`, which is unrolled, a dotted name as a type but `f.Type` of

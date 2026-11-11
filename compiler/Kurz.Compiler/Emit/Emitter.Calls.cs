@@ -76,6 +76,7 @@ public sealed partial class Emitter
                 or CallKind.FileSize or CallKind.FileExists or CallKind.FileModified or CallKind.DirectoryCreate or CallKind.DirectoryList or CallKind.DirectoryDelete
                 or CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileSeek or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
                 or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin => EmitFileCall(c, info),
+            CallKind.StdinRead or CallKind.StdinReadLine or CallKind.StdinReadAll => EmitStdinCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.EnvironmentExit => EmitExit(c, info),
