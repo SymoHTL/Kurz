@@ -67,18 +67,19 @@ the character before its position is to the assertions, and each transition is m
 character of its class that needs it and read from a table after that, over classes of code points
 where Rust's are of bytes, the code points that every operation of the automaton and every assertion
 read alike being one class, made once with the pattern. A state's members are the threads begun
-before its position: the thread a new start makes is added at each transition and not kept, so that
-a member reached both from an earlier start and from the current one keeps the earlier start, which
-costs time and never a match. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace`
+before its position: the thread of a new start is added at each transition, before the transition
+reads its character, and is not kept in the stored state, while the threads it reaches over the
+transition are members of the next state, so that a member reached both from an earlier start and
+from the current one keeps the earlier start, which costs time and never a match. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace`
 and `Split` run the Pike VM only where it finds a match left, from the last position up to that
 match's end, the end included, at which its state had no member, before which no match starts, so
 that `a*b` over `aab` runs the Pike VM from 0; where the DFA gives a search up or is not used, the
-Pike VM answers `IsMatch` and runs every other member alone. Its cache is made for each call, beside
+Pike VM answers `IsMatch` and runs `Match`, `Matches`, `Replace` and `Split` alone. Its cache is made for each call, beside
 the automaton and outside its bound, and the searches of one `Matches`, `Replace` or `Split` share it
 and its count of emptyings, so that a call whose DFA gave up runs the Pike VM for the rest of the
 call. It counts a state as 4 bytes for each column of its row and each of its members and 32 bytes
 of its own, and it is emptied when the next state does not fit. At an emptying the DFA gives the
-search up where the cache was emptied three times before and the searches read fewer bytes of UTF-8
+search up where the cache was emptied at least three times before and the searches read fewer bytes of UTF-8
 since the last emptying than 10 times the states made since then, as Rust's meta engine sets
 `minimum_cache_clear_count` and `minimum_bytes_per_state` and its `try_clear_cache` checks before it
 clears; and the DFA is not used where two states that each hold every state of the automaton as a
@@ -87,10 +88,8 @@ Rust's `minimum_cache_capacity` asks room for two such states beside three senti
 this cache does not have; so that a search's time stays in proportion to the pattern's size times
 the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
 ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
-making of its classes, 13.8 to 20.2 µs for the three patterns measured on 2026-11-12 for pull
-request 491, where it took 3.5 to 6.6 µs without them; a `Match` on a text of 19 bytes with a match
-at 0 1.41 times the time it took without the DFA, the cache being made for each call; and a call up
-to 2 MiB for its cache. *(assumed, §12: the defaults of the questions put to the owner on
+making of its classes, once for each pattern; a call the making of the states its cache holds, which
+a short text pays before the Pike VM runs; and a call up to 2 MiB for its cache. *(assumed, §12: the defaults of the questions put to the owner on
 2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state, the members a state
 keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
 the end of a list that cannot grow)*
@@ -227,11 +226,11 @@ request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{
 name as Rust's crate reads it, from the tables of the version §12 pins, where the crate holds 16.0.0, so that a name or a
 code point of 17.0.0 alone is a class here and `Syntax` or no match in Rust: a general category, a script, a binary
 property of that version's `PropList.txt`, `DerivedCoreProperties.txt` or `emoji-data.txt`, or `Bidi_Mirrored` of
-its `UnicodeData.txt`, the files the crate's tables of binary properties are made from, so that
-`Full_Composition_Exclusion` is no class, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
+its `UnicodeData.txt`, the files the crate's tables of binary properties are made from, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
 value the general category, the script, the script extensions, the age, which holds every version up to it, and the break
 properties Grapheme_Cluster_Break, Sentence_Break and Word_Break, as `name=value`, `name:value` or `name!=value`, which
-negates the class once more. A name is compared after three steps in turn: a first `is`, in either case of each
+negates the class once more. A binary property of another file, as `Full_Composition_Exclusion` of
+`DerivedNormalizationProps.txt`, is no class. A name is compared after three steps in turn: a first `is`, in either case of each
 letter, is set aside where the name begins with it as written; then ` `, `_` and `-` and every byte above ASCII are
 dropped and its capitals made small; then a name that had that `is` and is `c` alone is `isc`, so that `Is_C` is
 `isc` and `I_sGreek` keeps its `is`. A name alone is a binary property's, but for `cf`, `sc` and
