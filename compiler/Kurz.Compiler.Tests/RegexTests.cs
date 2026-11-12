@@ -185,6 +185,87 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    /// <summary>
+    /// G5: <c>Replace</c> reads its replacement as Rust's <c>replace_all</c> does, each row with the text Rust's reading gives: a number
+    /// and a name after <c>$</c>, the longest run of letters, digits and <c>_</c>, a number written with a <c>0</c> or a <c>+</c> before
+    /// it, as Rust's <c>usize</c> parse reads one, <c>${name}</c> ended at its brace, <c>$$</c>, and a <c>$</c> that names no group (at
+    /// the end, before a byte of no name, before a <c>{</c> without its <c>}</c>), which is a <c>$</c>; a group that does not exist, of
+    /// a number too large for any, of the empty name or of a name no group has, and one that did not take part, give no text. A
+    /// replacement that empties the text, a text with no match and a text of two-byte characters are rows too. <c>Split</c> adds the
+    /// groups that took part, in the order of their numbers, and splits at an empty match as <c>Matches</c> walks one (G4). The program
+    /// runs a second time under the allocator that makes every block it frees inaccessible.
+    /// </summary>
+    [Fact]
+    public void Replace_reads_the_replacement_as_rust_does_and_split_adds_the_groups_that_took_part()
+    {
+        const string Dates = @"(?<y>\d+)-(\d+)";
+        (string Pattern, string Text, string Replacement, string Expected)[] replaced =
+        [
+            (Dates, "a 12-34 b", "$1", "a 12 b"),
+            (Dates, "a 12-34 b", "$y", "a 12 b"),
+            (Dates, "a 12-34 b", "${y}x", "a 12x b"),
+            (Dates, "a 12-34 b", "$yx", "a  b"), // the longest run names `yx`, which no group has
+            (Dates, "a 12-34 b", "$2$1", "a 3412 b"),
+            (Dates, "a 12-34 b", "$0", "a 12-34 b"),
+            (Dates, "a 12-34 b", "$01", "a 12 b"),
+            (Dates, "a 12-34 b", "${01}", "a 12 b"),
+            (Dates, "a 12-34 b", "${+1}", "a 12 b"),
+            (Dates, "a 12-34 b", "${+}", "a  b"),
+            (Dates, "a 12-34 b", "$3", "a  b"),
+            (Dates, "a 12-34 b", "$99999999999999999999999", "a  b"),
+            (Dates, "a 12-34 b", "${}", "a  b"),
+            (Dates, "a 12-34 b", "${é}", "a  b"),
+            (Dates, "a 12-34 b", "$$1", "a $1 b"),
+            (Dates, "a 12-34 b", "$", "a $ b"),
+            (Dates, "a 12-34 b", "x$", "a x$ b"),
+            (Dates, "a 12-34 b", "$-", "a $- b"),
+            (Dates, "a 12-34 b", "$+1", "a $+1 b"), // a `+` is no byte of a name after a bare `$`
+            (Dates, "a 12-34 b", "$é", "a $é b"),
+            (Dates, "a 12-34 b", "${y", "a ${y b"),
+            (Dates, "a 12-34 b", "$y${", "a 12${ b"),
+            ("(a)|(b)", "ab", "[$1|$2]", "[a|][|b]"),
+            ("a", "banana", "", "bnn"),
+            ("a+", "aaa", "", ""),
+            ("z", "abc", "$1", "abc"),
+            ("é", "aéb", "ü", "aüb"),
+            ("x*", "axb", "-", "-a-b-"),
+        ];
+        (string Pattern, string Text, string Expected)[] split =
+        [
+            ("(a)|(b)", "xaybz", "[x, a, y, b, z]"),
+            ("(?<s>[a-z])(=)", "1a=2b=3", "[1, a, =, 2, b, =, 3]"),
+            ("", "ab", "[, a, b, ]"),
+            ("é", "aéb", "[a, b]"),
+            ("x", "abc", "[abc]"),
+        ];
+        var program = new StringBuilder();
+        var expected = new List<string>();
+        for (var i = 0; i < replaced.Length; i++)
+        {
+            var (pattern, text, replacement, result) = replaced[i];
+            program.Append($"v{i} = Regex.New(r\"{pattern}\").Replace(r\"{text}\", r\"{replacement}\")\nprint(\"<{{v{i}}}>\")\n");
+            expected.Add($"<{result}>");
+        }
+
+        for (var i = 0; i < split.Length; i++)
+        {
+            var (pattern, text, result) = split[i];
+            program.Append($"s{i} = Regex.New(r\"{pattern}\").Split(r\"{text}\")\nprint(s{i})\n");
+            expected.Add(result);
+        }
+
+        program.Append("print(Regex.New(\"x\").Split(\"\").Count)\n");
+        expected.Add("1");
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-replace" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(expected, output);
+        }
+    }
+
     /// <summary>The line the program prints for a pattern and a text: .NET's matches walked as Rust's <c>find_iter</c>, then <c>IsMatch</c> and the first match's position.</summary>
     private static string Walked(Regex regex, int groups, string text)
     {
@@ -225,10 +306,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static string Escaped(string s) => s.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("{", "\\{", StringComparison.Ordinal);
 
     /// <summary>
-    /// G1 to G5: a use of a name of regular expressions that the build refuses, where it stands: a pattern written as a literal that
+    /// G1 to G4: a use of a name of regular expressions that the build refuses, where it stands: a pattern written as a literal that
     /// does not build (G3), at the literal, whatever line the call starts on, but for a construct of Rust's syntax that the build does not
-    /// hold (G4), which is <c>not supported</c> where it is the pattern's first error, as the backtracking engine (G2), and <c>Replace</c>
-    /// and <c>Split</c> (G5), are; a function of <c>Regex</c> other than <c>New</c>; a pattern that is no literal, whose
+    /// hold (G4), which is <c>not supported</c> where it is the pattern's first error, as the backtracking engine (G2) is; a function of <c>Regex</c> other than <c>New</c>; a pattern that is no literal, whose
     /// call gives <c>Regex | RegexError</c>; and a file's own type, function, variable or parameter of one of the four names (V9),
     /// while a field takes the name.
     /// </summary>
@@ -248,8 +328,6 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Regex.New(r\"a)\\p{L}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // the first error of the pattern decides
     [InlineData("print(Regex.New(\"a\", backtracking: true).IsMatch(\"a\"))\n", "", 1)] // G2: the backtracking engine
     [InlineData("b = false\nprint(Regex.New(\"a\", backtracking: b).IsMatch(\"a\"))\n", "", 2)] // not the literal `false`
-    [InlineData("print(Regex.New(\"a\").Replace(\"a\", \"b\"))\n", "", 1)] // G5
-    [InlineData("print(Regex.New(\"a\").Split(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.Make(\"a\"))\n", "unknown-name", 1)] // V10: `New` is the one function
     [InlineData("print(Regex.New<int>(\"a\"))\n", "syntax", 1)] // T17
     [InlineData("p = \"a\"\nRegex re = Regex.New(p)\nprint(re)\n", "unlisted-case", 2)] // G3: `Regex | RegexError`, whose error top-level code passes to no caller (O9)
