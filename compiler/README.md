@@ -1834,24 +1834,36 @@ ask about it.
   class is matched as its UTF-8, and a construct that would match a byte of no character, `.`, `\D`, `\W`, `\S`, `\xNN`
   above 7F, a class that holds more than ASCII after its negation and a class's character above ASCII, is `Syntax` at its
   start once the parse and the levels found no error, the first in the order Rust's translator visits them, a class's
-  items before the class.
+  items before the class. The classes of `\p` and `\P`, as Rust's `parse_unicode_class` reads a name and its
+  `ClassQuery` resolves it: the name, `name=value`, `name:value` or `name!=value`, compared as `symbolic_name_normalize`
+  gives it, looked up in a stream of keys and sets that `tools/unicode_tables.py` writes (`CaseTables.RegexProperties`),
+  folded under `(?i)` before it is negated, and a name the stream does not hold, or any `\p` under `(?-u)`, `Syntax` at its
+  `\` once the parse and the levels found no error.
   A `Match` copies its `Value` out of the text when it is
   made, so that a chain of `?.` reads it as a field (N5): a copy per match, read or not. The ranges of `\d`, `\w` and `\s`,
   the folding of `(?i)` and the characters of a group's name are one global of a program that makes a `Regex`, written once
-  (`Emitter.Regex.cs`), which `Regex.New` reads. *(assumed)* Pinned by `RegexTests`, whose written patterns carry the reading
+  (`Emitter.Regex.cs`), which `Regex.New` reads; the stream of the classes of `\p` is in it where a pattern can need it, one
+  made when the program runs or a literal that holds `\p` or `\P`, about 79 KB, and a program whose patterns are all
+  literals without them carries a global whose count of it is 0. *(assumed)* Pinned by `RegexTests`, whose written patterns carry the reading
   of Rust's `regex-syntax` 0.8 of each, and the cases of `corpus/regex/`.
 - G2's backtracking engine, `Regex.New(pattern, backtracking: true)`: the same parse, which under the flag takes the
   backreferences `\1` and `\k<name>`, the four lookarounds and the atomic group, and the same automaton, counted and bounded
   as the linear engine's, a backreference one state and a lookaround or an atomic group two beside its content; a
-  backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses. A search tries the ways of the
+  backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses, and one to no group the
+  parse read before a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0. A search tries the ways of the
   automaton one after another from each start, in the order of the Pike VM's priorities, so that a pattern both engines take
   gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
   stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails
   that way, as the Pike VM's thread that comes back to a state at the same position ends. A lookaround and an atomic group
-  run their content as a search of its own; a lookbehind tries each start before its position, the nearest first; a
+  run their content as a search of its own; a lookbehind tries its position and each one before it, the nearest first, its content ending at its
+  position; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
-  backreference compares by the simple case folding. *(assumed: the defaults of issue 176, comment 6811727642)* Pinned by
+  backreference compares by the simple case folding, the flag in force at the backreference deciding. *(assumed: the
+  constructs, their count and bound, a lookbehind of any length and the case folding of a backreference, the defaults
+  of issue 176, comment 6811727642, Q1 to Q7 and Q10; the stack in memory, Q9 of that comment at its default; the
+  lookbehind's start, Q15 of comment 6812042360 at its default; the loop's end, the errors and the digits of a
+  backreference and when a group's positions are set, proposed with the record and not put to the owner)* Pinned by
   `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
   patterns of its own constructs, and `corpus/regex/backtracking.kz`.
 - G5: `Replace` and `Split` walk the matches `Matches` walks, Rust's `find_iter` (one method, `Next`). `Replace` reads the
@@ -2203,9 +2215,7 @@ larger type each time makes without end, by a call T34's walk does not read: out
 bound, its outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
 the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
 ended; another outer call still makes its copies, and each one whose chain reaches the bound reports its own `not supported`
-(T33, assumed); of regular expressions, in a literal pattern a construct of Rust's syntax that the standard library's
-parse does not build, `\p` and `\P`, where it is the pattern's first
-error, which a pattern that is no literal gets as the `RegexError` `Unsupported` when the program runs (G4); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
+(T33, assumed); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
 which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the

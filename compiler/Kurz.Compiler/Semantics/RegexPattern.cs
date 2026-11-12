@@ -31,7 +31,6 @@ internal sealed class RegexPattern
     private int laterAt = -1;
     private int failKind = -1;
     private int failAt;
-    private string? unbuilt;
     private readonly List<int> kind = [];
     private readonly List<int> na = [];
     private readonly List<int> nb = [];
@@ -112,14 +111,13 @@ internal sealed class RegexPattern
 
     /// <summary>
     /// The error <c>Regex.New(pattern)</c> gives, or with <paramref name="backtracking"/> <c>Regex.New(pattern, backtracking:
-    /// true)</c>, or null where it builds; with the words of the construct where the error is one of Rust's syntax that the build does
-    /// not hold (<see cref="Unbuilt"/>).
+    /// true)</c>, or null where it builds.
     /// </summary>
-    public static (Kind Kind, int At, string? Unbuilt)? Check(string pattern, bool backtracking = false)
+    public static (Kind Kind, int At)? Check(string pattern, bool backtracking = false)
     {
         var r = new RegexPattern(pattern, backtracking);
         r.Build();
-        return r.failKind < 0 ? null : ((Kind)r.failKind, r.failAt, r.unbuilt);
+        return r.failKind < 0 ? null : ((Kind)r.failKind, r.failAt);
     }
 
     /// <summary>The words <c>RegexError</c>'s text gives the error, <c>syntax at 1</c> (G3).</summary>
@@ -136,10 +134,11 @@ internal sealed class RegexPattern
         var root = Parse();
         if (failKind >= 0)
         {
+            Refs(failAt);
             return;
         }
 
-        Refs();
+        Refs(p.Length + 1);
         if (failKind >= 0)
         {
             return;
@@ -158,17 +157,21 @@ internal sealed class RegexPattern
     }
 
     /// <summary>
-    /// The backreferences, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a number no group has and a name no
-    /// group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern.
+    /// The backreferences before <paramref name="before"/>, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a
+    /// number no group has and a name no group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern. Where the
+    /// parse refused a construct, at <paramref name="before"/>, a backreference before it to no group the parse read is the error
+    /// instead, as .NET, which counts the groups before it parses, reports <c>\9(</c>; a group after that construct is not read,
+    /// so that <c>\2(a)\q(b)</c> is <c>Syntax</c> at 0 (G2).
     /// </summary>
-    private void Refs()
+    private void Refs(int before)
     {
-        for (var i = 0; i < refNode.Count; i++)
+        for (var i = 0; i < refNode.Count && refAt[i] < before; i++)
         {
             var group = refNumber[i] >= 0 ? refNumber[i] : names.IndexOf(refName[i], 1);
             if (group < 0 || group >= names.Count)
             {
-                Fail(0, refAt[i]);
+                failKind = 0;
+                failAt = refAt[i];
                 return;
             }
 
@@ -186,23 +189,10 @@ internal sealed class RegexPattern
     }
 
     /// <summary>
-    /// A construct of Rust's syntax (G4) that the standard library's parse does not build, <c>Unsupported</c> there at the position,
-    /// with the words the checker's <c>not supported</c> names it by where it is the first error of the pattern.
-    /// </summary>
-    private void Unbuilt(int position, string words)
-    {
-        if (failKind < 0)
-        {
-            unbuilt = words;
-        }
-
-        Fail(1, position);
-    }
-
-    /// <summary>
     /// A node, with whether the most it matches is no character, as Rust's <c>maximum_len</c> of <c>Some(0)</c>: the empty node and an
     /// assertion; a group of such a node; a sequence or an alternation of such nodes only; and a repetition of such a node or of at
-    /// most 0.
+    /// most 0. A lookaround is such a node, and an atomic group as its content; a backreference is not, even to a group that reads
+    /// no character (<c>()\1</c>), since its group is resolved after the parse, so that its repetition is counted in full.
     /// </summary>
     private int Node(int k, int a, int b, int c)
     {
@@ -250,6 +240,212 @@ internal sealed class RegexPattern
         }
 
         return Node(1, cp, 0, 0);
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_unicode_class</c> and its translation (G4): <c>\p</c> or <c>\P</c> at <paramref name="start"/>, then one
+    /// letter, or in braces a name, <c>name=value</c>, <c>name:value</c> or <c>name!=value</c>, which negates once more, the white
+    /// space and the comments of <c>(?x)</c> passed over. The end of the pattern is <c>Syntax</c> at the end, and a <c>\</c> for
+    /// the letter at that <c>\</c>. The class is <see cref="escSet"/>, folded under <c>(?i)</c> before it is negated; a name
+    /// Rust's crate does not know, and any <c>\p</c> under <c>(?-u)</c>, is <c>Syntax</c> at <paramref name="start"/> once the
+    /// parse and the levels found no error, as its translator refuses it.
+    /// </summary>
+    private bool Property(bool negated, int start)
+    {
+        at++;
+        Skip();
+        if (at >= n)
+        {
+            Fail(0, at);
+            return false;
+        }
+
+        var text = new List<byte>();
+        if (p[at] == 123)
+        {
+            at++;
+            Skip();
+            while (at < n && p[at] != 125)
+            {
+                var next = at + Length(p[at]);
+                text.AddRange(p[at..next]);
+                at = next;
+                Skip();
+            }
+
+            if (at >= n)
+            {
+                Fail(0, at);
+                return false;
+            }
+
+            at++;
+        }
+        else
+        {
+            if (p[at] == 92)
+            {
+                Fail(0, at);
+                return false;
+            }
+
+            var next = at + Length(p[at]);
+            text.AddRange(p[at..next]);
+            at = next;
+            Skip();
+        }
+
+        var split = Find(text, 33, 61);
+        var width = 2;
+        if (split < 0)
+        {
+            width = 1;
+            split = Find(text, 58, -1);
+        }
+
+        if (split < 0)
+        {
+            split = Find(text, 61, -1);
+        }
+
+        escSet = [];
+        if ((flags & 64) == 0)
+        {
+            Later(start);
+            return true;
+        }
+
+        var key = Key(0, text, 0, text.Count);
+        if (split >= 0)
+        {
+            var kindOf = Lookup(Key(8, text, 0, split));
+            key = kindOf is [< 0] ? Key(-1 - kindOf[0], text, split + width, text.Count) : [];
+        }
+
+        var set = key.Count > 0 ? Lookup(key) : [];
+        if (set.Count == 0 || set[0] < 0)
+        {
+            Later(start);
+            return true;
+        }
+
+        if ((flags & 1) != 0)
+        {
+            set = Folded(set);
+        }
+
+        escSet = negated != (split >= 0 && width == 2) ? Negate(set) : set;
+        return true;
+    }
+
+    /// <summary>Where <paramref name="text"/> first holds the byte <paramref name="a"/>, and <paramref name="b"/> after it where it is not -1; -1 where nowhere.</summary>
+    private static int Find(List<byte> text, int a, int b)
+    {
+        for (var i = 0; i < text.Count; i++)
+        {
+            if (text[i] == a && (b < 0 || (i + 1 < text.Count && text[i + 1] == b)))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The key of a name of <c>\p</c>: <paramref name="kind"/>, then the bytes of <paramref name="text"/> from
+    /// <paramref name="from"/> to <paramref name="to"/> as Rust's <c>symbolic_name_normalize</c> gives them: a first
+    /// <c>is</c> of any case dropped, <c> </c>, <c>_</c>, <c>-</c> and every byte above ASCII dropped, ASCII's capitals made
+    /// small, and <c>is</c> with <c>c</c> alone after it kept as <c>isc</c>.
+    /// </summary>
+    private static List<int> Key(int kind, List<byte> text, int from, int to)
+    {
+        var prefixed = to - from >= 2 && (text[from] | 32) == 105 && (text[from + 1] | 32) == 115;
+        var output = new List<int> { kind };
+        for (var i = prefixed ? from + 2 : from; i < to; i++)
+        {
+            int b = text[i];
+            if (b is not (32 or 95 or 45) && b <= 127)
+            {
+                output.Add(b >= 65 && b <= 90 ? b + 32 : b);
+            }
+        }
+
+        return prefixed && output is [_, 99] ? [kind, 105, 115, 99] : output;
+    }
+
+    /// <summary>The stream of the classes of <c>\p</c> that <see cref="CaseTables.RegexProperties"/> holds.</summary>
+    internal static readonly byte[] Properties = Convert.FromBase64String(CaseTables.RegexProperties);
+
+    /// <summary>
+    /// The classes of <c>\p</c> (G4), as the standard library's <c>RegexProperty</c> reads them: the union of the sets of
+    /// <paramref name="key"/> in <see cref="Properties"/>, the ranges of each set read from the varints of their gaps and
+    /// lengths, or for the name of a property its values' kind as <c>-1 - kind</c>, or none where the stream has no such key.
+    /// </summary>
+    private static List<int> Lookup(List<int> key)
+    {
+        var d = Properties;
+        var at = 0;
+        var end = Varint(d, ref at);
+        end += at;
+        var sets = end;
+        while (at < end)
+        {
+            int size = d[at];
+            var same = size == key.Count;
+            for (var i = 0; same && i < size; i++)
+            {
+                same = d[at + 1 + i] == key[i];
+            }
+
+            at += 1 + size;
+            var offset = Varint(d, ref at);
+            int count = d[at++];
+            if (!same)
+            {
+                continue;
+            }
+
+            if (count == 0)
+            {
+                return [-1 - offset];
+            }
+
+            var output = new List<int>();
+            at = sets + offset;
+            for (var s = 0; s < count; s++)
+            {
+                var one = new List<int>();
+                var last = -1;
+                for (var r = Varint(d, ref at); r > 0; r--)
+                {
+                    var lo = last + 1 + Varint(d, ref at);
+                    last = lo + Varint(d, ref at);
+                    one.Add(lo);
+                    one.Add(last);
+                }
+
+                output = Unite(output, one);
+            }
+
+            return output;
+        }
+
+        return [];
+    }
+
+    private static int Varint(byte[] d, ref int at)
+    {
+        var value = 0;
+        for (var shift = 0; ; shift += 7)
+        {
+            int b = d[at++];
+            value |= (b & 127) << shift;
+            if (b < 128)
+            {
+                return value;
+            }
+        }
     }
 
     private static List<int> Table(int which) => [.. which switch
@@ -1069,8 +1265,7 @@ internal sealed class RegexPattern
 
         if (c is 112 or 80)
         {
-            Unbuilt(start, "a class of Unicode by its name, `\\p` and `\\P`");
-            return 0;
+            return Property(c == 80, start) ? 2 : 0;
         }
 
         if (c is 100 or 68 or 119 or 87 or 115 or 83)

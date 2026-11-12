@@ -15,7 +15,7 @@ and the simple case folding, as Rust's `regex` reads them.
 Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
 anything is fetched or written (tools/calls.py).
 
-The five files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
+The fourteen files are fetched from unicode.org at the pinned version and each is checked by its SHA-256
 before it is read: a file of another hash is refused (FAIL), and a file that cannot be fetched, or
 whose download is cut off, leaves the tables unread (PARTLY, which is red: nothing was compared). A
 fetched file is kept under its hash in the system's temporary directory, and read from there while its
@@ -44,12 +44,26 @@ What the tables hold, as Rust's generator takes them:
   which a name's first character is one, and of the general categories Nd, Nl and No from UnicodeData.txt;
 - the simple case folding of CaseFolding.txt, its statuses C and S, as Rust's `regex` folds a pattern under
   `(?i)`: each set of the code points that fold together, as a cycle of each code point and the next of
-  its set in ascending order, the last with the first.
+  its set in ascending order, the last with the first;
+- the classes of `\\p` and `\\P` of G4, as `regex-syntax` 0.8.11 reads a name (`unicode::ClassQuery`) and as
+  `ucd-generate` 0.3.1 writes its tables: the general categories of UnicodeData.txt, Cn where it lists none
+  and Cs left out, with the groups of PropertyValueAliases.txt, Other with Cs; the scripts of Scripts.txt;
+  the script extensions, a script's code points less those ScriptExtensions.txt lists and those it lists for
+  the script; the versions of DerivedAge.txt, an age every version up to it; the values of the three break
+  properties of auxiliary/; and the binary properties of PropList.txt, DerivedCoreProperties.txt and
+  emoji/emoji-data.txt, with Bidi_Mirrored from UnicodeData.txt. A range's end inside the surrogates moves
+  out of them, as `--chars` writes it. Every name is resolved here, as the crate resolves it, into a key: a
+  kind, then the name as `symbolic_name_normalize` gives it; a name the crate refuses has no key. The stream
+  (`RegexProperties`) is the length of the keys' part as a varint, then each key, its length in one byte,
+  its bytes, the offset of its first set in the sets' part as a varint and its number of sets in one byte,
+  then the sets, each its number of ranges and each range's gap from the last end and its length, as
+  varints; a set is stored once, and the ages in their order, so that an age is its first sets.
 This tool refuses the forms its tables do not hold: a mapping that leaves its plane, a mapping past
 the first two planes, to one code point or to several, a delta of 32768, and more distinct blocks than
 an index of one byte numbers; and levels that, read back, do not give the mappings they were made
 from. A table with fewer entries than its floor is refused, so that a file read as empty is never a
 table."""
+import base64
 import hashlib
 import http.client
 import os
@@ -69,7 +83,20 @@ FILES = {
     "DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
     "PropList.txt": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
     "CaseFolding.txt": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+    "PropertyAliases.txt": "4441f573caf952ffece1d7c892e7715bd7136dfc26f96eb6f268bf1e474715fb",
+    "PropertyValueAliases.txt": "64e9a5f76f7a1e8b5a47d6a1f9a26522a251208f5276bdfa1559dac7cf2e827a",
+    "Scripts.txt": "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf",
+    "ScriptExtensions.txt": "ec2107e58825a1586acee8e0911ce18260394ac8b87e535ca325f1ccbeb06bc6",
+    "DerivedAge.txt": "f8ecdf768bdc210f201abd271d9bc587825618a86a7046a8146cc816393f1998",
+    "auxiliary/GraphemeBreakProperty.txt": "d6b51d1d2ae5c33b451b7ed994b48f1f4dc62b2272a5831e7fd418514a6bae89",
+    "auxiliary/WordBreakProperty.txt": "72274cac1e6b919507db35655c3e175aa27274668a1ece95c28d2069f2ad9852",
+    "auxiliary/SentenceBreakProperty.txt": "871c0c985ad95125e25b302414065a10839d068970bceb383ecec138f22a0a18",
+    "emoji/emoji-data.txt": "2cb2bb9455cda83e8481541ecf5b6dfda66a3bb89efa3fa7c5297eccf607b72b",
 }
+# the files of the classes of `\p` and `\P`, beside the five of the case tables
+PROPERTY_FILES = ("PropertyAliases.txt", "PropertyValueAliases.txt", "Scripts.txt", "ScriptExtensions.txt", "DerivedAge.txt",
+                  "auxiliary/GraphemeBreakProperty.txt", "auxiliary/WordBreakProperty.txt", "auxiliary/SentenceBreakProperty.txt",
+                  "emoji/emoji-data.txt")
 SOURCE = "https://www.unicode.org/Public/{version}/ucd/{name}"
 OUT = "compiler/Kurz.Compiler/Emit/CaseTables.cs"
 # the levels: the code points of the first two planes in blocks of 32, an index of one byte per block, and the
@@ -78,14 +105,16 @@ BLOCK = 32
 PLANES = 0x20000
 MARK = 0x8000
 # the entries each table holds at the least; 17.0.0 holds 69 and 82 blocks of deltas, 1 and 102 multis, 158 and 464
-# ranges, and 72, 802 and 10 ranges of the classes, 2994 code points that fold, and 761 and 146 ranges of a name's characters
+# ranges, and 72, 802 and 10 ranges of the classes, 2994 code points that fold, and 761 and 146 ranges of a name's characters,
+# and 79003 bytes of the classes of `\p`
 FLOORS = {"LowerDeltas": 30, "UpperDeltas": 30, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300,
-          "RegexDigit": 60, "RegexWord": 700, "RegexSpace": 8, "RegexFold": 2500, "RegexAlpha": 700, "RegexNumber": 130}
+          "RegexDigit": 60, "RegexWord": 700, "RegexSpace": 8, "RegexFold": 2500, "RegexAlpha": 700, "RegexNumber": 130,
+          "RegexProperties": 40000}
 WIDTH = {"LowerIndex": 1, "UpperIndex": 1, "LowerDeltas": BLOCK, "UpperDeltas": BLOCK, "LowerMultis": 4, "UpperMultis": 4,
          "Cased": 2, "CaseIgnorable": 2, "RegexDigit": 2, "RegexWord": 2, "RegexSpace": 2, "RegexFold": 2,
-         "RegexAlpha": 2, "RegexNumber": 2}
+         "RegexAlpha": 2, "RegexNumber": 2, "RegexProperties": 1}
 NAMES = ("LowerIndex", "LowerDeltas", "LowerMultis", "UpperIndex", "UpperDeltas", "UpperMultis", "Cased", "CaseIgnorable",
-         "RegexDigit", "RegexWord", "RegexSpace", "RegexFold", "RegexAlpha", "RegexNumber")
+         "RegexDigit", "RegexWord", "RegexSpace", "RegexFold", "RegexAlpha", "RegexNumber", "RegexProperties")
 
 
 class Unread(Exception):
@@ -227,11 +256,10 @@ def merge(found):
     return merged
 
 
-def categories(unicode_data, names):
-    """The merged ranges of the code points of UnicodeData.txt whose general category is one of `names`; a range
-    the file writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole."""
-    found = []
-    first = None
+def category_ranges(unicode_data):
+    """{general category: the ranges of its code points in UnicodeData.txt, in the file's order}; a range the file
+    writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole."""
+    category, first = {}, None
     for line in unicode_data.splitlines():
         if not line.strip():
             continue
@@ -242,9 +270,14 @@ def categories(unicode_data, names):
             continue
         start = first if first is not None and f[1].endswith(", Last>") else cp
         first = None
-        if f[2] in names:
-            found.append((start, cp))
-    return merge(found)
+        category.setdefault(f[2], []).append((start, cp))
+    return category
+
+
+def categories(unicode_data, names):
+    """The merged ranges of the code points of UnicodeData.txt whose general category is one of `names`."""
+    found = category_ranges(unicode_data)
+    return merge([r for name in names for r in found.get(name, [])])
 
 
 def folds(case_folding):
@@ -268,7 +301,268 @@ def folds(case_folding):
     return sorted(out)
 
 
-def generate(unicode_data, special_casing, properties, prop_list, case_folding, floors=FLOORS):
+# the kinds of a key of the classes of `\p` (G4), its first byte: a name read alone (`\pL`, `\p{Greek}`), the value of each
+# property the crate takes by value (`\p{sc=Greek}`), and the name of such a property, whose key holds its values' kind
+KIND_ALONE, KIND_PROPERTY = 0, 8
+VALUE_KINDS = {"General_Category": 1, "Script": 2, "Script_Extensions": 3, "Age": 4, "Grapheme_Cluster_Break": 5,
+               "Word_Break": 6, "Sentence_Break": 7}
+SURROGATES = (0xD800, 0xDFFF)
+# the groups of the general categories, as PropertyValueAliases.txt writes them; Other holds Cs, which has no set of its own
+GROUPS = {"Cased_Letter": ("Lu", "Ll", "Lt"), "Letter": ("Lu", "Ll", "Lt", "Lm", "Lo"), "Mark": ("Mn", "Mc", "Me"),
+          "Number": ("Nd", "Nl", "No"), "Punctuation": ("Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po"), "Symbol": ("Sm", "Sc", "Sk", "So"),
+          "Separator": ("Zs", "Zl", "Zp"), "Other": ("Cc", "Cf", "Cn", "Co", "Cs")}
+TOP = 0x10FFFF
+
+
+def normalized(name):
+    """A name as regex-syntax's `symbolic_name_normalize` gives it: a first `is` of any case dropped, ` `, `_` and `-`
+    dropped, ASCII's capitals made small, every byte above ASCII dropped, and `is` with `c` alone after it kept as `isc`."""
+    data = name.encode("utf-8")
+    prefixed = len(data) >= 2 and data[:2].lower() == b"is"
+    out = bytearray()
+    for b in data[2 if prefixed else 0:]:
+        if b in b" _-" or b > 0x7F:
+            continue
+        out.append(b + 32 if 65 <= b <= 90 else b)
+    return "isc" if prefixed and out == b"c" else out.decode("ascii")
+
+
+def chars(found):
+    """Ranges as ucd-generate's `--chars` writes them: merged as code points, then an end inside the surrogates moved out of
+    them, so that a range of surrogates alone is left out and one across them stays whole."""
+    out = []
+    for a, b in merge(found):
+        a = SURROGATES[1] + 1 if SURROGATES[0] <= a <= SURROGATES[1] else a
+        b = SURROGATES[0] - 1 if SURROGATES[0] <= b <= SURROGATES[1] else b
+        if a <= b:
+            out.append((a, b))
+    return out
+
+
+def rows(text):
+    """The fields of each line of a file of the database that holds data, its comment left out."""
+    for line in text.splitlines():
+        body = line.split("#")[0].strip()
+        if body:
+            yield [x.strip() for x in body.split(";")]
+
+
+def listed(text):
+    """{value: [(first, last)]} of a file whose lines are `code points ; value`."""
+    out = {}
+    for f in rows(text):
+        a, _, b = f[0].partition("..")
+        out.setdefault(f[1], []).append((int(a, 16), int(b or a, 16)))
+    return out
+
+
+def property_sets(unicode_data, properties, prop_list, texts):
+    """(sets, names, values): {kind: {canonical name: ranges}} of the classes of `\\p`, {normalized name: property} of
+    PropertyAliases.txt, and {property: {normalized value: canonical value}} of PropertyValueAliases.txt."""
+    names = {}
+    for f in rows(texts["PropertyAliases.txt"]):
+        for alias in f:
+            names[normalized(alias)] = f[1]
+    values, shorts = {}, {}
+    for f in rows(texts["PropertyValueAliases.txt"]):
+        prop = names.get(normalized(f[0]))
+        if prop is None or prop == "Canonical_Combining_Class":
+            continue
+        for alias in f[1:]:
+            values.setdefault(prop, {})[normalized(alias)] = f[2]
+        shorts.setdefault(prop, {})[f[1]] = f[2]
+    values["Script_Extensions"] = values.get("Script", {})
+    category = category_ranges(unicode_data)
+    category["Cn"] = invert(merge([r for found in category.values() for r in found]))
+    gc_long = shorts.get("General_Category", {})
+    gc = {gc_long.get(short, short): chars(found) for short, found in category.items() if short != "Cs"}
+    for group, members in GROUPS.items():
+        gc[group] = chars([r for m in members for r in category.get(m, [])])
+    script = listed(texts["Scripts.txt"])
+    of = {}
+    for name, found in script.items():
+        for a, b in found:
+            for cp in range(a, b + 1):
+                of[cp] = name
+    sc_long = shorts.get("Script", {})
+    extended = {name: set() for name in script}
+    moved = set()
+    for codes, found in listed(texts["ScriptExtensions.txt"]).items():
+        for a, b in found:
+            for cp in range(a, b + 1):
+                moved.add(cp)
+                for short in codes.split():
+                    extended.setdefault(sc_long.get(short, short), set()).add(cp)
+    scx = {}
+    for name in extended:
+        points = extended[name] | {cp for a, b in script.get(name, []) for cp in range(a, b + 1) if cp not in moved}
+        scx[name] = chars([(cp, cp) for cp in points])
+    ages = listed(texts["DerivedAge.txt"])
+    order = sorted(ages, key=lambda v: tuple(int(x) for x in v.split(".")))
+    binary = {}
+    for text in (prop_list, properties, texts["emoji/emoji-data.txt"]):
+        for name, found in listed(text).items():
+            binary.setdefault(name, []).extend(found)
+    binary["Bidi_Mirrored"] = [(int(f[0], 16), int(f[0], 16)) for f in (line.split(";") for line in unicode_data.splitlines() if line.strip())
+                               if f[9] == "Y"]
+    sets = {
+        "General_Category": gc,
+        "Script": {name: chars(found) for name, found in script.items()},
+        "Script_Extensions": {name: found for name, found in scx.items() if found},
+        "Age": {"V" + v.replace(".", "_"): chars(ages[v]) for v in order},
+        "Grapheme_Cluster_Break": {k: chars(v) for k, v in listed(texts["auxiliary/GraphemeBreakProperty.txt"]).items()},
+        "Word_Break": {k: chars(v) for k, v in listed(texts["auxiliary/WordBreakProperty.txt"]).items()},
+        "Sentence_Break": {k: chars(v) for k, v in listed(texts["auxiliary/SentenceBreakProperty.txt"]).items()},
+        "Binary": {k: chars(v) for k, v in binary.items()},
+    }
+    sets["General_Category"]["Any"] = [(0, TOP)]
+    sets["General_Category"]["ASCII"] = [(0, 0x7F)]
+    sets["General_Category"]["Assigned"] = chars(invert(sets["General_Category"].get("Unassigned", [])))
+    return sets, names, values
+
+
+def invert(found):
+    """The ranges of every code point that `found` does not hold."""
+    out, at = [], 0
+    for a, b in found:
+        if a > at:
+            out.append((at, a - 1))
+        at = b + 1
+    if at <= TOP:
+        out.append((at, TOP))
+    return out
+
+
+def classes(sets, names, values):
+    """{key: list of sets}, every key of the classes of `\\p` the crate builds, resolved as its `ClassQuery::canonicalize` and
+    `unicode::class` resolve it, and {key: kind} of the properties it reads by value. A name alone is a property's name before a
+    category's and a script's, but for `cf`, `sc` and `lc`, and the name of a property that is not binary is no class; a key of
+    an age holds the sets of every version up to it."""
+    gc_values = dict(values.get("General_Category", {}), any="Any", assigned="Assigned", ascii="ASCII")
+    out, kinds = {}, {}
+    ages = list(sets["Age"])
+    for norm in sorted(set(names) | set(gc_values) | set(values.get("Script", {}))):
+        if norm not in ("cf", "sc", "lc") and norm in names:
+            found = sets["Binary"].get(names[norm])
+        elif norm in gc_values:
+            found = sets["General_Category"].get(gc_values[norm])
+        else:
+            found = sets["Script"].get(values["Script"][norm])
+        if found:
+            out[bytes([KIND_ALONE]) + norm.encode()] = [found]
+    for norm, prop in names.items():
+        if prop in VALUE_KINDS:
+            kinds[bytes([KIND_PROPERTY]) + norm.encode()] = VALUE_KINDS[prop]
+    for prop, kind in VALUE_KINDS.items():
+        table = gc_values if prop == "General_Category" else values.get(prop, {})
+        for norm, canon in table.items():
+            if prop == "Age":
+                found = [sets["Age"][v] for v in ages[:ages.index(canon) + 1]] if canon in sets["Age"] else None
+            else:
+                one = sets[prop].get(canon)
+                found = [one] if one else None
+            if found:
+                out[bytes([kind]) + norm.encode()] = found
+    return out, kinds
+
+
+def varint(n, out):
+    while n >= 0x80:
+        out.append(n & 0x7F | 0x80)
+        n >>= 7
+    out.append(n)
+
+
+def encode(sets, names, values):
+    """The stream of the classes of `\\p`: the length of the keys' part as a varint, the keys in the order of their bytes,
+    each its length in one byte, its bytes, the offset of its first set in the sets' part as a varint and its number of sets in
+    one byte (a property's name: its values' kind and 0), then the sets, each stored once, the ages first in their order."""
+    found, kinds = classes(sets, names, values)
+    stored, part = {}, bytearray()
+
+    def write(ranges):
+        at = len(part)
+        varint(len(ranges), part)
+        last = -1
+        for a, b in ranges:
+            varint(a - last - 1, part)
+            varint(b - a, part)
+            last = b
+        return at
+
+    def store(ranges):
+        key = tuple(ranges)
+        if key not in stored:
+            stored[key] = write(ranges)
+        return stored[key]
+
+    # the ages first, each written in its order even where two are alike, so that the key of an age, the one key of several sets
+    # (`classes`), reads the sets of its versions in a row
+    ages = []
+    for v in sets["Age"].values():
+        ages.append(write(v))
+        stored.setdefault(tuple(v), ages[-1])
+    keys = bytearray()
+    for key in sorted(set(found) | set(kinds)):
+        if len(key) > 255:
+            raise ValueError(f"a key of {len(key)} bytes, longer than one byte counts")
+        keys.append(len(key))
+        keys += key
+        if key in kinds:
+            varint(kinds[key], keys)
+            keys.append(0)
+            continue
+        at = ages[:len(found[key])] if len(found[key]) > 1 else [store(found[key][0])]
+        varint(at[0], keys)
+        keys.append(len(at))
+    head = bytearray()
+    varint(len(keys), head)
+    return list(bytes(head + keys + part))
+
+
+def decode(data):
+    """{key: ranges} of a stream `encode` wrote, a property's name with its values' kind in place of ranges, the form the
+    file's check compares two versions in."""
+    data, at = bytes(data), 0
+
+    def read():
+        nonlocal at
+        n, shift = 0, 0
+        while True:
+            b = data[at]
+            at += 1
+            n |= (b & 0x7F) << shift
+            shift += 7
+            if b < 0x80:
+                return n
+
+    end = read()
+    end += at
+    base = end
+    out = {}
+    while at < end:
+        size = data[at]
+        key = data[at + 1:at + 1 + size]
+        at += 1 + size
+        offset = read()
+        count = data[at]
+        at += 1
+        if count == 0:
+            out[key] = ("kind", offset)
+            continue
+        keep, at = at, base + offset
+        found = []
+        for _ in range(count):
+            last = -1
+            for _ in range(read()):
+                a = last + 1 + read()
+                last = a + read()
+                found.append((a, last))
+        out[key], at = tuple(merge(found)), keep
+    return out
+
+
+def generate(unicode_data, special_casing, properties, prop_list, case_folding, texts=None, floors=FLOORS):
     """The arrays of the file, by name, as lists of integers."""
     lower, upper = mappings(unicode_data, special_casing)
     lower_index, lower_deltas, lower_multis = tables(lower)
@@ -289,6 +583,7 @@ def generate(unicode_data, special_casing, properties, prop_list, case_folding, 
         "RegexFold": [x for pair in folds(case_folding) for x in pair],
         "RegexAlpha": [x for r in ranges(properties, "Alphabetic") for x in r],
         "RegexNumber": [x for r in categories(unicode_data, {"Nd", "Nl", "No"}) for x in r],
+        "RegexProperties": encode(*property_sets(unicode_data, properties, prop_list, texts or {name: "" for name in PROPERTY_FILES})),
     }
     for name, floor in floors.items():
         if len(out[name]) // WIDTH[name] < floor:
@@ -310,6 +605,7 @@ SUMMARIES = {
     "RegexSpace": "G4: the ranges of the property White_Space, which <c>\\s</c> matches, as <see cref=\"Cased\"/> holds its ranges.",
     "RegexAlpha": "G4: the ranges of the property Alphabetic, of which the first character of a group's name is one, as Rust's <c>regex-syntax</c> reads a name through <c>char::is_alphabetic</c>, as <see cref=\"Cased\"/> holds its ranges.",
     "RegexNumber": "G4: the ranges of the general categories Nd, Nl and No, of which a later character of a group's name may be one beside Alphabetic, as Rust's <c>char::is_numeric</c> reads them, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexProperties": "G4: the classes of <c>\\p</c> and <c>\\P</c>, as Rust's <c>regex-syntax</c> reads a name, in base64: the length of the keys' part as a varint; each key, its length in one byte, its bytes (a kind, 0 a name alone, 1 to 7 a value of General_Category, Script, Script_Extensions, Age, Grapheme_Cluster_Break, Word_Break and Sentence_Break, 8 the name of such a property, then the name as <c>symbolic_name_normalize</c> gives it), the offset of its first set in the sets' part as a varint and its number of sets in one byte, a union, or for a property's name its values' kind and 0; then the sets, each its number of ranges and each range's gap from the last end and its length, as varints.",
     "RegexFold": "G4: the simple case folding of the statuses C and S, which a pattern under <c>(?i)</c> reads, two numbers each: a code point that folds with another and the next code point of its set in ascending order, the last of a set with its first, in the order of the code points.",
 }
 
@@ -347,6 +643,12 @@ def render(arrays):
                 lines.append(line)
                 line = "    ///"
             line += " " + word
+        if name in STRINGS:
+            text = base64.b64encode(bytes(values)).decode("ascii")
+            lines += [line, "    /// </summary>", f"    public const string {name} = \"\"\""]
+            lines += ["        " + text[at:at + 128] for at in range(0, len(text), 128)]
+            lines.append("        \"\"\";")
+            continue
         lines += [line, "    /// </summary>", f"    public static readonly int[] {name} =", "    ["]
         for at in range(0, len(values), per):
             lines.append("        " + ", ".join(number(v, at + k, name) for k, v in enumerate(values[at:at + per])) + ",")
@@ -356,11 +658,20 @@ def render(arrays):
 
 
 ARRAY = re.compile(r"public static readonly int\[\] (\w+) =\s*\[(.*?)\];", re.S)
+STRING = re.compile(r'public const string (\w+) = """(.*?)""";', re.S)
+# the arrays the file holds as a string of base64, read by the compiler as bytes
+STRINGS = ("RegexProperties",)
 
 
 def parse(text):
-    """The arrays of a written file, by name."""
-    return {name: [int(v, 0) for v in re.findall(r"-?(?:0x[0-9A-F]+|\d+)", body)] for name, body in ARRAY.findall(text)}
+    """The arrays of a written file, by name; an array written as base64 is read back as its bytes."""
+    arrays = {name: [int(v, 0) for v in re.findall(r"-?(?:0x[0-9A-F]+|\d+)", body)] for name, body in ARRAY.findall(text)}
+    for name, body in STRING.findall(text):
+        try:
+            arrays[name] = list(base64.b64decode("".join(body.split()), validate=True))
+        except ValueError:
+            arrays[name] = []
+    return arrays
 
 
 def expand(arrays):
@@ -384,6 +695,11 @@ def expand(arrays):
     values = arrays.get("RegexFold", [])
     for at in range(0, len(values) - 1, 2):
         found[("fold", values[at])] = (values[at + 1],)
+    try:
+        for key, ranges_ in decode(arrays.get("RegexProperties") or [0]).items():
+            found[("class", f"{key[0]}:{key[1:].decode('ascii', 'replace')}")] = ranges_
+    except IndexError:
+        found[("class", "the stream")] = ("cut off",)
     return found
 
 
@@ -391,15 +707,20 @@ def changes(old, new):
     """One line for each mapping or property that differs between two sets of arrays."""
     a, b = expand(old), expand(new)
     out = []
-    for key in sorted(set(a) | set(b), key=lambda k: (k[0], k[1])):
+    for key in sorted(set(a) | set(b), key=lambda k: (k[0], str(k[1]) if k[0] == "class" else f"{k[1]:08X}")):
         if a.get(key) != b.get(key):
+            if key[0] == "class":
+                count = lambda v: "none" if v is None else f"{v[1]} kind" if v[0] == "kind" else f"{len(v)} ranges"  # noqa: E731
+                out.append(f"class {key[1]}: {count(a.get(key))} -> {count(b.get(key))}")
+                continue
             show = lambda v: "none" if v is None else ("yes" if v is True else " ".join(f"U+{c:04X}" for c in v))  # noqa: E731
             out.append(f"{key[0]} U+{key[1]:04X}: {show(a.get(key))} -> {show(b.get(key))}")
     return out
 
 
 def files(fetcher=fetch):
-    return [fetcher(name) for name in ("UnicodeData.txt", "SpecialCasing.txt", "DerivedCoreProperties.txt", "PropList.txt", "CaseFolding.txt")]
+    return [fetcher(name) for name in ("UnicodeData.txt", "SpecialCasing.txt", "DerivedCoreProperties.txt", "PropList.txt", "CaseFolding.txt")] + [
+        {name: fetcher(name) for name in PROPERTY_FILES}]
 
 
 def main(argv, root=kit.ROOT, fetcher=fetch, floors=FLOORS):
@@ -556,8 +877,128 @@ def self_test():
                   folds(folding)))
     out = got(lambda: generate(data, special, props, plist, folding))
     cases.append(("generate: a table below its floor is refused", isinstance(out, ValueError) and "floor" in str(out), out))
+    # the classes of `\p` (G4), from files small enough to read, each line in the form the database writes it; Latin_Sign is made
+    # up, a binary property whose short name is the script Latin's, and so is Wordish, a script whose short name is Word_Break's
+    p_data = "\n".join([cat("0024", "Sc"), "0028;LEFT PARENTHESIS;Ps;0;ON;;;;;Y;;;;;", cat("0030", "Nd"), cat("0041", "Lu"), cat("0061", "Ll"),
+                        cat("00AD", "Cf"), cat("00C0", "Lu"), cat("01C5", "Lt"), cat("0391", "Lu"), cat("03B1", "Ll"),
+                        cat("D800", "Cs", "<Non Private Use High Surrogate, First>"), cat("DB7F", "Cs", "<Non Private Use High Surrogate, Last>")])
+    p_texts = {
+        "PropertyAliases.txt": "# PropertyAliases\ngc ; General_Category\nsc ; Script\nscx ; Script_Extensions\nage ; Age\n"
+                               "GCB ; Grapheme_Cluster_Break\nWB ; Word_Break\nSB ; Sentence_Break\nAlpha ; Alphabetic\nLatn ; Latin_Sign\n"
+                               "cf ; Case_Folding\nlc ; Lowercase_Mapping\nccc ; Canonical_Combining_Class\nBidi_M ; Bidi_Mirrored\n"
+                               "EPres ; Emoji_Presentation",
+        "PropertyValueAliases.txt": "gc ; C ; Other\ngc ; Cf ; Format\ngc ; Cn ; Unassigned\ngc ; Cs ; Surrogate\ngc ; L ; Letter\n"
+                                    "gc ; LC ; Cased_Letter\ngc ; Ll ; Lowercase_Letter\ngc ; Lt ; Titlecase_Letter\ngc ; Lu ; Uppercase_Letter\n"
+                                    "gc ; Nd ; Decimal_Number ; digit\ngc ; Ps ; Open_Punctuation\ngc ; Sc ; Currency_Symbol\nsc ; Grek ; Greek\n"
+                                    "sc ; Latn ; Latin\nsc ; WB ; Wordish\nsc ; Zyyy ; Common\nage ; 1.1 ; V1_1\nage ; 2.0 ; V2_0\n"
+                                    "WB ; NU ; Numeric\nGCB ; CR ; CR\nSB ; AT ; ATerm\nccc ; 0 ; NR ; Not_Reordered",
+        "Scripts.txt": "0024 ; Common # Sc\n0028 ; Common\n0030 ; Common\n0041 ; Latin\n0061 ; Latin\n00C0 ; Wordish\n0391 ; Greek\n03B1 ; Greek",
+        "ScriptExtensions.txt": "0030 ; Grek Latn # Nd",
+        "DerivedAge.txt": "0391 ; 2.0\n0024..0041 ; 1.1",
+        "auxiliary/GraphemeBreakProperty.txt": "000D ; CR",
+        "auxiliary/WordBreakProperty.txt": "0030 ; Numeric",
+        "auxiliary/SentenceBreakProperty.txt": "002E ; ATerm",
+        "emoji/emoji-data.txt": "231A..231B ; Emoji_Presentation",
+    }
+    p_props, p_list = "0041 ; Alphabetic\n0061 ; Alphabetic\n0391 ; Alphabetic", "0020 ; White_Space\n0024 ; Latin_Sign"
+    out = [normalized(x) for x in ("Is_Greek", "IS c", "is", " Gr-e_ek \u00e9", "isc", "ASCII")]
+    cases.append(("normalized: a first `is` of any case, ` `, `_`, `-` and the bytes above ASCII dropped, capitals made small, and `is` "
+                  "with `c` alone kept as `isc`", out == ["greek", "isc", "", "greek", "isc", "ascii"], out))
+    out = [chars([r]) for r in ((0xD000, 0xD900), (0xD800, 0xDFFF), (0xD7FF, 0xE000), (0xDC00, 0xE005))]
+    cases.append(("chars: an end inside the surrogates moves out of them, a range of surrogates alone is left out, and one across them "
+                  "stays whole", out == [[(0xD000, 0xD7FF)], [], [(0xD7FF, 0xE000)], [(0xE000, 0xE005)]], out))
+    p_sets = got(lambda: property_sets(p_data, p_props, p_list, p_texts))
+    if isinstance(p_sets, Exception):
+        cases.append(("property_sets: the classes of the files above", False, p_sets))
+    else:
+        p_found, p_kinds = globals()["classes"](*p_sets)  # the function, whose name the fixture of the categories above takes here
+        gc, scx, script = p_sets[0]["General_Category"], p_sets[0]["Script_Extensions"], p_sets[0]["Script"]
+        cases.append(("property_sets: Other holds the surrogates inside its range across them, Surrogate has no set, Unassigned's last range "
+                      "starts past them, and Letter is its categories merged",
+                      (0x3B2, TOP) in gc["Other"] and "Surrogate" not in gc and (0xE000, TOP) in gc["Unassigned"]
+                      and gc["Letter"] == [(0x41, 0x41), (0x61, 0x61), (0xC0, 0xC0), (0x1C5, 0x1C5), (0x391, 0x391), (0x3B1, 0x3B1)],
+                      {k: gc.get(k) for k in ("Other", "Unassigned", "Surrogate", "Letter")}))
+        cases.append(("property_sets: a script's extensions are its code points less those ScriptExtensions.txt lists, and those it lists "
+                      "for the script", scx.get("Greek") == [(0x30, 0x30), (0x391, 0x391), (0x3B1, 0x3B1)]
+                      and scx.get("Common") == [(0x24, 0x24), (0x28, 0x28)] and (0x30, 0x30) in script["Common"], (scx, script["Common"])))
+        cases.append(("property_sets: Bidi_Mirrored is UnicodeData.txt's field Y", p_sets[0]["Binary"].get("Bidi_Mirrored") == [(0x28, 0x28)],
+                      p_sets[0]["Binary"].get("Bidi_Mirrored")))
+
+        def alone(name):
+            return p_found.get(bytes([KIND_ALONE]) + name.encode())
+
+        def by(kind, name):
+            return p_found.get(bytes([kind]) + name.encode())
+
+        cases.append(("classes: a name alone is a binary property's before a category's and a script's",
+                      alone("latn") == [[(0x24, 0x24)]] and alone("alpha") == alone("alphabetic") == [[(0x41, 0x41), (0x61, 0x61), (0x391, 0x391)]]
+                      and alone("greek") == [script["Greek"]] and alone("l") == [gc["Letter"]], (alone("latn"), alone("alpha"), alone("greek"))))
+        cases.append(("classes: cf, sc and lc alone are categories, though each names a property",
+                      alone("cf") == [[(0xAD, 0xAD)]] and alone("sc") == [[(0x24, 0x24)]] and alone("lc") == [gc["Cased_Letter"]],
+                      (alone("cf"), alone("sc"), alone("lc"))))
+        cases.append(("classes: the name of a property that is not binary is no class alone, though a script has that name too",
+                      alone("wb") is None and alone("gc") is None and by(2, "wb") == [[(0xC0, 0xC0)]], (alone("wb"), alone("gc"), by(2, "wb"))))
+        cases.append(("classes: the name of a property read by value keys its values' kind, and another property's name keys none",
+                      [p_kinds.get(bytes([KIND_PROPERTY]) + n) for n in (b"gc", b"generalcategory", b"scx", b"age", b"wb", b"ccc", b"alpha")]
+                      == [1, 1, 3, 4, 6, None, None], p_kinds))
+        v11, v20 = p_sets[0]["Age"]["V1_1"], p_sets[0]["Age"]["V2_0"]
+        cases.append(("classes: an age holds the sets of every version up to it, in their order",
+                      by(4, "2.0") == by(4, "v20") == [v11, v20] and by(4, "1.1") == [v11], (by(4, "2.0"), v11, v20)))
+        cases.append(("classes: a value is keyed by every alias under its property's kind, Script_Extensions' by the scripts' names",
+                      by(3, "grek") == [scx["Greek"]] and by(2, "grek") == [script["Greek"]] and by(1, "digit") == by(1, "nd") == [[(0x30, 0x30)]]
+                      and by(6, "nu") == [[(0x30, 0x30)]], sorted(k for k in p_found if k[0] != KIND_ALONE)))
+
+        def offsets(data):  # {key: (the offset of its first set, its number of sets)}, the keys' part of a stream as `decode` reads it
+            data, at = bytes(data), 0
+
+            def read():
+                nonlocal at
+                n, shift = 0, 0
+                while True:
+                    at += 1
+                    n |= (data[at - 1] & 0x7F) << shift
+                    shift += 7
+                    if data[at - 1] < 0x80:
+                        return n
+
+            end = read()
+            end += at
+            out = {}
+            while at < end:
+                key = data[at + 1:at + 1 + data[at]]
+                at += 1 + data[at]
+                offset = read()
+                out[key] = (offset, data[at])
+                at += 1
+            return out
+
+        stream = got(lambda: encode(*p_sets))
+        decoded = got(lambda: decode(stream))
+        if isinstance(decoded, Exception):
+            cases.append(("encode and decode: the stream of the classes reads back", False, decoded))
+        else:
+            cases.append(("encode and decode: every key reads back as the union of its sets, and a property's name as its values' kind",
+                          decoded.get(bytes([4]) + b"2.0") == tuple(merge(v11 + v20)) and decoded.get(bytes([KIND_ALONE]) + b"latn") == ((0x24, 0x24),)
+                          and decoded.get(bytes([KIND_PROPERTY]) + b"sc") == ("kind", 2) and len(decoded) == len(p_found) + len(p_kinds),
+                          {k: v for k, v in decoded.items() if k[0] in (4, KIND_PROPERTY)}))
+            at = offsets(stream)
+            cases.append(("encode: a set is stored once, its keys pointing at it, and an age's key at the first age",
+                          at[bytes([KIND_ALONE]) + b"greek"] == at[bytes([2]) + b"greek"] and at[bytes([2]) + b"greek"][1] == 1
+                          and at[bytes([4]) + b"2.0"] == (0, 2) and at[bytes([4]) + b"1.1"] == (0, 1), at))
+            more = got(lambda: encode(*property_sets(p_data, p_props, p_list, {**p_texts, "Scripts.txt": p_texts["Scripts.txt"] + "\n0300 ; Greek"})))
+            said = got(lambda: changes({"RegexProperties": stream}, {"RegexProperties": more}))
+            cases.append(("changes: a class that changed is named with its ranges before and after",
+                          isinstance(said, list) and "class 2:greek: 2 ranges -> 3 ranges" in said, said))
+        alike = got(lambda: decode(encode(*property_sets(p_data, p_props, p_list, {**p_texts, "DerivedAge.txt": "0024 ; 1.1\n0024 ; 2.0"}))))
+        cases.append(("encode: ages alike are each stored, so that an age reads the sets of its own versions",
+                      isinstance(alike, dict) and alike.get(bytes([4]) + b"2.0") == ((0x24, 0x24),),
+                      alike.get(bytes([4]) + b"2.0") if isinstance(alike, dict) else alike))
+        name = "X" * 300
+        out = got(lambda: encode(*property_sets(p_data, p_props, p_list, {**p_texts, "Scripts.txt": p_texts["Scripts.txt"] + f"\n00C0 ; {name}",
+                                                                           "PropertyValueAliases.txt": p_texts["PropertyValueAliases.txt"] + f"\nsc ; Long ; {name}"})))
+        cases.append(("encode: a key longer than one byte counts is refused", isinstance(out, ValueError) and "longer than one byte" in str(out), out))
     # a refusal of the tables, as a mutation of a case above makes, fails the two cases below and prints every case
-    arrays = got(lambda: generate(data, special, props, plist, folding, floors={}))
+    arrays = got(lambda: generate(data, special, props, plist, folding, p_texts, floors={}))
     if isinstance(arrays, Exception):
         cases.append(("render and parse: the written file reads back as the arrays", False, arrays))
         cases.append(("changes: a changed mapping is named with both values", False, arrays))
@@ -626,7 +1067,7 @@ def self_test():
             cases.append(("main: the runs of main over the tables of the cases above", False, arrays))
         else:
             texts = {"UnicodeData.txt": data, "SpecialCasing.txt": special, "DerivedCoreProperties.txt": props, "PropList.txt": plist,
-                     "CaseFolding.txt": folding}
+                     "CaseFolding.txt": folding, **p_texts}
             os.makedirs(os.path.join(cache, os.path.dirname(OUT)))
             import contextlib
             import io

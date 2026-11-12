@@ -405,7 +405,7 @@ Gate: review rule "rules for sessions".
 
 - **The case tables are generated, never edited.** `compiler/Kurz.Compiler/Emit/CaseTables.cs` is what
   `tools/unicode_tables.py` writes from the Unicode Character Database of the version Rust's stable
-  release pins, each of its five files fetched and checked by its SHA-256 (section 12 of the design
+  release pins, each of its fourteen files fetched and checked by its SHA-256 (section 12 of the design
   record: the owner, 2026-10-31, "Rust's pin" and "Generated, as Rust"); a newer version comes in by a
   pull request that runs the tool and lists the mappings it prints, with no question to the owner
   ([knowledge/a-new-unicode-version-is-one-generator-run.md](knowledge/a-new-unicode-version-is-one-generator-run.md)).

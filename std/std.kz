@@ -10811,10 +10811,11 @@ class RegexParser {
         names.Add("")
         root = Parse()
         if failKind >= 0 {
+            Refs(failAt)
             return
         }
 
-        Refs()
+        Refs(n + 1)
         if failKind >= 0 {
             return
         }
@@ -10843,10 +10844,16 @@ class RegexParser {
         }
     }
 
-    // The backreferences, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has and a name no
-    // group has are `Syntax` at the `\`, the first such one in the pattern.
-    internal void Refs() {
+    // The backreferences before `before`, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has
+    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct, at
+    // `before`, a backreference before it to no group the parse read is the error instead, as .NET, which counts the groups before
+    // it parses, reports `\9(`; a group after that construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 (G2).
+    internal void Refs(int before) {
         for i in 0..<refNode.Count {
+            if refAt[i] >= before {
+                return
+            }
+
             mut group = refNumber[i]
             if group < 0 {
                 for j in 1..<names.Count {
@@ -10857,7 +10864,8 @@ class RegexParser {
             }
 
             if group < 0 || group >= names.Count {
-                Fail(0, refAt[i])
+                failKind = 0
+                failAt = refAt[i]
                 return
             }
 
@@ -10886,7 +10894,8 @@ class RegexParser {
 
     // A node, with whether the most it matches is no character, as Rust's `maximum_len` of `Some(0)`: the empty node and an
     // assertion; a group of such a node; a sequence or an alternation of such nodes only; and a repetition of such a node or of
-    // at most 0.
+    // at most 0. A lookaround is such a node, and an atomic group as its content; a backreference is not, even to a group that
+    // reads no character (`()\1`), since its group is resolved after the parse, so that its repetition is counted in full.
     internal int Node(int k, int a, int b, int c) {
         mut none = false
         if k == 0 || k == 3 {
@@ -11739,9 +11748,106 @@ class RegexParser {
         }
     }
 
+    // Rust's `parse_unicode_class` and its translation (G4): `\p` or `\P` at `start`, then one letter, or in braces a name,
+    // `name=value`, `name:value` or `name!=value`, which negates once more, the white space and the comments of `(?x)` passed over.
+    // The end of the pattern is `Syntax` at the end, and a `\` for the letter at that `\`. The class is `escSet`, folded under
+    // `(?i)` before it is negated; a name Rust's crate does not know, and any `\p` under `(?-u)`, is `Syntax` at `start` once the
+    // parse and the levels found no error, as its translator refuses it.
+    internal bool Property(bool negated, int start) {
+        at = at + 1
+        Skip()
+        if at >= n {
+            Fail(0, at)
+            return false
+        }
+
+        mut spelled = List<int>()
+        if p[at] == 123 {
+            at = at + 1
+            Skip()
+            while at < n && p[at] != 125 {
+                stop = at + RegexLength(p[at])
+                while at < stop {
+                    spelled.Add(int(p[at]))
+                    at = at + 1
+                }
+
+                Skip()
+            }
+
+            if at >= n {
+                Fail(0, at)
+                return false
+            }
+
+            at = at + 1
+        } else {
+            if p[at] == 92 {
+                Fail(0, at)
+                return false
+            }
+
+            past = at + RegexLength(p[at])
+            while at < past {
+                spelled.Add(int(p[at]))
+                at = at + 1
+            }
+
+            Skip()
+        }
+
+        mut split = RegexFind(spelled, 33, 61)
+        mut width = 2
+        if split < 0 {
+            width = 1
+            split = RegexFind(spelled, 58, -1)
+        }
+
+        if split < 0 {
+            split = RegexFind(spelled, 61, -1)
+        }
+
+        escSet = List<int>()
+        if (mode & 64) == 0 {
+            Later(start)
+            return true
+        }
+
+        mut query = RegexKey(0, spelled, 0, spelled.Count)
+        if split >= 0 {
+            kindOf = RegexProperty(tables, RegexKey(8, spelled, 0, split))
+            if kindOf.Count == 1 && kindOf[0] < 0 {
+                query = RegexKey(-1 - kindOf[0], spelled, split + width, spelled.Count)
+            } else {
+                query = List<int>()
+            }
+        }
+
+        mut set = List<int>()
+        if query.Count > 0 {
+            set = RegexProperty(tables, query)
+        }
+
+        if set.Count == 0 || set[0] < 0 {
+            Later(start)
+            return true
+        }
+
+        if (mode & 1) != 0 {
+            set = Folded(set)
+        }
+
+        if negated != (split >= 0 && width == 2) {
+            set = RegexNegate(set)
+        }
+
+        escSet = set
+        return true
+    }
+
     // Rust's `parse_escape`: 1 for a character in `escCp`, 2 for a class in `escSet`, 3 for an assertion in `escCp` (0 `\A`, 1 `\z`,
     // 4 `\b`, 5 `\B`, 6 `\b{start}` and `\<`, 7 `\b{end}` and `\>`, 8 `\b{start-half}`, 9 `\b{end-half}`) and 0 for an error; a
-    // backreference is `Unsupported` at the `\`, the backtracking engine's (G4), and so are `\k` and `\p`. For the backtracking
+    // backreference is `Unsupported` at the `\`, the backtracking engine's (G4), and so is `\k`. For the backtracking
     // engine (G2), 4 for a backreference: `\` and a digit from 1 on, the group of the number its digits write, or `\k<name>`, in
     // `escRef`, -1 with the name in `escName`.
     internal int Escape() {
@@ -11787,8 +11893,16 @@ class RegexParser {
             return 4
         }
 
-        if c >= 48 && c <= 57 || c == 107 || c == 112 || c == 80 {
+        if c >= 48 && c <= 57 || c == 107 {
             Fail(1, start)
+            return 0
+        }
+
+        if c == 112 || c == 80 {
+            if Property(c == 80, start) {
+                return 2
+            }
+
             return 0
         }
 
@@ -12688,14 +12802,14 @@ List<int> RegexHead(List<int> a, int count) {
 // A `Match` of the text `s`, which a `Regex` makes: its own name is a method there.
 Match RegexFound(string s, int start, int end, List<int> slots, List<string> names) => Match.Of(s, start, end, slots, names)
 
-// The numbers of part `which` of the compiler's table: six counts of 32 bits, of the numbers of `\d`, `\w`, `\s`, the
-// folding, and the characters of a group's name, Alphabetic and the categories Nd, Nl and No, then those numbers, 32 bits
-// each (`Emitter.RegexTable`).
+// The numbers of part `which` of the compiler's table: seven counts of 32 bits, of the numbers of `\d`, `\w`, `\s`, the
+// folding, the characters of a group's name, Alphabetic and the categories Nd, Nl and No, and the classes of `\p`, then those
+// numbers, 32 bits each (`Emitter.RegexTable`).
 List<int> RegexTablePart(long tables, int which) {
     mut out = List<int>()
     raw {
         int* t = Ptr<int>(tables)
-        mut long start = 6
+        mut long start = 7
         mut long k = 0
         while k < long(which) {
             start = start + long(t[k])
@@ -12708,6 +12822,186 @@ List<int> RegexTablePart(long tables, int which) {
             out.Add(t[start + i])
             i = i + 1
         }
+    }
+
+    return out
+}
+
+// Where `spelled` first holds the byte `a`, and `b` after it where `b` is not -1; -1 where nowhere.
+int RegexFind(List<int> spelled, int a, int b) {
+    mut i = 0
+    while i < spelled.Count {
+        if spelled[i] == a && (b < 0 || i + 1 < spelled.Count && spelled[i + 1] == b) {
+            return i
+        }
+
+        i = i + 1
+    }
+
+    return -1
+}
+
+// The key of a name of `\p` (G4): `sort`, then the bytes of `spelled` from `lo` to `hi` as Rust's `symbolic_name_normalize`
+// gives them: a first `is` of any case dropped, ` `, `_`, `-` and every byte above ASCII dropped, ASCII's capitals made small,
+// and `is` with `c` alone after it kept as `isc`.
+List<int> RegexKey(int sort, List<int> spelled, int lo, int hi) {
+    prefixed = hi - lo >= 2 && (spelled[lo] == 105 || spelled[lo] == 73) && (spelled[lo + 1] == 115 || spelled[lo + 1] == 83)
+    mut out = [sort]
+    mut i = lo
+    if prefixed {
+        i = lo + 2
+    }
+
+    while i < hi {
+        b = spelled[i]
+        if b != 32 && b != 95 && b != 45 && b <= 127 {
+            if b >= 65 && b <= 90 {
+                out.Add(b + 32)
+            } else {
+                out.Add(b)
+            }
+        }
+
+        i = i + 1
+    }
+
+    if prefixed && out.Count == 2 && out[1] == 99 {
+        return [sort, 105, 115, 99]
+    }
+
+    return out
+}
+
+// The classes of `\p` (G4), from part 6 of the compiler's table, the bytes of `CaseTables.RegexProperties` four to each number,
+// the first the lowest: the length of the keys' part as a varint, then each key, its length in one byte, its bytes, the offset of
+// its first set in the sets' part as a varint and its number of sets in one byte, then the sets, each its number of ranges and
+// each range's gap from the last end and its length, as varints. The union of the sets of `key`, or for the name of a property its
+// values' kind as `-1 - kind`, or none where the table has no such key or no classes.
+List<int> RegexProperty(long tables, List<int> key) {
+    mut parts = List<int>()
+    mut ends = List<int>()
+    raw {
+        int* t = Ptr<int>(tables)
+        mut long start = 7
+        mut long k = 0
+        while k < 6 {
+            start = start + long(t[k])
+            k = k + 1
+        }
+
+        if t[6] > 0 {
+            byte* d = Ptr<byte>(tables + 4 * start)
+            mut long at = 0
+            mut long value = 0
+            mut long scale = 1
+            mut long b = 128
+            while b >= 128 {
+                b = long(d[at])
+                at = at + 1
+                value = value + (b & 127) * scale
+                scale = scale * 128
+            }
+
+            long keysEnd = at + value
+            long setsAt = keysEnd
+            mut long found = -1
+            mut long count = 0
+            while at < keysEnd && found < 0 {
+                long size = long(d[at])
+                mut bool same = size == long(key.Count)
+                mut long i = 0
+                while same && i < size {
+                    same = long(d[at + 1 + i]) == long(key[int(i)])
+                    i = i + 1
+                }
+
+                at = at + 1 + size
+                value = 0
+                scale = 1
+                b = 128
+                while b >= 128 {
+                    b = long(d[at])
+                    at = at + 1
+                    value = value + (b & 127) * scale
+                    scale = scale * 128
+                }
+
+                if same {
+                    found = value
+                    count = long(d[at])
+                }
+
+                at = at + 1
+            }
+
+            if found >= 0 && count == 0 {
+                parts.Add(-1 - int(found))
+            } else if found >= 0 {
+                at = setsAt + found
+                mut long s = 0
+                while s < count {
+                    value = 0
+                    scale = 1
+                    b = 128
+                    while b >= 128 {
+                        b = long(d[at])
+                        at = at + 1
+                        value = value + (b & 127) * scale
+                        scale = scale * 128
+                    }
+
+                    mut long r = value
+                    mut long last = -1
+                    while r > 0 {
+                        mut long field = 0
+                        while field < 2 {
+                            value = 0
+                            scale = 1
+                            b = 128
+                            while b >= 128 {
+                                b = long(d[at])
+                                at = at + 1
+                                value = value + (b & 127) * scale
+                                scale = scale * 128
+                            }
+
+                            if field == 0 {
+                                last = last + 1 + value
+                                parts.Add(int(last))
+                            } else {
+                                last = last + value
+                                parts.Add(int(last))
+                            }
+
+                            field = field + 1
+                        }
+
+                        r = r - 1
+                    }
+
+                    ends.Add(parts.Count)
+                    s = s + 1
+                }
+            }
+        }
+    }
+
+    if ends.Count < 2 {
+        return parts
+    }
+
+    mut out = List<int>()
+    mut cursor = 0
+    mut e = 0
+    while e < ends.Count {
+        mut one = List<int>()
+        while cursor < ends[e] {
+            one.Add(parts[cursor])
+            cursor = cursor + 1
+        }
+
+        out = RegexUnion(out, one)
+        e = e + 1
     }
 
     return out

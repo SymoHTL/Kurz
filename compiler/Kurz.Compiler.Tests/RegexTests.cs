@@ -44,9 +44,24 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("(?U)a*", "ok"), ("(?x) a b # c", "ok"), ("(?s).", "ok"), ("(?m)^a$", "ok"), ("\\", "syntax at 0"), ("\\q", "syntax at 0"),
         ("\\d\\D\\w\\W\\s\\S", "ok"), ("\\x41", "ok"), ("\\x{1F600}", "ok"), ("\\x{110000}", "syntax at 3"), ("\\x4", "syntax at 3"),
         ("\\u0041", "ok"),
-        ("\\p{L}", "unsupported at 0"), // G4: a class of Unicode by its name, Rust's syntax the build does not hold
-        ("\\P{L}", "unsupported at 0"),
-        ("\\pL", "unsupported at 0"),
+        // G4: the classes of Unicode by their names, as Rust's crate reads them; a name it does not know is refused by its translator
+        ("\\pL", "ok"), ("\\p{L}", "ok"), ("\\PL", "ok"), ("\\P{L}", "ok"), ("\\p{Greek}", "ok"), ("\\p{sc=Greek}", "ok"),
+        ("\\p{scx:Greek}", "ok"), ("\\p{gc!=L}", "ok"), ("\\P{gc!=L}", "ok"), ("\\p{age=6.0}", "ok"), ("\\p{age=V1_1}", "ok"),
+        ("\\p{Alphabetic}", "ok"), ("\\p{wb=ALetter}", "ok"), ("\\p{gcb=LV}", "ok"), ("\\p{sb=STerm}", "ok"), ("\\p{Any}", "ok"),
+        ("\\p{ASCII}", "ok"), ("\\p{Assigned}", "ok"), ("\\p{sc}", "ok"), ("\\p{cf}", "ok"), ("\\p{lc}", "ok"), ("\\p{gc=any}", "ok"),
+        ("\\p{General_Category=Lu}", "ok"), ("\\p{Script_Extensions=Greek}", "ok"), ("\\p{Emoji_Presentation}", "ok"),
+        ("\\p{L}{10}", "ok"), ("(?x)\\p { G r e e k }", "ok"), ("(?x)\\p#c\nL", "ok"), ("[\\P{L}a]", "ok"), ("(?i)\\p{Lu}", "ok"),
+        ("[\\p{L}--\\p{Greek}]", "ok"), ("\\p{scx=Hira}", "ok"),
+        ("\\p{age=17.0}", "ok"), // the version the build pins, 17.0.0, where Rust's crate 1.13 holds 16.0.0 and refuses it
+        ("\\p{ Is_Greek }", "syntax at 0"), ("a\\p{Foo}", "syntax at 1"), ("a\\pQ", "syntax at 1"), ("(?-u)a\\pL", "syntax at 6"),
+        ("a[b\\p{Foo}]", "syntax at 3"), ("a\\p", "syntax at 3"), ("a\\p{L", "syntax at 5"), ("a\\p\\d", "syntax at 3"),
+        ("a\\p{^L}", "syntax at 1"), ("a\\p{isc}", "syntax at 1"), ("\\p{IsC}", "syntax at 0"), ("\\p{is}", "syntax at 0"),
+        ("\\p{Cs}", "syntax at 0"), ("\\p{Unknown}", "syntax at 0"), ("\\p{gc}", "syntax at 0"), ("\\p{bc=L}", "syntax at 0"),
+        ("\\p{Alphabetic=Yes}", "syntax at 0"), ("\\pé", "syntax at 0"), ("\\p{gc=Foo}", "syntax at 0"), ("\\p{Foo=L}", "syntax at 0"),
+        ("\\p{a:b=c}", "syntax at 0"), ("\\p{Foo}(", "syntax at 7"), ("(?-u)\\p{Foo}", "syntax at 5"), ("\\p{Foo}\\p{Bar", "syntax at 13"),
+        ("[\\p{Foo}", "syntax at 0"),
+        ("\\p{L}{1000}", "ok"), // the bound of G2, where Rust's automaton counts its states otherwise and is too big
+        ("\\p{L}{655357}", "too big at 0"), // the numbers of the class's ranges count in the bound (G2), where `a{655357}` builds
         ("\\k<a>", "unsupported at 0"), // the backtracking engine's (G4), where Rust's syntax has no such escape
         ("\\1", "unsupported at 0"), ("(a)\\1", "unsupported at 3"), ("\\<", "ok"), ("\\>", "ok"), ("\\b{start}", "ok"),
         ("\\A\\z", "ok"), ("\\Z", "syntax at 0"), ("\\G", "syntax at 0"), ("(?=a)", "unsupported at 0"), ("(?!a)", "unsupported at 0"),
@@ -76,7 +91,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("(?x)[a-#c\nz]", "ok"), ("(?x)[ ^a]", "ok"), ("[[:^digit:]]", "ok"), ("[:alpha:]", "ok"), ("((((a", "syntax at 3"),
         ("a))", "syntax at 1"), ("(a|b", "syntax at 0"), ("a|b)", "syntax at 3"), ("(?i)a(", "syntax at 5"), ("[a&&[b", "syntax at 4"),
         (")", "syntax at 0"),
-        ("\\pL)", "unsupported at 0"), // the first error of the pattern decides, as the parse reads it
+        ("\\pL)", "syntax at 3"), // the first error of the pattern decides, as the parse reads it
         ("a)\\pL", "syntax at 1"),
         ("(?R)a)", "syntax at 5"),
         ("a)(?R)", "syntax at 1"),
@@ -200,8 +215,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// them, 12 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
     /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
     /// The generator puts no group inside a look-behind, whose groups .NET takes from right to left, and no repetition of what can
-    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, so <c>k</c> and the Kelvin sign are
-    /// one, a row with its own expectation, since .NET counts positions in UTF-16 units.
+    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference
+    /// deciding (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and a look-behind tries its own position
+    /// first (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
+    /// counts positions in UTF-16 units, and so is <c>(a*)*</c> on <c>aa</c>, where the loop that comes back with no character read
+    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2).
     /// </summary>
     [Fact]
     public void The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does()
@@ -210,6 +228,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         [
             @"(\w+) \1", @"\d+(?= kg)", @"(a|b\1)+", @"(?<=a+)b", @"(?<!a)b", @"(?>a+)b", @"(?>a|ab)c", @"(?=(a+))a*b\1",
             @"(?i)(a)\1", @"\2(a)(b)", @"(a)|\1b", @"(?!a)\w", @"(?<n>a)\k<n>", @"(?<=\b)a(?!a)", @"(?<=ab|b)a", @"a(?=b(?=c))",
+            @"(a)(?i)\1", @"(?i)(a)(?-i)\1", @"(?<=)b", @"(?<=a*)b",
         ];
         string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
             "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))"];
@@ -253,26 +272,44 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
+            for loop in [Regex.New(r"(a*)*"), Regex.New(r"(a*)*", backtracking: true)] {
+                m = loop.Match("aa")
+                if m != null {
+                    g = m.Group(1)
+                    if g != null {
+                        print("{m.Index},{m.Length},{g.Index},{g.Length}")
+                    }
+                }
+            }
+
             """.Replace("KELVIN", "\u212A", StringComparison.Ordinal)), [], toolchain.Runtime, testBuild: true); // U+212A
         Assert.True(folded.Program is not null, string.Join("; ", folded.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(folded.Program, "regex-backtracking-fold"));
         Assert.Equal((0, ""), (code, error));
-        Assert.Equal(["1,4", "0,4", "-"], output); // the Kelvin sign is three bytes, `K` and `k` one each
+        // the Kelvin sign is three bytes, `K` and `k` one each; then `(a*)*` on `aa`, whose group 1 is `aa` on both engines, where
+        // .NET's last iteration reads no character and leaves it empty at 2
+        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2"], output);
+        var empty = new Regex("(a*)*").Match("aa").Groups[1];
+        Assert.Equal((true, 2, 0), (empty.Success, empty.Index, empty.Length));
     }
 
     /// <summary>
     /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
     /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
-    /// at its <c>\</c>, after any error of the parse; one inside a class is <c>Unsupported</c> at its <c>\</c>; <c>\k</c>
-    /// without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every digit after the <c>\</c>, <c>\0</c>
-    /// <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
+    /// at its <c>\</c>, and before a construct the parse refuses after it, where the parse read no such group before that construct
+    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), while the parse's own error
+    /// stands where the group was read (<c>\1(a</c>) or the backreference comes after it (<c>a)\2</c>); one inside a class is
+    /// <c>Unsupported</c> at its <c>\</c>; <c>\k</c> without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every
+    /// digit after the <c>\</c>, <c>\0</c> <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
     /// </summary>
     [Fact]
     public void The_backtracking_engine_refuses_a_reference_to_no_group_at_its_backslash()
     {
         (string Pattern, string Reading)[] rows =
         [
-            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 2"),
+            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 0"),
+            (@"\9(", "syntax at 0"), (@"\2[\1]", "syntax at 0"), (@"\2(a)\q(b)", "syntax at 0"), (@"\1(a", "syntax at 2"),
+            (@"a)\2", "syntax at 1"),
             (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
             (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
         ];
@@ -290,6 +327,39 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-backtracking-errors"));
         Assert.Equal((0, ""), (code, error));
         Assert.Equal(rows.Select(r => r.Reading), output);
+    }
+
+    /// <summary>
+    /// G4 and the default of question 1 of issue 176, comment 6812529825: the classes of <c>\p</c> are in a program whose patterns
+    /// can need them, one made when the program runs or a literal that holds <c>\p</c> or <c>\P</c>, and the table of a program whose
+    /// patterns are all literals without them counts none of them; a program that runs a <c>\p</c> reads them.
+    /// </summary>
+    [Fact]
+    public void The_classes_of_p_are_carried_by_a_program_whose_patterns_can_need_them()
+    {
+        string Ir(string source)
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", source), [], toolchain.Runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            return compilation.Program.Ir;
+        }
+
+        var none = Ir("print(Regex.New(\"a+\").IsMatch(\"a\"))\n");
+        Assert.DoesNotContain("regex.tables.p", none, StringComparison.Ordinal);
+        Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 0, ", none);
+        var literal = Ir("print(Regex.New(r\"\\p{Greek}\").IsMatch(\"a\"))\nprint(Regex.New(\"b\").IsMatch(\"b\"))\n");
+        Assert.Matches(@"@""regex\.tables\.p"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", literal);
+        Assert.Contains("@\"regex.tables\" =", literal, StringComparison.Ordinal);
+        var made = Ir("s = \"a\"\nmatch Regex.New(s) {\n    Regex re => print(re.IsMatch(\"a\"))\n    RegexError e => print(e)\n}\n");
+        Assert.Contains("@\"regex.tables.p\" =", made, StringComparison.Ordinal);
+        Assert.DoesNotContain("@\"regex.tables\" =", made, StringComparison.Ordinal);
+        var program = "s = r\"\\p{Greek}+\"\nmatch Regex.New(s) {\n    Regex re => print(re.Match(\"ab αβ\")?.Value)\n    RegexError e => print(e)\n}\n"
+            + "print(Regex.New(r\"\\P{L}+\").Match(\"ab12\")?.Value)\n";
+        var built = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true);
+        Assert.True(built.Program is not null, string.Join("; ", built.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(built.Program, "regex-classes"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["αβ", "12"], output);
     }
 
     /// <summary>The groups of a pattern the tests generate: its <c>(</c>s that open no <c>(?</c>.</summary>
@@ -458,7 +528,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// around its <c>-</c> under <c>(?x)</c>; a counted repetition with white space inside its braces; and a repetition of what matches
     /// no character, taken at most once; under <c>(?mR)</c> a line's start and end at <c>\r</c>, <c>\n</c> and <c>\r\n</c>, and
     /// under <c>(?R)</c> a <c>.</c> that takes neither; under <c>(?-u)</c> ASCII's <c>\w</c>, <c>\d</c>, <c>\s</c>, word
-    /// boundaries and folding, and a character above ASCII matched as its UTF-8.
+    /// boundaries and folding, and a character above ASCII matched as its UTF-8; and the classes of <c>\p</c> and <c>\P</c>, on both
+    /// engines.
     /// </summary>
     [Fact]
     public void The_constructs_net_reads_otherwise_match_as_rust_matches_them()
@@ -505,12 +576,36 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             (@"(?-u)\b", "éa é", "2-2 3-3"),
             (@"(?-u)\B", "é", "0-0 2-2"),
             (@"(?-u)\b{start}\w", "éab", "2-3"),
+            (@"\p{Greek}+", "abc αβγ", "4-10"),
+            (@"\PL+", "ab12cd", "2-4"),
+            (@"(?i)\p{Lu}", "aB", "0-1 1-2"),
+            (@"(?i)\P{Lu}", "aB1", "2-3"),
+            (@"\p{gc!=L}", "a1", "1-2"),
+            (@"\P{gc!=L}", "a1", "0-1"),
+            (@"[^\p{L}]", "a1", "1-2"),
+            (@"\p{sc=Han}+", "x漢字y", "1-7"),
+            (@"[\p{L}&&\p{Greek}]+", "aαb", "1-3"),
+            (@"\p{N}+", "x٣4ⅷ", "1-7"),
+            (@"\p{age=1.1}", "a€", "0-1"),
+            (@"\p{age=2.1}", "€", "0-3"),
+            (@"\p{Any}", "é", "0-2"),
+            (@"\p{ASCII}+", "aé", "0-1"),
+            (@"\pZ", "a b", "1-2"),
+            (@"\p{scx=Hira}+", "ア゛ー", "3-9"),
+            (@"\p{wb=Numeric}+", "a12", "1-3"),
+            ("(?i)[\\p{Ll}]", "Kk\u212A", "0-1 1-2 2-5"),
+            (@"\p{Lt}", "ǅ", "0-2"),
         ];
+        // the rows of the classes of \p once more on the backtracking engine, which reads the same classes (issue 176, comment
+        // 6812529825, Q4, the default taken)
+        var classes = rows.Where(r => r.Pattern.Contains("\\p", StringComparison.Ordinal) || r.Pattern.Contains("\\P", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(classes);
+        var runs = rows.Select(r => (r, "")).Concat(classes.Select(r => (r, ", backtracking: true"))).ToArray();
         var program = new StringBuilder();
-        for (var i = 0; i < rows.Length; i++)
+        for (var i = 0; i < runs.Length; i++)
         {
-            var (pattern, text, _) = rows[i];
-            program.Append($"mut line{i} = \"\"\nfor m in Regex.New(\"{Escaped(pattern)}\").Matches(\"{Escaped(text)}\") {{\n")
+            var ((pattern, text, _), flag) = runs[i];
+            program.Append($"mut line{i} = \"\"\nfor m in Regex.New(\"{Escaped(pattern)}\"{flag}).Matches(\"{Escaped(text)}\") {{\n")
                 .Append($"    if line{i} != \"\" {{\n        line{i} = \"{{line{i}}} \"\n    }}\n\n")
                 .Append($"    line{i} = \"{{line{i}}}{{m.Index}}-{{m.Index + m.Length}}\"\n}}\n\nprint(\"<{{line{i}}}>\")\n");
         }
@@ -521,7 +616,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-rust" + suffix));
             Assert.Equal((0, ""), (code, error));
-            Assert.Equal(rows.Select(r => $"<{r.Matches}>"), output);
+            Assert.Equal(runs.Select(r => $"<{r.r.Matches}>"), output);
         }
     }
 
@@ -583,8 +678,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Regex.New(r\"(a)\\1\").IsMatch(\"a\"))\n", "regex-invalid", 1)]
     [InlineData("print(Regex.New(r\"a{655358}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // past the bound of the automaton (G2)
     [InlineData("print(Regex.New(r\"(?:a{1000}){1000}\").IsMatch(\"a\"))\n", "regex-invalid", 1)]
-    [InlineData("print(Regex.New(r\"\\p{L}\").IsMatch(\"a\"))\n", "", 1)] // G4: Rust's syntax that the build does not hold
-    [InlineData("print(Regex.New(r\"a\\P{L}\").IsMatch(\"a\"))\n", "", 1)]
+    [InlineData("print(Regex.New(r\"\\p{L}\").IsMatch(\"a\"))\n", "", 0)] // G4: a class of Unicode by its name
+    [InlineData("print(Regex.New(r\"a\\P{L}\").IsMatch(\"a\"))\n", "", 0)]
+    [InlineData("print(Regex.New(r\"\\p{Foo}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // a name Rust's crate does not know
     [InlineData("print(Regex.New(\"(?-u).\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // refused by Rust's translator (G4)
     [InlineData("print(Regex.New(\"(?R)(?-u:a)\").IsMatch(\"a\"))\n", "", 0)] // the flags `R` and `u` (G4)
     [InlineData("print(Regex.New(r\"a)\\p{L}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // the first error of the pattern decides
