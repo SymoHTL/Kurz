@@ -132,7 +132,7 @@ to its start with no character read since fails that way, as the Pike VM's threa
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
 .NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
 .NET; and a lookbehind matches its content from right to left, from its position back, as .NET's
-`RegexOptions.RightToLeft` matches it, so that every group inside it is .NET's (§12, the owner,
+`RegexOptions.RightToLeft` matches it, so that a group inside it is .NET's but where this rule's differences from .NET apply, the loop that comes back with no character read among them, `(?<=(a*)*)b` over `aab` giving group 1 `aa` from 0 where .NET gives it empty (§12, the owner,
 2026-11-12, issue 176, comment 6819137493, Q15 of comment 6812042360). .NET reads it so (§12, as
 .NET 10's `Regex` was seen to on 2026-11-12): a sequence's items last first, a character or a class
 taking the character that ends at the position; a repetition, greedy or lazy, taken toward the
@@ -141,8 +141,7 @@ stopped to where it began; a backreference comparing its group's text with the t
 the position, so that one written before its group reads the group the content took first; a
 lookahead inside it read forward again; and an atomic group inside it read in the direction it
 stands in. So `(?<=)b` and `(?<=a*)b` match `b`, `(?<=(a+))b` over `aaab` gives group 1 `aaa`
-from 0, `(?<=(a+?))b` gives `a` from 2, `(?<=\1(a))b` matches `aab`, and `(?<=(?>(a+))a)b` over
-`aaab` gives group 1 `aa` from 0. *(assumed, §12: the stack in memory, Q9 of comment
+from 0, `(?<=(a+?))b` gives `a` from 2, `(?<=\1(a))b` matches `aab`, and `(?<=(?>(a+))a)b` over `aaab` gives group 1 `aa` from 0. The match follows that reading too, and not only a group's text: `(?<=(?>a+)a)b` over `aaab` matches, the atomic group read toward the text's start leaving the `a` it needs, and `(?<=(a+))b\1` over `aaabaaa` matches `baaa`, group 1 taking `aaa`. *(assumed, §12: the stack in memory, Q9 of comment
 6811727642, taken at its default; and, proposed with this record and not put to the owner, the errors of a
 backreference, the reading of its digits and a loop that comes back to its start with no character read)*
 
