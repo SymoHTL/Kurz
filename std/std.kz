@@ -12104,8 +12104,9 @@ pub Regex RegexChecked(string pattern, byte* tables) {
 // A `Match` of the text `s`, which a `Regex` makes: its own name is a method there.
 Match RegexFound(string s, int start, int end, List<int> slots, List<string> names) => Match.Of(s, start, end, slots, names)
 
-// The numbers of part `which` of the compiler's table: four counts of 32 bits, of the numbers of `\d`, `\w`, `\s` and the
-// folding, then those numbers, 32 bits each (`Emitter.RegexTable`).
+// The numbers of part `which` of the compiler's table: six counts of 32 bits, of the numbers of `\d`, `\w`, `\s`, the
+// folding, and the characters of a group's name, Alphabetic and the categories Nd, Nl and No, then those numbers, 32 bits
+// each (`Emitter.RegexTable`).
 List<int> RegexTablePart(long tables, int which) {
     mut out = List<int>()
     raw {
