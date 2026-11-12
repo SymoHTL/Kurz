@@ -186,10 +186,11 @@ The runtime gives each source a handle, `SettingsReload`, which the source calls
 `reload.Changed()`, when its source changed (§12, the owner, 2026-11-12, B12 (a), and B19, "Load +
 Watch", the option whose words name the call, "... and calls `reload.Changed()`", comment
 6819483332, recorded in comment 6819319795). `Changed()` runs the source's `Load` in the actor that
-called it and hands the pairs it gave to the runtime, which merges, checks and publishes them (B9),
-so that a source is reached from one actor at a time, as ASP.NET's reload token calls its provider's
-`Load` on the thread that fires it (§12, the owner, 2026-11-12, comment 6820218118, "Changed() calls
-Load").
+called it and hands the pairs it gave to the runtime, which merges, checks and publishes them (B9);
+at the start the source's first `Load` runs before `Watch` begins (B19), so that the two never
+overlap and a source is reached from one actor at a time, as ASP.NET's reload token calls its
+provider's `Load` on the thread that fires it, at the cost of a `Watch` held while `Load` runs (§12,
+the owner, 2026-11-12, comment 6820218118, "Changed() calls Load").
 
 No case: as B1's.
 
@@ -255,8 +256,9 @@ No case: as B1's.
 `Load` gives pairs of a setting's path and its text, each read as a variable's value is (B4), the
 spelling of the path standing open (§14), and the
 runtime calls `Watch` once after the first load, in an actor of its own, so that a source waits there
-on its source and calls the handle of B12; a source whose source never changes returns from `Watch`
-at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
+on its source and calls the handle of B12, whose `Changed()` runs `Load` in that actor (§12, the
+owner, 2026-11-12, comment 6820218118, "Changed() calls Load"); a source whose source never changes
+returns from `Watch` at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
 published the value, so that `Watch` may read `settings`, and `Watch` has a body that returns at once,
 which such a source keeps)*
 
