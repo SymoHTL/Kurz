@@ -196,10 +196,14 @@ the owner chose on 2026-11-02 and 2026-11-03, while the compiler read no body of
 with its cause). That `Text()` is `virtual` (§12, the owner, 2026-11-12, issue 457, comment
 6833680029, "Yes, virtual"), and a `data` type of a file may derive from `HttpError`, and from every
 `data` type of `std/` with a body, `RegexError` among them, as from one of the file (D6, D16) (§12,
-the same comment, "Every one"): its text is that of its own `Text()`, an `override` of `HttpError`'s,
-or else its detail, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
-*(assumed, §12: that no call of `std/` takes an `HttpError` from a program, so that no derived
-value reaches `std/`)*
+the same comment, "Every one"): its text is that of the nearest `override` of `Text()` along its
+chain of bases, its own among them, and `HttpError`'s, its `Detail`, where no type of the chain
+overrides it, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
+*(assumed, §12: the nearest `override` along the chain, as D16 gives the text of a value of a chain;
+that no call of `std/` takes an `HttpError` as an argument and acts on its type, and none but a
+generic container's gives one the program made back to it, while a derived value does reach `std/`
+in a `List` or a `Map` that holds it and gives it back as it took it, and in `string.Join` (X6),
+which takes its text as `print` does)*
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
@@ -222,13 +226,16 @@ data Coded(int Code) : HttpError {
 
 data Plain(int Code) : HttpError
 
+data Tagged(string Tag) : Coded
+
 HttpError e = Coded(HttpKind.Status, "teapot", 418)
 print(e)
 print(e.Text())
 print(e.Detail)
-print(e == HttpError(HttpKind.Status, "teapot"))
-print(e with { Detail = "gone" })
 print(Plain(HttpKind.Protocol, "short", 1))
+HttpError t = Tagged(HttpKind.Status, "clash", 409, "twice")
+print(t)
+print(t.Text())
 ```
 
 ### W3 (decided, §12) A server's request sent to another actor moves with its body

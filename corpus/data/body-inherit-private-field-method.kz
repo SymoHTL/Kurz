@@ -1,0 +1,12 @@
+// expect: error redeclared at 9
+// rules: D16
+
+data A(int X) {
+    int Hidden = X + 1
+}
+
+data B(int Y) : A {
+    pub int Hidden() => Y
+}
+
+print(B(1, 2))
