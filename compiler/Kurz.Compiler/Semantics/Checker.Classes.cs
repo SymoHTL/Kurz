@@ -2459,15 +2459,20 @@ public sealed partial class Checker
         _ => false,
     };
 
-    /// <summary>A5, A9, A15: a class instance's text is its <c>pub Text()</c>; one without <c>pub</c> is <c>not-visible</c> wherever <c>print</c> or an interpolation uses it, inside the class too.</summary>
-    private bool PrivateText(KurzType type, int line)
+    /// <summary>
+    /// A5, A9, A15: a class instance's text is its <c>pub Text()</c>; one without <c>pub</c> is <c>not-visible</c> wherever <c>print</c>, an
+    /// interpolation or <c>string.Join</c> (X6, the owner, 2026-11-11, "(a) Join refuses it") uses it, inside the class too.
+    /// </summary>
+    private bool PrivateText(KurzType type, int line, bool join = false)
     {
         if (PrivateTextClass(type, []) is not { } c)
         {
             return false;
         }
 
-        Report(ErrorIds.NotVisible, line, $"the `Text()` of `{c}` has no `pub`, and `print` and an interpolation reach it from outside the type, inside it too (A9, A15, D16)");
+        Report(ErrorIds.NotVisible, line, join
+            ? $"the `Text()` of `{c}` has no `pub`, and `string.Join` reaches it from outside the type, inside it too (X6, A9, A15, D16)"
+            : $"the `Text()` of `{c}` has no `pub`, and `print` and an interpolation reach it from outside the type, inside it too (A9, A15, D16)");
         return true;
     }
 

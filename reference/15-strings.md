@@ -213,7 +213,9 @@ print(s.Replace("-", '+'))
 
 `string.Join(separator, values)` takes a list of any item type and writes the text of each item (A4)
 with the separator between two items, as C#'s `Join` calls `ToString`; an item type that has no text
-is `no-text` (§12, the owner, 2026-10-31, "Any list"). The separator is a `string` or a `char`, as
+is `no-text` (§12, the owner, 2026-10-31, "Any list"). An item type whose text is a `Text()` without
+`pub`, of a class or a `data` type, is `not-visible` at the call, inside the type too, as `print` of it
+is (A9, A15) (§12, the owner, 2026-11-11, "(a) Join refuses it"). The separator is a `string` or a `char`, as
 C#'s `Join(char, ...)` (§12, the owner, 2026-10-31, "Join(char, items)"). A call that fits neither
 form, a separator of another type or values that are no list, is `argument-mismatch`, with a line for
 each form (F13). An empty list literal, `string.Join(",", [])`, is a list from which no item type is
@@ -233,6 +235,16 @@ print(string.Join(", ", ["a", "b", "c"]))
 print(string.Join("-", [1, 2, 3]))
 print(string.Join(", ", List<string>()) == "")
 print(string.Join('/', ["a", "b"]))
+```
+
+Case: [strings/join-private-text.kz](../corpus/strings/join-private-text.kz)
+```kurz
+// `Point`'s `Text()` has no `pub`, so `string.Join` reaches no text of it, as `print` reaches none (A9)
+data Point(int X, int Y) {
+    string Text() => "({X}, {Y})"
+}
+
+print(string.Join(", ", [Point(1, 2)]))
 ```
 
 Case: [strings/join-no-text.kz](../corpus/strings/join-no-text.kz)

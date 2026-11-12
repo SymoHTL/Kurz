@@ -1,0 +1,9 @@
+// expect: error not-visible at 9
+// rules: X6
+
+// `Point`'s `Text()` has no `pub`, so `string.Join` reaches no text of it, as `print` reaches none (A9)
+data Point(int X, int Y) {
+    string Text() => "({X}, {Y})"
+}
+
+print(string.Join(", ", [Point(1, 2)]))

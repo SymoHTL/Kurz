@@ -5505,6 +5505,20 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void String_join_over_a_text_without_pub_is_not_visible_as_print_of_it_is()
+    {
+        // X6 with A9 and A15 (the owner, 2026-11-11, "(a) Join refuses it", issue 455, comment 6790380573): `string.Join` over items
+        // whose `Text()` has no `pub` is `not-visible` at the call, for a data type and a class, with either separator, for an item
+        // that holds such a value, and inside the type too, as `print` of them is; with `pub` the same calls are clean
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("data P(int X) {\n    string Text() => \"p\"\n}\n\nprint(string.Join(\", \", [P(1)]))\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("class P(int X) {\n    string Text() => \"p\"\n}\n\nprint(string.Join('/', [P(1)]))\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 5)], Errors("data P(int X) {\n    string Text() => \"p\"\n}\n\nprint(string.Join(\", \", [[P(1)]]))\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 3)], Errors("data P(int X) {\n    string Text() => \"p\"\n    pub string All(List<P> ps) => string.Join(\", \", ps)\n}\n\nprint(P(1).All([P(2)]))\n"));
+        Assert.Empty(Errors("data P(int X) {\n    pub string Text() => \"p\"\n}\n\nprint(string.Join(\", \", [P(1)]))\n"));
+        Assert.Empty(Errors("class P(int X) {\n    pub string Text() => \"p\"\n}\n\nprint(string.Join('/', [P(1)]))\n"));
+    }
+
+    [Fact]
     public void A_method_named_like_a_field_and_a_name_a_method_declares_like_a_member_are_redeclared()
     {
         // V9, D16: a method takes no name of a field of its type, and inside a method a parameter and a variable take no name of a
