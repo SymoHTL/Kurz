@@ -52,6 +52,13 @@ public sealed partial class Checker
         _ => string.Empty,
     }).Where(name => name.Length > 0);
 
+    /// <summary>
+    /// D16, F9: whether the body of <paramref name="b"/> or of a base of it declares a <c>pub</c> method of the name, which a derived type
+    /// sees; a private one it does not see, so that a member of a derived type's body may take its name, as a class's may (K7).
+    /// </summary>
+    private static bool SeenBaseMethod(DataSymbol b, string name) =>
+        b.Chain.Any(s => (s.Declaration.Members ?? []).OfType<FunctionDeclaration>().Any(m => m.Name == name && (m.Modifiers & Modifiers.Pub) != 0));
+
     /// <summary>D6: whether the data type derives from another or another derives from it.</summary>
     private bool InFamily(DataSymbol symbol) => symbol.Base is not null || dataDeclared.Any(other => ReferenceEquals(other.Base, symbol));
 
@@ -180,7 +187,7 @@ public sealed partial class Checker
             return;
         }
 
-        if (symbol.Base is { } b && BodyDeclares(b, f.Name))
+        if (symbol.Base is { } b && SeenBaseMethod(b, f.Name))
         {
             Report(ErrorIds.Redeclared, f.Line, $"`{f.Name}` is a method of a base of `{symbol.Name}` already (V9, D16)");
             return;
@@ -217,7 +224,7 @@ public sealed partial class Checker
         { Property: true } => "a property of a data type, which section 14 leaves open (D16, K7)",
         { Name: "Equals" or "GetHashCode" } => $"a method named `{f.Name}` of a data type, which section 14 leaves open (D16, K5)",
         _ when (f.Modifiers & Modifiers.Static) != 0 => "a `static` method of a data type (D16, K19)",
-        _ when (f.Modifiers & (Modifiers.Virtual | Modifiers.Override)) != 0 && !InFamily(symbol) => "a `virtual` or `override` method of a data type that derives from none and from which none derives (D16, K7)",
+        _ when (f.Modifiers & Modifiers.Virtual) != 0 && !InFamily(symbol) => "a `virtual` method of a data type that derives from none and from which none derives (D16, K7)",
         _ when (f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut | Modifiers.Virtual | Modifiers.Override)) != 0 => $"the modifier `{(f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut | Modifiers.Virtual | Modifiers.Override)).ToString().ToLowerInvariant()}` of a method of a data type (D16, F9)",
         { Name: "Text" } when (f.Modifiers & Modifiers.Mut) != 0 => "a `mut` method named `Text` of a data type (D16, A5)",
         _ when f.TypeParameters.Count > 0 => "a method with type parameters of its own (section 4, T19)",
@@ -295,7 +302,7 @@ public sealed partial class Checker
             methods.Add(view);
         }
 
-        foreach (var symbol in dataDeclared.Where(s => s.Base is not null))
+        foreach (var symbol in dataDeclared)
         {
             foreach (var view in symbol.Methods.Values.SelectMany(list => list))
             {
@@ -305,8 +312,9 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// D16, K7: a method of a data type with a base, judged as a class's against the nearest method of a base with its name and its
-    /// parameter types, one with <c>pub</c>, which a derived type sees (F9); a private one is hidden by nothing (F9). An override is
+    /// D16, K7: a method of a data type, judged as a class's against the nearest method of a base with its name and its parameter types,
+    /// one with <c>pub</c>, which a derived type sees (F9); a private one is hidden by nothing (F9), and in a type without a base an
+    /// <c>override</c> overrides nothing, <c>override-without-virtual</c>, as in a class without one. An override is
     /// <c>mut</c> exactly when the method it overrides is, else <c>override-mut</c> (§4, the owner, 2026-11-12, issue 455, comment
     /// 6819137865, H1 (a)). <c>virtual</c> and <c>override</c> on one method, and <c>virtual</c> on a private method, are <c>not
     /// supported</c>, as a class's (K7).
@@ -321,7 +329,7 @@ public sealed partial class Checker
             return;
         }
 
-        var overridden = symbol.Base!.Chain
+        var overridden = symbol.Base?.Chain
             .Select(s => s.Methods.TryGetValue(method.Name, out var list) ? list.FirstOrDefault(m => SameParameters(m, method) && (m.Declaration!.Modifiers & Modifiers.Pub) != 0) : null)
             .FirstOrDefault(m => m is not null);
         if (JudgeOverride(method, overridden, $"type of `{symbol.Name}`", "D16, K7") is not { } taken)
@@ -360,7 +368,7 @@ public sealed partial class Checker
         var seen = methods.Where(f => (f.Declaration!.Modifiers & Modifiers.Pub) != 0 || ReferenceEquals(CurrentData(), f.DataOwner)).ToList();
         if (seen.Count == 0)
         {
-            Report(ErrorIds.NotVisible, m.Line, $"`{m.Member}` of `{type.Symbol.Name}` is private to its type: a method is visible outside it with `pub` (F9, D16)");
+            Report(ErrorIds.NotVisible, m.Line, $"`{m.Member}` of `{OwnerName(methods[0])}` is private to its type: a method is visible outside it with `pub` (F9, D16)");
             CheckArgumentsLoosely(c);
             return Typed.Error;
         }
