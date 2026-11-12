@@ -1,0 +1,17 @@
+// expect: output
+// | 101
+// | 9
+// rules: F12
+
+data P(int N) {
+    pub int Show(int k) => N * 100 + k
+}
+
+int Set(mut P p) {
+    p = P(9)
+    return 1
+}
+
+mut c = P(1)
+print(c.Show(Set(mut c)))
+print(c.N)

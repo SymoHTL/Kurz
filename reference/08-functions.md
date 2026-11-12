@@ -598,7 +598,7 @@ call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of t
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
-order written at the call, named arguments included (the owner, 2026-10-10). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
+order written at the call, named arguments included (the owner, 2026-10-10). A method's receiver is evaluated before its arguments: its value, or for a `mut` method the place of its value, so that an argument that assigns the variable the receiver reads leaves the call with the value the receiver read, as C# evaluates the target of a call first (§8, the owner, 2026-11-12, issue 39, comment 6819138235, item 12). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
 folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
 `data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, which goes
@@ -633,6 +633,22 @@ int Show(string s, int v) {
 int Add(int a, int b) => a + b
 
 print(Add(b: Show("b", 2), a: Show("a", 1)))
+```
+
+Case: [functions/receiver-first.kz](../corpus/functions/receiver-first.kz)
+```kurz
+data P(int N) {
+    pub int Show(int k) => N * 100 + k
+}
+
+int Set(mut P p) {
+    p = P(9)
+    return 1
+}
+
+mut c = P(1)
+print(c.Show(Set(mut c)))
+print(c.N)
 ```
 
 Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)

@@ -1232,7 +1232,12 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   input first, as Rust's `wait` drops `stdin`, and wait under the bound through the same `poll` as `Output()` (`Drive` of the
   Linux file), the pipes read with no close at their ends, since the program's `File` holds them; `WaitWithOutput()` takes the
   bytes a `File` read ahead (S24) first, and a read that fails ends it at once with that `IoError`, under a bound as without
-  one, the pipes left open and no child waited for or killed. A later wait gives the first one's status, or `TimedOut` again, and `Kill()` sends
+  one, the pipes left open and no child waited for or killed; a wait that gives an `IoError`, that read's or `TimedOut`, gives
+  what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
+  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe (S19; the order of
+  the bytes given back is among S19's assumed readings). A later wait after one that waited for the child gives the first one's
+  status, or `TimedOut` again, and one after a `WaitWithOutput()` whose read failed waits for the child, which that call left to
+  a later `Wait()` or `Kill()` (S19, the owner's "Error, no wait"), and `Kill()` sends
   `SIGKILL` to a child not yet waited for alone, whose number the system cannot have given away. The result is a
   union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
   `runtime/common/`. `Command`, `Stdio`, `ExitStatus`, `ProcessOutput`, `ExitError` and `ChildProcess` are names every file sees, so that a
