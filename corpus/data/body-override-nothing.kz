@@ -1,0 +1,10 @@
+// expect: error override-without-virtual at 5
+// rules: D16
+
+data Shape(int W) {
+    pub override string Kind() => "shape"
+}
+
+data Box(int D) : Shape
+
+print(Box(1, 2).Kind())
