@@ -13378,7 +13378,7 @@ class RegexParser {
     // `x` first, a lazy one the way past it. A look-behind's content is built to be read from right to left, as .NET's
     // `RegexOptions.RightToLeft` builds it: a sequence's items last first, a character, a class and a backreference by the
     // states that read backward, and a group's positions set at its left end; an alternation keeps its order, a repetition its
-    // greed, and a look-ahead inside it reads forward again (G2).
+    // greed, a look-ahead inside it reads forward again, and an atomic group keeps the direction it stands in (G2).
     internal void Emit(int node) {
         k = kind[node]
         if k == 0 {

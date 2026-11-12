@@ -1870,7 +1870,7 @@ ask about it.
   run their content as a search of its own; a lookbehind reads its content from its position back, from right to left, as
   .NET's `RegexOptions.RightToLeft` reads it: the parse builds that content with a sequence's items last first, states that
   read a character, a class or a backreference's text backward and a group's end set at its left, and a lookahead inside it
-  forward again (`RegexParser.Emit`), so that `(?<=(a+))b` over `aaab` gives group 1 `aaa`; a
+  forward again and an atomic group in the direction it stands in (`RegexParser.Emit`), so that `(?<=(a+))b` over `aaab` gives group 1 `aaa`; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
   backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, counted

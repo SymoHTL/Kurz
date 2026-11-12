@@ -138,10 +138,11 @@ a state at the same position ends, so that `(a*)*` ends and both engines give th
 taking the character that ends at the position; a repetition, greedy or lazy, taken toward the
 text's start; an alternation's branches in their order; a group's text from where its content
 stopped to where it began; a backreference comparing its group's text with the text that ends at
-the position, so that one written before its group reads the group the content took first; and a
-lookahead inside it read forward again. So `(?<=)b` and `(?<=a*)b` match `b`, `(?<=(a+))b` over
-`aaab` gives group 1 `aaa` from 0, `(?<=(a+?))b` gives `a` from 2, and `(?<=\1(a))b` matches
-`aab`. *(assumed, §12: the stack in memory, Q9 of comment
+the position, so that one written before its group reads the group the content took first; a
+lookahead inside it read forward again; and an atomic group inside it read in the direction it
+stands in. So `(?<=)b` and `(?<=a*)b` match `b`, `(?<=(a+))b` over `aaab` gives group 1 `aaa`
+from 0, `(?<=(a+?))b` gives `a` from 2, `(?<=\1(a))b` matches `aab`, and `(?<=(?>(a+))a)b` over
+`aaab` gives group 1 `aa` from 0. *(assumed, §12: the stack in memory, Q9 of comment
 6811727642, taken at its default; and, proposed with this record and not put to the owner, the errors of a
 backreference, the reading of its digits and a loop that comes back to its start with no character read)*
 
