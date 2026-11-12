@@ -1247,8 +1247,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
   one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
-  (S19, the owner's "Try the lock inside the poll"; the order of
-  the bytes given back is among S19's assumed readings). A later wait after one that waited for the child gives the first one's
+  (S19, the owner's "Try the lock inside the poll"). Once the child ended, a lock another holder holds is tried once more at the
+  wake that follows and then no more, its pipe left to that holder, so that the call gives the child's status with a bound and
+  without one; the child's end is polled through a descriptor of its process (`pidfd_open`) wherever a pipe's `File` is given
+  (S19, the owner's "Child's end decides"). The call is in flight on each pipe's `File` (S5) from before the runtime's call
+  until it let go of the lock, so that a `Close` through another holder meanwhile leaves the descriptor open to it. The wake
+  within 4 ms, each lock held until the bytes are taken or given back, the bytes ahead read under the lock, the output's lock
+  tried before the error's, the last try after the child's end, the call in flight on each `File` and the order of the bytes
+  given back are among S19's assumed readings. A later wait after one that waited for the child gives the first one's
   status, or `TimedOut` again, and one after a `WaitWithOutput()` whose read failed waits for the child, which that call left to
   a later `Wait()` or `Kill()` (S19, the owner's "Error, no wait"), and `Kill()` sends
   `SIGKILL` to a child not yet waited for alone, whose number the system cannot have given away. The result is a

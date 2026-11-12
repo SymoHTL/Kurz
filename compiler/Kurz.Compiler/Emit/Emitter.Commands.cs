@@ -151,8 +151,11 @@ public sealed partial class Emitter
     /// of the pipe (the owner, 2026-11-12, issue 174, (a)), those its <c>File</c> read ahead first, S19's assumed order
     /// (<see cref="GiveBack"/>). The runtime tries each pipe's reader lock at each wake of its poll and never waits on one, reading a
     /// pipe only once it took its lock (the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll";
-    /// <see cref="TryReader"/>), and each lock it took is held until the bytes are taken or given back (<see cref="LetGo"/>). Each
-    /// call is <c>not supported</c> in a build for Windows (S11), where no child exists.
+    /// <see cref="TryReader"/>), and each lock it took is held until the bytes are taken or given back (<see cref="LetGo"/>). Once
+    /// the child ended, a lock another holder holds is tried no more and that pipe is left to its holder (the owner, 2026-11-12,
+    /// issue 174, comment 6825493833, "Child's end decides"). The call is in flight on each pipe's <c>File</c> from before the
+    /// runtime's call until after its lock is let go of (<see cref="Pipe"/>, <see cref="Leave"/>). Each call is
+    /// <c>not supported</c> in a build for Windows (S11), where no child exists.
     /// </summary>
     private string EmitChildCall(CallExpression c, CallInfo info)
     {
@@ -210,13 +213,17 @@ public sealed partial class Emitter
         fn.Block(done);
         LetGo(outTook);
         LetGo(errTook);
+        Leave(outHandle);
+        Leave(errHandle);
         return result;
     }
 
     /// <summary>
     /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, and that handle, -1 and null
     /// where it is null or a <c>Close</c> marked it (S5). The <c>ChildProcess</c> holds the <c>File</c> through the call, so that nothing
-    /// frees the reader the runtime tries the lock of (<see cref="TryReader"/>).
+    /// frees the reader the runtime tries the lock of (<see cref="TryReader"/>), and the call enters the handle as a call in flight on
+    /// it (<see cref="EnterHandle"/>), so that a <c>Close</c> through another holder while the runtime polls the descriptor marks the
+    /// handle and leaves the release of the descriptor to the call's end (<see cref="Leave"/>), as it leaves it to a read in flight (S5).
     /// </summary>
     private (string Fd, string Handle) Pipe(string child, int offset)
     {
@@ -230,8 +237,7 @@ public sealed partial class Emitter
         var done = fn.Label("pipe.done");
         fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), present, done);
         fn.Block(present);
-        var word = fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4");
-        fn.CondBranch(fn.Value($"icmp eq i32 {fn.Value($"and i32 {word}, 1")}, 0"), unmarked, done);
+        fn.CondBranch(fn.Value($"call i1 {EnterHandle()}(ptr {handle})"), unmarked, done);
         fn.Block(unmarked);
         fn.Emit($"store i32 {HandleDescriptor(handle)}, ptr {fd}");
         fn.Emit($"store ptr {handle}, ptr {open}");
@@ -332,6 +338,21 @@ public sealed partial class Emitter
         fn.Emit($"call void {UnlockReader()}(ptr {ReaderField(HandleField(handle, ReaderAt), ReaderLock)})");
         fn.Branch(free);
         fn.Block(free);
+    }
+
+    /// <summary>
+    /// S19, S5: the call on the handle <paramref name="handle"/> that <see cref="Pipe"/> entered ended, null where it entered none; the
+    /// last call out of a handle a <c>Close</c> marked meanwhile releases its descriptor (<see cref="LeaveHandle"/>).
+    /// </summary>
+    private void Leave(string handle)
+    {
+        var entered = fn.Label("pipe.entered");
+        var left = fn.Label("pipe.left");
+        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), entered, left);
+        fn.Block(entered);
+        fn.Emit($"call void {LeaveHandle()}(ptr {handle})");
+        fn.Branch(left);
+        fn.Block(left);
     }
 
     /// <summary>
