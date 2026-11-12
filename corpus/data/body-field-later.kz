@@ -1,0 +1,9 @@
+// expect: error unknown-name at 5
+// rules: D16
+
+data Order(int Price, int Count) {
+    pub int Total = Price * Count + Fee
+    pub int Fee = 1
+}
+
+print(Order(3, 2))

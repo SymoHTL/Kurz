@@ -1,0 +1,22 @@
+// expect: output
+// | Price = 3
+// | Count = 2
+// | Total = 6
+// | Order { Price = 5, Count = 2, Total = 10, Note = 10 in all }
+// rules: T33, D16
+
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+    string Note = "{Total} in all"
+}
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print("{f.Name} = {f.Get(value)}")
+    }
+}
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+ShowFields(Order(3, 2))
+print(Remake(Order(5, 2)))

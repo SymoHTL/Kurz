@@ -1,0 +1,9 @@
+// expect: error not-visible at 9
+// rules: D16
+
+data Order(int Price, int Count) {
+    int Total = Price * Count
+}
+
+o = Order(3, 2)
+print(o.Total)

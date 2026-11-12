@@ -1,0 +1,8 @@
+// expect: error field-unassigned at 5
+// rules: D16
+
+data Order(int Price, int Count) {
+    pub int Total
+}
+
+print(Order(3, 2))

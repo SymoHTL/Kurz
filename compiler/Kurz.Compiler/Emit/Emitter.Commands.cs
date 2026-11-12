@@ -147,9 +147,10 @@ public sealed partial class Emitter
     /// its <c>stdin</c>, so that a child that reads to its end ends (issue 174, Q6: the owner, 2026-11-11, "All three as built", comment
     /// 6790379522). <c>WaitWithOutput()</c> reads each pipe from where the program stopped: the bytes its <c>File</c> read ahead first,
     /// taken from it once the wait gives no <c>IoError</c>, then what the pipe still gives; a <c>File</c> that a <c>Close</c> marked gives
-    /// none. A wait that gives an <c>IoError</c> gives every byte it gathered of a pipe back to that pipe's <c>File</c>, those it read
-    /// ahead first, before the rest of the pipe (<see cref="GiveBack"/>). Each call is <c>not supported</c> in a build for Windows (S11),
-    /// where no child exists.
+    /// none. A wait that gives an <c>IoError</c> gives every byte it gathered of a pipe back to that pipe's <c>File</c>, before the rest
+    /// of the pipe (the owner, 2026-11-12, issue 174, (a)), those its <c>File</c> read ahead first, S19's assumed order
+    /// (<see cref="GiveBack"/>). Each pipe's reader is locked from the read of the bytes it read ahead until they are taken or given
+    /// back (<see cref="Ahead"/>). Each call is <c>not supported</c> in a build for Windows (S11), where no child exists.
     /// </summary>
     private string EmitChildCall(CallExpression c, CallInfo info)
     {
@@ -201,6 +202,8 @@ public sealed partial class Emitter
         GiveBack(errHandle, errKept);
         fn.Branch(done);
         fn.Block(done);
+        LetGo(outHandle);
+        LetGo(errHandle);
         return result;
     }
 
@@ -225,7 +228,10 @@ public sealed partial class Emitter
     /// <summary>
     /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, -1 where it is null or a
     /// <c>Close</c> marked it (S5), the bytes its reader holds ahead of the program (S16), and the place of the reader's position,
-    /// null where it holds none, which <see cref="Taken"/> moves past them once the wait took them.
+    /// null where it holds none, which <see cref="Taken"/> moves past them once the wait took them. It takes the reader's lock before
+    /// it reads them, which <see cref="LetGo"/> lets go of once they were taken or given back, so that a read through the <c>File</c>
+    /// on another thread waits for the call, as a fill holds the lock across its read (S16), and neither takes the bytes the call takes
+    /// nor fills and replaces the buffer the runtime copies them from.
     /// </summary>
     private (string Fd, string Ahead, string Count, string Taken, string Handle) Ahead(string child, int offset)
     {
@@ -249,9 +255,10 @@ public sealed partial class Emitter
         var word = fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4");
         fn.CondBranch(fn.Value($"icmp eq i32 {fn.Value($"and i32 {word}, 1")}, 0"), unmarked, done);
         fn.Block(unmarked);
+        var reader = HandleField(handle, ReaderAt);
+        fn.Emit($"call void {LockReader()}(ptr {ReaderField(reader, ReaderLock)})");
         fn.Emit($"store i32 {HandleDescriptor(handle)}, ptr {fd}");
         fn.Emit($"store ptr {handle}, ptr {open}");
-        var reader = HandleField(handle, ReaderAt);
         var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
         fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, done);
         fn.Block(buffered);
@@ -259,9 +266,9 @@ public sealed partial class Emitter
         var end = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
         fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr {ahead}");
         fn.Emit($"store i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}, ptr {count}");
-        // the runtime copies them before anything frees the buffer; the address of the position stays good until `Taken` writes it,
-        // since the call runs no code of the program and the `ChildProcess` it is a member of holds the `File` through it, so that
-        // nothing frees or replaces the reader
+        // the runtime copies them under the reader's lock; the address of the position stays good until `Taken` writes it, since the
+        // `ChildProcess` holds the `File` through the call, so that nothing frees the reader, and the lock keeps another thread's read
+        // from moving the position or replacing the buffer
         fn.Emit($"store ptr {ReaderField(reader, ReaderPosition)}, ptr {taken}");
         fn.Branch(done);
         fn.Block(done);
@@ -270,10 +277,11 @@ public sealed partial class Emitter
 
     /// <summary>
     /// S19: the bytes a <c>WaitWithOutput()</c> that gave an <c>IoError</c> gathered of one pipe, in the list at <paramref name="kept"/>,
-    /// those its <c>File</c> read ahead first, given back to that <c>File</c>'s reader under its lock (<see cref="KeepRest"/>), so that a
-    /// later read takes them before the rest of the pipe and sees the output whole (the owner, 2026-11-12, issue 174, (a), against the
-    /// bytes dropped); the handle at <paramref name="open"/> is the <c>File</c> the wait read, null where it read none, which the
-    /// <c>ChildProcess</c> holds through the call, as <see cref="Ahead"/> says. The list is let go of either way.
+    /// given back to that <c>File</c>'s reader (<see cref="KeepRest"/>), so that a later read takes them before the rest of the pipe and
+    /// sees the output whole (the owner, 2026-11-12, issue 174, (a), against the bytes dropped), those its <c>File</c> read ahead first,
+    /// S19's assumed order; under the reader's lock that <see cref="Ahead"/> took, which this takes no second time; the handle at
+    /// <paramref name="open"/> is the <c>File</c> the wait read, null where it read none, which the <c>ChildProcess</c> holds through the
+    /// call, as <see cref="Ahead"/> says. The list is let go of either way.
     /// </summary>
     private void GiveBack(string open, string kept)
     {
@@ -283,14 +291,26 @@ public sealed partial class Emitter
         var given = fn.Label("give.done");
         fn.CondBranch(fn.Value($"and i1 {fn.Value($"icmp ne ptr {handle}, null")}, {fn.Value($"icmp ne ptr {list}, null")}"), give, given);
         fn.Block(give);
-        var reader = HandleField(handle, ReaderAt);
-        var word = ReaderField(reader, ReaderLock);
-        fn.Emit($"call void {LockReader()}(ptr {word})");
-        KeepRest(handle, reader, list);
-        fn.Emit($"call void {UnlockReader()}(ptr {word})");
+        KeepRest(handle, HandleField(handle, ReaderAt), list);
         fn.Branch(given);
         fn.Block(given);
         Release(list, new ListType(Types.Byte));
+    }
+
+    /// <summary>
+    /// S19: the reader's lock that <see cref="Ahead"/> took let go of, where it took one, once the wait's bytes were taken
+    /// (<see cref="Taken"/>) or given back (<see cref="GiveBack"/>).
+    /// </summary>
+    private void LetGo(string open)
+    {
+        var handle = fn.Value($"load ptr, ptr {open}");
+        var held = fn.Label("ahead.held");
+        var free = fn.Label("ahead.free");
+        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), held, free);
+        fn.Block(held);
+        fn.Emit($"call void {UnlockReader()}(ptr {ReaderField(HandleField(handle, ReaderAt), ReaderLock)})");
+        fn.Branch(free);
+        fn.Block(free);
     }
 
     /// <summary>

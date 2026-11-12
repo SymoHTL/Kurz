@@ -89,12 +89,17 @@ this cache does not have; so that a search's time stays in proportion to the pat
 the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
 ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
 making of its classes, once for each pattern; a call the making of the states its cache holds, which
-a short text pays before the Pike VM runs; and a call up to 2 MiB for its cache (§12, the owner, 2026-11-12, issue 176, comment 6819137493,
+the build has a short text pay too, before the Pike VM runs, where the length Q3 of comment
+6813110851 chose, which is not built, has it pay none; and a call up to 2 MiB for its cache (§12, the owner, 2026-11-12, issue 176, comment 6819137493,
 Q1, Q2 and Q4 of comment 6813110851). *(assumed, §12: the count of a state, the members a state
 keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
 the end of a list that cannot grow)* Below a text length measured on a benchmark the Pike VM runs
 alone, without the DFA (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q3 of comment
 6813110851); the compiler does not build that length, and its DFA runs first at every length.
+*(assumed, §12, readings of that answer not put to the owner: the benchmark, the programs that
+measured the DFA's cost for pull request 491, the length found on it; what is measured, the bytes
+from a search's start to the text's end, so that a later search of `Matches` measures what is left;
+and the calls, every member that searches, `IsMatch` among them)*
 
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
@@ -126,12 +131,18 @@ and a stack that cannot grow ends the process with `allocation-failed`, as a lis
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
 .NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
-.NET; and a lookbehind matches its content from right to left, from its position back, as .NET
-matches it, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookbehind takes the text
-its content reads so (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q15 of comment
-6812042360); the compiler does not build that direction: its lookbehind tries its position and each
-one before it, the nearest first, its content ending at its position, so that a group inside it
-takes the text of the nearest start its content matches from. *(assumed, §12: the stack in memory, Q9 of comment
+.NET; and a lookbehind matches its content from right to left, from its position back, as .NET's
+`RegexOptions.RightToLeft` matches it, so that every group inside it is .NET's (§12, the owner,
+2026-11-12, issue 176, comment 6819137493, Q15 of comment 6812042360). .NET reads it so (§12, as
+.NET 10's `Regex` was seen to on 2026-11-12): a sequence's items last first, a character or a class
+taking the character that ends at the position; a repetition, greedy or lazy, taken toward the
+text's start; an alternation's branches in their order; a group's text from where its content
+stopped to where it began; a backreference comparing its group's text with the text that ends at
+the position, so that one written before its group reads the group the content took first; a
+lookahead inside it read forward again; and an atomic group inside it read in the direction it
+stands in. So `(?<=)b` and `(?<=a*)b` match `b`, `(?<=(a+))b` over `aaab` gives group 1 `aaa`
+from 0, `(?<=(a+?))b` gives `a` from 2, `(?<=\1(a))b` matches `aab`, and `(?<=(?>(a+))a)b` over
+`aaab` gives group 1 `aa` from 0. *(assumed, §12: the stack in memory, Q9 of comment
 6811727642, taken at its default; and, proposed with this record and not put to the owner, the errors of a
 backreference, the reading of its digits and a loop that comes back to its start with no character read)*
 
@@ -322,9 +333,10 @@ that is no letter, digit or `_`, or before a `{` without its `}`, is a `$`. *(as
 `Replace` of every match and Rust's reading of the replacement, where C# reads `$1a` as group 1 and
 an `a` and keeps `$9` of a group that does not exist as it is written)* Both take the matches `Matches` gives
 (G4), so that an empty match right after another match is passed over, and `Split` adds a match's
-groups in the order of their numbers; a text with no match is given back by `Replace` as it is and
-by `Split` as one piece (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q1 and Q2 of
-comment 6810129884, the walk and the order).
+groups in the order of their numbers (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q1
+and Q2 of comment 6810129884, the walk and the order). A text with no match is given back by
+`Replace` as it is and by `Split` as one piece, as Rust's `replace_all` and `split` give it.
+*(proposed: the record says what each does at a match)*
 
 Case: [regex/replace.kz](../corpus/regex/replace.kz)
 ```kurz
