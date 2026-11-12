@@ -196,9 +196,14 @@ leaves it out. `re.Replace(s, replacement)` replaces every match, as C#'s `Repla
 digits and `_`, so that `$1a` names a group `1a`, a name of digits alone names a group by its number,
 `${name}` ends the name at its brace, `$$` is a `$`, and a group that does not exist or did not take
 part gives no text. A replacement with `${name}` is written as a raw literal (L20), since `{` opens
-an interpolation in every other literal (L6). *(assumed, §12: the group left out of `Split`,
+an interpolation in every other literal (L6). A `$` that names no group, at the end, before a byte
+that is no letter, digit or `_`, or before a `{` without its `}`, is a `$`. *(assumed, §12: the group left out of `Split`,
 `Replace` of every match and Rust's reading of the replacement, where C# reads `$1a` as group 1 and
-an `a` and keeps `$9` of a group that does not exist as it is written)*
+an `a` and keeps `$9` of a group that does not exist as it is written)* Both take the matches `Matches` gives
+(G4), so that an empty match right after another match is passed over, and `Split` adds a match's
+groups in the order of their numbers; a text with no match is given back by `Replace` as it is and
+by `Split` as one piece. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6810129884)*
 
 Case: [regex/replace.kz](../corpus/regex/replace.kz)
 ```kurz
@@ -217,4 +222,13 @@ print(Regex.New("[-+]").Split("1+2-3"))
 print(Regex.New("([-+])").Split("1+2-3"))
 print(Regex.New(r"(-)|(\+)").Split("1+2-3"))
 print(Regex.New(",").Split(",a"))
+```
+
+Case: [regex/walk.kz](../corpus/regex/walk.kz)
+```kurz
+print(Regex.New("x*").Split("axb"))
+print(Regex.New("x*").Replace("axb", "-"))
+print(Regex.New(",").Split("abc"))
+print(Regex.New(",").Replace("abc", "-"))
+print(Regex.New("(?<sign>[a-z])(=)").Split("1a=2"))
 ```

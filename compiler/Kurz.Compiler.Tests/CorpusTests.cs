@@ -65,8 +65,6 @@ public sealed class CorpusTests
     {
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
         ["regex/backtracking.kz"] = "the backtracking engine, `backtracking: true` of `Regex.New` (G2)",
-        ["regex/replace.kz"] = "`Replace` of a `Regex` (G5)",
-        ["regex/split.kz"] = "`Split` of a `Regex` (G5)",
     };
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;
