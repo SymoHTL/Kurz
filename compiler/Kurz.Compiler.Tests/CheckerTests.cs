@@ -2661,6 +2661,10 @@ public sealed class CheckerTests
         // `override-without-virtual`, and a `Text()` of a type derived from `HttpError` without `override` is `hides-member` (K7)
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], CheckSeeingStd("data Bad : RegexError {\n    pub override string Text() => \"bad\"\n}\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
         Assert.Equal([(ErrorIds.HidesMember, 2)], CheckSeeingStd("data Mine : HttpError {\n    pub string Text() => \"mine\"\n}\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+
+        // and a field of the derived type's primary constructor named like a field of `HttpError` is `redeclared`, as below a base of the
+        // file (V9, D16); the first program, whose fields take names of their own, is its positive control
+        Assert.Equal([(ErrorIds.Redeclared, 1)], CheckSeeingStd("data Mine(string Kind) : HttpError\n\nprint(Mine(HttpKind.Status, \"a\", \"b\"))\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------
