@@ -850,12 +850,12 @@ public sealed partial class Checker
 
                     if (BodyDeclares(d.Symbol, member))
                     {
-                        if (dataMethodErrors.Contains((d.Symbol, member)) && !d.Symbol.Methods.ContainsKey(member))
+                        if (d.Symbol.Chain.Any(s => dataMethodErrors.Contains((s, member))) && DataMethodsOf(d.Symbol, member) is null)
                         {
                             return Typed.Error; // its declaration reported the error (E1)
                         }
 
-                        NotSupported(line, d.Symbol.Methods.ContainsKey(member)
+                        NotSupported(line, DataMethodsOf(d.Symbol, member) is not null
                             ? "a method of a data type named without a call (D16, F11)"
                             : "a member of the body of a data type that the checker does not read (D16)"); // refused where it is declared
                         return Typed.Error;

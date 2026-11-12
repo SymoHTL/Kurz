@@ -2652,8 +2652,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_data_type_of_the_file_that_derives_from_a_data_type_of_std_with_a_body_is_not_supported_at_its_base()
     {
-        // D16 with D6: a body in a relation of inheritance is not read (section 14), and the checker of std/ sees no type of the file that
-        // derives from `HttpError`; one error, at the base, and a type that derives from the refused one carries none (E1)
+        // D16 with D6: the checker of std/ sees no type of the file that derives from `HttpError`, so it reads that type's body as the body
+        // of a type from which none derives; one error, at the base, and a type that derives from the refused one carries none (E1)
         var program = "data Mine(int Code) : HttpError\ndata Deeper(int More) : Mine\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n";
         var refused = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
         Assert.Equal((true, 1), (refused.IsNotSupported, refused.Line));
@@ -5400,7 +5400,6 @@ public sealed class CheckerTests
 
     [Theory]
     [InlineData(2, "D16, T19", "data W<T>(T Value) {\n    pub T Get() => Value\n}\n\nprint(1)")]
-    [InlineData(3, "D16, D6", "data A(int X)\ndata B(int Y) : A {\n    pub int Get() => Y\n}\n\nprint(1)")]
     [InlineData(2, "D16, K5", "data D(int X) {\n    pub bool Equals(D other) => true\n}\n\nprint(1)")]
     [InlineData(2, "D16, K5", "data D(int X) {\n    pub int GetHashCode() => 1\n}\n\nprint(1)")]
     [InlineData(2, "D8, D16", "data D {\n    pub int Y = 1\n}\n\nprint(1)")]
@@ -5421,8 +5420,8 @@ public sealed class CheckerTests
     public void A_part_of_a_data_body_the_checker_does_not_read_is_not_supported_at_its_line(int line, string rule, string program)
     {
         // D16: what a body holds beside its methods and fields, a method or a field with what this build does not read, and a body it does
-        // not read; section 14 leaves open a property, `Equals` and `GetHashCode`, and a `mut` method on an item of a list (question 1b); a
-        // body in a relation of inheritance with `virtual` and `override` (question 6), a `static` method (question 3), a field of a type
+        // not read; section 14 leaves open a property, `Equals` and `GetHashCode`, and a `mut` method on an item of a list (question 1b);
+        // `virtual` and `override` on a type that derives from none and from which none derives (question 6), a `static` method (question 3), a field of a type
         // without a primary constructor, a `static` field, an `internal` one, one without a written type, a constructor, `prot`, a method's
         // own type parameters, a `mut` `Text`, the body of a generic type, a member read through the type's name and a method named without
         // a call are what this build does not read; such a field without `=` is `not supported` too, before `field-unassigned`
@@ -5456,16 +5455,41 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_data_body_under_inheritance_is_checked_as_a_class_body_its_override_as_mut_as_what_it_overrides()
+    {
+        // D16 (§4, the owner, 2026-11-12, issue 455, comment 6819137865, H1 (a), and H4 at its default): an `override` is `mut` exactly
+        // when the method it overrides is, else `override-mut`, either way round; the rest as a class's (K7): a method with the name and
+        // the parameter types of a base's `pub` one and no `override` is `hides-member`, an `override` of a method neither `virtual` nor
+        // `override` is `override-without-virtual`, another return type `override-return-type`; a private member of a base's body is
+        // visible to the base alone (F9); an initializer of a derived type's body reads the fields of every primary constructor and its own
+        // body's above it, and a base's field of the body, computed after it in a class's order, is no name there (V10); a member of the
+        // derived type's body named like a member of a base's body, and a field of its primary constructor named like a base's field of the
+        // body, are `redeclared` (V9). The base and the control derive and override as the rules let them, with no error.
+        const string a = "data A(int X) {\n    pub int P = X * 2\n    int Hidden = 1\n\n    pub virtual mut void Bump() {\n        X = X + 1\n    }\n\n    pub virtual int Get() => X\n\n    pub int Plain() => X\n\n    pub int Shown() => Own() + Hidden\n\n    int Own() => 1\n}\n\n";
+        const string tail = "}\n\nprint(B(1, 2))\n";
+        Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Q = X + Y\n\n    pub override mut void Bump() {\n        Y = Y + 1\n    }\n\n    pub override int Get() => Y + P\n}\n\nmut b = B(1, 2)\nb.Bump()\nprint(b.Get() + b.Plain() + b.Shown() + b.Q)\n"));
+        Assert.Equal([(ErrorIds.OverrideMut, 19)], Errors(a + "data B(int Y) : A {\n    pub override void Bump() {\n        print(Y)\n    }\n" + tail));
+        Assert.Equal([(ErrorIds.OverrideMut, 19)], Errors(a + "data B(int Y) : A {\n    pub override mut int Get() => Y\n" + tail));
+        Assert.Equal([(ErrorIds.HidesMember, 19)], Errors(a + "data B(int Y) : A {\n    pub int Get() => Y\n" + tail));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 19)], Errors(a + "data B(int Y) : A {\n    pub override int Plain() => Y\n" + tail));
+        Assert.Equal([(ErrorIds.OverrideReturnType, 19)], Errors(a + "data B(int Y) : A {\n    pub override string Get() => \"y\"\n" + tail));
+        Assert.Equal([(ErrorIds.NotVisible, 19)], Errors(a + "data B(int Y) : A {\n    pub int Peek() => Hidden\n" + tail));
+        Assert.Equal([(ErrorIds.NotVisible, 19)], Errors(a + "data B(int Y) : A {\n    pub int Peek() => Own()\n" + tail));
+        Assert.Equal([(ErrorIds.UnknownName, 19)], Errors(a + "data B(int Y) : A {\n    pub int Q = P + Y\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Get = 1\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int P() => Y\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int P) : A\n\nprint(B(1, 2))\n"));
+    }
+
+    [Fact]
     public void A_call_of_a_method_the_checker_refused_is_not_supported_at_the_call_too()
     {
         // D16, E1: the call reports `not supported` where the declaration did, and no error
         var lines = NotSupported("data D(int X) {\n    pub bool Equals(D other) => true\n}\n\nprint(D(1).Equals(D(1)))").Select(d => d.Split(':')[0]);
         Assert.Equal(["2", "5"], lines);
 
-        // a `static` method, called after the type's name (K19), and a method of a body the checker does not read, the base's of a
-        // type that derives from it (D6)
+        // a `static` method, called after the type's name (K19)
         Assert.Equal(["2", "5"], NotSupported("data Counter(int Count) {\n    pub static Counter Zero() => Counter(0)\n}\n\nprint(Counter.Zero().Count)").Select(d => d.Split(':')[0]));
-        Assert.Equal(["2", "9"], NotSupported("data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\ndata Sub(int X) : Counter\n\nmut s = Sub(1, 2)\ns.Increment()").Select(d => d.Split(':')[0]));
     }
 
     [Fact]

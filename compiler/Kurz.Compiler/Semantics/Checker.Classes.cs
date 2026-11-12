@@ -873,32 +873,47 @@ public sealed partial class Checker
         var overridden = symbol.Base?.Chain
             .Select(c => c.Methods.TryGetValue(method.Name, out var list) ? list.FirstOrDefault(m => SameParameters(m, method) && SeenByDerived(m)) : null)
             .FirstOrDefault(m => m is not null);
+        method.Overridden = JudgeOverride(method, overridden, $"class of `{symbol.Name}`", "K7");
+    }
+
+    /// <summary>
+    /// K7, D16: what the marks of a method of a derived type say against the method of a base it would override, the nearest one with its
+    /// name and parameter types that the type sees: without <c>override</c> such a method is <c>hides-member</c>; with it, no such method,
+    /// or one marked neither <c>virtual</c> nor <c>override</c>, is <c>override-without-virtual</c>, and another return type
+    /// <c>override-return-type</c>. The method it overrides, or null where it overrides none or was refused.
+    /// </summary>
+    private FunctionSymbol? JudgeOverride(FunctionSymbol method, FunctionSymbol? overridden, string bases, string rules)
+    {
+        var d = method.Declaration!;
         if ((d.Modifiers & Modifiers.Override) == 0)
         {
             if (overridden is not null)
             {
-                Report(ErrorIds.HidesMember, d.Line, $"`{method.Name}` has the name and the parameter types of a method of `{overridden.Owner!.Name}`: an override is marked `override`, and the method it overrides `virtual` (K7)");
+                Report(ErrorIds.HidesMember, d.Line, $"`{method.Name}` has the name and the parameter types of a method of `{OwnerName(overridden)}`: an override is marked `override`, and the method it overrides `virtual` ({rules})");
             }
 
-            return;
+            return null;
         }
 
         if (overridden is null || !overridden.IsVirtual)
         {
             Report(ErrorIds.OverrideWithoutVirtual, d.Line, overridden is null
-                ? $"`{method.Name}` overrides nothing: no base class of `{symbol.Name}` has a method of this name and these parameter types that it sees (K7)"
-                : $"`{method.Name}` of `{overridden.Owner!.Name}` is marked neither `virtual` nor `override`, so nothing overrides it (K7)");
-            return;
+                ? $"`{method.Name}` overrides nothing: no base {bases} has a method of this name and these parameter types that it sees ({rules})"
+                : $"`{method.Name}` of `{OwnerName(overridden)}` is marked neither `virtual` nor `override`, so nothing overrides it ({rules})");
+            return null;
         }
 
         if (!Types.IsError(method.ReturnType) && !Types.IsError(overridden.ReturnType) && !Types.Same(method.ReturnType, overridden.ReturnType))
         {
-            Report(ErrorIds.OverrideReturnType, d.Line, $"`{method.Name}` returns `{method.ReturnType}`, and the method of `{overridden.Owner!.Name}` it overrides `{overridden.ReturnType}`: an override has the return type of the method it overrides (K7)");
-            return;
+            Report(ErrorIds.OverrideReturnType, d.Line, $"`{method.Name}` returns `{method.ReturnType}`, and the method of `{OwnerName(overridden)}` it overrides `{overridden.ReturnType}`: an override has the return type of the method it overrides ({rules})");
+            return null;
         }
 
-        method.Overridden = overridden;
+        return overridden;
     }
+
+    /// <summary>The name of the class or the data type whose method this is.</summary>
+    private static string OwnerName(FunctionSymbol method) => method.Owner?.Name ?? method.DataOwner!.Name;
 
     /// <summary>F9: whether a class derived from the class of <paramref name="method"/> sees it: with <c>pub</c> or <c>prot</c>, or <c>internal</c> in its folder.</summary>
     private bool SeenByDerived(FunctionSymbol method) =>
@@ -1169,12 +1184,18 @@ public sealed partial class Checker
     /// that no method nearer the class has the parameter types of, so that an override stands for what it overrides; null where the
     /// chain has none.
     /// </summary>
-    private static List<FunctionSymbol>? MethodsOf(ClassSymbol symbol, string name)
+    private static List<FunctionSymbol>? MethodsOf(ClassSymbol symbol, string name) => NearestMethods(symbol.Chain.Select(c => c.Methods), name);
+
+    /// <summary>
+    /// K7, D16: of the tables of methods of a type and of each base up its chain, in that order, the methods of a name: each one that no
+    /// method of a table before it has the parameter types of; null where no table has the name.
+    /// </summary>
+    private static List<FunctionSymbol>? NearestMethods(IEnumerable<Dictionary<string, List<FunctionSymbol>>> chain, string name)
     {
         List<FunctionSymbol>? found = null;
-        foreach (var c in symbol.Chain)
+        foreach (var methods in chain)
         {
-            if (!c.Methods.TryGetValue(name, out var list))
+            if (!methods.TryGetValue(name, out var list))
             {
                 continue;
             }
@@ -1241,7 +1262,7 @@ public sealed partial class Checker
     /// <summary>K7, V9, D16: inside a method of a class or of a data type, whether a name is a member of its type, which a declaration of the name would hide.</summary>
     private bool IsMemberName(string name) =>
         (CurrentClass() is { } c && (c.Field(name) is not null || c.StaticField(name) is not null || MethodsOf(c, name) is not null))
-        || (CurrentData() is { } d && (d.Field(name) is not null || BodyNames(d).Contains(name))); // D16: a data type's fields and methods, as a class's
+        || (CurrentData() is { } d && (d.Field(name) is not null || BodyDeclares(d, name))); // D16: a data type's fields and methods and its bases', as a class's
 
     /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10), and a <c>static</c> member has none (K19).</summary>
     private Typed CheckThis(ThisExpression t)
