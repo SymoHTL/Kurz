@@ -4028,7 +4028,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// The edits that make the allocator take every block from pages of its own, which end at a page the system makes inaccessible,
     /// as Electric Fence places a block by default, and make them unreachable when the block is freed, so that a write past a
-    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again. A block
+    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again, and the
+    /// memory of a freed block's pages goes back to the system while its addresses stay inaccessible, so that a run holds the memory
+    /// of the blocks it has not freed alone: a program that makes and frees millions of blocks, as the searches of a `Regex` do,
+    /// runs in the memory a program of its live blocks takes. A block
     /// ends where its size rounded up to 16 ends, so that its address stays a multiple of 16, as the allocation entry gives it: a
     /// write past the size asked for that stays within that rounding is not seen by the page after it. The block's header holds the
     /// size the allocation asked for, and `Free` holds the size it is given against it: another size writes
@@ -4104,8 +4107,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     "    return p\n" +
                     "}\n\n" +
                     "byte* Mapped(long bytes) {"),
-                // PROT_NONE from the first of the block's pages: the pages stay mapped
-                (file, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)"),
+                // the block's pages, from the first, made inaccessible (`mprotect` with `PROT_NONE`) and then given back to the system
+                // (`madvise` with `MADV_DONTNEED`, 4): the pages stay mapped, as MEM_DECOMMIT keeps them reserved on Windows, in a
+                // mapping with the flags of its neighbours, which the system joins with them, so that the count of mappings stays low
+                (file, "    int mprotect(void* address, long length, int protection)", "    int mprotect(void* address, long length, int protection)\n    int madvise(void* address, long length, int advice)"),
+                (file, "munmap(Ptr<void>(p), bytes)",
+                    "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)\n" +
+                    "        madvise(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 4)"),
                 (file, "pub byte* Resize(byte* p, long bytes, long grown) {", "pub byte* Resize(byte* p, long bytes, long grown) {\n    return null\n}\n\nbyte* Resized(byte* p, long bytes, long grown) {"),
             ];
     }
