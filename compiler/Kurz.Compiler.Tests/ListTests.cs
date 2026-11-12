@@ -2494,7 +2494,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // `mut` field of an instance (K2), a method on a value read from that field that replaces the field while it runs, and a `mut`
     // method on a value inside an instance's block that replaces the instance holding it while it runs, whose place that instance's read
     // keeps (K2), and one on a `mut` field of an instance that assigns that field while it runs, whose writes land in the new value
-    // (D16)
+    // (D16), and one whose argument replaces the instance that holds the field it was called on, so that nothing but the call's count
+    // keeps that instance while the method writes into it (D16)
     private const string DataBodies = """
         data Counter(int Count, string Name) {
             pub mut void Increment() {
@@ -2588,12 +2589,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         class Holder(mut Box In)
 
+        int Swap(Holder h) {
+            h.In = Box(Counter(7, "s{1}"))
+            return 1
+        }
+
         hd = Holder(Box(Counter(1, "h")))
         hg = hd
         hd.In.D.Moved(hg)
         print(hd.In.D)
         bx.D.Reset(bx)
         print(bx.D)
+        hd.In.D.Add(Swap(hd))
+        print(hd.In.D)
         """;
 
     private static readonly string[] DataBodiesPrint =
@@ -2614,6 +2622,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "x",
         "<m=9>", // the instance the method put in place of the one that held its receiver, whose block the read kept for the write (K2)
         "<r1+x=6>", // the value the method assigned to the field it was called on, which its writes reach through the place its call took (D16)
+        "<s1=7>", // the instance the argument put in place of the one whose field the call took, which the method's writes did not reach (D16)
     ];
 
     // the fields of a `data` body (D16): strings and lists each initializer makes, from the primary fields and the fields above it, a
