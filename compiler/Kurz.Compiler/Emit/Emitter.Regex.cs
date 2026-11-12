@@ -30,16 +30,28 @@ public sealed partial class Emitter
     /// of the pairs of the folding, of the ranges of the characters of a group's name, Alphabetic and the categories Nd, Nl and No,
     /// and of the 32 bits of the classes of <c>\p</c>, then those numbers, 32 bits each, from <see cref="CaseTables"/>; the
     /// classes of <c>\p</c> are the bytes of <see cref="CaseTables.RegexProperties"/>, four to each number, the first the lowest.
-    /// A pattern made when the program runs, and a literal that holds <c>\p</c> or <c>\P</c>, takes the global with them
-    /// (<paramref name="classes"/>), and any other literal one whose count of them is 0, so that a program whose patterns are all
-    /// literals without them carries none (issue 176, comment 6812529825, Q1, the default taken).
+    /// A program carries one such global, which every call reads: with the classes where one of its patterns can need them, a
+    /// pattern made when the program runs or a literal that holds <c>\p</c> or <c>\P</c> (<paramref name="classes"/>), and with
+    /// a count of 0 for them otherwise, so that a program whose patterns are all literals without them carries none (issue 176,
+    /// comment 6812529825, Q1, the default taken). It is written once the whole program is emitted (<see cref="EmitRegexTable"/>).
     /// </summary>
     private string RegexTable(bool classes)
     {
-        var name = classes ? "@\"regex.tables.p\"" : "@\"regex.tables\"";
-        if (helpers.Add(name))
+        regexTable = true;
+        regexClasses |= classes;
+        return "@\"regex.tables\"";
+    }
+
+    /// <summary>Whether the program makes a <c>Regex</c>, and whether one of its patterns can need the classes of <c>\p</c>.</summary>
+    private bool regexTable, regexClasses;
+
+    /// <summary>The global of <see cref="RegexTable"/>, once, where the program makes a <c>Regex</c>.</summary>
+    private void EmitRegexTable()
+    {
+        if (regexTable)
         {
-            byte[] bytes = classes ? RegexPattern.Properties : [];
+            const string name = "@\"regex.tables\"";
+            byte[] bytes = regexClasses ? RegexPattern.Properties : [];
             var packed = new int[(bytes.Length + 3) / 4];
             for (var i = 0; i < bytes.Length; i++)
             {
@@ -51,7 +63,5 @@ public sealed partial class Emitter
             int[] all = [.. parts.Select(p => p.Length), .. parts.SelectMany(p => p)];
             module.Global($"{name} = private unnamed_addr constant [{all.Length} x i32] [{string.Join(", ", all.Select(w => $"i32 {w}"))}], align 4");
         }
-
-        return name;
     }
 }

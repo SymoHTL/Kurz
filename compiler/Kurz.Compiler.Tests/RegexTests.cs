@@ -296,9 +296,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
     /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
-    /// at its <c>\</c>, and before a construct the parse refuses after it, where the parse read no such group before that construct
-    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), while the parse's own error
-    /// stands where the group was read (<c>\1(a</c>) or the backreference comes after it (<c>a)\2</c>); one inside a class is
+    /// at its <c>\</c>, and before a construct the parse refuses, where the parse read no such group before it stopped
+    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), also where that construct is
+    /// a group the pattern's end leaves open before the backreference (<c>(\9</c>, <c>(a\3</c>, <c>(a)(\3</c> and <c>(a\2</c>, which
+    /// .NET 10 reports at the backreference), while the parse's own error stands where the group was read (<c>\1(a</c>) or the
+    /// backreference comes after it (<c>a)\2</c>); one inside a class is
     /// <c>Unsupported</c> at its <c>\</c>; <c>\k</c> without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every
     /// digit after the <c>\</c>, <c>\0</c> <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
     /// </summary>
@@ -309,7 +311,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         [
             (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 0"),
             (@"\9(", "syntax at 0"), (@"\2[\1]", "syntax at 0"), (@"\2(a)\q(b)", "syntax at 0"), (@"\1(a", "syntax at 2"),
-            (@"a)\2", "syntax at 1"),
+            (@"a)\2", "syntax at 1"), (@"(\9", "syntax at 1"), (@"(a\3", "syntax at 2"), (@"(a)(\3", "syntax at 4"), (@"(a\2", "syntax at 2"),
             (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
             (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
         ];
@@ -332,7 +334,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G4 and the default of question 1 of issue 176, comment 6812529825: the classes of <c>\p</c> are in a program whose patterns
     /// can need them, one made when the program runs or a literal that holds <c>\p</c> or <c>\P</c>, and the table of a program whose
-    /// patterns are all literals without them counts none of them; a program that runs a <c>\p</c> reads them.
+    /// patterns are all literals without them counts none of them; a program carries one table, whichever its patterns are, and a
+    /// program that runs a <c>\p</c> reads them.
     /// </summary>
     [Fact]
     public void The_classes_of_p_are_carried_by_a_program_whose_patterns_can_need_them()
@@ -348,11 +351,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("regex.tables.p", none, StringComparison.Ordinal);
         Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 0, ", none);
         var literal = Ir("print(Regex.New(r\"\\p{Greek}\").IsMatch(\"a\"))\nprint(Regex.New(\"b\").IsMatch(\"b\"))\n");
-        Assert.Matches(@"@""regex\.tables\.p"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", literal);
-        Assert.Contains("@\"regex.tables\" =", literal, StringComparison.Ordinal);
-        var made = Ir("s = \"a\"\nmatch Regex.New(s) {\n    Regex re => print(re.IsMatch(\"a\"))\n    RegexError e => print(e)\n}\n");
-        Assert.Contains("@\"regex.tables.p\" =", made, StringComparison.Ordinal);
-        Assert.DoesNotContain("@\"regex.tables\" =", made, StringComparison.Ordinal);
+        Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", literal);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(literal, @"@""regex\.tables[^""]*"" ="));
+        var made = Ir("s = \"a\"\nmatch Regex.New(s) {\n    Regex re => print(re.IsMatch(\"a\"))\n    RegexError e => print(e)\n}\nprint(Regex.New(\"b\").IsMatch(\"b\"))\n");
+        Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", made);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(made, @"@""regex\.tables[^""]*"" ="));
         var program = "s = r\"\\p{Greek}+\"\nmatch Regex.New(s) {\n    Regex re => print(re.Match(\"ab αβ\")?.Value)\n    RegexError e => print(e)\n}\n"
             + "print(Regex.New(r\"\\P{L}+\").Match(\"ab12\")?.Value)\n";
         var built = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true);

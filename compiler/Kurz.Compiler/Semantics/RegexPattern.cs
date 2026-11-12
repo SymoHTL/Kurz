@@ -134,7 +134,7 @@ internal sealed class RegexPattern
         var root = Parse();
         if (failKind >= 0)
         {
-            Refs(failAt);
+            Refs(at);
             return;
         }
 
@@ -159,9 +159,9 @@ internal sealed class RegexPattern
     /// <summary>
     /// The backreferences before <paramref name="before"/>, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a
     /// number no group has and a name no group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern. Where the
-    /// parse refused a construct, at <paramref name="before"/>, a backreference before it to no group the parse read is the error
-    /// instead, as .NET, which counts the groups before it parses, reports <c>\9(</c>; a group after that construct is not read,
-    /// so that <c>\2(a)\q(b)</c> is <c>Syntax</c> at 0 (G2).
+    /// parse refused a construct and stopped at <paramref name="before"/>, a backreference before that to no group the parse read
+    /// is the error instead, as .NET, which counts the groups before it parses, reports <c>\9(</c> and <c>(\9</c>; a group after
+    /// that construct is not read, so that <c>\2(a)\q(b)</c> is <c>Syntax</c> at 0 (G2).
     /// </summary>
     private void Refs(int before)
     {
@@ -247,8 +247,8 @@ internal sealed class RegexPattern
     /// letter, or in braces a name, <c>name=value</c>, <c>name:value</c> or <c>name!=value</c>, which negates once more, the white
     /// space and the comments of <c>(?x)</c> passed over. The end of the pattern is <c>Syntax</c> at the end, and a <c>\</c> for
     /// the letter at that <c>\</c>. The class is <see cref="escSet"/>, folded under <c>(?i)</c> before it is negated; a name
-    /// Rust's crate does not know, and any <c>\p</c> under <c>(?-u)</c>, is <c>Syntax</c> at <paramref name="start"/> once the
-    /// parse and the levels found no error, as its translator refuses it.
+    /// for which the tables hold no class, read as Rust's crate reads a name, and any <c>\p</c> under <c>(?-u)</c>, is
+    /// <c>Syntax</c> at <paramref name="start"/> once the parse and the levels found no error, as its translator refuses it.
     /// </summary>
     private bool Property(bool negated, int start)
     {

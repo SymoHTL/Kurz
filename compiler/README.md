@@ -1857,7 +1857,8 @@ ask about it.
   backreferences `\1` and `\k<name>`, the four lookarounds and the atomic group, and the same automaton, counted and bounded
   as the linear engine's, a backreference one state and a lookaround or an atomic group two beside its content; a
   backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses, and one to no group the
-  parse read before a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0. A search tries the ways of the
+  parse read before it stopped at a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0
+  and `(\9` at 1. A search tries the ways of the
   automaton one after another from each start, in the order of the Pike VM's priorities, so that a pattern both engines take
   gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
   stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails

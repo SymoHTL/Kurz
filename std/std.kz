@@ -11283,7 +11283,7 @@ class RegexParser {
         names.Add("")
         root = Parse()
         if failKind >= 0 {
-            Refs(failAt)
+            Refs(at)
             return
         }
 
@@ -11317,9 +11317,10 @@ class RegexParser {
     }
 
     // The backreferences before `before`, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has
-    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct, at
-    // `before`, a backreference before it to no group the parse read is the error instead, as .NET, which counts the groups before
-    // it parses, reports `\9(`; a group after that construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 (G2).
+    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct and
+    // stopped at `before`, a backreference before that to no group the parse read is the error instead, as .NET, which counts the
+    // groups before it parses, reports `\9(` and `(\9`; a group after that construct is not read, so that `\2(a)\q(b)` is
+    // `Syntax` at 0 (G2).
     internal void Refs(int before) {
         for i in 0..<refNode.Count {
             if refAt[i] >= before {
@@ -12375,8 +12376,8 @@ class RegexParser {
     // Rust's `parse_unicode_class` and its translation (G4): `\p` or `\P` at `start`, then one letter, or in braces a name,
     // `name=value`, `name:value` or `name!=value`, which negates once more, the white space and the comments of `(?x)` passed over.
     // The end of the pattern is `Syntax` at the end, and a `\` for the letter at that `\`. The class is `escSet`, folded under
-    // `(?i)` before it is negated; a name Rust's crate does not know, and any `\p` under `(?-u)`, is `Syntax` at `start` once the
-    // parse and the levels found no error, as its translator refuses it.
+    // `(?i)` before it is negated; a name for which the tables hold no class, read as Rust's crate reads a name, and any `\p` under
+    // `(?-u)`, is `Syntax` at `start` once the parse and the levels found no error, as its translator refuses it.
     internal bool Property(bool negated, int start) {
         at = at + 1
         Skip()

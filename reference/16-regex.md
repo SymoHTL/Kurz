@@ -92,15 +92,16 @@ engine does not take is `Unsupported` there, which the parse reports before the 
 the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
 single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
-parse refuses a construct after such a backreference, the backreference is the error, as .NET, which
-counts the groups before it parses, reports `\9(`; a group after that construct is not read, so that
-`\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
+parse refuses a construct, a backreference it read before it stopped, to a group it did not read, is
+the error, as .NET, which counts the groups before it parses, reports `\9(` and `(\9`; a group after
+the refused construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
 after its `\`, so that `\10` names group 10 and is `Syntax` in a pattern of fewer groups, where .NET
 reads a number of two or more digits that names no group as an octal escape (`(a)\10` matches `a`
 and U+0008 there), and `\0` is `Unsupported`, as on the linear engine. A search keeps its choices
 on a stack in memory, not on the process's stack, as .NET's interpreter does, a stack that grows
 with the text's length times the choices a way keeps open, beside the automaton and outside its
-bound, as the Pike VM's lists of threads are; a loop that comes back
+bound, where the Pike VM's lists of threads, outside it too, are sized by the automaton's states,
+and a stack that cannot grow ends the process with `allocation-failed`, as a list's does (M9); a loop that comes back
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
 .NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
@@ -205,11 +206,18 @@ ASCII, is `Syntax` at its start (G3), after any error of the parse and of the le
 several the first that Rust's translator meets, a class's items before the class.
 *(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
 request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
-name as Rust's crate reads it, from the tables of the version §12 pins: a general category, a script, a binary property,
-`Any`, `ASCII` and `Assigned` alone, or by value the general category, the script, the script extensions, the age, which
-holds every version up to it, and the three break properties, as `name=value`, `name:value` or `name!=value`, which
-negates the class once more; a name is compared with a first `is`, ` `, `_` and `-` set aside and its capitals made small.
-A name the crate does not know, and a `\p` under `(?-u)`, is `Syntax` at its `\` (G3). *(assumed, §12: the defaults of
+name as Rust's crate reads it, from the tables of the version §12 pins, where the crate holds 16.0.0, so that a name or a
+code point of 17.0.0 alone is a class here and `Syntax` or no match in Rust: a general category, a script, a binary
+property the crate has a table for, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
+value the general category, the script, the script extensions, the age, which holds every version up to it, and the break
+properties Grapheme_Cluster_Break, Sentence_Break and Word_Break, as `name=value`, `name:value` or `name!=value`, which
+negates the class once more. A name is compared with a first `is`, ` `, `_` and `-` set aside, every byte above ASCII
+dropped and its capitals made small, but `isc` stays `isc`; a name alone is a binary property's, but for `cf`, `sc` and
+`lc`, then a general category's, then a script's, and the name alone of a property that is not binary is no class. Under
+`(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
+that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
+error of the parse and of the levels, the first of several first; a class the pattern's end cuts off is `Syntax` at the
+end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
 the questions put to the owner on 2026-11-12, issue 176, comment 6812529825)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
