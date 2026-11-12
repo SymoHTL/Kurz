@@ -41,8 +41,8 @@ the defaults of Rust's `size_limit` and `dfa_size_limit`. *(assumed, §12: the l
 the flag, the flag's name and type, the constructs under it, no time bound, the same match on both
 engines and the two bounds)* The automaton's size is counted as 16 bytes for each of its states and 4
 bytes for each number that bounds a range of its classes, the same in the check of a literal (G3) and
-in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig`. *(assumed, §12: the default
-of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)* The states are three
+in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig` (§12, the owner, 2026-11-12, issue 176,
+comment 6819137493, Q9 of comment 6808653712). The states are three
 for the whole match, its start, its end and the match; one for a character, a class or an assertion;
 two for a group with a name or a number beside its content; the sum of a sequence's items; the sum of
 an alternation's branches with two for each `|`; and for a repetition of n to m, written `{n,m}`, `{n}`
@@ -89,10 +89,12 @@ this cache does not have; so that a search's time stays in proportion to the pat
 the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
 ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
 making of its classes, once for each pattern; a call the making of the states its cache holds, which
-a short text pays before the Pike VM runs; and a call up to 2 MiB for its cache. *(assumed, §12: the defaults of the questions put to the owner on
-2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state, the members a state
+a short text pays before the Pike VM runs; and a call up to 2 MiB for its cache (§12, the owner, 2026-11-12, issue 176, comment 6819137493,
+Q1, Q2 and Q4 of comment 6813110851). *(assumed, §12: the count of a state, the members a state
 keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
-the end of a list that cannot grow)*
+the end of a list that cannot grow)* Below a text length measured on a benchmark the Pike VM runs
+alone, without the DFA (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q3 of comment
+6813110851); the compiler does not build that length, and its DFA runs first at every length.
 
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
@@ -103,8 +105,8 @@ lookaround keeps the groups it took and a negative one none; `\k<name>` is the o
 named backreference; a search has no limit on its steps; and the automaton is counted and bounded as
 the linear engine's, a backreference one state and a lookaround or an atomic group two beside its
 content, so that a pattern both engines take is `TooBig` on both or on neither; a construct the linear
-engine does not take is `Unsupported` there, which the parse reports before the automaton is counted. *(assumed, §12: the defaults of
-the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
+engine does not take is `Unsupported` there, which the parse reports before the automaton is counted (§12, the owner, 2026-11-12, issue 176,
+comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642). A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
 single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
 parse refuses a construct, a backreference it read before it stopped, to a group whose `(` it did not read, is
@@ -122,12 +124,13 @@ and a stack that cannot grow ends the process with `allocation-failed`, as a lis
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
 .NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
-.NET; and a lookbehind tries its position and each one before it, the nearest first, its content
-ending at its position, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookbehind
-takes the text of the nearest start its content matches from, where .NET matches a
-lookbehind from right to left. *(assumed, §12: Q9 of that comment, taken at its default; the
-lookbehind's start, the default of Q15, put to the owner on 2026-11-12, issue 176, comment
-6812042360; and the rest proposed with this record and not put to the owner)*
+.NET; and a lookbehind matches its content from right to left, from its position back, as .NET
+matches it, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookbehind takes the text
+its content reads so (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q15 of comment
+6812042360); the compiler does not build that direction: its lookbehind tries its position and each
+one before it, the nearest first, its content ending at its position, so that a group inside it
+takes the text of the nearest start its content matches from. *(assumed, §12: Q9 of comment
+6811727642, taken at its default, and the rest proposed with this record and not put to the owner)*
 
 Case: [regex/backtracking.kz](../corpus/regex/backtracking.kz)
 ```kurz
@@ -238,10 +241,10 @@ dropped and its capitals made small; then a name that had that `is` and is `c` a
 `(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
 that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
 error of the parse and of the levels, and among several the first Rust's translator meets, as for the flag `u`; a class the pattern's end cuts off is `Syntax` at the
-end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
-the questions put to the owner on 2026-11-12, issue 176, comment 6812529825, and the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+end, and a `\` where its letter stands is `Syntax` at that `\`. (§12, the owner, 2026-11-12, issue 176,
+comment 6819137493, Q1 to Q6 of comment 6812529825: the version, every property the crate reads, and a name with no class `Syntax` at its `\`) *(assumed, §12: the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
-`backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
+`backtracking` gives two that are not. (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q12 of comment 6808653712, whose option named the engine)
 
 Case: [regex/match.kz](../corpus/regex/match.kz)
 ```kurz
@@ -317,8 +320,8 @@ that is no letter, digit or `_`, or before a `{` without its `}`, is a `$`. *(as
 an `a` and keeps `$9` of a group that does not exist as it is written)* Both take the matches `Matches` gives
 (G4), so that an empty match right after another match is passed over, and `Split` adds a match's
 groups in the order of their numbers; a text with no match is given back by `Replace` as it is and
-by `Split` as one piece. *(assumed, §12: the defaults of the questions put to the owner on
-2026-11-12, issue 176, comment 6810129884)*
+by `Split` as one piece (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q1 and Q2 of
+comment 6810129884, the walk and the order).
 
 Case: [regex/replace.kz](../corpus/regex/replace.kz)
 ```kurz

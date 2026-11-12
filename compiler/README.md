@@ -1823,8 +1823,9 @@ ask about it.
   `Regex.New` makes once (`RegexParser.Tests` and `RegexParser.Classes`), each set of ranges read once and the pieces a test
   takes moved out of their class, as a partition is refined; `IsMatch` takes its answer, and the other searches run the Pike VM only where it finds a
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
-  fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM. *(assumed: the
-  defaults of issue 176, comment 6813110851)* The parse is
+  fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM (the owner, 2026-11-12, issue 176,
+  comment 6819137493, Q1, Q2 and Q4 of comment 6813110851); the text length below which Q3 of that comment has the Pike VM
+  run alone is not built, and the DFA runs first at every length. The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two
@@ -1868,17 +1869,19 @@ ask about it.
   position; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
-  backreference compares by the simple case folding, the flag in force at the backreference deciding. *(assumed: the
-  constructs, their count and bound, a lookbehind of any length and the case folding of a backreference, the defaults
-  of issue 176, comment 6811727642, Q1 to Q7 and Q10; the stack in memory, Q9 of that comment at its default; the
-  lookbehind's start, Q15 of comment 6812042360 at its default; the loop's end, the errors and the digits of a
+  backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, their
+  count and bound, a lookbehind of any length and the case folding of a backreference: the owner, 2026-11-12, issue 176,
+  comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642; the lookbehind's start, the nearest first, is not what Q15
+  of comment 6812042360 chose that day, a lookbehind matched from right to left as .NET's, which is not built) *(assumed:
+  the stack in memory, Q9 of comment 6811727642 at its default; the loop's end, the errors and the digits of a
   backreference and when a group's positions are set, proposed with the record and not put to the owner)* Pinned by
   `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
   patterns of its own constructs, and `corpus/regex/backtracking.kz`.
 - G5: `Replace` and `Split` walk the matches `Matches` walks, Rust's `find_iter` (one method, `Next`). `Replace` reads the
   replacement once into its pieces, counts the result's length and writes it into one string, as Rust's `replace_all` writes
   into one `String`; a text with no match is given back as it is. `Split` adds a match's groups in the order of their numbers,
-  as Python's `re.split` does. *(assumed: the walk and the order, put to the owner on issue 176, comment 6810129884)* Pinned
+  as Python's `re.split` does (the walk and the order: the owner, 2026-11-12, issue 176, comment 6819137493, Q1 and Q2 of
+  comment 6810129884). Pinned
   by `RegexTests` and `corpus/regex/replace.kz` and `split.kz`.
 
 ## What the compiler says about a program
