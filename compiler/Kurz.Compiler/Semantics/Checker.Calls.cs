@@ -255,7 +255,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+                    if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -1096,7 +1096,7 @@ public sealed partial class Checker
                 return (false, $"the hash of {Types.A(p)}, which reads 1.5 and 1.50 as one value, is not built");
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or HandleType or HasherType or CommandType or CFunctionType or VoidType:
+            case FunctionType or HandleType or HasherType or CommandType or ChildProcessType or CFunctionType or VoidType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c when c.Symbol.EqualBy.Any(f => f.Mut):
                 return (false, $"`{c}` names a `mut` field in its `equal by`, and whether `mutable-key` reaches a key type that holds it is open (K12, section 14)");
@@ -1206,7 +1206,7 @@ public sealed partial class Checker
                 return null;
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType or HasherType or CommandType:
+            case FunctionType or CFunctionType or HandleType or HasherType or CommandType or ChildProcessType:
                 return (true, $"`==` takes no `{type}`");
             case ClassType c:
                 return ByFieldsThatCount(c, held => HeldEquality(held, seen, path, cut));
@@ -1280,7 +1280,7 @@ public sealed partial class Checker
                 return u.Cases.Where(c => c is not NullType).Select(ItemEquality).FirstOrDefault(w => w is not null); // N10: `null` equals `null` alone
             case MapType m:
                 return (true, $"`==` between two `{m}` is `type-mismatch`");
-            case FunctionType or CFunctionType or HandleType or HasherType or CommandType or VoidType:
+            case FunctionType or CFunctionType or HandleType or HasherType or CommandType or ChildProcessType or VoidType:
                 return (true, $"`==` takes no `{item}`");
             case ClassType or InterfaceType:
                 return HeldEquality(item, [], [], []);
@@ -1430,7 +1430,7 @@ public sealed partial class Checker
 
         if (m.Target is NameExpression n && Lookup(n.Name).Variable is null && !(frame.Reserved?.Contains(n.Name) ?? false))
         {
-            if (IsUnreadName(n.Name) || UnreadProcessName(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
+            if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadTypeMember(n.Name, m.Member, m.Line))
             {
                 CheckArgumentsLoosely(c);
                 return Typed.Error;
@@ -1516,6 +1516,11 @@ public sealed partial class Checker
             if (n.Name == "Hint")
             {
                 return CheckHintFunction(m, c); // F18
+            }
+
+            if (n.Name == "Regex" && IsStdRegex())
+            {
+                return CheckRegexFunction(m, c); // G3
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))
@@ -1835,6 +1840,11 @@ public sealed partial class Checker
         if (target.Type is CommandType)
         {
             return CheckCommandMethod(m, c); // S17 to S21
+        }
+
+        if (target.Type is ChildProcessType)
+        {
+            return CheckChildMethod(m, c); // S19
         }
 
         var member = Narrowed(m, MemberOf(target.Type, m.Member, m.Line)); // N3: a nullable C function known not null (R17)

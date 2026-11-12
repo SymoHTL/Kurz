@@ -1,0 +1,8 @@
+// expect: output
+// | invalid input: cat
+// rules: S19
+
+Command.New("cat").Input("x").Stdin(Stdio.Null).Status() else {
+    IoError e => print(e)
+    ExitError e => print(e)
+}

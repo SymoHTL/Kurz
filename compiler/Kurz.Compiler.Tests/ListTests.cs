@@ -4022,13 +4022,77 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             byte* Resized(byte* p, long bytes, long grown) {
             """));
 
+    /// <summary>
+    /// The fenced allocator gives the memory of a freed block's pages back to the system (<see cref="Fence"/>, Linux): a program that
+    /// grows 2,000 lists of 512 items, one at a time, peaks under the fence at less than 32 MiB, the line <c>VmHWM</c> of its
+    /// <c>/proc/self/status</c>, where a fence that makes a freed block's pages inaccessible and keeps them, its edit without the
+    /// <c>madvise</c>, holds every page it ever gave and peaks at more than twice as much, the positive control.
+    /// </summary>
+    [Fact]
+    public void The_fence_gives_the_memory_of_a_freed_block_back_to_the_system()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // the fence decommits a freed block's pages on Windows, where no `/proc/self/status` reads the peak
+        }
+
+        const string text = """
+            long | IoError Peak() {
+                bytes = File.ReadAll("/proc/self/status")
+                text = string.FromUtf8(bytes) else {
+                    InvalidUtf8 => ""
+                }
+
+                for line in text.Split('\n') {
+                    if line.StartsWith("VmHWM:") {
+                        return long.Parse(line.Replace("VmHWM:", "").Replace("kB", "").Trim()) else {
+                            ParseError => -1
+                        }
+                    }
+                }
+
+                return -1
+            }
+
+            mut total = 0
+            for round in 0..<2000 {
+                mut xs = List<int>()
+                for i in 0..<512 {
+                    xs.Add(i)
+                }
+
+                total = total + xs.Count
+            }
+
+            print(total)
+            match Peak() {
+                long kb => print(kb)
+                IoError e => print(e)
+            }
+
+            """;
+        var given = BuildAndRun(text, Fenced, "fence-given-back");
+        Assert.Equal((0, ""), (given.Code, given.Error));
+        Assert.Equal("1024000", given.Output[0]);
+        var kept = Fence.Select(e => e.New.Contains("madvise(Ptr<void>", StringComparison.Ordinal) ? (e.Path, e.Old, e.New[..e.New.IndexOf('\n', StringComparison.Ordinal)]) : e).ToArray();
+        Assert.Single(Fence, e => e.New.Contains("madvise(Ptr<void>", StringComparison.Ordinal));
+        var held = BuildAndRun(text, Edited(kept), "fence-kept");
+        Assert.Equal((0, ""), (held.Code, held.Error));
+        var (givenPeak, heldPeak) = (long.Parse(given.Output[1], CultureInfo.InvariantCulture), long.Parse(held.Output[1], CultureInfo.InvariantCulture));
+        Assert.True(givenPeak is > 0 and < 32 * 1024, $"the fenced run peaked at {givenPeak} kB");
+        Assert.True(heldPeak > 2 * givenPeak, $"the run that keeps the pages peaked at {heldPeak} kB, the fenced one at {givenPeak} kB");
+    }
+
     /// <summary>The line the fenced allocator's `Free` writes to the error stream before it ends the process (<see cref="Fence"/>).</summary>
     private const string FreeSizeLine = "fence: Free was given a size other than its block was allocated with\n";
 
     /// <summary>
     /// The edits that make the allocator take every block from pages of its own, which end at a page the system makes inaccessible,
     /// as Electric Fence places a block by default, and make them unreachable when the block is freed, so that a write past a
-    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again. A block
+    /// block's end and a read or a write of a freed block end the process with the system's signal; nothing is used again, and the
+    /// memory of a freed block's pages goes back to the system while its addresses stay inaccessible, so that a run holds the memory
+    /// of the blocks it has not freed alone: a program that makes and frees millions of blocks, as the searches of a `Regex` do,
+    /// runs in the memory a program of its live blocks takes. A block
     /// ends where its size rounded up to 16 ends, so that its address stays a multiple of 16, as the allocation entry gives it: a
     /// write past the size asked for that stays within that rounding is not seen by the page after it. The block's header holds the
     /// size the allocation asked for, and `Free` holds the size it is given against it: another size writes
@@ -4104,8 +4168,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     "    return p\n" +
                     "}\n\n" +
                     "byte* Mapped(long bytes) {"),
-                // PROT_NONE from the first of the block's pages: the pages stay mapped
-                (file, "munmap(Ptr<void>(p), bytes)", "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)"),
+                // the block's pages, from the first, made inaccessible (`mprotect` with `PROT_NONE`) and then given back to the system
+                // (`madvise` with `MADV_DONTNEED`, 4): the pages stay mapped, as MEM_DECOMMIT keeps them reserved on Windows, in a
+                // mapping with the flags of its neighbours, which the system joins with them, so that the count of mappings stays low
+                (file, "    int mprotect(void* address, long length, int protection)", "    int mprotect(void* address, long length, int protection)\n    int madvise(void* address, long length, int advice)"),
+                (file, "munmap(Ptr<void>(p), bytes)",
+                    "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)\n" +
+                    "        madvise(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 4)"),
                 (file, "pub byte* Resize(byte* p, long bytes, long grown) {", "pub byte* Resize(byte* p, long bytes, long grown) {\n    return null\n}\n\nbyte* Resized(byte* p, long bytes, long grown) {"),
             ];
     }

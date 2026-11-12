@@ -436,6 +436,10 @@ public sealed partial class Emitter
                 return Elapsed(target(), m.Line); // S25
             case HandleType when m.Member == "Port":
                 return fn.Value($"load i32, ptr {HandleField(target(), 12)}"); // S9
+            case ChildProcessType when m.Member == "Id":
+                return fn.Value($"load i32, ptr {HandleField(target(), ChildPid)}"); // S19
+            case ChildProcessType:
+                return Narrowed(ChildStream(target(), m.Member), Types.Nullable(Types.File), type); // S19, N3
 
             default:
                 throw Unsupported(m.Line, $"the member `{m.Member}` of {Lower.Refusal(targetType)}");

@@ -171,6 +171,7 @@ public static class ErrorIds
     public const string VoidTypeArgument = "void-type-argument";
     public const string GrowingTypeArgument = "growing-type-argument";
     public const string LogTemplate = "log-template";
+    public const string RegexInvalid = "regex-invalid";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

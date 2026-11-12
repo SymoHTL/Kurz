@@ -67,6 +67,7 @@ public sealed partial class Emitter
             CallKind.Parse => EmitParse(c, info),
             CallKind.TimeFrom => EmitTimeFrom(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
+            CallKind.RegexNew => EmitRegexNew(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
             CallKind.BlackBox => EmitBlackBox(c, info),
             CallKind.MapRemove => EmitMapRemove(c),
@@ -77,7 +78,8 @@ public sealed partial class Emitter
                 or CallKind.FileRead or CallKind.FileFill or CallKind.FileConsume or CallKind.FileSeek or CallKind.FileWrite or CallKind.FileClose or CallKind.TcpBind or CallKind.TcpConnect or CallKind.TcpAccept or CallKind.TcpSetReadTimeout or CallKind.TcpSetWriteTimeout or CallKind.TcpSetAcceptTimeout
                 or CallKind.TcpShutdownWrite or CallKind.TcpSetNoDelay or CallKind.TcpWriteWithin => EmitFileCall(c, info),
             CallKind.StdinRead or CallKind.StdinReadLine or CallKind.StdinReadAll => EmitStdinCall(c, info),
-            CallKind.CommandNew or CallKind.CommandAdd or CallKind.CommandArgs or CallKind.CommandStream or CallKind.CommandInput or CallKind.CommandTimeout or CallKind.CommandOutput or CallKind.CommandStatus => EmitCommandCall(c, info),
+            CallKind.CommandNew or CallKind.CommandAdd or CallKind.CommandArgs or CallKind.CommandStream or CallKind.CommandInput or CallKind.CommandTimeout or CallKind.CommandOutput or CallKind.CommandStatus or CallKind.CommandSpawn => EmitCommandCall(c, info),
+            CallKind.ChildWait or CallKind.ChildWaitWithOutput or CallKind.ChildKill => EmitChildCall(c, info),
             CallKind.EnvironmentArgs => EmitArguments(0, c.Line),
             CallKind.EnvironmentVariable => EmitVariable(c, info),
             CallKind.EnvironmentExit => EmitExit(c, info),

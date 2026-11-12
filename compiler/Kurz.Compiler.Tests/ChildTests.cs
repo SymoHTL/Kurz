@@ -285,7 +285,10 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["[0, 1, 2, ]"], ran.Output);
             var leaked = Ran(text, "child-descriptors-leaked", "exec 7</dev/null && ", runtime: ListTests.Edited(("runtime/linux/linux.kz", call, "if syscall(long(-1)) < -1 {")))!.Value;
             Assert.Equal((0, ""), (leaked.Code, leaked.Error));
-            Assert.Equal(["[0, 1, 2, 7, ]"], leaked.Output);
+            // the control holds descriptor 7 alone: under a runtime that marks none, the child also holds any other descriptor
+            // the program had open without its close-on-exec mark, one more in three runs of 2026-11-12 (183, 196 and 191),
+            // whose source was not found
+            Assert.Contains("7", Assert.Single(leaked.Output).Trim('[', ']').Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
         }
     }
 
@@ -586,10 +589,10 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_read_of_the_output_that_fails_closes_the_input_too_so_that_the_child_reads_its_end()
     {
-        // S18 with S19 (the owner, 2026-11-11, "Close pipes, wait"): a read that fails closes every pipe the call holds to the child, the
-        // input's among them, so that a child that reads its input to the end gets the end at once and the call ends; `wc` counts what
-        // reached it, and the call that writes on after the failure would give it the whole MiB. The positive control, under this
-        // machine's runtime, reads the byte, and `wc` counts the whole MiB
+        // S18 with S19 (the owner, 2026-11-11, "Close pipes, wait", issue 174, comment 6802725183): a read that fails closes every
+        // pipe the call holds to the child, the input's among them, so that a child that reads its input to the end gets the end at
+        // once and the call ends; `wc` counts what reached it, and the call that writes on after the failure would give it the
+        // whole MiB. The positive control, under this machine's runtime, reads the byte, and `wc` counts the whole MiB
         var text = Program(Big + """
                 match Command.New("sh").Args(["-c", "printf a; wc -c > kurz-count"]).Input(big).Output() {
                     ProcessOutput o => print(o.Stdout.Count)
@@ -649,6 +652,40 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_write_of_the_input_that_fails_closes_every_pipe_and_waits_for_the_childs_end_under_the_bound()
+    {
+        // S19 (assumed, §12): a write of the input that fails, but for a child that closed its input (`EPIPE`), is handled as a
+        // read that fails is (S18): every pipe closed, the child's end waited for under the bound (S20), and the write's `IoError`
+        // the call's whatever status the child ends with; here under a runtime whose every write of the input fails (`EBADF`).
+        // `sleep 10` under `Timeout(300ms)` is killed at the bound, so that a wait held by no bound shows on the program's clock,
+        // and `exit 3` gives the write's error and not its status; the positive control, under this machine's runtime, writes
+        // the byte and gives `TimedOut` and the status
+        var text = Program("""
+                start = instant.Now
+                match Command.New("sleep").Arg("10").Input("x").Timeout(300ms).Output() {
+                    ProcessOutput o => print(o.Stdout.Count)
+                    IoError e => print("{e.Kind} [{e.Path}] {e.Code}")
+                    ExitError e => print(e)
+                }
+
+                Command.New("sh").Args(["-c", "exit 3"]).Input("x").Status() else {
+                    IoError e => print("{e.Kind} [{e.Path}] {e.Code}")
+                    ExitError e => print(e)
+                }
+
+                print(start.Elapsed < 4s)
+            """);
+        if (Ran(text, "child-write-fails", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long wrote = write(fds[1], staging + sent, staged - sent)", "long wrote = write(-1, staging + sent, staged - sent)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sleep] 9", "Other [sh] 9", "true"], ran.Output);
+            var control = Ran(text, "child-write-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["TimedOut [sleep] 0", "exit status 3: sh", "true"], control.Output);
+        }
+    }
+
+    [Fact]
     public void Input_beside_a_stdin_member_is_invalid_input_at_the_start()
     {
         // S19, the owner, 2026-11-02: `Input` beside a member `Stdin`, of any `Stdio` and in either order, is `InvalidInput` with the
@@ -669,12 +706,370 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    /// <summary>
+    /// The functions a program of a spawned child calls: the case of <c>Wait()</c>, the case or the counts of <c>WaitWithOutput()</c>, and
+    /// the case of a <c>Spawn()</c> waited for, as a line, so that a program goes on after a failed call.
+    /// </summary>
+    private const string Children = """
+        string Joined(ChildProcess c) {
+            c.Wait() else {
+                IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+                ExitError e => return "{e}"
+            }
+
+            return "ended"
+        }
+
+        string Gathered(ChildProcess c) {
+            match c.WaitWithOutput() {
+                ProcessOutput o => return "{o.Stdout.Count} {o.Stderr.Count}"
+                IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+                ExitError e => return "{e}"
+            }
+        }
+
+        string Started(Command c) {
+            match c.Spawn() {
+                ChildProcess child => return Joined(child)
+                IoError e => return "{e.Kind} [{e.Path}] {e.Code}"
+            }
+        }
+
+        """;
+
+    [Fact]
+    public void Spawn_starts_the_child_and_every_wait_gives_the_status_of_its_end()
+    {
+        // S19: `Spawn()` gives the child, whose `Id` is its process's number; `Wait()` gives its end as `Status()` does, and a second wait
+        // of either kind gives the status the first gave; a start that fails is the `IoError` of S21, the program or the directory its path
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "exit 3"]).Spawn()
+                print(child.Id > 0)
+                print(Joined(child))
+                print(Joined(child))
+                print(Gathered(child))
+                ok = Command.New("true").Spawn()
+                print(Joined(ok))
+                print(Gathered(ok))
+                print(Started(Command.New("kurz-case-no-such")))
+                print(Started(Command.New("true").Dir("/kurz-case-no-such")))
+            """) + Children;
+        if (Ran(text, "child-spawn") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["true", "exit status 3: sh", "exit status 3: sh", "exit status 3: sh", "ended", "0 0", "NotFound [kurz-case-no-such] 2", "NotFound [/kurz-case-no-such] 2"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void The_piped_streams_of_a_spawned_child_are_files_and_its_wait_reads_each_from_where_the_program_stopped()
+    {
+        // S19: a stream set to `Stdio.Piped` is a `File`, the others `null`; the program writes the input and closes it, reads part of the
+        // output through the buffer of S24, and `WaitWithOutput()` gives the rest, the bytes the `File` read ahead first; the pipe read
+        // to its end stays open, so that a read of it gives no byte and a second `WaitWithOutput()` gives empty output
+        var text = Program("""
+                child = Command.New("cat").Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
+                match child.Stderr {
+                    File => print("stderr")
+                    null => print("no stderr")
+                }
+
+                match child.Stdin {
+                    File input => {
+                        input.Write("ab;cd;".Bytes)
+                        input.Close()
+                    }
+                    null => print("no input")
+                }
+
+                match child.Stdout {
+                    File out => {
+                        mut first = Bytes()
+                        n = out.Fill(mut first)
+                        print(n)
+                        out.Consume(3)
+                    }
+                    null => print("no output")
+                }
+
+                got = child.WaitWithOutput()
+                print(string.FromUtf8(got.Stdout))
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                    }
+                    null => print("no output")
+                }
+
+                print(Gathered(child))
+            """) + Children;
+        if (Ran(text, "child-spawn-pipes") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["no stderr", "6", "cd;", "0", "0 0"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_pipe_the_program_closed_gives_the_wait_no_byte()
+    {
+        // S19, S5: `WaitWithOutput()` reads no pipe whose `File` a `Close` marked, so that the number the system gives the next pipe it
+        // opens, the second child's output here, is not read through the first child
+        var text = Program("""
+                first = Command.New("true").Stdout(Stdio.Piped).Spawn()
+                match first.Stdout {
+                    File out => out.Close()
+                    null => print("no output")
+                }
+
+                second = Command.New("sh").Args(["-c", "printf second"]).Stdout(Stdio.Piped).Spawn()
+                print(Gathered(first))
+                print(Gathered(second))
+            """) + Children;
+        if (Ran(text, "child-spawn-closed") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["0 0", "6 0"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_copy_of_a_child_holds_the_one_child_and_a_command_spawned_again_starts_another()
+    {
+        // S19, issue 174, Q5 (assumed): a copy of a `ChildProcess` is one more holder of the one child, as a copy of a `File` is, so that
+        // a wait through the copy gives the status the first wait through the other holder gave; S17: `Spawn()` changes no member of its
+        // command, so that the command spawned again starts a second child of the same program and arguments
+        var text = Program("""
+                cmd = Command.New("sh").Args(["-c", "exit 5"])
+                child = cmd.Spawn()
+                copy = child
+                print(Joined(copy))
+                print(Joined(child))
+                print(copy.Id == child.Id)
+                again = cmd.Spawn()
+                print(again.Id == child.Id)
+                print(Joined(again))
+            """) + Children;
+        if (Ran(text, "child-spawn-copy") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["exit status 5: sh", "exit status 5: sh", "true", "false", "exit status 5: sh"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_write_through_a_pipe_whose_reader_ended_or_that_the_program_closed_is_an_error()
+    {
+        // S19, S5, issue 174, Q9 (assumed): a write to the input of a child that ended is the system's `EPIPE`, `BrokenPipe`, since the
+        // runtime sets `SIGPIPE` aside, with the program as the path of the pipe's `File`; the child closed its input when it ended, which
+        // the end of its output shows; a write through a `File` the program closed is the closed file's error
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf done"]).Stdin(Stdio.Piped).Stdout(Stdio.Piped).Spawn()
+                match child.Stdout {
+                    File out => {
+                        mut all = Bytes()
+                        while out.Read(mut all, 64) > 0 {
+                        }
+
+                        print(string.FromUtf8(all))
+                    }
+                    null => print("no output")
+                }
+
+                match child.Stdin {
+                    File input => {
+                        input.Write("late".Bytes) else {
+                            IoError e => print("{e.Kind} [{e.Path}] {e.Code}")
+                        }
+                    }
+                    null => print("no input")
+                }
+
+                print(Joined(child))
+                other = Command.New("cat").Stdin(Stdio.Piped).Spawn()
+                match other.Stdin {
+                    File input => {
+                        input.Close()
+                        input.Write("late".Bytes) else {
+                            IoError e => print("{e.Kind} [{e.Path}] {e.Code}")
+                        }
+                    }
+                    null => print("no input")
+                }
+
+                print(Joined(other))
+            """) + Children;
+        if (Ran(text, "child-spawn-broken") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["done", "BrokenPipe [sh] 32", "ended", "Other [cat] 9", "ended"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_closes_the_piped_input_first_so_that_a_child_that_reads_to_its_end_ends()
+    {
+        // S19, issue 174, Q6 (assumed): `Wait()` closes the program's end of a piped standard input before it waits, as Rust's `wait`
+        // drops `stdin`, so that `cat` reads its end; a write through the `File` after it is the closed file's error (S5). The bound of
+        // five seconds turns a wait that holds into `TimedOut`, and the program's own clock shows that none held
+        var text = Program("""
+                start = instant.Now
+                child = Command.New("cat").Stdin(Stdio.Piped).Timeout(5s).Spawn()
+                print(Joined(child))
+                match child.Stdin {
+                    File input => {
+                        input.Write("late".Bytes) else {
+                            IoError e => print("{e.Kind} [{e.Path}] {e.Code}")
+                        }
+                    }
+                    null => print("no input")
+                }
+
+                print(start.Elapsed < 4s)
+            """) + Children;
+        if (Ran(text, "child-spawn-close") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["ended", "Other [cat] 9", "true"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_with_output_whose_read_fails_gives_the_error_at_once_and_leaves_the_child_to_the_program()
+    {
+        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): `WaitWithOutput()` whose read of a pipe fails
+        // gives that `IoError`, with the program as its path, at once and waits for no child, under a bound as without one, so that the
+        // `Kill()` after it reaches the child, whose wait then gives `signal 9`; a call that waited, with the pipes open or closed, or
+        // to the child's end under its bound, would hold for the three seconds of `sleep` and find the child ended by itself, which the
+        // status and the program's own clock show. The positive control, under this machine's runtime, reads the byte, waits for the
+        // end, and its `Kill()` sends nothing
+        var text = Program("""
+                start = instant.Now
+                child = Command.New("sh").Args(["-c", "printf a; exec sleep 3"]).Stdout(Stdio.Piped).Spawn()
+                print(Gathered(child))
+                child.Kill()
+                print(Joined(child))
+                bounded = Command.New("sh").Args(["-c", "printf a; exec sleep 3"]).Stdout(Stdio.Piped).Timeout(10s).Spawn()
+                print(Gathered(bounded))
+                bounded.Kill()
+                print(Joined(bounded))
+                print(start.Elapsed < 2s)
+            """) + Children;
+        if (Ran(text, "child-spawn-read-fails", runtime: ListTests.Edited(("runtime/linux/linux.kz", "long n = read(fd, buffer, 65536)", "long n = read(-1, buffer, 65536)"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Other [sh] 9", "signal 9: sh", "Other [sh] 9", "signal 9: sh", "true"], ran.Output);
+            var control = Ran(text, "child-spawn-read-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["1 0", "ended", "1 0", "ended", "false"], control.Output);
+        }
+    }
+
+    [Fact]
+    public void Kill_ends_the_child_with_sigkill_and_sends_nothing_to_one_that_was_waited_for()
+    {
+        // S19: `Kill()` sends `SIGKILL`, and the wait gives `signal 9`; a `Kill()` after the wait gives `void` and sends no signal, whose
+        // number the system may have given to another process; `Id` stays the number after the wait
+        var text = Program("""
+                start = instant.Now
+                child = Command.New("sleep").Arg("10").Spawn()
+                id = child.Id
+                child.Kill()
+                print(Joined(child))
+                child.Kill()
+                print(child.Id == id)
+                done = Command.New("true").Spawn()
+                print(Joined(done))
+                done.Kill()
+                print("killed after the end")
+                print(start.Elapsed < 8s)
+            """) + Children;
+        if (Ran(text, "child-spawn-kill") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["signal 9: sleep", "true", "ended", "killed after the end", "true"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_bound_under_spawn_is_held_by_the_wait_and_a_child_that_ended_before_it_gives_its_own_status()
+    {
+        // S20: under `Spawn()` the bound runs from the start and is held by `Wait()` and `WaitWithOutput()`, which kill a child still
+        // running and give `TimedOut`, as a second wait does again (assumed: the result the first gave); a child that ended before its
+        // bound gives its own status, also when the wait comes after the bound passed, the child's end deciding, and so does one that
+        // `Kill()` ended before its bound, whose wait after the bound gives `signal 9`
+        var text = Program("""
+                start = instant.Now
+                slow = Command.New("sleep").Arg("10").Timeout(300ms).Spawn()
+                print(Joined(slow))
+                print(Joined(slow))
+                print(Gathered(slow))
+                quick = Command.New("sh").Args(["-c", "exit 3"]).Timeout(10s).Spawn()
+                print(Joined(quick))
+                early = Command.New("sh").Args(["-c", "exit 4"]).Timeout(100ms).Spawn()
+                killed = Command.New("sleep").Arg("10").Timeout(300ms).Spawn()
+                killed.Kill()
+                Command.New("sleep").Arg("0.5").Status()
+                print(Joined(early))
+                print(Joined(killed))
+                print(start.Elapsed < 8s)
+            """) + Children;
+        if (Ran(text, "child-spawn-bound") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["TimedOut [sleep] 0", "TimedOut [sleep] 0", "TimedOut [sleep] 0", "exit status 3: sh", "exit status 4: sh", "signal 9: sleep", "true"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_child_let_go_of_runs_on_and_a_pipe_the_program_holds_outlives_it()
+    {
+        // S19: a child let go of without a wait is neither waited for nor killed, and a pipe's `File` is a holder of its own (S5; issue
+        // 174, Q1), so that the program reads what the child writes after its `ChildProcess` is gone
+        var text = """
+            File? Pipe() {
+                match Command.New("sh").Args(["-c", "sleep 0.3; printf late"]).Stdout(Stdio.Piped).Spawn() {
+                    ChildProcess child => return child.Stdout
+                    IoError => return null
+                }
+            }
+
+            void | IoError | InvalidUtf8 Run() {
+                match Pipe() {
+                    File out => {
+                        mut got = Bytes()
+                        mut n = 1
+                        while n > 0 {
+                            n = out.Read(mut got, 100)
+                        }
+
+                        print(string.FromUtf8(got))
+                    }
+                    null => print("no output")
+                }
+            }
+
+            Run() else {
+                IoError e => print("{e.Kind} [{e.Path}]")
+                InvalidUtf8 e => print(e)
+            }
+
+            """;
+        if (Ran(text, "child-spawn-let-go") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["late"], ran.Output);
+        }
+    }
+
     [Theory]
     [InlineData("print(1)\nCommand.New(\"true\").Arg(\"x\").Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    Command.New(\"true\").Status()\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("void | IoError | ExitError Run() {\n    print(1)\n    out = Command.New(\"true\").Output()\n    print(out.Stdout.Count)\n}\n\nRun() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 3)]
     [InlineData("print(1)\nCommand.New(\"sleep\").Arg(\"1\").Timeout(1s).Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
     [InlineData("print(1)\nCommand.New(\"cat\").Input(\"hi\".Bytes).Status() else {\n    IoError e => print(e)\n    ExitError e => print(e)\n}\n", 2)]
+    [InlineData("print(1)\nmatch Command.New(\"cat\").Spawn() {\n    ChildProcess c => print(c.Id)\n    IoError e => print(e)\n}\n", 2)]
     public void A_build_for_windows_says_not_supported_at_the_first_call_on_a_command(string text, int line)
     {
         // S17 to S21 with S11: as `Stdin` is, the first call on `Command` or on a command, where the build stops
@@ -694,19 +1089,28 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(1)\nCommand<int> c = Command.New(\"a\")\nprint(1)\n", "syntax", 2)] // T17
     [InlineData("print(1)\nc = Command.New(1)\n", "type-mismatch", 2)] // T1
     [InlineData("print(1)\nc = Command.New(\"a\").Stdout(1)\n", "type-mismatch", 2)]
-    [InlineData("print(1)\nc = Command.New(\"a\").Spawn()\n", "", 2)] // S19, `not supported`
     [InlineData("print(1)\nc = Command.New(\"a\").Input(1)\n", "argument-mismatch", 2)] // S19, an `int` is neither `Bytes` nor a `string`, F13 for its two forms
     [InlineData("print(1)\nc = Command.New(\"a\").Timeout(1)\n", "type-mismatch", 2)] // S20, a number is no `duration`
-    [InlineData("print(1)\nChildProcess c = null\n", "", 2)] // S19
+    [InlineData("print(1)\nChildProcess c = null\nprint(c.Id)\n", "type-mismatch", 2)] // S19, a child is no `null`
+    [InlineData("void M(ChildProcess c) {\n    print(c)\n}\n", "no-text", 2)] // S19, as of a `File`
+    [InlineData("void M(ChildProcess c) {\n    print(c == c)\n}\n", "type-mismatch", 2)]
+    [InlineData("void M(ChildProcess c) {\n    x = c.Run()\n}\n", "unknown-name", 2)] // V10
+    [InlineData("void M(ChildProcess c) {\n    x = c.Id()\n}\n", "unknown-name", 2)]
+    [InlineData("void M(ChildProcess c) {\n    print(c.Name)\n}\n", "unknown-name", 2)]
+    [InlineData("void M(ChildProcess c) {\n    x = c.Wait(1)\n}\n", "argument-mismatch", 2)]
+    [InlineData("void M(ChildProcess c) {\n    x = c.Stdout.Close()\n}\n", "nullable-unchecked", 2)] // N2: a `File?`
+    [InlineData("print(1)\nx = ChildProcess.New()\n", "unknown-name", 2)]
+    [InlineData("print(1)\nChildProcess<int> c = null\n", "syntax", 2)] // T17
     [InlineData("void Command() {\n}\n", "redeclared", 1)] // V9: a name every file sees
     [InlineData("data Stdio(int A)\n", "redeclared", 1)]
     [InlineData("data ExitStatus(int A)\n", "redeclared", 1)]
     [InlineData("data ProcessOutput(int A)\n", "redeclared", 1)]
     [InlineData("data ExitError(int A)\n", "redeclared", 1)]
+    [InlineData("data ChildProcess(int A)\n", "redeclared", 1)]
     public void A_use_of_a_command_outside_its_members_is_refused_where_it_stands(string text, string id, int line)
     {
-        // S17: a command has the members of S17 to S20 and no text and no `==`; `Spawn()` and `ChildProcess` (S19) stay `not supported`
-        // (an empty id); and a file declares none of the five names of S17 and S18 (V9)
+        // S17: a command has the members of S17 to S20 and no text and no `==`; S19: a child has the members of S19 and no text and no
+        // `==`, and `ChildProcess` names no function; and a file declares none of the six names of S17 to S19 (V9)
         var refused = Compile(text, toolchain.Runtime);
         Assert.Null(refused.Program);
         var diagnostic = Assert.Single(refused.Diagnostics.Items);
