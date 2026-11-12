@@ -1400,7 +1400,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
   `const` as its digits and a `sym` as its symbol; an output is stored into its place after the call. The
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
-  is refused when clang builds the program, as the command's failure `clang did not build the program`;
+  is refused when clang builds the program. The command grants a program no `raw` (R7), so no program it
+  builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
+  whose refusal its failure `clang did not build the program` names as the compiler's defect;
 - a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly
   under the function's symbol in `.text`, typed a function on ELF and by its `.def` on COFF, aligned to
   16 bytes, beside a declaration of the symbol in the C types of its signature; a function or state a
