@@ -548,28 +548,41 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_wait_with_output_without_a_bound_where_the_system_refuses_pidfd_open_gives_the_refusal_and_leaves_the_child()
+    public void A_wait_with_output_without_a_bound_opens_no_descriptor_of_its_child_and_sees_its_end_where_the_system_refuses_one()
     {
-        // S19, S20 (assumed, §12): a `WaitWithOutput()` with a pipe's `File` polls the child's end through the descriptor
-        // `pidfd_open` gives, without a bound too, so that a lock another holder holds is given up at that end; where the system
-        // refuses it (a kernel before 5.3, or a filter), the wait gives the system's error, here `ENOSYS` (38), `Unsupported`, at
-        // once, and leaves the child, which `Kill()` then ends; a wait that went on without the descriptor would wait for the child's
-        // end, as the positive control, under this machine's runtime, does
+        // S19, S20 (assumed, §12; item 3 of the round of pull request 513): a `WaitWithOutput()` with no bound opens no descriptor of
+        // the child's process, and while another holder holds a pipe's lock it looks at the child at each wake (`waitid`), so that a
+        // system that refuses `pidfd_open` (a kernel before 5.3, or a filter) changes nothing for it. Under a runtime whose
+        // `pidfd_open` fails, the swapped helper reports the error pipe's lock held at every try: the wait gives the child's status once
+        // the child ended, with the output's `a`, and leaves `b` in its pipe for the holder of its lock, as the wait with no bound of
+        // `A_wait_with_output_whose_lock_another_holder_never_lets_go_gives_the_childs_status_once_the_child_ended` does under this
+        // machine's runtime. A wait that opened the descriptor without a bound gives `Unsupported` at once, and one that never looked
+        // at the child never ends
         var text = Program("""
-                start = instant.Now
-                child = Command.New("sleep").Arg("3").Stdout(Stdio.Piped).Spawn()
+                child = Command.New("sh").Args(["-c", "printf a; printf b >&2"]).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Spawn()
                 print(Gathered(child))
-                child.Kill()
-                print(Joined(child))
-                print(start.Elapsed < 2s)
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no output")
+                }
+
+                match child.Stderr {
+                    File err => {
+                        mut rest = Bytes()
+                        print(err.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no error output")
+                }
             """) + Children;
-        if (Ran(text, "child-wait-no-pidfd", runtime: ListTests.Edited(("runtime/linux/linux.kz", "process = int(syscall(434, long(state[0]), long(0)))", "process = int(syscall(-1, long(state[0]), long(0)))"))) is { } ran)
+        if (Ran(text, "child-wait-no-pidfd", runtime: ListTests.Edited(("runtime/linux/linux.kz", "process = int(syscall(434, long(state[0]), long(0)))", "process = int(syscall(-1, long(state[0]), long(0)))")), edit: ir => HeldElsewhere(ir, Never)) is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
-            Assert.Equal(["Unsupported [sleep] 38", "signal 9: sleep", "true"], ran.Output);
-            var control = Ran(text, "child-wait-pidfd-control")!.Value;
-            Assert.Equal((0, ""), (control.Code, control.Error));
-            Assert.Equal(["0 0", "ended", "false"], control.Output);
+            Assert.Equal(["1 0", "0", "", "1", "b"], ran.Output);
         }
     }
 
@@ -1256,7 +1269,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // S19, S5 (item 6 of the round of pull request 509): the swapped helper closes the error pipe's `File` through another holder
         // at the wait's first try of its lock, after the wait read the handle's mark and descriptor and before it polls that descriptor,
-        // as a `Close` on another thread can land there; no program can make that race, since no handle reaches a second thread (R10).
+        // as a `Close` on another thread can land there; a test program cannot land its `Close` in that gap at will, since nothing it
+        // can wait on marks the moment between the wait's read of the handle and its poll, so the helper stands in for that thread.
         // The wait is in flight on the handle, so the `Close` marks it and leaves the descriptor open to the wait, which reads the pipe
         // whole, and the read through the `File` after it gives the closed handle's error. A wait that read the mark and the descriptor
         // and was not in flight polls a descriptor the `Close` released, whose read fails
@@ -1384,7 +1398,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
               %handle = getelementptr i8, ptr %first, i64 -32
               %at = getelementptr i8, ptr %handle, i64 8
               %fd = load i32, ptr %at
-              %polled = alloca [8 x i8]
+              %polled = alloca [2 x i32]
               store i32 %fd, ptr %polled
               %events = getelementptr i8, ptr %polled, i64 4
               store i16 1, ptr %events

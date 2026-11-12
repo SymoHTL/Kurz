@@ -62,6 +62,7 @@ extern "C" {
     int dup2(int from, int to)
     int chdir(byte* path)
     int waitpid(int pid, int* status, int options)
+    int waitid(int type, int id, void* info, int options)
     int getrlimit(int resource, long* limits)
     int kill(int pid, int number)
 }
@@ -3111,9 +3112,10 @@ pub void | IoError ChildKill(int* state, string program) {
 // (`Drive`), each from the wake that took the lock of its reader, at `outReader` and `errReader`, null where
 // none is held, by `take`, which `held` names, under its bound: the status `waitpid` gave, or a failure below
 // 0, -4100 where the bound passed, the child killed and waited for. A child waited for before gives the status
-// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline. Where a
-// reader is given, the child's end is polled with or without a bound, so that a lock another holder holds is
-// given up at that end (`Drive`).
+// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline. Under a
+// bound the child's end is polled through the descriptor of its process; without one `Drive` looks at the child
+// at each wake while a lock another holder holds is still to take, so that that lock is given up at the child's
+// end and a wait with no bound opens no descriptor, as one where the system refuses it needs.
 long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errReader, extern "C" (byte*, long*) => long take, int* held, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
@@ -3130,7 +3132,7 @@ long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errRea
     raw {
         long deadline = *Ptr<long>(Ptr<byte>(state) + 8)
         mut int process = -1
-        if (deadline >= 0 || outReader != null || errReader != null) && state[1] == 0 {
+        if deadline >= 0 && state[1] == 0 {
             process = int(syscall(434, long(state[0]), long(0)))
             if process < 0 {
                 failure = -long(*__errno_location())
@@ -3955,9 +3957,11 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
 // `errReader` is read only once `take` took the lock of that reader, which it tries at each wake and never
 // waits on, and from then on after the bytes the reader held ahead; `held` gets 1 for each lock it took, at
 // the first `int` for the output's and at the second for the error's (S19, the owner, 2026-11-12, issue 174,
-// comment 6821985043, "Try the lock inside the poll"). From the wake after the child's end, a lock it did not
-// take is tried no more, and that pipe is left to the holder of its lock, with or without a bound (S19, the
-// owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides").
+// comment 6821985043, "Try the lock inside the poll"). A lock it did not take is tried once more at the wake
+// after the child's end and then no more, and that pipe is left to the holder of its lock, with or without a
+// bound (S19, the owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides"); where `process` is
+// -1 and `pid` is not 0, that end is seen by a look at the child at each wake while such a lock is still to
+// take, `waitid` with `WNOHANG` and `WNOWAIT`, which leaves the child to be waited for.
 long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long deadline, bool owned, int* fds, byte* outReader, byte* errReader, extern "C" (byte*, long*) => long take, int* held, byte* staging, string feed, bool fed, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
@@ -4169,6 +4173,22 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
             if ready > 0 && *Ptr<short>(Ptr<byte>(polled) + 22) != 0 {
                 exited = true
                 polled[4] = -1
+            }
+
+            // S19: without the descriptor of the child's process, the child's end looked at once a wake while a lock
+            // another holder holds is still to take: `waitid` on `P_PID` (1) with `WEXITED` (4), `WNOHANG` (1) and
+            // `WNOWAIT` (0x01000000) fills the `siginfo_t` in the read's buffer, whose `si_pid`, at 16, the call
+            // cleared, and is not 0 once the child ended, which it leaves to be waited for
+            if process < 0 && pid > 0 && !exited && (outWaits || errWaits) && failure == 0 {
+                *Ptr<int>(buffer + 16) = 0
+                if waitid(1, pid, Ptr<void>(buffer), 16777221) < 0 {
+                    if *__errno_location() != 4 {
+                        failure = -long(*__errno_location())
+                        polling = false
+                    }
+                } else if *Ptr<int>(buffer + 16) != 0 {
+                    exited = true
+                }
             }
 
             if ready > 0 && writing && *Ptr<short>(Ptr<byte>(polled) + 30) != 0 {
