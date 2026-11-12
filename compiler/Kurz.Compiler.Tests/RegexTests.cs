@@ -254,6 +254,38 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal(["1,4", "0,4", "-"], output); // the Kelvin sign is three bytes, `K` and `k` one each
     }
 
+    /// <summary>
+    /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
+    /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
+    /// at its <c>\</c>, after any error of the parse; one inside a class is <c>Unsupported</c> at its <c>\</c>; <c>\k</c>
+    /// without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every digit after the <c>\</c>, <c>\0</c>
+    /// <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
+    /// </summary>
+    [Fact]
+    public void The_backtracking_engine_refuses_a_reference_to_no_group_at_its_backslash()
+    {
+        (string Pattern, string Reading)[] rows =
+        [
+            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 2"),
+            (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
+            (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
+        ];
+        Assert.All(rows, r => Assert.Equal(r.Reading, RegexPattern.Check(r.Pattern, backtracking: true) is { } f ? RegexPattern.Words(f.Kind, f.At) : "ok"));
+        var program = new StringBuilder("patterns = [\n");
+        foreach (var (p, _) in rows)
+        {
+            program.Append("    \"").Append(Escaped(p)).Append("\",\n");
+        }
+
+        program.Append("]\nfor p in patterns {\n    match Regex.New(p, backtracking: true) {\n        Regex re => print(\"ok\")\n"
+            + "        RegexError e => print(e)\n    }\n}\n");
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], toolchain.Runtime, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-backtracking-errors"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(rows.Select(r => r.Reading), output);
+    }
+
     /// <summary>The groups of a pattern the tests generate: its <c>(</c>s that open no <c>(?</c>.</summary>
     private static int Groups(string pattern) => Enumerable.Range(0, pattern.Length)
         .Count(i => pattern[i] == '(' && (i == 0 || pattern[i - 1] != '\\') && (i + 1 >= pattern.Length || pattern[i + 1] != '?'))

@@ -68,7 +68,9 @@ the linear engine's, a backreference one state and a lookaround or an atomic gro
 content, so that a pattern is `TooBig` on both engines or on neither. *(assumed, §12: the defaults of
 the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one when
-the pattern is made, and one inside a class is `Unsupported` at its `\`. A search keeps its choices
+the pattern is made, and one inside a class is `Unsupported` at its `\`. A backreference by number
+reads every digit after its `\`, so that `\10` names group 10, and `\0` is `Unsupported`, as on the
+linear engine. A search keeps its choices
 on a stack in memory, not on the process's stack, as .NET's interpreter does; a loop that comes back
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match; and a
@@ -162,7 +164,8 @@ with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
 owner)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
-(K4): two `Regex`es of one pattern are equal. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)*
+(K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
+`backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 
 Case: [regex/match.kz](../corpus/regex/match.kz)
 ```kurz
@@ -211,6 +214,7 @@ digits = Regex.New(r"\d+")
 same = Regex.New(r"\d+")
 print(digits == same)
 print(digits == Regex.New(r"\d*"))
+print(digits == Regex.New(r"\d+", backtracking: true))
 first = digits.Match("a12")
 again = same.Match("a12")
 other = digits.Match("a34")
