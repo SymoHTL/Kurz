@@ -106,7 +106,9 @@ named backreference; a search has no limit on its steps; and the automaton is co
 the linear engine's, a backreference one state and a lookaround or an atomic group two beside its
 content, so that a pattern both engines take is `TooBig` on both or on neither; a construct the linear
 engine does not take is `Unsupported` there, which the parse reports before the automaton is counted (§12, the owner, 2026-11-12, issue 176,
-comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642). A
+comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642, but for the flag in force at the
+backreference, the states each construct counts and the `Unsupported` of the linear engine)
+*(assumed, §12: those three, the last Q8 of comment 6811727642 at its default)* A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
 single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
 parse refuses a construct, a backreference it read before it stopped, to a group whose `(` it did not read, is
@@ -129,8 +131,9 @@ matches it, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookb
 its content reads so (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q15 of comment
 6812042360); the compiler does not build that direction: its lookbehind tries its position and each
 one before it, the nearest first, its content ending at its position, so that a group inside it
-takes the text of the nearest start its content matches from. *(assumed, §12: Q9 of comment
-6811727642, taken at its default, and the rest proposed with this record and not put to the owner)*
+takes the text of the nearest start its content matches from. *(assumed, §12: the stack in memory, Q9 of comment
+6811727642, taken at its default; and, proposed with this record and not put to the owner, the errors of a
+backreference, the reading of its digits and a loop that comes back to its start with no character read)*
 
 Case: [regex/backtracking.kz](../corpus/regex/backtracking.kz)
 ```kurz
@@ -241,8 +244,8 @@ dropped and its capitals made small; then a name that had that `is` and is `c` a
 `(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
 that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
 error of the parse and of the levels, and among several the first Rust's translator meets, as for the flag `u`; a class the pattern's end cuts off is `Syntax` at the
-end, and a `\` where its letter stands is `Syntax` at that `\`. (§12, the owner, 2026-11-12, issue 176,
-comment 6819137493, Q1 to Q6 of comment 6812529825: the version, every property the crate reads, and a name with no class `Syntax` at its `\`) *(assumed, §12: the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the owner's answer of 2026-11-12 to Q1 to Q6 of issue 176, comment
+6812529825, read as all six standing as built and said back in comment 6819137493, for the version, every property the crate reads and a name with no class `Syntax` at its `\`; the readings of the crate asked of it that day for the rest)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. (§12, the owner, 2026-11-12, issue 176, comment 6819137493, Q12 of comment 6808653712, whose option named the engine)
 

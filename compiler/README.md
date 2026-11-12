@@ -1869,11 +1869,12 @@ ask about it.
   position; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
-  backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, their
-  count and bound, a lookbehind of any length and the case folding of a backreference: the owner, 2026-11-12, issue 176,
+  backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, counted
+  and bounded as the linear engine's, a lookbehind of any length and the case folding of a backreference: the owner, 2026-11-12, issue 176,
   comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642; the lookbehind's start, the nearest first, is not what Q15
   of comment 6812042360 chose that day, a lookbehind matched from right to left as .NET's, which is not built) *(assumed:
-  the stack in memory, Q9 of comment 6811727642 at its default; the loop's end, the errors and the digits of a
+  the stack in memory, Q9 of comment 6811727642 at its default; the states each construct counts, the flag in force at
+  the backreference, the loop's end, the errors and the digits of a
   backreference and when a group's positions are set, proposed with the record and not put to the owner)* Pinned by
   `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
   patterns of its own constructs, and `corpus/regex/backtracking.kz`.
