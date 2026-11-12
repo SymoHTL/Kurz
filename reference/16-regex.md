@@ -39,7 +39,95 @@ leftmost one and, among the alternatives at its start, the first that matches, s
 matches `a` in `ab` on either. The automaton is bounded at 10 MiB and the lazy DFA's cache at 2 MiB,
 the defaults of Rust's `size_limit` and `dfa_size_limit`. *(assumed, §12: the linear engine without
 the flag, the flag's name and type, the constructs under it, no time bound, the same match on both
-engines and the two bounds)*
+engines and the two bounds)* The automaton's size is counted as 16 bytes for each of its states and 4
+bytes for each number that bounds a range of its classes, the same in the check of a literal (G3) and
+in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig`. *(assumed, §12: the default
+of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)* The states are three
+for the whole match, its start, its end and the match; one for a character, a class or an assertion;
+two for a group with a name or a number beside its content; the sum of a sequence's items; the sum of
+an alternation's branches with two for each `|`; and for a repetition of n to m, written `{n,m}`, `{n}`
+(m is n) or `?` (0 to 1), n copies of its item and m - n optional copies of one state more each, for
+one of n or more, written `{n,}` or `+` (n is 1), n copies and one state, but for `*` and `{0,}` one
+copy and two states, a lazy repetition as the greedy one, and a repetition of an item that matches no
+character taken with its least and its most at most 1, as Rust's `Hir::repetition` takes it, so that
+`\b{1000000}` builds. A class counts the numbers of its ranges once where it is written, after `(?i)` folded it
+and after its negation, a letter that `(?i)` gives another case counts as the class of its cases, and
+a pattern with a word boundary counts the numbers of `\w`'s ranges once more. A size at the bound
+builds. A search takes time in proportion to the text's length times the automaton's states times one
+more than the positions a thread carries, which are none for `IsMatch`, so that it takes the text's
+length times the states, and for the members that give a match two for the whole match and two for
+each group, which the Pike VM copies from thread to thread as Rust's `PikeVM` copies its slots; beside
+the automaton a search holds two lists of threads, its states times one more than those positions,
+which the bound does not count, as Rust's `size_limit` does not count the `PikeVM`'s cache. *(assumed,
+§12: the states and the ranges of each construct, a size at the bound that builds, and the time and the
+memory of a search)*
+
+The lazy DFA runs before the Pike VM: its states are sets of the automaton's states, each with what
+the character before its position is to the assertions, and each transition is made on the first
+character of its class that needs it and read from a table after that, over classes of code points
+where Rust's are of bytes, the code points that every operation of the automaton and every assertion
+read alike being one class, made once with the pattern. A state's members are the threads begun
+before its position: the thread of a new start is added at each transition, before the transition
+reads its character, and is not kept in the stored state, while the threads it reaches over the
+transition are members of the next state, so that a member reached both from an earlier start and
+from the current one keeps the earlier start, which costs time and never a match. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace`
+and `Split` run the Pike VM only where it finds a match left, from the last position up to that
+match's end, the end included, at which its state had no member, before which no match starts, so
+that `a*b` over `aab` runs the Pike VM from 0; where the DFA gives a search up or is not used, the
+Pike VM answers `IsMatch` and runs `Match`, `Matches`, `Replace` and `Split` alone. Its cache is made for each call, beside
+the automaton and outside its bound, and the searches of one `Matches`, `Replace` or `Split` share it
+and its count of emptyings, so that a call whose DFA gave up runs the Pike VM for the rest of the
+call. It counts a state as 4 bytes for each column of its row and each of its members and 32 bytes
+of its own, and it is emptied when the next state does not fit. At an emptying the DFA gives the
+search up where the cache was emptied at least three times before and the searches read fewer bytes of UTF-8
+since the last emptying than 10 times the states made since then, as Rust's meta engine sets
+`minimum_cache_clear_count` and `minimum_bytes_per_state` and its `try_clear_cache` checks before it
+clears; and the DFA is not used where two states that each hold every state of the automaton as a
+member, with their rows, and 8 bytes for each state of the automaton exceed the cache's 2 MiB, as
+Rust's `minimum_cache_capacity` asks room for two such states beside three sentinel states, which
+this cache does not have; so that a search's time stays in proportion to the pattern's size times
+the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
+ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
+making of its classes, once for each pattern; a call the making of the states its cache holds, which
+a short text pays before the Pike VM runs; and a call up to 2 MiB for its cache. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state, the members a state
+keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
+the end of a list that cannot grow)*
+
+The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
+backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
+simple case folding, the flag in force at the backreference deciding, as .NET's does, so that `(?i)(a)\1`
+and `(a)(?i)\1` match `aA` and `(?i)(a)(?-i)\1` does not; a backreference to a later group or to its own
+group parses and fails while the group has no text, so that `(a|b\1)+` matches `aba`; a positive
+lookaround keeps the groups it took and a negative one none; `\k<name>` is the one spelling of a
+named backreference; a search has no limit on its steps; and the automaton is counted and bounded as
+the linear engine's, a backreference one state and a lookaround or an atomic group two beside its
+content, so that a pattern both engines take is `TooBig` on both or on neither; a construct the linear
+engine does not take is `Unsupported` there, which the parse reports before the automaton is counted. *(assumed, §12: the defaults of
+the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
+backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
+single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
+parse refuses a construct, a backreference it read before it stopped, to a group whose `(` it did not read, is
+the error, the first such where it read several, as .NET, which counts the groups before it parses,
+reports `\9(` and `(\9`, so that `\8\9(` is `Syntax` at 0; a group whose `(` it read counts, so that
+`(a\1` is `Syntax` at its `(`, which no `)` closes; and a group after
+the refused construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
+after its `\`, so that `\10` names group 10 and is `Syntax` in a pattern of fewer groups, where .NET
+reads a number of two or more digits that names no group as an octal escape (`(a)\10` matches `a`
+and U+0008 there), and `\0` is `Unsupported`, as on the linear engine. A search keeps its choices
+on a stack in memory, not on the process's stack, as .NET's interpreter does, a stack that grows
+with the text's length times the choices a way keeps open, beside the automaton and outside its
+bound, where the Pike VM's lists of threads, outside it too, are sized by the automaton's states,
+and a stack that cannot grow ends the process with `allocation-failed`, as a list's does (M9); a loop that comes back
+to its start with no character read since fails that way, as the Pike VM's thread that comes back to
+a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
+.NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
+.NET; and a lookbehind tries its position and each one before it, the nearest first, its content
+ending at its position, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookbehind
+takes the text of the nearest start its content matches from, where .NET matches a
+lookbehind from right to left. *(assumed, §12: Q9 of that comment, taken at its default; the
+lookbehind's start, the default of Q15, put to the owner on 2026-11-12, issue 176, comment
+6812042360; and the rest proposed with this record and not put to the owner)*
 
 Case: [regex/backtracking.kz](../corpus/regex/backtracking.kz)
 ```kurz
@@ -55,6 +143,19 @@ Case: [regex/backreference-linear.kz](../corpus/regex/backreference-linear.kz)
 ```kurz
 twice = Regex.New(r"(\w+) \1")
 print(twice.IsMatch("a a"))
+```
+
+Case: [regex/bound.kz](../corpus/regex/bound.kz)
+```kurz
+void Try(string pattern) {
+    match Regex.New(pattern) {
+        Regex re => print(re)
+        RegexError e => print(e)
+    }
+}
+
+Try(r"a{655357}")
+Try(r"a{655358}")
 ```
 
 ### G3 (decided, §12) A pattern's errors
@@ -106,12 +207,41 @@ match Regex.New("{word}+") {
 `Index` and `Length`, and `m.Group(n)` and `m.Group(name)` give a group, a `Match?`, `null` for a
 group that did not take part and for one the pattern does not have, `m.Group(0)` the whole match. A
 position and a length count bytes, as a position in a string does (X2), and `\d`, `\w`, `\s`, `\b`
-and a match that ignores case take Unicode's classes from the tables of the version §12 pins. The syntax is that of Rust's `regex` crate, Perl's without backreferences and lookaround,
+and a match that ignores case take Unicode's classes from the tables of the version §12 pins. The syntax is that of Rust's `regex` crate, Perl's without backreferences and lookaround on the
+linear engine, to which `backtracking: true` adds the backreferences, lookarounds and atomic group
+of G2,
 with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)` and `(?x)`; a
 `Regex` has members alone, with no static `Regex.IsMatch(input, pattern)`. *(assumed, §12: the
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
-owner)*
+owner)* The flags `U`, `R` and `u` read as Rust's crate reads them: `U` swaps greedy and lazy; under
+`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` and without `(?s)` a `.` takes neither;
+and `u` is in force from the start, without it `\d`, `\w`, `\s`, the word boundaries and the folding
+of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a class that holds
+more than ASCII after its negation, `\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above
+ASCII, is `Syntax` at its start (G3), after any error of the parse and of the levels, and among
+several the first that Rust's translator meets, a class's items before the class.
+*(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
+request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
+name as Rust's crate reads it, from the tables of the version §12 pins, where the crate holds 16.0.0, so that a name or a
+code point of 17.0.0 alone is a class here and `Syntax` or no match in Rust: a general category, a script, a binary
+property of that version's `PropList.txt`, `DerivedCoreProperties.txt` or `emoji-data.txt`, or `Bidi_Mirrored` of
+its `UnicodeData.txt`, the files the crate's tables of binary properties are made from, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
+value the general category, the script, the script extensions, the age, which holds every version up to it, and the break
+properties Grapheme_Cluster_Break, Sentence_Break and Word_Break, as `name=value`, `name:value` or `name!=value`, which
+negates the class once more. A binary property of another file, as `Full_Composition_Exclusion` of
+`DerivedNormalizationProps.txt`, is no class. A name is compared after three steps in turn: a first `is`, in either case of each
+letter, is set aside where the name begins with it as written; then ` `, `_` and `-` and every byte above ASCII are
+dropped and its capitals made small; then a name that had that `is` and is `c` alone is `isc`, so that `Is_C` is
+`isc` and `I_sGreek` keeps its `is`. A name alone is a binary property's, but for `cf`, `sc` and
+`lc`, then a general category's, then a script's, and the name alone of a property that is not binary is no class. Under
+`(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
+that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
+error of the parse and of the levels, and among several the first Rust's translator meets, as for the flag `u`; a class the pattern's end cuts off is `Syntax` at the
+end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
+the questions put to the owner on 2026-11-12, issue 176, comment 6812529825, and the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+(K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
+`backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 
 Case: [regex/match.kz](../corpus/regex/match.kz)
 ```kurz
@@ -154,6 +284,22 @@ print(Regex.New(r"^\w+$").IsMatch("wörld"))
 print(Regex.New("(?i)é").IsMatch("É"))
 ```
 
+Case: [regex/equality.kz](../corpus/regex/equality.kz)
+```kurz
+digits = Regex.New(r"\d+")
+same = Regex.New(r"\d+")
+print(digits == same)
+print(digits == Regex.New(r"\d*"))
+print(digits == Regex.New(r"\d+", backtracking: true))
+first = digits.Match("a12")
+again = same.Match("a12")
+other = digits.Match("a34")
+if first != null && again != null && other != null {
+    print(first == again)
+    print(first == other)
+}
+```
+
 ### G5 (decided, §12) Replacing and splitting
 
 `re.Split(s)` gives the pieces between the matches with the text of each of the pattern's groups
@@ -162,11 +308,17 @@ added for grouping alone changes the result, and a group that did not take part 
 leaves it out. `re.Replace(s, replacement)` replaces every match, as C#'s `Replace` and Rust's
 `replace_all`, and reads the replacement as Rust's does: `$name` takes the longest run of letters,
 digits and `_`, so that `$1a` names a group `1a`, a name of digits alone names a group by its number,
-`${name}` ends the name at its brace, `$$` is a `$`, and a group that does not exist or did not take
+with `0`s before it or not, as does a name of one `+` and digits inside braces, `${+1}`, as Rust's
+parse of a `usize` reads one, `${name}` ends the name at its brace, `$$` is a `$`, and a group that does not exist or did not take
 part gives no text. A replacement with `${name}` is written as a raw literal (L20), since `{` opens
-an interpolation in every other literal (L6). *(assumed, §12: the group left out of `Split`,
+an interpolation in every other literal (L6). A `$` that names no group, at the end, before a byte
+that is no letter, digit or `_`, or before a `{` without its `}`, is a `$`. *(assumed, §12: the group left out of `Split`,
 `Replace` of every match and Rust's reading of the replacement, where C# reads `$1a` as group 1 and
-an `a` and keeps `$9` of a group that does not exist as it is written)*
+an `a` and keeps `$9` of a group that does not exist as it is written)* Both take the matches `Matches` gives
+(G4), so that an empty match right after another match is passed over, and `Split` adds a match's
+groups in the order of their numbers; a text with no match is given back by `Replace` as it is and
+by `Split` as one piece. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6810129884)*
 
 Case: [regex/replace.kz](../corpus/regex/replace.kz)
 ```kurz
@@ -176,6 +328,7 @@ print(date.Replace("2026-11", r"${month}.${year}"))
 print(date.Replace("2026-11", r"${1}a"))
 print(date.Replace("2026-11", "$1a"))
 print(date.Replace("2026-11", "$$"))
+print(date.Replace("2026-11", r"${+1}"))
 print(Regex.New("a").Replace("banana", "o"))
 ```
 
@@ -185,4 +338,13 @@ print(Regex.New("[-+]").Split("1+2-3"))
 print(Regex.New("([-+])").Split("1+2-3"))
 print(Regex.New(r"(-)|(\+)").Split("1+2-3"))
 print(Regex.New(",").Split(",a"))
+```
+
+Case: [regex/walk.kz](../corpus/regex/walk.kz)
+```kurz
+print(Regex.New("x*").Split("axb"))
+print(Regex.New("x*").Replace("axb", "-"))
+print(Regex.New(",").Split("abc"))
+print(Regex.New(",").Replace("abc", "-"))
+print(Regex.New("(?<sign>[a-z])(=)").Split("1a=2"))
 ```

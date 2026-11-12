@@ -302,6 +302,9 @@ public enum CallKind
     /// <summary><c>Hex.Decode(s)</c> (H7), the bytes of the digits or the case <c>HexError</c>.</summary>
     HexDecode,
 
+    /// <summary><c>Regex.New(pattern)</c> (G3): a <c>Regex</c> where the pattern is a literal the checker read, else <c>Regex | RegexError</c>.</summary>
+    RegexNew,
+
     /// <summary><c>Sha256.New()</c>, <c>Md5.New()</c> or <c>Crc32.New()</c> (H3); <see cref="CallInfo.Target"/> is the hasher's type.</summary>
     HasherNew,
 

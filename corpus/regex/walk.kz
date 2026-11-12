@@ -1,0 +1,13 @@
+// expect: output
+// | [, a, b, ]
+// | -a-b-
+// | [abc]
+// | abc
+// | [1, a, =, 2]
+// rules: G5
+
+print(Regex.New("x*").Split("axb"))
+print(Regex.New("x*").Replace("axb", "-"))
+print(Regex.New(",").Split("abc"))
+print(Regex.New(",").Replace("abc", "-"))
+print(Regex.New("(?<sign>[a-z])(=)").Split("1a=2"))

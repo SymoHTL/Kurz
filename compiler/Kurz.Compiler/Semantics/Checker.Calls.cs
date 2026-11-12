@@ -255,7 +255,7 @@ public sealed partial class Checker
                         return Typed.Error;
                     }
 
-                    if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line) || UnreadRegexName(n.Name, n.Line))
+                    if (IsUnreadName(n.Name) || ProcessNameAsValue(n.Name, n.Line))
                     {
                         CheckArgumentsLoosely(c);
                         return Typed.Error;
@@ -1516,6 +1516,11 @@ public sealed partial class Checker
             if (n.Name == "Hint")
             {
                 return CheckHintFunction(m, c); // F18
+            }
+
+            if (n.Name == "Regex" && IsStdRegex())
+            {
+                return CheckRegexFunction(m, c); // G3
             }
 
             if (enums.TryGetValue(n.Name, out var enumSymbol))

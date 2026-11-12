@@ -67,6 +67,7 @@ public sealed partial class Emitter
             CallKind.Parse => EmitParse(c, info),
             CallKind.TimeFrom => EmitTimeFrom(c, info),
             CallKind.HexDecode => EmitHexDecode(c, info),
+            CallKind.RegexNew => EmitRegexNew(c, info),
             CallKind.StringJoin => EmitStringJoin(c, info),
             CallKind.BlackBox => EmitBlackBox(c, info),
             CallKind.MapRemove => EmitMapRemove(c),

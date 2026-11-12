@@ -1,0 +1,20 @@
+// expect: output
+// | true
+// | false
+// | false
+// | true
+// | false
+// rules: G4
+
+digits = Regex.New(r"\d+")
+same = Regex.New(r"\d+")
+print(digits == same)
+print(digits == Regex.New(r"\d*"))
+print(digits == Regex.New(r"\d+", backtracking: true))
+first = digits.Match("a12")
+again = same.Match("a12")
+other = digits.Match("a34")
+if first != null && again != null && other != null {
+    print(first == again)
+    print(first == other)
+}

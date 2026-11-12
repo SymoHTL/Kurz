@@ -85,9 +85,10 @@ public sealed partial class Checker
     /// W1: the names of the types of <c>std/</c> every file sees, each a <c>pub</c> type there, a list held in the compiler where Rust
     /// writes its list in <c>std</c>, as the module <c>std::prelude::rust_2021</c> (design record, section 12: the owner, 2026-11-02, Q8 (a),
     /// the list held in the compiler, and 2026-11-01, Q7 (b), that every file sees them; the names on the list are assumed there, but
-    /// <c>Url</c>, <c>HttpDate</c> and <c>HttpQuery</c>, which the owner's answer of 2026-11-06, G1 (a) to G3 (a), added).
+    /// <c>Url</c>, <c>HttpDate</c> and <c>HttpQuery</c>, which the owner's answer of 2026-11-06, G1 (a) to G3 (a), added), and the names
+    /// of regular expressions, <c>Regex</c>, <c>Match</c>, <c>RegexError</c> and <c>RegexKind</c> (G1; section 12, the owner, 2026-11-01, "In std").
     /// </summary>
-    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient"];
+    public static IReadOnlyList<string> Prelude { get; } = ["HttpKind", "HttpError", "HttpHeaders", "HttpRate", "HttpLimits", "HttpRequest", "HttpBody", "HttpResponse", "HttpWriter", "HttpServer", "Uri", "UriError", "UriKind", "Url", "HttpDate", "HttpQuery", "HttpClientOptions", "HttpResponseMessage", "HttpClient", "Regex", "Match", "RegexError", "RegexKind"];
 
     /// <summary>The types of the variables the top level declares, by name, for a test to read.</summary>
     public IReadOnlyDictionary<string, KurzType> TopLevelVariables => topLevel;
@@ -465,22 +466,6 @@ public sealed partial class Checker
     /// <summary>S23: a call of <c>Environment.Exit</c>, after which no path goes on (section 12).</summary>
     private bool IsExit(Expression e) =>
         e is CallExpression { Callee: MemberAccess { Target: NameExpression { Name: "Environment" }, Member: "Exit" } } && Lookup("Environment").Variable is null;
-
-    /// <summary>G1: the names of regular expressions, which every file sees (section 12, the owner, 2026-11-01), so that a file's own
-    /// declaration of one is <c>redeclared</c> (V9).</summary>
-    private static bool IsRegexName(string name) => name is "Regex" or "Match" or "RegexError" or "RegexKind";
-
-    /// <summary>G1 to G5: a name of <see cref="IsRegexName"/>, which the checker does not read: a use of one is <c>not supported</c>.</summary>
-    private bool UnreadRegexName(string name, int line)
-    {
-        if (!IsRegexName(name))
-        {
-            return false;
-        }
-
-        NotSupported(line, $"regular expressions, `{name}` (G1 to G5)");
-        return true;
-    }
 
     /// <summary>A name the checker does not read where a value or a call stands: an unread type's, a function's with a modifier of a method, or one declared inside a block around the place.</summary>
     private bool IsUnreadName(string name) => IsUnreadType(name) || unreadFunctions.Contains(name) || nestedNames.Any(n => n.Functions.Contains(name));
@@ -1430,11 +1415,6 @@ public sealed partial class Checker
             return vector; // R18, where no declaration gives the name
         }
 
-        if (UnreadRegexName(n.Name, n.Line))
-        {
-            return Types.Error;
-        }
-
         Report(ErrorIds.UnknownName, n.Line, $"no type named `{n.Name}` is visible here (V10)");
         return Types.Error;
     }
@@ -1496,7 +1476,7 @@ public sealed partial class Checker
             symbol.TypeParameters.Add(new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null, HasDefault = p.Default is not null });
         }
 
-        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || flagsTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || IsRegexName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
+        if (dataTypes.ContainsKey(d.Name) || classes.ContainsKey(d.Name) || interfaces.ContainsKey(d.Name) || enums.ContainsKey(d.Name) || flagsTypes.ContainsKey(d.Name) || unsupportedTypes.Contains(d.Name) || IsBuiltInName(d.Name) || IsProcessName(d.Name) || cFunctions.ContainsKey(d.Name) || stateNames.Contains(d.Name))
         {
             Report(ErrorIds.Redeclared, d.Line, Redeclared(d.Name)); // a C declaration's among them, which has one name (R16)
             refused.Add(symbol); // its signature, defaults and body are checked all the same
@@ -1912,7 +1892,7 @@ public sealed partial class Checker
 
     /// <summary>V9's reading: a function's and a type's name is visible in the whole file (F6), and so are the built-in names.</summary>
     private bool IsDeclaredName(string name) =>
-        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || flagsTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name) || IsRegexName(name)
+        functions.ContainsKey(name) || dataTypes.ContainsKey(name) || classes.ContainsKey(name) || interfaces.ContainsKey(name) || enums.ContainsKey(name) || flagsTypes.ContainsKey(name) || cFunctions.ContainsKey(name) || stateNames.Contains(name) || IsUnreadName(name) || IsBuiltInName(name) || IsProcessName(name)
         || IsMemberName(name); // K7: inside a method, its class's fields and methods are visible, and no declaration hides them (V9)
 
     /// <summary>
