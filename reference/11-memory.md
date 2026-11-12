@@ -749,6 +749,38 @@ raw {
 }
 ```
 
+Case: [memory/asm-operands.kz](../corpus/memory/asm-operands.kz)
+```kurz
+mut long count = 41
+mut long seven = 0
+mut long high = 0
+mut long low = 0
+mut long doubled = 0
+mut double x = 1.25
+mut long n = 1
+mut long kept = 5
+raw {
+    long* p = &n
+    asm("add {r}, 1", r = inout(reg) count)
+    asm("mov {x:e}, 7", x = out(reg) seven)
+    print(count)
+    print(seven)
+    asm("lea {r}, [{r} + {k}]", r = inout(reg) count, k = const 100)
+    print(count)
+    asm("mul {f}", f = in(reg) 8, inlateout("rax") 4611686018427387904 => low, lateout("rdx") high)
+    print(high)
+    print(low)
+    asm("lea {o}, [{i} + {i}]", i = in(reg) 21, o = out(reg) doubled, options(pure, nomem, nostack))
+    print(doubled)
+    asm("addsd {a}, {b}", a = inout(xmm_reg) x, b = in(xmm_reg) 2.5)
+    print(x)
+    asm("mov {v}, 9", v = out(reg) *p)
+    print(n)
+    asm("mov ecx, 3", "mov r8d, 4", clobber_abi("C"))
+    print(kept)
+}
+```
+
 Case: [memory/asm-register-twice.kz](../corpus/memory/asm-register-twice.kz)
 ```kurz
 raw {
@@ -809,6 +841,27 @@ class Switcher {
     }
 }
 // the grant keeps `naked-not-allowed` out, and a `naked` body counts as a `raw` block, so that the place of `naked` is the one defect (R12)
+```
+
+Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
+```kurz
+long Nine() => 9
+
+naked long Seven() {
+    asm("mov eax, 7", "ret")
+}
+
+naked long Answer() {
+    asm("mov eax, {k}", "ret", k = const 40 + 2)
+}
+
+naked long Forward() {
+    asm("jmp {f}", f = sym Nine)
+}
+
+print(Seven())
+print(Answer())
+print(Forward())
 ```
 
 ### R13 (decided, §3) State outside a function

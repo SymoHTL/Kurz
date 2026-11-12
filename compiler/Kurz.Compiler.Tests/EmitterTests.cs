@@ -13,7 +13,7 @@ namespace Kurz.Compiler.Tests;
 /// say (design record, section 6; the owner, 2026-10-23, "Caller passes it" and "Id + size"), the test build left unoptimised and
 /// the line tables (section 2; the owner, 2026-10-29), the texts of the integers at their edges (A2), a conversion from an unsigned type to a signed one (T20), the empty
 /// string's pointer (R15), the largest string (T15; the owner, 2026-10-23, "C#'s limit"), the integer an enum's value is stored in (D12;
-/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the reference to an instance of a class (K6), the runtime of every target emitted, and a
+/// section 4, an assumption there), the layout of a nullable value and the address of one known not null (N1, N3, R10), the reference to an instance of a class (K6), the constraints and the attributes of an `asm` and the module's assembly of a `naked` function (R11, R12), the runtime of every target emitted, and a
 /// construct of the runtime the emitter does not lay out, which is the compiler's defect.
 /// </summary>
 public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
@@ -273,6 +273,57 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // the owner, "C#'s limit" on 2026-10-23 and "allocation-failed" on 2026-10-24; no byte at the pointer is read
         Ran(BuildAndRun($"raw {{\n    {statement}\n}}\n", $"string-limit-{code}-{statement.Length}", "raw"), code, line is null ? [] : [line], error);
+    }
+
+    [Fact]
+    public void An_asm_takes_the_constraints_and_the_attributes_Rusts_compiler_gives_it_and_a_naked_function_is_assembly_of_the_module()
+    {
+        // R11, R12, lowered as rustc lowers `asm!` and `#[naked]` (README, "What the emitter emits"); what each call does is run by the
+        // corpus cases memory/asm-operands.kz and memory/naked-function.kz, and what a run cannot show is pinned here: the options' words,
+        // clobbers and attributes, each statement a control of the others, and the registers each `clobber_abi` lets go of
+        const string text = "mut long a = 1\nmut long b = 2\nmut long c = 3\nraw {\n"
+            + "    asm(\"add {r}, 1\", r = inout(reg) a)\n"
+            + "    asm(\"lea {o}, [{i} + 1]\", i = in(reg) a, o = out(reg) b, options(pure, nomem, nostack, preserves_flags))\n"
+            + "    asm(\"mov ({p}), {o}\", p = in(reg) &c, o = out(reg) b, options(pure, readonly, att_syntax))\n"
+            + "    asm(\"nop\", options(nomem, nostack))\n"
+            + "    asm(\"nop\", out(\"rsi\") b, clobber_abi(\"sysv64\"))\n"
+            + "    asm(\"nop\", clobber_abi(\"win64\"))\n"
+            + "}\nprint(b)\n";
+        var program = Compile(text, Builder.CheckRuntime(Target.Linux), testBuild: true, "raw").Program;
+        Assert.True(program is not null, "no program");
+        var calls = program.Ir.Split('\n').Where(l => l.Contains(" asm ", StringComparison.Ordinal) && l.Contains("call ", StringComparison.Ordinal) && !l.Contains("\"\", \"r,~{memory}\"", StringComparison.Ordinal))
+            .Select(l => Regex.Replace(l, @", !dbg !\d+$", string.Empty)).ToList(); // the line's location set aside
+        var shown = string.Join("\n", calls);
+        Assert.True(calls.Count == 6, shown);
+        Assert.Contains("asm sideeffect alignstack inteldialect \"add ${0:q}, 1\", \"=&r,0,~{dirflag},~{fpsr},~{flags},~{memory}\"(", calls[0], StringComparison.Ordinal);
+        Assert.EndsWith(") nounwind", calls[0], StringComparison.Ordinal);
+        Assert.Contains("asm inteldialect \"lea ${0:q}, [${1:q} + 1]\", \"=&r,r\"(", calls[1], StringComparison.Ordinal);
+        Assert.EndsWith(") nounwind willreturn memory(none)", calls[1], StringComparison.Ordinal);
+        Assert.Contains("asm alignstack \"mov (${1:q}), ${0:q}\", \"=&r,r,~{dirflag},~{fpsr},~{flags},~{memory}\"(", calls[2], StringComparison.Ordinal);
+        Assert.EndsWith(") nounwind willreturn memory(read)", calls[2], StringComparison.Ordinal);
+        Assert.Contains("call void asm sideeffect inteldialect \"nop\", \"~{dirflag},~{fpsr},~{flags}\"()", calls[3], StringComparison.Ordinal);
+        Assert.EndsWith(") nounwind memory(inaccessiblemem: readwrite)", calls[3], StringComparison.Ordinal);
+        Assert.Contains("\"=&{si},={ax},={cx},={dx},={di},={r8},={r9},={r10},={r11},={xmm0},", calls[4], StringComparison.Ordinal); // rsi once, as the output names it
+        Assert.Contains(",={xmm15},~{st},~{st(1)},", calls[4], StringComparison.Ordinal);
+        Assert.Contains(",~{mm7},~{dirflag},", calls[4], StringComparison.Ordinal);
+        Assert.Contains("\"={ax},={cx},={dx},={r8},={r9},={r10},={r11},={xmm0},", calls[5], StringComparison.Ordinal); // no rsi, no rdi
+        Assert.Contains(",={xmm5},~{st},", calls[5], StringComparison.Ordinal); // xmm6 to xmm15 kept
+
+        const string naked = "long Nine() => 9\n\nnaked long Forward() {\n    asm(\"jmp {f}\", f = sym Nine)\n}\n\nprint(Forward())\n";
+        const string symbol = @"\\22[^\\""]*\bForward\b[^\\""]*\\22"; // the function's symbol, quoted as LLVM writes a quote in a string
+        foreach (var (target, typed) in new[] { (Target.Linux, $@"module asm ""\.type {symbol},@function"""), (Target.Windows, $@"module asm ""\.def {symbol}""") })
+        {
+            var emitted = Compile(naked, Builder.CheckRuntime(target), testBuild: true, "raw").Program;
+            Assert.True(emitted is not null, $"no program for {target}");
+            var module = string.Join("\n", emitted.Ir.Split('\n').Where(l => l.StartsWith("module asm ", StringComparison.Ordinal) || l.StartsWith("@llvm.compiler.used", StringComparison.Ordinal)));
+            Assert.True(Regex.IsMatch(module, typed), $"{target}:\n{module}");
+            Assert.Matches($@"module asm ""{symbol}:""", module);
+            Assert.Contains("module asm \".p2align 4\"", module, StringComparison.Ordinal);
+            Assert.Matches(@"module asm ""jmp \\22[^\\""]*\bNine\b[^\\""]*\\22""", module); // the `sym` as the symbol it names
+            Assert.Matches(@"@llvm\.compiler\.used = appending global \[1 x ptr\] \[ptr @""[^""]*\bNine\b[^""]*""\]", module);
+            Assert.Matches(@"(?m)^declare dso_local i64 @""[^""]*\bForward\b[^""]*""\(\)$", emitted.Ir);
+            Assert.DoesNotMatch(@"(?m)^define [^\n]*@""[^""]*\bForward\b", emitted.Ir); // no body of LLVM's, so no prologue
+        }
     }
 
     [Fact]

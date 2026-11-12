@@ -32,6 +32,9 @@ public sealed partial class Checker
     /// </summary>
     private static readonly Dictionary<string, (string Base, string Class)> ExplicitRegisters = ExplicitRegistersOfX86_64();
 
+    /// <summary>R11: the register an operand names in quotes, which the checker read, by the register it is a view of and its class, for the emitter.</summary>
+    internal static (string Base, string Class) ExplicitRegisterOf(string name) => ExplicitRegisters[name];
+
     /// <summary>R11: the registers Rust takes as no operand on x86-64, by the register they are a view of, with Rust's reason.</summary>
     private static readonly Dictionary<string, string> ReservedRegisters = new(StringComparer.Ordinal)
     {

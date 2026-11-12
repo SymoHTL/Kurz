@@ -1386,7 +1386,21 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   over"), state outside a function, `thread static` among it, laid out
   after the layout knows the program's data types, a `data` value without fields as its initial
   value (R13),
-  calls of C functions with `...` (R16) and of a C function value (R17).
+  calls of C functions with `...` (R16) and of a C function value (R17);
+- inline assembly (R11), lowered as rustc lowers `asm!`: one LLVM `asm` call whose constraints are the
+  outputs (`=&` for `out` and `inout`, `=` for `lateout` and `inlateout`), then the inputs, an `inout`'s tied
+  to its output, then the clobbers: `~{dirflag},~{fpsr},~{flags}` unless `preserves_flags`, `~{memory}`
+  unless `nomem`, and for `clobber_abi` every register the convention lets a callee change, a late output
+  where no operand names it (System V: `rax`, `rcx`, `rdx`, `rsi`, `rdi`, `r8` to `r11`, `xmm0` to `xmm15`;
+  Windows x64: `rax`, `rcx`, `rdx`, `r8` to `r11`, `xmm0` to `xmm5`), and the x87 and MMX registers; the call is
+  `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
+  `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
+  `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
+  `const` as its digits and a `sym` as its symbol; an output is stored into its place after the call;
+- a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly
+  under the function's symbol in `.text`, typed a function on ELF and by its `.def` on COFF, aligned to
+  16 bytes, beside a declaration of the symbol in the C types of its signature; a function or state a
+  `sym` names there is kept by `llvm.compiler.used`.
 
 A test build, unoptimised, keeps every call a call, so that a recursion runs as deep as the program
 wrote it (record, section 2), which
@@ -1706,7 +1720,7 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
-(M7), a `naked` function (R12), inline assembly (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
+(M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
