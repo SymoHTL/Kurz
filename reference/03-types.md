@@ -1806,6 +1806,25 @@ print(Lazy<Label>())
 Twin(Order("b2", 4))
 ```
 
+Case: [types/type-fields-body.kz](../corpus/types/type-fields-body.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+    string Note = "{Total} in all"
+}
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print("{f.Name} = {f.Get(value)}")
+    }
+}
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+ShowFields(Order(3, 2))
+print(Remake(Order(5, 2)))
+```
+
 Case: [types/type-make-kind-not-read.kz](../corpus/types/type-make-kind-not-read.kz)
 ```kurz
 T Zero<T>() => T.Make(f => 0)

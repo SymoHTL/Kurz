@@ -115,11 +115,18 @@ public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration
 
     /// <summary>D16: of the symbol a call picks, the function it is checked and emitted as; null for any other function.</summary>
     public FunctionSymbol? Real { get; set; }
+
+    /// <summary>
+    /// D16: the field of a <c>data</c> body whose initializer this function computes, from the value being made, <c>this</c>, whose
+    /// primary fields and the fields of the body above it are set (§4, the owner, 2026-11-12); null for any other function.
+    /// </summary>
+    public FieldSymbol? DataField { get; set; }
 }
 
 /// <summary>
 /// A field of a <c>data</c> type (D1), its own or inherited (D7), or of a class (K1); <paramref name="Body"/> is the declaration of a
-/// field of a class body (K7), which is no parameter of a constructor, and null for a field of a primary constructor.
+/// field of a class body (K7) or of a <c>data</c> body (D16), which is no parameter of a constructor, and null for a field of a primary
+/// constructor.
 /// </summary>
 public sealed record FieldSymbol(string Name, KurzType Type, bool HasDefault, bool Mut, int Line, FieldDeclaration? Body = null)
 {
@@ -159,6 +166,15 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     public bool IsGeneric => TypeParameters.Count > 0;
 
     public FieldSymbol? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+
+    /// <summary>
+    /// D2, D16: the fields a construction gives, those of the primary constructors, the base's first (D7); a field declared in the body
+    /// follows them and is given by its initializer alone (§4, the owner, 2026-11-12).
+    /// </summary>
+    public List<FieldSymbol> ConstructorFields => Fields.Where(f => f.Body is null).ToList();
+
+    /// <summary>D16: the function that computes each field of the body from the value being made, by the field's name (<see cref="FunctionSymbol.DataField"/>).</summary>
+    public Dictionary<string, FunctionSymbol> Initializers { get; } = [];
 
     /// <summary>D16: the methods its body declares, by name, each the symbol a call picks (<see cref="FunctionSymbol.Real"/>).</summary>
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = [];
