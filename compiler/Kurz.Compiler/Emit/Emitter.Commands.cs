@@ -196,7 +196,8 @@ public sealed partial class Emitter
     /// <summary>
     /// S19: the reader's position moved past the bytes <see cref="Ahead"/> handed to a wait that read the pipes, once the wait gave no
     /// <c>IoError</c>; a wait that gave one, a failed read's or <c>TimedOut</c>, leaves them to the <c>File</c>, which reads them next (for
-    /// a failed read, the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267; the rest is S19's assumed reading).
+    /// a failed read, S19's assumed reading of the owner's answer of 2026-11-11, "Error, no wait", issue 174, comment 6806240267, which
+    /// gives the error at once and waits for no child; for <c>TimedOut</c>, S19's assumed reading).
     /// </summary>
     private void Taken(string taken)
     {
@@ -245,7 +246,10 @@ public sealed partial class Emitter
         var end = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
         fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr {ahead}");
         fn.Emit($"store i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}, ptr {count}");
-        fn.Emit($"store ptr {ReaderField(reader, ReaderPosition)}, ptr {taken}"); // the runtime copies them before anything frees the buffer
+        // the runtime copies them before anything frees the buffer; the address of the position stays good until `Taken` writes it,
+        // since the call runs no code of the program and the `ChildProcess` it is a member of holds the `File` through it, so that
+        // nothing frees or replaces the reader
+        fn.Emit($"store ptr {ReaderField(reader, ReaderPosition)}, ptr {taken}");
         fn.Branch(done);
         fn.Block(done);
         return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {ahead}"), fn.Value($"load i64, ptr {count}"), taken);

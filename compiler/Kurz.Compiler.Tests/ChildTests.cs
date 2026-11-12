@@ -969,7 +969,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_wait_with_output_whose_read_fails_leaves_the_bytes_the_file_read_ahead_to_the_file()
     {
-        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a `WaitWithOutput()` that gives an `IoError` takes
+        // S19, its assumed reading of the owner's "Error, no wait" (2026-11-11, issue 174, comment 6806240267, the error at once and no
+        // wait): a `WaitWithOutput()` that gives an `IoError` takes
         // none of the bytes the pipe's `File` read ahead, so that the program reads them through the `File` after the error. The child
         // writes `abc`, of which the program takes one byte through the buffer of S24, then reads its input to the end, which the wait
         // closes first (Q6), and writes `d`, whose read fails; a wait that took the bytes ahead would leave the `File` to read `d`
@@ -1007,7 +1008,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_wait_with_output_whose_read_fails_on_the_look_at_its_bound_kills_no_child()
     {
-        // S19, S20 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a read that fails on the look a wait takes at
+        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267, for the error and no wait) and S20's assumed reading
+        // of it (no kill at the bound): a read that fails on the look a wait takes at
         // its bound, which the runtime here takes at the first look, gives its `IoError`, waits for no child and kills none, as a read
         // that fails before the bound does, so that the child still sleeps, as `/proc` shows. A wait that killed it and waited for none
         // would leave a process that no longer sleeps, as `/proc` shows of the probe `Kill()` ended, the positive control
