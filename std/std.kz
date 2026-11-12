@@ -10272,7 +10272,7 @@ pub class Regex {
         mut stack = List<int>()
         mut start = from
         while start <= n {
-            if Run(b, 0, start, -1, mut slots, mut stack) >= 0 {
+            if Run(b, 0, start, mut slots, mut stack) >= 0 {
                 for k in 0..<count {
                     if found.Count <= k {
                         found.Add(slots[k])
@@ -10294,14 +10294,15 @@ pub class Regex {
         return false
     }
 
-    // The first way from state `first` at `from` to the match, or to the end of the look-around or the atomic group it starts in,
-    // there at `end` where `end` is not -1: the position it ends at, with `slots` holding its groups; -1 where no way gets there,
-    // with `slots` as they were. A frame of `stack` is three numbers: 0, a state and the position to try it at; or 1, a slot and
-    // the position it held before the way changed it. A split the way comes back to at the position it last came to it at closes
+    // The first way from state `first` at `from` to the match, or to the end of the look-around or the atomic group it starts in:
+    // the position it ends at, with `slots` holding its groups; -1 where no way gets there, with `slots` as they were. The states
+    // of a look-behind's content read the text from right to left: each takes the character, or the group's text, that ends at
+    // its position and moves back over it (G2). A frame of `stack` is three numbers: 0, a state and the position to try it at;
+    // or 1, a slot and the position it held before the way changed it. A split the way comes back to at the position it last came to it at closes
     // a loop that read no character since, and that way fails, as the Pike VM's thread that comes back to a state at the same
     // position ends; so `(a*)*` ends, and the loop's other way is tried. The way that gets there keeps its groups, and gives the
     // positions of the splits back, so that a look-around tried again at the same position starts afresh.
-    int Run(Bytes b, int first, int from, int end, mut List<int> slots, mut List<int> stack) {
+    int Run(Bytes b, int first, int from, mut List<int> slots, mut List<int> stack) {
         n = b.Count
         marked = 3 * names.Count
         base = stack.Count
@@ -10325,22 +10326,18 @@ pub class Regex {
             while going {
                 op = ops[pc]
                 if op == 0 || op == 9 || op == 11 {
-                    if end < 0 || at == end {
-                        while stack.Count > base {
-                            last = stack.Count - 3
-                            if stack[last] == 1 && stack[last + 1] >= marked {
-                                slots[stack[last + 1]] = stack[last + 2]
-                            }
-
-                            stack.RemoveAt(last + 2)
-                            stack.RemoveAt(last + 1)
-                            stack.RemoveAt(last)
+                    while stack.Count > base {
+                        last = stack.Count - 3
+                        if stack[last] == 1 && stack[last + 1] >= marked {
+                            slots[stack[last + 1]] = stack[last + 2]
                         }
 
-                        return at
+                        stack.RemoveAt(last + 2)
+                        stack.RemoveAt(last + 1)
+                        stack.RemoveAt(last)
                     }
 
-                    going = false
+                    return at
                 } else if op == 1 || op == 2 {
                     mut c = -1
                     if at < n {
@@ -10349,6 +10346,20 @@ pub class Regex {
 
                     if c >= 0 && (op == 1 && c == xs[pc] || op == 2 && RegexIn(ranges, xs[pc], ys[pc], c)) {
                         at = at + RegexLength(b[at])
+                        pc = pc + 1
+                    } else {
+                        going = false
+                    }
+                } else if op == 12 || op == 13 {
+                    mut c = -1
+                    mut back = at
+                    if at > 0 {
+                        back = RegexBack(b, at)
+                        c = RegexDecode(b, back)
+                    }
+
+                    if c >= 0 && (op == 12 && c == xs[pc] || op == 13 && RegexIn(ranges, xs[pc], ys[pc], c)) {
+                        at = back
                         pc = pc + 1
                     } else {
                         going = false
@@ -10369,9 +10380,12 @@ pub class Regex {
                     slot = xs[pc]
                     if slot % 2 == 0 {
                         Set(2 * names.Count + slot / 2, at, mut slots, mut stack)
-                    } else {
+                    } else if ys[pc] == 0 {
                         Set(slot - 1, slots[2 * names.Count + slot / 2], mut slots, mut stack)
                         Set(slot, at, mut slots, mut stack)
+                    } else {
+                        Set(slot - 1, at, mut slots, mut stack)
+                        Set(slot, slots[2 * names.Count + slot / 2], mut slots, mut stack)
                     }
 
                     pc = pc + 1
@@ -10381,8 +10395,14 @@ pub class Regex {
                     } else {
                         going = false
                     }
-                } else if op == 7 {
-                    to = Same(b, xs[pc], ys[pc] == 1, at, slots)
+                } else if op == 7 || op == 14 {
+                    mut to = -1
+                    if op == 7 {
+                        to = Same(b, xs[pc], ys[pc] == 1, at, slots)
+                    } else {
+                        to = Before(b, xs[pc], ys[pc] == 1, at, slots)
+                    }
+
                     if to < 0 {
                         going = false
                     } else {
@@ -10397,7 +10417,7 @@ pub class Regex {
                     }
                 } else {
                     saved = RegexHead(slots, marked)
-                    to = Run(b, pc + 1, at, -1, mut slots, mut stack)
+                    to = Run(b, pc + 1, at, mut slots, mut stack)
                     if to < 0 {
                         going = false
                     } else {
@@ -10431,29 +10451,14 @@ pub class Regex {
         }
     }
 
-    // Whether the look-around at state `pc` holds at `at`: `(?=` and `(?!` from `at` on, `(?<=` and `(?<!` from a start before
-    // `at` to `at` itself, the nearest start first, as .NET takes a look-behind of any length (G2). A positive one that holds keeps
-    // the groups its way took, with frames that give them back when the search comes back past it; a negative one keeps none.
+    // Whether the look-around at state `pc` holds at `at`: `(?=` and `(?!` read from `at` on, `(?<=` and `(?<!` from `at` back,
+    // their content from right to left as .NET's `RegexOptions.RightToLeft` reads a look-behind of any length (G2). A positive
+    // one that holds keeps the groups its way took, with frames that give them back when the search comes back past it; a
+    // negative one keeps none.
     bool Around(Bytes b, int pc, int at, mut List<int> slots, mut List<int> stack) {
         kind = xs[pc]
         saved = RegexHead(slots, 3 * names.Count)
-        mut to = -1
-        if kind < 2 {
-            to = Run(b, pc + 1, at, -1, mut slots, mut stack)
-        } else {
-            mut start = at
-            while true {
-                to = Run(b, pc + 1, start, at, mut slots, mut stack)
-                if to >= 0 || start == 0 {
-                    break
-                }
-
-                start = start - 1
-                while start > 0 && (int(b[start]) & 192) == 128 {
-                    start = start - 1
-                }
-            }
-        }
+        to = Run(b, pc + 1, at, mut slots, mut stack)
 
         if kind == 0 || kind == 2 {
             if to < 0 {
@@ -10509,6 +10514,47 @@ pub class Regex {
 
                 i = i + 1
                 j = j + 1
+            }
+        }
+
+        return j
+    }
+
+    // Where the text of group `group` starts when it is read again from right to left, ending at `at`, as a look-behind's content
+    // reads it (G2): byte by byte, or under `(?i)` character by character from the last by the simple case folding (G4); -1 where
+    // it is not there, and where the group has no text, as `Same` gives.
+    int Before(Bytes b, int group, bool folded, int at, List<int> slots) {
+        start = slots[2 * group]
+        end = slots[2 * group + 1]
+        if start < 0 || end < 0 {
+            return -1
+        }
+
+        mut i = end
+        mut j = at
+        while i > start {
+            if j <= 0 {
+                return -1
+            }
+
+            if folded {
+                ci = RegexBack(b, i)
+                cj = RegexBack(b, j)
+                c = RegexDecode(b, ci)
+                d = RegexDecode(b, cj)
+                if c != d && !Folds(c, d) {
+                    return -1
+                }
+
+                i = ci
+                j = cj
+            } else {
+                if b[i - 1] != b[j - 1] {
+                    return -1
+                }
+
+                i = i - 1
+                j = j - 1
             }
         }
 
@@ -11174,7 +11220,9 @@ class RegexDfa {
 // 7 a greedy and 8 a lazy repetition (`na` its node, `nb` the least count and `nc` the most, -1 for no most). The automaton's
 // states: 0 the match, 1 a character (`xs` its code point), 2 a class (`xs` the first of its ranges, `ys` their count), 3 a split
 // (`xs` the state tried first, `ys` the other), 4 a jump (`xs`), 5 a save of the position into slot `xs`, and 6 an assertion
-// (`xs` its kind).
+// (`xs` its kind). In a look-behind's content, which the backtracking engine reads from right to left (G2), 12 a character, 13
+// a class and 14 a backreference stand for 1, 2 and 7 and read backward, and a save into an odd slot with `ys` 1 closes its
+// group at the group's left end.
 class RegexParser {
     internal mut string text = ""
     internal mut Bytes p = Bytes()
@@ -11271,6 +11319,8 @@ class RegexParser {
     internal mut int escStart = 0
     internal mut int escRef = 0
     internal mut string escName = ""
+    // whether the states `Emit` builds are a look-behind's content, which reads the text from right to left (G2)
+    internal mut bool backward = false
 
     // The automaton of `pattern`, or the error in `failKind` and `failAt`. Its size is counted from the tree before it is built,
     // each state 16 bytes and each number of a range 4, and one above 10 MiB, the default of Rust's `size_limit`, is `TooBig`
@@ -13325,7 +13375,10 @@ class RegexParser {
     // a split before each but the last, which jumps past the rest; a look-around and an atomic group a state before their content,
     // which names the state past them, and one after it; `x*` a split, `x` and a jump back; `x{n,}` n - 1 copies of `x`,
     // then `x` and a split back; `x{n,m}` n copies, then m - n of a split and `x`, each split past all of them. A greedy split tries
-    // `x` first, a lazy one the way past it.
+    // `x` first, a lazy one the way past it. A look-behind's content is built to be read from right to left, as .NET's
+    // `RegexOptions.RightToLeft` builds it: a sequence's items last first, a character, a class and a backreference by the
+    // states that read backward, and a group's positions set at its left end; an alternation keeps its order, a repetition its
+    // greed, a look-ahead inside it reads forward again, and an atomic group keeps the direction it stands in (G2).
     internal void Emit(int node) {
         k = kind[node]
         if k == 0 {
@@ -13333,12 +13386,12 @@ class RegexParser {
         }
 
         if k == 1 {
-            State(1, na[node], 0)
+            State(Read(1), na[node], 0)
             return
         }
 
         if k == 2 {
-            State(2, na[node], nb[node])
+            State(Read(2), na[node], nb[node])
             return
         }
 
@@ -13348,7 +13401,7 @@ class RegexParser {
         }
 
         if k == 9 {
-            State(7, na[node], nb[node])
+            State(Read(7), na[node], nb[node])
             return
         }
 
@@ -13359,22 +13412,38 @@ class RegexParser {
             }
 
             opened = State(op, na[node], 0)
+            outer = backward
+            if k == 10 {
+                backward = na[node] >= 2
+            }
+
             Emit(nb[node])
+            backward = outer
             State(op + 1, 0, 0)
             ys[opened] = ops.Count
             return
         }
 
         if k == 4 {
+            mut close = 0
+            if backward {
+                close = 1
+            }
+
             State(5, 2 * na[node], 0)
             Emit(nb[node])
-            State(5, 2 * na[node] + 1, 0)
+            State(5, 2 * na[node] + 1, close)
             return
         }
 
         if k == 5 {
             for i in 0..<nb[node] {
-                Emit(kids[na[node] + i])
+                mut j = i
+                if backward {
+                    j = nb[node] - 1 - i
+                }
+
+                Emit(kids[na[node] + j])
             }
 
             return
@@ -13439,6 +13508,20 @@ class RegexParser {
         for s in splits {
             Branch(s, s + 1, end, greedy)
         }
+    }
+
+    // The state that reads what `op` reads, a character (1), a class (2) or a group's text again (7), or where `backward` the one
+    // that reads it from right to left (12, 13 and 14).
+    internal int Read(int op) {
+        if !backward {
+            return op
+        }
+
+        if op == 7 {
+            return 14
+        }
+
+        return op + 11
     }
 
     internal void Branch(int split, int body, int end, bool greedy) {
@@ -13860,6 +13943,16 @@ string RegexJoined(string s, string replacement, List<int> parts, long total) {
     }
 
     return made
+}
+
+// The start of the UTF-8 sequence that ends at `at`, which is above 0.
+int RegexBack(Bytes b, int at) {
+    mut start = at - 1
+    while start > 0 && (int(b[start]) & 192) == 128 {
+        start = start - 1
+    }
+
+    return start
 }
 
 // The length of the UTF-8 sequence its first byte starts.
