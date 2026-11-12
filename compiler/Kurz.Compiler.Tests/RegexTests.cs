@@ -214,12 +214,13 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G2: the backtracking engine's own constructs, a backreference by number and by name, the four look-arounds, a look-behind of
     /// any length among them, and the atomic group, match as .NET's do, held to .NET over written rows and 300 generated patterns of
-    /// them, 18 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
+    /// them, 19 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
     /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
-    /// A look-behind reads its content from right to left, as .NET's does: a sequence last first, a repetition greedy to the left,
-    /// an alternation in its order, a backreference ending at the position, a look-ahead inside it forward again and an atomic
-    /// group in the direction it stands in, so that
-    /// <c>(?&lt;=(a+))b</c> over <c>aaab</c> gives group 1 <c>aaa</c> from 0 and <c>(?&lt;=\1(a))b</c> matches <c>aab</c>; written
+    /// A look-behind reads its content from right to left, as .NET's does: a sequence last first, a repetition taken toward the
+    /// text's start with its greed or laziness, an alternation in its order, a backreference ending at the position, a look-ahead
+    /// inside it forward again and an atomic group in the direction it stands in, so that <c>(?&lt;=(a+))b</c> over <c>aaab</c>
+    /// gives group 1 <c>aaa</c> from 0 and <c>(?&lt;=\1(a))b</c> matches <c>aab</c>; the match itself follows that reading, so that
+    /// <c>(?&lt;=(?&gt;a+)a)b</c> matches <c>aaab</c> and <c>(?&lt;=(a+))b\1</c> matches <c>baaa</c> in <c>aaabaaa</c>; written
     /// rows and generated ones put groups inside it. The generator puts no repetition of what can match nothing. Under
     /// <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference deciding
     /// (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and an empty look-behind holds at its position
@@ -237,7 +238,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             @"(a)(?i)\1", @"(?i)(a)(?-i)\1", @"(?<=)b", @"(?<=a*)b",
             @"(?<=(a+))b", @"(?<=(a+?))b", @"(?<=(a*)(a*))b", @"(?<=(a|aa))b", @"(?<=(a)\1)b", @"(?<=\1(a))b", @"(?<=(?i)\1(a))b",
             @"(?<=(?=(a))a)b", @"(?<=(?<=(a))b)c", @"(?<=(?>a+))b", @"(?<=(ab|a)+)c", @"(?<=^(a+))b", @"(?<=(\w+) )x",
-            @"(?<=(?>(a+)))b", @"(?<=(?>(a+))a)b",
+            @"(?<=(?>(a+)))b", @"(?<=(?>(a+))a)b", @"(?<=(?>a+)a)b", @"(?<=(a+))b\1", @"(?<=(?>a|ab)c)",
         ];
         string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
             "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))", "(?<=(a+))", "(?<=(a|ab)b?)",
@@ -259,7 +260,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.All(patterns, p => Assert.Null(RegexPattern.Check(p.Item1, backtracking: true)));
         Assert.All(patterns.Take(written.Length), p => Assert.NotNull(RegexPattern.Check(p.Item1))); // the linear engine takes none of the written ones
         string[] fixedTexts = ["", "a", "ab", "aba", "aab b", "say hello hello there", "5 m, 12 kg", "aA", "abab", "abc", "aaab", "Aab", "abac",
-            "hi there x"];
+            "hi there x", "aaabaaa"];
         var texts = fixedTexts.Concat(Enumerable.Range(0, 4).Select(_ => new string(Enumerable.Range(0, random.Next(8)).Select(_ => "aab "[random.Next(4)]).ToArray()))).ToList();
         var expected = new List<string>();
         foreach (var (p, groups) in patterns)
