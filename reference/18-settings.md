@@ -47,7 +47,8 @@ both files, and not the path of `settings.kz` itself)*
 
 A file is a call of the type's constructor with named arguments that gives the fields its layer
 sets and no others, a nested `data` field by its own constructor's call,
-`AppSettings(Root: "/data", Address: "0.0.0.0:9000")`.
+`AppSettings(Root: "/data", Address: "0.0.0.0:9000")`. A field without a default may be left out of a
+file for another layer to set: the layers together are what B7 checks.
 *(assumed, §12: the defaults of the round of 2026-11-11)*
 
 No case: as B1's.
@@ -58,7 +59,9 @@ A variable names a setting by each name of its path in upper snake case, `__` be
 after the prefix the declaration names, and with no prefix where it names none, as Rust's `config`
 and `figment` read variables: under `settings("APP_") data AppSettings(...)`, `APP_ACCESS_KEY` sets
 `AccessKey` and `APP_LOGGING__ORDERS` sets `Orders` in `Logging` (§12, the owner, 2026-11-11,
-Q3 (b)); where `Logging` is a map, the key arrives as `ORDERS`, the cost the option named. A key of a map
+Q3 (b)); where `Logging` is a map, the key arrives as `ORDERS`, the cost the option named. Where
+the declaration names no prefix, a field named `Path`, `Home`, `User` or `Lang` reads the system's own
+variable, the cost the question named for the forms without a prefix. A key of a map
 read from a variable is matched without case. *(assumed, §12: the words of the question's lean)* A list's item is a variable of its
 own, `NAME__0`, `NAME__1`. *(assumed, §12: the defaults of the round of 2026-11-11)*
 
@@ -68,8 +71,9 @@ No case: as B1's.
 
 An option names a setting by each name of its path in kebab case, `.` between the parts, its value
 the next argument or after `=`: `--access-key AK`, `--access-key=AK`, `--logging.orders warning`
-(§12, the owner, 2026-11-11, Q4 (b)). `args` keeps every argument (S13), and an argument that names
-no setting is left to the program, as ASP.NET leaves it. *(assumed, §12: the question's words for
+(§12, the owner, 2026-11-11, Q4 (b)). `args` keeps every argument (S13), a `secret` field's value given
+there among them, as a plain `string`, and an argument that names no setting is left to the program,
+as ASP.NET leaves it. *(assumed, §12: the question's words for
 either form)* A list's item is an option repeated, `--hosts a --hosts b`. *(assumed, §12: the
 defaults of the round of 2026-11-11)*
 
@@ -104,7 +108,8 @@ of 2026-11-11 (§14):
   and figment's `Provider` are, giving pairs of a setting's path and its text, read as a variable's
   value is (B4), with the place a refusal names (B7), and the declaration names the sources and
   where each stands among the four layers.
-- (b) A function of the program that the runtime calls at the start with the value of the four
-  layers, and whose result is the settings, checked by the type's constraints.
+- (b) A function of the program that the runtime calls at the start with the pairs of a setting's
+  path and its text that the four layers gave, and whose pairs the runtime reads into the settings,
+  checked as B7 says, the type's constraints among the checks.
 
 Lean: (a), as both ASP.NET and figment let a program add a provider.
