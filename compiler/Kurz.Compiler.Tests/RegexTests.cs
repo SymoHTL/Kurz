@@ -296,9 +296,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
     /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
-    /// at its <c>\</c>, and before a construct the parse refuses after it, where the parse read no such group before that construct
-    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), while the parse's own error
-    /// stands where the group was read (<c>\1(a</c>) or the backreference comes after it (<c>a)\2</c>); one inside a class is
+    /// at its <c>\</c>, and before a construct the parse refuses, where the parse read no such group before it stopped
+    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), also where that construct is
+    /// a group the pattern's end leaves open before the backreference (<c>(\9</c>, <c>(a\3</c>, <c>(a)(\3</c> and <c>(a\2</c>, which
+    /// .NET 10 reports at the backreference), while the parse's own error stands where the group was read (<c>\1(a</c>) or the
+    /// backreference comes after it (<c>a)\2</c>); one inside a class is
     /// <c>Unsupported</c> at its <c>\</c>; <c>\k</c> without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every
     /// digit after the <c>\</c>, <c>\0</c> <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
     /// </summary>
@@ -309,7 +311,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         [
             (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 0"),
             (@"\9(", "syntax at 0"), (@"\2[\1]", "syntax at 0"), (@"\2(a)\q(b)", "syntax at 0"), (@"\1(a", "syntax at 2"),
-            (@"a)\2", "syntax at 1"),
+            (@"a)\2", "syntax at 1"), (@"(\9", "syntax at 1"), (@"(a\3", "syntax at 2"), (@"(a)(\3", "syntax at 4"), (@"(a\2", "syntax at 2"),
             (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
             (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
         ];
@@ -332,7 +334,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G4 and the default of question 1 of issue 176, comment 6812529825: the classes of <c>\p</c> are in a program whose patterns
     /// can need them, one made when the program runs or a literal that holds <c>\p</c> or <c>\P</c>, and the table of a program whose
-    /// patterns are all literals without them counts none of them; a program that runs a <c>\p</c> reads them.
+    /// patterns are all literals without them counts none of them; a program carries one table, whichever its patterns are, and a
+    /// program that runs a <c>\p</c> reads them.
     /// </summary>
     [Fact]
     public void The_classes_of_p_are_carried_by_a_program_whose_patterns_can_need_them()
@@ -348,11 +351,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.DoesNotContain("regex.tables.p", none, StringComparison.Ordinal);
         Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 0, ", none);
         var literal = Ir("print(Regex.New(r\"\\p{Greek}\").IsMatch(\"a\"))\nprint(Regex.New(\"b\").IsMatch(\"b\"))\n");
-        Assert.Matches(@"@""regex\.tables\.p"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", literal);
-        Assert.Contains("@\"regex.tables\" =", literal, StringComparison.Ordinal);
-        var made = Ir("s = \"a\"\nmatch Regex.New(s) {\n    Regex re => print(re.IsMatch(\"a\"))\n    RegexError e => print(e)\n}\n");
-        Assert.Contains("@\"regex.tables.p\" =", made, StringComparison.Ordinal);
-        Assert.DoesNotContain("@\"regex.tables\" =", made, StringComparison.Ordinal);
+        Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", literal);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(literal, @"@""regex\.tables[^""]*"" ="));
+        var made = Ir("s = \"a\"\nmatch Regex.New(s) {\n    Regex re => print(re.IsMatch(\"a\"))\n    RegexError e => print(e)\n}\nprint(Regex.New(\"b\").IsMatch(\"b\"))\n");
+        Assert.Matches(@"@""regex\.tables"" = private unnamed_addr constant \[\d+ x i32\] \[(i32 \d+, ){6}i32 [1-9]\d*, ", made);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(made, @"@""regex\.tables[^""]*"" ="));
         var program = "s = r\"\\p{Greek}+\"\nmatch Regex.New(s) {\n    Regex re => print(re.Match(\"ab αβ\")?.Value)\n    RegexError e => print(e)\n}\n"
             + "print(Regex.New(r\"\\P{L}+\").Match(\"ab12\")?.Value)\n";
         var built = Builder.Compile(SourceText.FromString("program.kz", program), [], toolchain.Runtime, testBuild: true);
@@ -528,8 +531,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// around its <c>-</c> under <c>(?x)</c>; a counted repetition with white space inside its braces; and a repetition of what matches
     /// no character, taken at most once; under <c>(?mR)</c> a line's start and end at <c>\r</c>, <c>\n</c> and <c>\r\n</c>, and
     /// under <c>(?R)</c> a <c>.</c> that takes neither; under <c>(?-u)</c> ASCII's <c>\w</c>, <c>\d</c>, <c>\s</c>, word
-    /// boundaries and folding, and a character above ASCII matched as its UTF-8; and the classes of <c>\p</c> and <c>\P</c>, on both
-    /// engines.
+    /// boundaries and folding, and a character above ASCII matched as its UTF-8; and the classes of <c>\p</c> and <c>\P</c>, folded
+    /// under <c>(?i)</c> before <c>\P</c> or <c>!=</c> negates one, so that <c>(?i)\P{Lu}</c> takes no letter of either case where
+    /// <c>\P{Lu}</c> takes the lower one, on both engines.
     /// </summary>
     [Fact]
     public void The_constructs_net_reads_otherwise_match_as_rust_matches_them()
@@ -595,6 +599,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             (@"\p{wb=Numeric}+", "a12", "1-3"),
             ("(?i)[\\p{Ll}]", "Kk\u212A", "0-1 1-2 2-5"),
             (@"\p{Lt}", "ǅ", "0-2"),
+            (@"(?i)\P{Lu}", "aB1", "2-3"), (@"(?i)\p{gc!=Lu}", "aB1", "2-3"), (@"\P{Lu}", "aB1", "0-1 2-3"),
         ];
         // the rows of the classes of \p once more on the backtracking engine, which reads the same classes (issue 176, comment
         // 6812529825, Q4, the default taken)
@@ -607,7 +612,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var ((pattern, text, _), flag) = runs[i];
             program.Append($"mut line{i} = \"\"\nfor m in Regex.New(\"{Escaped(pattern)}\"{flag}).Matches(\"{Escaped(text)}\") {{\n")
                 .Append($"    if line{i} != \"\" {{\n        line{i} = \"{{line{i}}} \"\n    }}\n\n")
-                .Append($"    line{i} = \"{{line{i}}}{{m.Index}}-{{m.Index + m.Length}}\"\n}}\n\nprint(\"<{{line{i}}}>\")\n");
+                .Append($"    line{i} = \"{{line{i}}}{{m.Index}}-{{m.Index + m.Length}}\"\n}}\n\n")
+                .Append($"print(\"<{{line{i}}}>{{Regex.New(\"{Escaped(pattern)}\"{flag}).IsMatch(\"{Escaped(text)}\")}}\")\n");
         }
 
         foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
@@ -616,8 +622,73 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
             var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-rust" + suffix));
             Assert.Equal((0, ""), (code, error));
-            Assert.Equal(runs.Select(r => $"<{r.r.Matches}>"), output);
+            // `IsMatch` is the lazy DFA's answer alone on the linear engine, and Rust's answer is whether a match was found
+            Assert.Equal(runs.Select(r => $"<{r.r.Matches}>{(r.r.Matches.Length > 0 ? "true" : "false")}"), output);
         }
+    }
+
+    /// <summary>
+    /// G2: the lazy DFA's cache of 2 MiB fills and is emptied, and the searches give the Pike VM's answers all the same:
+    /// <c>[ab]*a[ab]{15}c</c> over random <c>a</c>s and <c>b</c>s makes a new DFA state at almost every character, one for each way
+    /// the last 16 characters can read, each of 4 bytes for every column (a class for <c>a</c>, <c>b</c>, <c>c</c> and every other
+    /// character, and the end of the text) and every member, and 32 of its own, so that the cache holds some 24,000 of them, which
+    /// some 30,000 characters fill. The program runs again with a standard library that writes each emptying and each move to the
+    /// Pike VM to the error stream, which holds the path of each search: each of its three searches of the shorter two texts, of
+    /// 60,000 characters, empties the cache twice, the DFA then giving its answer from the states made after the second emptying,
+    /// and each of the longer three, of 200,000, three times, where at the fourth the searches had read fewer than 10 bytes for
+    /// each state and the DFA gave the search up to the Pike VM. A text of each length ends in <c>c</c>, with an
+    /// <c>a</c> 16 characters before it in one and a <c>b</c> in the other, so that one has the one match and the other none;
+    /// <c>IsMatch</c>, <c>Match</c> and <c>Matches</c> are held to the answer of .NET's non-backtracking engine for each, which its
+    /// backtracking one would take time quadratic in the text's length to give.
+    /// </summary>
+    [Fact]
+    public void The_lazy_dfa_gives_the_pike_vms_answers_after_its_cache_is_emptied()
+    {
+        var random = new Random(Seed + 11);
+        var body = new string(Enumerable.Range(0, 200000).Select(_ => "ab"[random.Next(2)]).ToArray());
+        var shorter = body[..60000];
+        string[] texts = [body + "a" + new string('b', 15) + "c", body + "b" + new string('b', 15) + "c", body,
+            shorter + "a" + new string('b', 15) + "c", shorter + "b" + new string('b', 15) + "c"];
+        const string pattern = "[ab]*a[ab]{15}c";
+        var dotnet = new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+        var expected = texts.Select(t => dotnet.Match(t) is { Success: true } m ? $"true {m.Index},{m.Length} 1" : "false - 0").ToList();
+        Assert.Equal(["true 0,200017 1", "false - 0", "false - 0", "true 0,60017 1", "false - 0"], expected);
+        var program = new StringBuilder("texts = [\n");
+        foreach (var t in texts)
+        {
+            program.Append("    \"").Append(t).Append("\",\n");
+        }
+
+        program.Append($$"""
+            ]
+            re = Regex.New(r"{{pattern}}")
+            for t in texts {
+                first = re.Match(t)
+                if first != null {
+                    print("{re.IsMatch(t)} {first.Index},{first.Length} {re.Matches(t).Count}")
+                } else {
+                    print("{re.IsMatch(t)} - {re.Matches(t).Count}")
+                }
+            }
+
+            """);
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], toolchain.Runtime, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-dfa-cache"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(expected, output);
+        var told = ListTests.Edited(
+            ("std/std.kz", "            off = true\n            return false\n", "            eprint(\"off\")\n            off = true\n            return false\n"),
+            ("std/std.kz", "        clears = clears + 1\n", "        clears = clears + 1\n        eprint(\"emptied\")\n"));
+        var watched = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], told, testBuild: true);
+        Assert.True(watched.Program is not null, string.Join("; ", watched.Diagnostics.Sorted));
+        var (toldCode, toldOutput, toldError) = Toolchain.Run(toolchain.Build(watched.Program, "regex-dfa-cache-told"));
+        Assert.Equal(0, toldCode);
+        Assert.Equal(expected, toldOutput);
+        // `Match`, `IsMatch` and `Matches` for each text, each with a cache of its own (Q1)
+        string[] given = ["emptied", "emptied", "emptied", "off"], answered = ["emptied", "emptied"];
+        var path = texts.SelectMany(t => Enumerable.Repeat(t.Length > 100000 ? given : answered, 3).SelectMany(x => x));
+        Assert.Equal(path, toldError.Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>The line the program prints for a pattern and a text: .NET's matches walked as Rust's <c>find_iter</c>, then <c>IsMatch</c> and the first match's position.</summary>

@@ -9903,6 +9903,14 @@ pub class Regex {
     // compare by, empty where none does
     bool backtracking
     List<int> fold
+    // the lazy DFA's classes of characters (`RegexParser.Classes`): the first code point of each piece of the code points,
+    // ascending from 0, the class of each piece, the class of each ASCII character and the first code point of each class, all
+    // empty for the backtracking engine; and whether the automaton has an assertion
+    List<int> bounds
+    List<int> classes
+    List<int> ascii
+    List<int> firsts
+    bool looks
 
     Regex(string p, RegexParser parsed) {
         pattern = p
@@ -9915,6 +9923,12 @@ pub class Regex {
         wordCount = parsed.wordCount
         backtracking = parsed.backtracking
         fold = parsed.RefFold()
+        looks = parsed.Looks()
+        tested = parsed.Tests(looks)
+        bounds = parsed.Bounds(tested, looks)
+        classes = parsed.Classes(bounds, tested, looks)
+        ascii = RegexAscii(bounds, classes)
+        firsts = RegexFirsts(bounds, classes)
     }
 
     // The pattern built, or the error of the first construct the parse refuses, of an automaton above the bound (G2, G3).
@@ -10088,10 +10102,29 @@ pub class Regex {
             return Backtrack(b, from, mut found, count)
         }
 
+        // the lazy DFA first, as Rust's meta engine runs its hybrid DFA before the `PikeVM`: where it finds no match left, there
+        // is none; where it finds one, `IsMatch` has its answer and a search for the groups goes on in the Pike VM from the
+        // position before which the DFA saw no match start, as Rust's runs it over the match's bounds alone (G2)
+        if t.dfa == null {
+            t.dfa = Lazy()
+        }
+
+        ahead = Ahead(b, from, t.dfa)
+        if ahead == 0 {
+            return false
+        }
+
+        if ahead > 0 && count == 0 {
+            return true
+        }
+
         n = b.Count
         t.Clear(0)
         mut matched = false
         mut at = from
+        if ahead > 0 {
+            at = ahead - 1
+        }
         while true {
             if !matched {
                 for k in 0..<count {
@@ -10553,6 +10586,223 @@ pub class Regex {
 
         return RegexWordLook(kind, before, after)
     }
+
+    // The lazy DFA of the automaton, with no state yet: a cache of a call's searches over the pattern's classes of characters.
+    RegexDfa Lazy() {
+        return RegexDfa(ops.Count, bounds, classes, ascii, firsts, looks)
+    }
+
+    // Whether a match is left from `from` on, by the lazy DFA `d`: where one is, as soon as a match ends, 1 + the last position
+    // up to there at which the DFA's state held no thread of an earlier start, before which no match starts, since every match
+    // that started before it would have ended there; 0 where none is, at the end of the text; -1 where the DFA gave the search up
+    // (`RegexDfa.Empty`).
+    int Ahead(Bytes b, int from, RegexDfa d) {
+        if d.off {
+            return -1
+        }
+
+        n = b.Count
+        mut s = d.Intern(Context(d, b, from), List<int>())
+        if s < 0 {
+            return -1
+        }
+
+        mut at = from
+        mut start = from
+        while at < n {
+            if d.info[4 * s + 2] == 0 {
+                start = at
+            }
+
+            k = d.ClassOf(RegexDecode(b, at))
+            mut e = d.table[s * d.width + k]
+            if e < 0 {
+                e = Step(d, s, k)
+                if e < 0 {
+                    return -1
+                }
+            }
+
+            if e % 2 == 1 {
+                return start + 1
+            }
+
+            width = RegexLength(b[at])
+            d.read = d.read + long(width)
+            s = e / 2
+            at = at + width
+        }
+
+        if d.info[4 * s + 2] == 0 {
+            start = n
+        }
+
+        mut end = d.table[s * d.width + d.width - 1]
+        if end < 0 {
+            end = Step(d, s, d.width - 1)
+        }
+
+        if end == 1 {
+            return start + 1
+        }
+
+        return end
+    }
+
+    // The transition of the DFA's state `s` on the class `k`, or on the end of the text where `k` is its last column, made as
+    // Rust's lazy DFA makes one: every state the members and a new thread at the automaton's start reach without a character,
+    // each assertion read from the character before, which the state holds, and from the one of the class; a match among them
+    // ends before the character, and the states after it are those whose character or class takes it. Kept in the state's row,
+    // but where the cache was emptied for the next state; 2 * the next state, + 1 where a match ends, or for the end of the text
+    // 1 or 0; -1 where the DFA gives the search up.
+    int Step(RegexDfa d, int s, int k) {
+        before = d.info[4 * s]
+        mut next = -1
+        if k < d.width - 1 {
+            next = d.firsts[k]
+        }
+
+        if d.generation >= 1073741824 {
+            for i in 0..<d.seen.Count {
+                d.seen[i] = 0
+            }
+
+            d.generation = 0
+        }
+
+        d.generation = d.generation + 1
+        d.stack.Clear()
+        d.next.Clear()
+        d.stack.Add(0)
+        for i in 0..<d.info[4 * s + 2] {
+            d.stack.Add(d.members[d.info[4 * s + 1] + i])
+        }
+
+        mut matched = 0
+        while d.stack.Count > 0 {
+            mut pc = d.stack[d.stack.Count - 1]
+            d.stack.RemoveAt(d.stack.Count - 1)
+            while d.seen[pc] != d.generation {
+                d.seen[pc] = d.generation
+                op = ops[pc]
+                if op == 4 {
+                    pc = xs[pc]
+                } else if op == 3 {
+                    d.stack.Add(ys[pc])
+                    pc = xs[pc]
+                } else if op == 5 {
+                    pc = pc + 1
+                } else if op == 6 && LooksAt(xs[pc], before, next) {
+                    pc = pc + 1
+                } else {
+                    if op == 0 {
+                        matched = 1
+                    } else if next >= 0 && (op == 1 && next == xs[pc] || op == 2 && RegexIn(ranges, xs[pc], ys[pc], next)) {
+                        d.next.Add(pc + 1)
+                    }
+
+                    break
+                }
+            }
+        }
+
+        if next < 0 {
+            d.table[s * d.width + k] = matched
+            return matched
+        }
+
+        d.next.Sort()
+        mut context = 0
+        if d.looks {
+            context = Bits(next)
+        }
+
+        clears = d.clears
+        to = d.Intern(context, d.next)
+        if to < 0 {
+            return -1
+        }
+
+        e = 2 * to + matched
+        if d.clears == clears {
+            d.table[s * d.width + k] = e
+        }
+
+        return e
+    }
+
+    // What a state at `at` holds of the character before it: -1 at the text's start, else its `Bits`; 0 for every state of an
+    // automaton with no assertion.
+    int Context(RegexDfa d, Bytes b, int at) {
+        if !d.looks {
+            return 0
+        }
+
+        if at == 0 {
+            return -1
+        }
+
+        mut start = at - 1
+        while start > 0 && (int(b[start]) & 192) == 128 {
+            start = start - 1
+        }
+
+        return Bits(RegexDecode(b, start))
+    }
+
+    // What the character `c` is to the assertions: 1 `\n`, 2 `\r`, 4 a word's character of ASCII, 8 a word's character of `\w`.
+    int Bits(int c) {
+        mut bits = 0
+        if c == 10 {
+            bits = 1
+        } else if c == 13 {
+            bits = 2
+        }
+
+        if RegexAsciiWord(c) {
+            bits = bits + 4
+        }
+
+        if wordCount > 0 && RegexIn(ranges, wordAt, wordCount, c) {
+            bits = bits + 8
+        }
+
+        return bits
+    }
+
+    // `Looks` for the DFA: whether the assertion `kind` holds between the character `before` stands for (`Context`) and the code
+    // point `next`, -1 at the end of the text.
+    bool LooksAt(int kind, int before, int next) {
+        if kind == 10 {
+            return before < 0 || before % 2 == 1 || (before / 2 % 2 == 1 && next != 10)
+        }
+
+        if kind == 11 {
+            return next < 0 || next == 13 || (next == 10 && (before < 0 || before / 2 % 2 == 0))
+        }
+
+        if kind >= 12 {
+            return RegexWordLook(kind - 8, before >= 0 && before / 4 % 2 == 1, next >= 0 && RegexAsciiWord(next))
+        }
+
+        if kind == 0 {
+            return before < 0
+        }
+
+        if kind == 1 {
+            return next < 0
+        }
+
+        if kind == 2 {
+            return before < 0 || before % 2 == 1
+        }
+
+        if kind == 3 {
+            return next < 0 || next == 10
+        }
+
+        return RegexWordLook(kind, before >= 0 && before / 8 % 2 == 1, next >= 0 && RegexIn(ranges, wordAt, wordCount, next))
+    }
 }
 
 // Whether the word's assertion `kind`, 4 to 9 of `Regex.Looks`, holds between a character that is a word's or not and another.
@@ -10620,6 +10870,8 @@ class RegexThreads {
     internal mut List<int> size = [0, 0]
     internal mut List<int> work = List<int>()
     internal mut List<int> stack = List<int>()
+    // the lazy DFA of the call's searches, made at its first search (`Regex.Lazy`)
+    internal mut RegexDfa? dfa = null
 
     pub RegexThreads(int states, int count) {
         for i in 0..<states {
@@ -10690,6 +10942,227 @@ class RegexThreads {
         n = size[0]
         size[0] = size[1]
         size[1] = n
+    }
+}
+
+// The lazy DFA of the linear engine (G2), as Rust's `regex-automata` builds its hybrid DFA over the automaton the Pike VM runs: a
+// state is a set of the automaton's states and what the character before its position is to the assertions, each transition is
+// made once, on the first character of its class that needs it (`Regex.Step`), and read from a table after that. It is made for
+// one call of `IsMatch`, `Match`, `Matches`, `Replace` or `Split`, beside the automaton and outside its bound. Its states are
+// bounded by 2 MiB, Rust's `dfa_size_limit`, each counted as 4 bytes for every column of its row and for every member and 32
+// bytes of its own, and it is emptied when the next state does not fit; it gives the search to the Pike VM where it was emptied
+// three times and read fewer than 10 bytes for each of its states since, as Rust's meta engine sets `minimum_cache_clear_count`
+// and `minimum_bytes_per_state`; and it is not used where the cache cannot hold two states of every member of the automaton beside
+// its marks, as Rust's `minimum_cache_capacity` asks room for two beside its three sentinel states.
+// The class of each ASCII character, of the pieces that start at `bounds` and their `classes`; empty where there are none.
+List<int> RegexAscii(List<int> bounds, List<int> classes) {
+    mut ascii = List<int>()
+    if bounds.Count == 0 {
+        return ascii
+    }
+
+    mut k = 0
+    for c in 0..<128 {
+        while k + 1 < bounds.Count && bounds[k + 1] <= c {
+            k = k + 1
+        }
+
+        ascii.Add(classes[k])
+    }
+
+    return ascii
+}
+
+// The first code point of each class, of the pieces that start at `bounds` and their `classes`, which are numbered in the order
+// of their first piece.
+List<int> RegexFirsts(List<int> bounds, List<int> classes) {
+    mut firsts = List<int>()
+    for i in 0..<bounds.Count {
+        if classes[i] == firsts.Count {
+            firsts.Add(bounds[i])
+        }
+    }
+
+    return firsts
+}
+
+// The piece of the code point `c` among the pieces that start at `bounds`: the last that starts at `c` or before.
+int RegexPiece(List<int> bounds, int c) {
+    mut lo = 0
+    mut hi = bounds.Count - 1
+    while lo < hi {
+        m = (lo + hi + 1) / 2
+        if bounds[m] <= c {
+            lo = m
+        } else {
+            hi = m - 1
+        }
+    }
+
+    return lo
+}
+
+class RegexDfa {
+    // the pattern's classes of characters (`Regex.bounds`, `Regex.classes`, `Regex.ascii` and `Regex.firsts`)
+    internal mut List<int> bounds = List<int>()
+    internal mut List<int> classes = List<int>()
+    internal mut List<int> ascii = List<int>()
+    internal mut List<int> firsts = List<int>()
+    // the columns of a row, one for each class and one for the end of the text
+    internal mut int width = 0
+    // whether the automaton has an assertion, so that a state holds what the character before it is
+    internal mut bool looks = false
+    // four numbers for each state: its context (`Regex.Context`), the first of its members in `members`, their count and its
+    // hash
+    internal mut List<int> info = List<int>()
+    internal mut List<int> members = List<int>()
+    // each state's row: per column 2 * the next state, + 1 where a match ends before the character (for the end of the text 1 or
+    // 0), -1 where it is not made yet
+    internal mut List<int> table = List<int>()
+    // the states by their hash, open addressing: a state + 1, 0 where none is
+    internal mut List<int> slots = List<int>()
+    // the bytes the states take, the times the cache was emptied, the bytes the searches read since the last time, and whether
+    // the DFA gave the searches up
+    internal mut int used = 0
+    internal mut int clears = 0
+    internal mut long read = 0
+    internal mut bool off = false
+    // the marks of the states a transition reaches, by the number of the transition, and its stack and its next states
+    internal mut List<int> seen = List<int>()
+    internal mut int generation = 0
+    internal mut List<int> stack = List<int>()
+    internal mut List<int> next = List<int>()
+
+    // The cache of an automaton of `states` states over its classes of characters.
+    pub RegexDfa(int states, List<int> starts, List<int> pieces, List<int> low, List<int> leads, bool assertions) {
+        looks = assertions
+        bounds = starts
+        classes = pieces
+        ascii = low
+        firsts = leads
+        width = firsts.Count + 1
+        if 2 * (4 * (width + states) + 32) + 8 * states > 2097152 {
+            off = true
+        }
+
+        for i in 0..<states {
+            seen.Add(0)
+        }
+
+        for i in 0..<64 {
+            slots.Add(0)
+        }
+    }
+
+    // The class of the code point `c`: the class of its piece.
+    internal int ClassOf(int c) {
+        if c < 128 {
+            return ascii[c]
+        }
+
+        return classes[RegexPiece(bounds, c)]
+    }
+
+    // The state of the context `ctx` and the sorted states `set`, made where it is not there yet, after the cache is emptied
+    // where it does not fit; -1 where the DFA gives the search up.
+    internal int Intern(int ctx, List<int> set) {
+        mut h = long(ctx + 2)
+        for x in set {
+            h = (h * 131 + long(x)) % 1000000007
+        }
+
+        mut i = int(h % long(slots.Count))
+        while slots[i] != 0 {
+            s = slots[i] - 1
+            if info[4 * s + 3] == int(h) && Same(s, ctx, set) {
+                return s
+            }
+
+            i = (i + 1) % slots.Count
+        }
+
+        cost = 4 * (width + set.Count) + 32
+        if used + cost > 2097152 {
+            if !Empty() {
+                return -1
+            }
+
+            i = int(h % long(slots.Count))
+        }
+
+        s = info.Count / 4
+        info.Add(ctx)
+        info.Add(members.Count)
+        info.Add(set.Count)
+        info.Add(int(h))
+        members.AddRange(set)
+        for k in 0..<width {
+            table.Add(-1)
+        }
+
+        slots[i] = s + 1
+        used = used + cost
+        if 2 * (s + 1) > slots.Count {
+            Grow()
+        }
+
+        return s
+    }
+
+    // Whether the state `s` is the one of `ctx` and `set`.
+    internal bool Same(int s, int ctx, List<int> set) {
+        if info[4 * s] != ctx || info[4 * s + 2] != set.Count {
+            return false
+        }
+
+        at = info[4 * s + 1]
+        for i in 0..<set.Count {
+            if members[at + i] != set[i] {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    // The slots doubled, every state put in again.
+    internal void Grow() {
+        size = 2 * slots.Count
+        slots.Clear()
+        for i in 0..<size {
+            slots.Add(0)
+        }
+
+        for s in 0..<info.Count / 4 {
+            mut i = info[4 * s + 3] % size
+            while slots[i] != 0 {
+                i = (i + 1) % size
+            }
+
+            slots[i] = s + 1
+        }
+    }
+
+    // Empties the cache, as Rust's `try_clear_cache` does: false, and the DFA off, where it was emptied three times before and
+    // the searches read fewer than 10 bytes for each of its states since the last time.
+    internal bool Empty() {
+        if clears >= 3 && read < 10L * long(info.Count / 4) {
+            off = true
+            return false
+        }
+
+        info.Clear()
+        members.Clear()
+        table.Clear()
+        slots.Clear()
+        for i in 0..<64 {
+            slots.Add(0)
+        }
+
+        used = 0
+        clears = clears + 1
+        read = 0
+        return true
     }
 }
 
@@ -10811,7 +11284,7 @@ class RegexParser {
         names.Add("")
         root = Parse()
         if failKind >= 0 {
-            Refs(failAt)
+            Refs(at)
             return
         }
 
@@ -10845,9 +11318,10 @@ class RegexParser {
     }
 
     // The backreferences before `before`, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has
-    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct, at
-    // `before`, a backreference before it to no group the parse read is the error instead, as .NET, which counts the groups before
-    // it parses, reports `\9(`; a group after that construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 (G2).
+    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct and
+    // stopped at `before`, a backreference before that to no group the parse read is the error instead, as .NET, which counts the
+    // groups before it parses, reports `\9(` and `(\9`; a group after that construct is not read, so that `\2(a)\q(b)` is
+    // `Syntax` at 0 (G2).
     internal void Refs(int before) {
         for i in 0..<refNode.Count {
             if refAt[i] >= before {
@@ -10874,6 +11348,207 @@ class RegexParser {
                 foldRefs = true
             }
         }
+    }
+
+    // Whether the automaton has an assertion.
+    internal bool Looks() {
+        for op in ops {
+            if op == 6 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    // What the operations of the automaton test a character by, each once, and `\w` for the word boundaries where `looks`: a
+    // character as -1 - its code point, a class as the first of its ranges * 2^32 + their count, a class whose ranges are those of
+    // one already taken left out, so that the pieces and the classes of the lazy DFA read each set of ranges once; empty for the
+    // backtracking engine, which runs no DFA.
+    internal List<long> Tests(bool looks) {
+        mut tests = List<long>()
+        if backtracking {
+            return tests
+        }
+
+        for pc in 0..<ops.Count {
+            if ops[pc] == 1 {
+                tests.Add(-1L - long(xs[pc]))
+            } else if ops[pc] == 2 {
+                Tested(mut tests, xs[pc], ys[pc])
+            }
+        }
+
+        if looks {
+            Tested(mut tests, wordAt, wordCount)
+        }
+
+        tests.Sort()
+        mut unique = List<long>()
+        for t in tests {
+            if unique.Count == 0 || t != unique[unique.Count - 1] {
+                unique.Add(t)
+            }
+        }
+
+        return unique
+    }
+
+    // The class of the `count` ranges from `start` added to `tests`, but where a class of `tests` has the same ranges.
+    internal void Tested(mut List<long> tests, int start, int count) {
+        if count == 0 {
+            return
+        }
+
+        for t in tests {
+            if t >= 0L && int(t % 4294967296L) == count {
+                other = int(t / 4294967296L)
+                mut same = true
+                for m in 0..<2 * count {
+                    if ranges[other + m] != ranges[start + m] {
+                        same = false
+                        break
+                    }
+                }
+
+                if same {
+                    return
+                }
+            }
+        }
+
+        tests.Add(long(start) * 4294967296L + long(count))
+    }
+
+    // The pieces of the code points for the lazy DFA, the first code point of each, ascending from 0: the code points split where
+    // a test of `tests` (`Tests`), or an assertion, can tell two apart, as Rust's `ByteClasses` split the bytes, but over code
+    // points, which the automaton reads; empty for the backtracking engine, which runs no DFA.
+    internal List<int> Bounds(List<long> tests, bool looks) {
+        mut bounds = List<int>()
+        if backtracking {
+            return bounds
+        }
+
+        mut points = [0]
+        for t in tests {
+            if t < 0L {
+                points.Add(int(-1L - t))
+                points.Add(int(-1L - t) + 1)
+            } else {
+                start = int(t / 4294967296L)
+                for m in 0..<int(t % 4294967296L) {
+                    points.Add(ranges[start + 2 * m])
+                    points.Add(ranges[start + 2 * m + 1] + 1)
+                }
+            }
+        }
+
+        if looks {
+            // `\n` and `\r` for the lines, and ASCII's word characters for the words
+            marks = [10, 11, 13, 14, 48, 58, 65, 91, 95, 96, 97, 123]
+            for mark in marks {
+                points.Add(mark)
+            }
+        }
+
+        points.Sort()
+        for point in points {
+            if bounds.Count == 0 || point != bounds[bounds.Count - 1] {
+                bounds.Add(point)
+            }
+        }
+
+        return bounds
+    }
+
+    // The class of each piece that starts at `bounds`: the pieces that every test of `tests` and every assertion read alike are one
+    // class, numbered in the order of their first piece, so that a row of the DFA has a column for each way the automaton can read
+    // a character rather than for each piece (`Regex.Step`). Each test moves the pieces it takes out of their class into one beside
+    // it, as a partition is refined, so that a test costs the pieces it takes and not every piece.
+    internal List<int> Classes(List<int> bounds, List<long> tests, bool looks) {
+        mut classes = List<int>()
+        for i in 0..<bounds.Count {
+            classes.Add(0)
+        }
+
+        if bounds.Count == 0 {
+            return classes
+        }
+
+        // for each class, the class this test's pieces of it went to, -1 where none did yet, and the classes this test split
+        mut count = 1
+        mut moved = [-1]
+        mut touched = List<int>()
+        // the ASCII marks of the assertions: `\n`, `\r` and ASCII's word characters
+        marks = [10, 10, 13, 13, 48, 57, 65, 90, 95, 95, 97, 122]
+        for i in 0..<tests.Count + 3 {
+            // the test's ranges, ascending: `pairs` pairs of a first and a last code point from `start` of `source`
+            mut source = marks
+            mut start = 0
+            mut pairs = 1
+            if i < tests.Count {
+                probe = tests[i]
+                if probe < 0L {
+                    source = [int(-1L - probe), int(-1L - probe)]
+                } else {
+                    source = ranges
+                    start = int(probe / 4294967296L)
+                    pairs = int(probe % 4294967296L)
+                }
+            } else if !looks {
+                break
+            } else if i == tests.Count + 1 {
+                start = 2
+            } else if i == tests.Count + 2 {
+                start = 4
+                pairs = 4
+            }
+
+            // each range starts a piece and ends before one, so that one walk from the first range's piece reaches them all
+            mut k = RegexPiece(bounds, source[start])
+            for m in 0..<pairs {
+                while bounds[k] < source[start + 2 * m] {
+                    k = k + 1
+                }
+
+                while k < bounds.Count && bounds[k] <= source[start + 2 * m + 1] {
+                    old = classes[k]
+                    if moved[old] < 0 {
+                        moved[old] = count
+                        moved.Add(-1)
+                        touched.Add(old)
+                        count = count + 1
+                    }
+
+                    classes[k] = moved[old]
+                    k = k + 1
+                }
+            }
+
+            for split in touched {
+                moved[split] = -1
+            }
+
+            touched.Clear()
+        }
+
+        // the classes numbered in the order of their first piece; a class every piece of which moved has none left
+        mut order = List<int>()
+        for j in 0..<count {
+            order.Add(-1)
+        }
+
+        mut made = 0
+        for k in 0..<bounds.Count {
+            if order[classes[k]] < 0 {
+                order[classes[k]] = made
+                made = made + 1
+            }
+
+            classes[k] = order[classes[k]]
+        }
+
+        return classes
     }
 
     // The simple case folding a backreference under `(?i)` compares by, empty where none does.
@@ -11751,8 +12426,8 @@ class RegexParser {
     // Rust's `parse_unicode_class` and its translation (G4): `\p` or `\P` at `start`, then one letter, or in braces a name,
     // `name=value`, `name:value` or `name!=value`, which negates once more, the white space and the comments of `(?x)` passed over.
     // The end of the pattern is `Syntax` at the end, and a `\` for the letter at that `\`. The class is `escSet`, folded under
-    // `(?i)` before it is negated; a name Rust's crate does not know, and any `\p` under `(?-u)`, is `Syntax` at `start` once the
-    // parse and the levels found no error, as its translator refuses it.
+    // `(?i)` before it is negated; a name for which the tables hold no class, read as Rust's crate reads a name, and any `\p` under
+    // `(?-u)`, is `Syntax` at `start` once the parse and the levels found no error, as its translator refuses it.
     internal bool Property(bool negated, int start) {
         at = at + 1
         Skip()
@@ -11923,9 +12598,11 @@ class RegexParser {
                 which = 2
             }
 
-            mut set = Table(which)
+            mut set = List<int>()
             if (mode & 64) == 0 {
                 set = RegexAsciiPerl(which)
+            } else {
+                set = Table(which)
             }
 
             if c < 97 {
