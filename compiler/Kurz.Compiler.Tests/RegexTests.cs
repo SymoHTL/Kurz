@@ -51,7 +51,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("\\p{ASCII}", "ok"), ("\\p{Assigned}", "ok"), ("\\p{sc}", "ok"), ("\\p{cf}", "ok"), ("\\p{lc}", "ok"), ("\\p{gc=any}", "ok"),
         ("\\p{General_Category=Lu}", "ok"), ("\\p{Script_Extensions=Greek}", "ok"), ("\\p{Emoji_Presentation}", "ok"),
         ("\\p{L}{10}", "ok"), ("(?x)\\p { G r e e k }", "ok"), ("(?x)\\p#c\nL", "ok"), ("[\\P{L}a]", "ok"), ("(?i)\\p{Lu}", "ok"),
-        ("[\\p{L}--\\p{Greek}]", "ok"), ("\\p{scx=Hira}", "ok"),
+        ("[\\p{L}--\\p{Greek}]", "ok"), ("\\p{scx=Hira}", "ok"), ("\\p{IsGreek}", "ok"), ("\\p{ISGREEK}", "ok"),
+        ("\\p{Bidi_Mirrored}", "ok"),
         ("\\p{age=17.0}", "ok"), // the version the build pins, 17.0.0, where Rust's crate 1.13 holds 16.0.0 and refuses it
         ("\\p{ Is_Greek }", "syntax at 0"), ("a\\p{Foo}", "syntax at 1"), ("a\\pQ", "syntax at 1"), ("(?-u)a\\pL", "syntax at 6"),
         ("a[b\\p{Foo}]", "syntax at 3"), ("a\\p", "syntax at 3"), ("a\\p{L", "syntax at 5"), ("a\\p\\d", "syntax at 3"),
@@ -59,7 +60,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("\\p{Cs}", "syntax at 0"), ("\\p{Unknown}", "syntax at 0"), ("\\p{gc}", "syntax at 0"), ("\\p{bc=L}", "syntax at 0"),
         ("\\p{Alphabetic=Yes}", "syntax at 0"), ("\\pé", "syntax at 0"), ("\\p{gc=Foo}", "syntax at 0"), ("\\p{Foo=L}", "syntax at 0"),
         ("\\p{a:b=c}", "syntax at 0"), ("\\p{Foo}(", "syntax at 7"), ("(?-u)\\p{Foo}", "syntax at 5"), ("\\p{Foo}\\p{Bar", "syntax at 13"),
-        ("[\\p{Foo}", "syntax at 0"),
+        ("[\\p{Foo}", "syntax at 0"), ("\\p{I_sGreek}", "syntax at 0"), ("\\p{Is_C}", "syntax at 0"),
+        ("\\p{Full_Composition_Exclusion}", "syntax at 0"),
         ("\\p{L}{1000}", "ok"), // the bound of G2, where Rust's automaton counts its states otherwise and is too big
         ("\\p{L}{655357}", "too big at 0"), // the numbers of the class's ranges count in the bound (G2), where `a{655357}` builds
         ("\\k<a>", "unsupported at 0"), // the backtracking engine's (G4), where Rust's syntax has no such escape
@@ -313,6 +315,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             (@"\9(", "syntax at 0"), (@"\2[\1]", "syntax at 0"), (@"\2(a)\q(b)", "syntax at 0"), (@"\1(a", "syntax at 2"),
             (@"a)\2", "syntax at 1"), (@"(\9", "syntax at 1"), (@"(a\3", "syntax at 2"), (@"(a)(\3", "syntax at 4"), (@"(a\2", "syntax at 2"),
             (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
+            (@"(a\1", "syntax at 0"), (@"\8\9(", "syntax at 0"),
             (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
         ];
         Assert.All(rows, r => Assert.Equal(r.Reading, RegexPattern.Check(r.Pattern, backtracking: true) is { } f ? RegexPattern.Words(f.Kind, f.At) : "ok"));
