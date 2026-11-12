@@ -1234,9 +1234,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   bytes a `File` read ahead (S24) first, and a read that fails ends it at once with that `IoError`, under a bound as without
   one, the pipes left open and no child waited for or killed; a wait that gives an `IoError`, that read's or `TimedOut`, gives
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
-  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe, the reader's lock
-  held from the read of the bytes read ahead until they are taken or given back, so that a read through the `File` on another
-  thread waits for the call (S19; the order of
+  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe. The wait never
+  waits on a reader's lock: at each wake of its poll `Drive` tries each lock it does not hold yet through the emitter's
+  `try.reader`, which it gets as a C function (R17), since Kurz has no atomic form, and which reads the bytes ahead only once it
+  took the lock; a pipe is polled from the wake that took its lock, the next wake comes within 4 ms while another holder holds
+  one, and the emitter lets go of each lock the runtime took once the bytes are taken or given back, so that `Timeout(d)`
+  bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
+  (S19, the owner's "Try the lock inside the poll"; the order of
   the bytes given back is among S19's assumed readings). A later wait after one that waited for the child gives the first one's
   status, or `TimedOut` again, and one after a `WaitWithOutput()` whose read failed waits for the child, which that call left to
   a later `Wait()` or `Kill()` (S19, the owner's "Error, no wait"), and `Kill()` sends
