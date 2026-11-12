@@ -285,8 +285,9 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal(["[0, 1, 2, ]"], ran.Output);
             var leaked = Ran(text, "child-descriptors-leaked", "exec 7</dev/null && ", runtime: ListTests.Edited(("runtime/linux/linux.kz", call, "if syscall(long(-1)) < -1 {")))!.Value;
             Assert.Equal((0, ""), (leaked.Code, leaked.Error));
-            // the control holds descriptor 7 alone: the test host can hand the program another descriptor without its
-            // close-on-exec mark, which a runtime that marks none passes on (191 in run 43164162995)
+            // the control holds descriptor 7 alone: under a runtime that marks none, the child also holds any other descriptor
+            // the program had open without its close-on-exec mark, one more in three runs of 2026-11-12 (183, 196 and 191),
+            // whose source was not found
             Assert.Contains("7", Assert.Single(leaked.Output).Trim('[', ']').Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
         }
     }
