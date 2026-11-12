@@ -103,7 +103,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G3: the checker's copy of the parse and the count, and the standard library's <c>Regex.New</c> when the program runs, give each
     /// written pattern the reading written beside it, and every generated pattern the same reading as each other: the error's kind and
-    /// byte, or a pattern that builds. The generated patterns all build, and each of them with a character of the syntax put in at a
+    /// byte, or a pattern that builds. The generated patterns hold the standard library's parse to the checker's and to no reading
+    /// of Rust's crate; only the written rows hold both to readings asked of the crate. The generated patterns all build, and each of them with a character of the syntax put in at a
     /// place mostly does not.
     /// </summary>
     [Fact]

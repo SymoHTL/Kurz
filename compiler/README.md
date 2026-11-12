@@ -1815,8 +1815,8 @@ ask about it.
   and `outcomes/else-interface-arm.kz`.
 - G2 to G4: a `Regex` is the standard library's: the pattern parsed into a tree, the automaton's size counted from the tree
   before anything is built (G2), then the automaton of Thompson's construction, which a Pike VM runs, as Rust's `PikeVM`, so
-  that a search takes time in proportion to the automaton's states times the positions a thread carries times the text's
-  bytes (G2); the lazy DFA of G2 is not built, which changes the time of a search and none of its matches. The parse is
+  that a search takes time in proportion to the automaton's states times one more than the positions a thread carries
+  times the text's bytes (G2); the lazy DFA of G2 is not built, which changes the time of a search and none of its matches. The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two

@@ -45,15 +45,19 @@ in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig`. *(assume
 of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)* The states are three
 for the whole match, its start, its end and the match; one for a character, a class or an assertion;
 two for a group with a name or a number beside its content; the sum of a sequence's items; the sum of
-an alternation's branches with two for each `|`; and for a repetition `{n,m}` n copies of its item and
-m - n optional copies of one state more each, for `*` one copy and two states, for `{n,}` n copies and
-one state. A class counts the numbers of its ranges once where it is written, after `(?i)` folded it
+an alternation's branches with two for each `|`; and for a repetition of n to m, written `{n,m}`, `{n}`
+(m is n) or `?` (0 to 1), n copies of its item and m - n optional copies of one state more each, for
+one of n or more, written `{n,}` or `+` (n is 1), n copies and one state, but for `*` and `{0,}` one
+copy and two states, a lazy repetition as the greedy one, and a repetition of an item that matches no
+character taken with its least and its most at most 1, as Rust's `Hir::repetition` takes it, so that
+`\b{1000000}` builds. A class counts the numbers of its ranges once where it is written, after `(?i)` folded it
 and after its negation, a letter that `(?i)` gives another case counts as the class of its cases, and
 a pattern with a word boundary counts the numbers of `\w`'s ranges once more. A size at the bound
-builds. A search takes time in proportion to the text's length times the automaton's states times the
-positions a thread carries, none for `IsMatch` and for the members that give a match two for the whole
-match and two for each group, which the Pike VM copies from thread to thread as Rust's `PikeVM` copies
-its slots; beside the automaton a search holds two lists of threads, its states times those positions,
+builds. A search takes time in proportion to the text's length times the automaton's states times one
+more than the positions a thread carries, which are none for `IsMatch`, so that it takes the text's
+length times the states, and for the members that give a match two for the whole match and two for
+each group, which the Pike VM copies from thread to thread as Rust's `PikeVM` copies its slots; beside
+the automaton a search holds two lists of threads, its states times one more than those positions,
 which the bound does not count, as Rust's `size_limit` does not count the `PikeVM`'s cache. *(assumed,
 §12: the states and the ranges of each construct, a size at the bound that builds, and the time and the
 memory of a search)*

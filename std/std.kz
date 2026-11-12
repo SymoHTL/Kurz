@@ -9880,9 +9880,9 @@ pub class Match {
 
 // A pattern built for one of G2's two engines. For the linear engine, as Rust's `regex` builds one: the pattern parsed into a
 // tree (`RegexParser`), the tree compiled into a Thompson automaton, and a search a Pike VM that runs the automaton over the text
-// once, its time in proportion to the text's length times the automaton's states times the positions a thread carries, which it
-// copies from thread to thread as Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole match and two for
-// each group for the members that give a match (G2). For the backtracking engine, the same automaton, whose ways a search tries
+// once, its time in proportion to the text's length times the automaton's states times one more than the positions a thread
+// carries, which it copies from thread to thread as Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole
+// match and two for each group for the members that give a match (G2). For the backtracking engine, the same automaton, whose ways a search tries
 // one after another (`Backtrack`). `Regex.New` of a literal the compiler checked gives a `Regex`, and of any other string
 // `Regex | RegexError` (G3); the compiler calls `RegexNew` and `RegexChecked` with the tables of G4's classes. Its text is its
 // pattern, as Rust's `Display` gives it (G1).
@@ -10608,8 +10608,8 @@ List<int> RegexShift(List<int> set, int shift) {
 
 // The two lists of threads of a search, each a sparse set of states with the slots of each thread, and the stack and the slots of
 // the thread being added, as Rust's `PikeVM` holds its `ActiveStates`; made once for a search, and for every search of `Matches`.
-// They take the automaton's states times the positions a thread carries, beside the automaton and outside its bound, as Rust's
-// `size_limit` does not count the `PikeVM`'s cache (G2).
+// They take the automaton's states times one more than the positions a thread carries, beside the automaton and outside its
+// bound, as Rust's `size_limit` does not count the `PikeVM`'s cache (G2).
 class RegexThreads {
     internal mut List<int> dense0 = List<int>()
     internal mut List<int> sparse0 = List<int>()
