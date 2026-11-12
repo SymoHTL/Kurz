@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using Kurz.Compiler.Build;
 using Kurz.Compiler.Semantics;
@@ -33,24 +32,24 @@ public sealed partial class Emitter
     /// descriptor 0, the path <c>&lt;stdin&gt;</c> its <c>IoError</c> names, and the one reader's state (<see cref="ReaderAt"/>) that every
     /// read and pull of the process goes through, under the reader's lock, as Rust's <c>Stdin</c> holds one <c>BufReader</c> behind a
     /// <c>Mutex</c> (section 12, the owner, 2026-11-01, "A type Stdin"). No value holds it and no <c>Close</c> marks it, so it lasts as
-    /// long as the process, with the buffer of its reader (section 12, assumed: "`Stdin` having no `Close`"). After a handle's fields it
-    /// holds the room of its reader's buffer (<see cref="StdinRoom"/>).
+    /// long as the process, with the buffer of its reader (section 12, assumed: "`Stdin` having no `Close`"). It holds the room of its
+    /// reader's buffer as every handle does (<see cref="ReaderRoom"/>).
     /// </summary>
     private const string StdinHandle = "@kz.stdin";
 
     /// <summary>
-    /// S22: where the handle of standard input holds the room of its reader's buffer, in 8 bytes right after a handle's fields, at offset
-    /// <see cref="HandleSize"/>: 0 while the buffer is none or the <see cref="LineBuffer"/> bytes a fill makes, else the bytes of the
-    /// buffer a <c>ReadAll</c> that failed part-way made for what it kept (<see cref="KeepRest"/>), so that the next one frees it with its
-    /// size.
+    /// S19, S22: where a handle holds the room of its reader's buffer, 8 bytes after the reader's state and the word of its calls in
+    /// flight: 0 while the buffer is none or the <see cref="LineBuffer"/> bytes a fill makes, else the bytes of the buffer that
+    /// <see cref="KeepRest"/> made for the bytes it kept, those of a <c>ReadAll</c> of standard input that failed part-way or of a
+    /// <c>WaitWithOutput()</c> that gave an <c>IoError</c>, so that the next one, and the handle's last holder, free it with its size.
     /// </summary>
-    private static readonly int StdinRoom = int.Parse(HandleSize, CultureInfo.InvariantCulture);
+    private const int ReaderRoom = 56;
 
     /// <summary>S22: the path an <c>IoError</c> of standard input names (section 12, assumed).</summary>
     private const string StdinPath = "<stdin>";
 
     /// <summary>The bytes of a handle's block.</summary>
-    private const string HandleSize = "56";
+    private const string HandleSize = "64";
 
     /// <summary>The bytes of the buffer a file's lines are read through, as Rust's <c>BufReader</c> reads 8 KiB at a time (S16).</summary>
     private const string LineBuffer = "8192";
@@ -924,7 +923,7 @@ public sealed partial class Emitter
         var through = fn.Label("rest.through");
         fn.CondBranch(fn.Value($"icmp slt i64 {r}, 0"), failed, through);
         fn.Block(failed);
-        KeepRest(reader, fn.Value($"load ptr, ptr {list}"));
+        KeepRest(StdinHandle, reader, fn.Value($"load ptr, ptr {list}"));
         fn.Branch(through);
         fn.Block(through);
         fn.Emit($"call void {UnlockReader()}(ptr {word})");
@@ -934,13 +933,15 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// S22: the bytes of the list <paramref name="block"/> that a <c>ReadAll</c> took before its read failed, put in the reader's buffer of
-    /// standard input from its start, under the lock the caller holds, so that the next read, pull or <c>ReadAll</c> takes them first (section
-    /// 12, the owner, 2026-11-11, "Keep for next read"). The buffer took every byte it held before the read, so none is left in it. A buffer
-    /// with less room than the bytes, or none, is made again with the room of the larger of the bytes and <see cref="LineBuffer"/>, which a fill
-    /// reads into, and its room kept in the handle (<see cref="StdinRoom"/>), the old buffer freed with its own. No byte taken, nothing is put.
+    /// S22, S19: the bytes of the list <paramref name="block"/> put in the buffer of <paramref name="handle"/>'s reader from its start,
+    /// under the lock the caller holds, so that the next read, pull or <c>ReadAll</c> takes them first: those a <c>ReadAll</c> of standard
+    /// input took before its read failed (section 12, the owner, 2026-11-11, "Keep for next read"), and those a <c>WaitWithOutput()</c>
+    /// that gave an <c>IoError</c> gathered of a pipe (the owner, 2026-11-12, issue 174, (a)). The bytes hold every byte the buffer held
+    /// before the call, so none is left in it. A buffer with less room than the bytes, or none, is made again with the room of the larger
+    /// of the bytes and <see cref="LineBuffer"/>, which a fill reads into, and its room kept in the handle (<see cref="ReaderRoom"/>), the
+    /// old buffer freed with its own. No byte taken, nothing is put.
     /// </summary>
-    private void KeepRest(string reader, string block)
+    private void KeepRest(string handle, string reader, string block)
     {
         var count = fn.Value($"sext i32 {fn.Value($"call i32 {StdFunction("ListCount")}(ptr {block})")} to i64");
         var some = fn.Label("keep.some");
@@ -948,7 +949,7 @@ public sealed partial class Emitter
         fn.CondBranch(fn.Value($"icmp sgt i64 {count}, 0"), some, done);
         fn.Block(some);
         var slot = ReaderField(reader, ReaderBuffer);
-        var roomField = HandleField(StdinHandle, StdinRoom);
+        var roomField = HandleField(handle, ReaderRoom);
         var buffer = fn.Value($"load ptr, ptr {slot}");
         var kept = fn.Value($"load i64, ptr {roomField}");
         var room = fn.Value($"select i1 {fn.Value($"icmp eq i64 {kept}, 0")}, i64 {LineBuffer}, i64 {kept}");
@@ -1300,6 +1301,7 @@ public sealed partial class Emitter
         fn.Emit($"store i64 0, ptr {ReaderField(reader, ReaderPosition)}"); // the position and the count of the buffer's bytes
         fn.Emit($"store i32 0, ptr {ReaderField(reader, ReaderLock)}"); // the lock, free
         fn.Emit($"store i32 0, ptr {HandleField(handle, InFlightAt)}"); // no call in flight, and no mark
+        fn.Emit($"store i64 0, ptr {HandleField(handle, ReaderRoom)}"); // the buffer, when made, of the room a fill makes
         return handle;
     }
 
@@ -1491,7 +1493,8 @@ public sealed partial class Emitter
             var unbuffered = fn.Label("unbuffered");
             fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, unbuffered);
             fn.Block(buffered);
-            fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {LineBuffer})");
+            var room = fn.Value($"load i64, ptr {HandleField("%a0", ReaderRoom)}");
+            fn.Emit($"call void {StdFunction("Free")}(ptr {buffer}, i64 {fn.Value($"select i1 {fn.Value($"icmp eq i64 {room}, 0")}, i64 {LineBuffer}, i64 {room}")})");
             fn.Branch(unbuffered);
             fn.Block(unbuffered);
             fn.Emit($"call void {StdFunction("Free")}(ptr %a0, i64 {HandleSize})");

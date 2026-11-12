@@ -969,9 +969,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_wait_with_output_whose_read_fails_leaves_the_bytes_the_file_read_ahead_to_the_file()
     {
-        // S19, its assumed reading of the owner's "Error, no wait" (2026-11-11, issue 174, comment 6806240267, the error at once and no
-        // wait): a `WaitWithOutput()` that gives an `IoError` takes
-        // none of the bytes the pipe's `File` read ahead, so that the program reads them through the `File` after the error. The child
+        // S19 (the owner, 2026-11-12, issue 174, (a), the bytes given back): a `WaitWithOutput()` that gives an `IoError` gives the
+        // bytes the pipe's `File` read ahead back to it, so that the program reads them through the `File` after the error. The child
         // writes `abc`, of which the program takes one byte through the buffer of S24, then reads its input to the end, which the wait
         // closes first (Q6), and writes `d`, whose read fails; a wait that took the bytes ahead would leave the `File` to read `d`
         var text = Program("""
@@ -1002,6 +1001,52 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["3", "Other [sh] 9", "signal 9: sh", "2", "bc"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_with_output_that_times_out_gives_every_byte_it_read_back_to_each_file_before_the_rest_of_its_pipe()
+    {
+        // S19 (the owner, 2026-11-12, issue 174, (a)): a `WaitWithOutput()` that gives an `IoError`, here `TimedOut`, gives what it
+        // read of each pipe back to that pipe's `File`, the bytes the `File` read ahead first, so that a later read sees the output
+        // whole. The program takes one byte of `abc` through the buffer of S24; the wait closes the input first (Q6), so that the child
+        // writes `def` and `ghi` on its error, which the wait reads, and sleeps past the bound. A wait that dropped what it read would
+        // leave `bc` and nothing, as the build before the answer did; one that gave nothing back would leave `bc`, read ahead
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf abc; read x; printf def; printf ghi >&2; exec sleep 30"]).Stdin(Stdio.Piped).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Timeout(3s).Spawn()
+                match child.Stdout {
+                    File out => {
+                        mut first = Bytes()
+                        n = out.Fill(mut first)
+                        print(n)
+                        out.Consume(1)
+                    }
+                    null => print("no output")
+                }
+
+                print(Gathered(child))
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no output")
+                }
+
+                match child.Stderr {
+                    File err => {
+                        mut rest = Bytes()
+                        print(err.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no error output")
+                }
+            """) + Children;
+        if (Ran(text, "child-spawn-timed-out-gives-back") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["3", "TimedOut [sh] 0", "5", "bcdef", "3", "ghi"], ran.Output);
         }
     }
 
