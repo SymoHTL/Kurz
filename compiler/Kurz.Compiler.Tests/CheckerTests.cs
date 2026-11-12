@@ -5405,6 +5405,8 @@ public sealed class CheckerTests
     [InlineData(2, "D16, K5", "data D(int X) {\n    pub int GetHashCode() => 1\n}\n\nprint(1)")]
     [InlineData(2, "D8, D16", "data D {\n    pub int Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, K18", "data D(int X) {\n    pub static int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D8, D16", "data D {\n    pub int Y\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K18", "data D(int X) {\n    pub static int Y\n}\n\nprint(1)")]
     [InlineData(2, "D16, F9", "data D(int X) {\n    internal int Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, V2", "data D(int X) {\n    mut Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, K14", "data D(int X) {\n    pub D() : this(1) { }\n}\n\nprint(1)")]
@@ -5423,7 +5425,7 @@ public sealed class CheckerTests
         // body in a relation of inheritance with `virtual` and `override` (question 6), a `static` method (question 3), a field of a type
         // without a primary constructor, a `static` field, an `internal` one, one without a written type, a constructor, `prot`, a method's
         // own type parameters, a `mut` `Text`, the body of a generic type, a member read through the type's name and a method named without
-        // a call are what this build does not read
+        // a call are what this build does not read; such a field without `=` is `not supported` too, before `field-unassigned`
         NotSupportedAt(line, rule, program);
     }
 
@@ -5434,11 +5436,19 @@ public sealed class CheckerTests
         // of the body has an initializer, which reads the primary fields and the fields of the body above it and no field below it, no
         // method and no `this` (V10, as K7); one named like a field above it, or a method named like it, is `redeclared` (V9); `with`
         // names none of them, and one without `mut` is assigned by nothing, through a `mut` variable and in a `mut` method too, where one
-        // with `mut` is; one without `pub` is read inside its type alone (F9)
+        // with `mut` is; one without `pub` is read and assigned inside its type alone (F9), and its assignment outside the type is
+        // `not-visible` where it has no `mut` too, its access read first (line 17, the order D16 assumes)
         const string order = "data Order(int Price, int Count) {\n    pub int Total = Price * Count\n    int Twice = Total * 2\n    pub mut int Seen = 0\n\n    pub int Get() => Twice\n\n    pub mut void Look() {\n        Seen = Seen + Twice\n    }\n}\n\n";
         Assert.Empty(Errors(order + "mut o = Order(3, 2)\no.Look()\no.Seen = 4\nprint(o.Total + o.Get() + o.Seen)\nprint(o with { Price = 1 })\n"));
         Assert.Equal([(ErrorIds.FieldUnassigned, 2)], Errors("data P(int A) {\n    pub int B\n}\n\nprint(P(1))\n"));
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Redeclared, 4)], Errors("data P(int A) {\n    pub int A = 1\n    pub int B = A\n    pub int B() => 2\n}\n\nprint(P(1))\n"));
+
+        // a lambda's parameter, a local of a lambda's block and an arm's binding inside an initializer, named like a field above it, are
+        // `redeclared` (V9), as inside a method, so that no name in an initializer that names a field above it binds anything else, and
+        // the copy of the initializer, which reads each such name as the field, meets none; the same names not taken are the control
+        const string shadows = "data P(int A, List<int | string> Xs) {\n    pub int B = A * 2\n    pub int C = Xs.Where(A => true).Count\n    pub int D = Xs.Where(x => {\n        B = 1\n        return B > 0\n    }).Count\n    pub int E = Xs.Where(x => {\n        match x {\n            int B => return B > 1\n            string s => return false\n        }\n    }).Count\n}\n\nprint(P(1, [1, \"a\"]))\n";
+        Assert.Equal([(ErrorIds.Redeclared, 3), (ErrorIds.Redeclared, 5), (ErrorIds.Redeclared, 10)], Errors(shadows));
+        Assert.Empty(Errors(shadows.Replace("Where(A =>", "Where(a =>").Replace("        B = 1\n        return B", "        b = 1\n        return b").Replace("int B => return B", "int n => return n")));
         Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.UnknownName, 3), (ErrorIds.UnknownName, 4)], Errors("data P(int A) {\n    pub int B = C + A\n    pub int C = this.A\n    pub int D = Get()\n\n    pub int Get() => A\n}\n\nprint(P(1))\n"));
         Assert.Equal([(ErrorIds.AssignImmutable, 14), (ErrorIds.AssignImmutable, 15), (ErrorIds.NotVisible, 16), (ErrorIds.NotVisible, 17)], Errors(order + "mut o = Order(3, 2)\no = o with { Total = 1 }\no.Total = 5\nprint(o.Twice)\no.Twice = 1\n"));
         Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("data P(int A) {\n    pub mut void Set() {\n        B = 2\n    }\n\n    pub int B = A\n}\n\nmut p = P(1)\np.Set()\nprint(p)\n"));
