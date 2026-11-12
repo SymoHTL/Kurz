@@ -12547,9 +12547,11 @@ class RegexParser {
                 which = 2
             }
 
-            mut set = Table(which)
+            mut set = List<int>()
             if (mode & 64) == 0 {
                 set = RegexAsciiPerl(which)
+            } else {
+                set = Table(which)
             }
 
             if c < 97 {

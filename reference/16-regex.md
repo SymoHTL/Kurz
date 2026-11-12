@@ -197,10 +197,12 @@ with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
 owner)* The flags `U`, `R` and `u` read as Rust's crate reads them: `U` swaps greedy and lazy; under
-`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` a `.` takes neither;
+`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` and without `(?s)` a `.` takes neither;
 and `u` is in force from the start, without it `\d`, `\w`, `\s`, the word boundaries and the folding
-of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a negated class,
-`\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above ASCII, is `Syntax` at its start (G3).
+of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a class that holds
+more than ASCII after its negation, `\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above
+ASCII, is `Syntax` at its start (G3), after any error of the parse and of the levels, and among
+several the first that Rust's translator meets, a class's items before the class.
 *(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
 request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
 name as Rust's crate reads it, from the tables of the version §12 pins: a general category, a script, a binary property,
