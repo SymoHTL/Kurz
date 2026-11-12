@@ -1071,12 +1071,11 @@ below it, a method of the type and `this` are `unknown-name` there, as in the de
 field (K7) *(assumed, §4)*. `with` computes the fields of the body again from the copy's fields (B4),
 and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The
 text writes them after the fields of the primary constructor, in the order of their declaration (B5), one
-without `pub` among them (B6), which code outside the type reads nowhere else: a read or an assignment of it there is `not-visible` (F9),
-where it has no `mut` either, since its access is read before the assignment, as C# reports a
-private field's access before its `readonly` *(assumed, §4: that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a
-field of the value it holds, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a
-`mut` method (B7), and through a `mut` variable as D4 lets a field of the primary constructor be
-*(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
+without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is `not-visible` (F9), and an assignment of it there
+is `not-visible` too, where it has no `mut` either, since its access is read before the assignment, as C# reports a
+private field's access before its `readonly` *(assumed, §4: the assignment and that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a field of the value it holds,
+inside its type, or outside it where it is `pub`, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a `mut` method (B7), and through a `mut` variable as D4 lets a field of the primary
+constructor be, inside its type, or outside it where it is `pub` too *(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
 constructor may (B9), and one named like a field above it, a method or a parameter is `redeclared` (V9)
 (B10). A method without `mut` changes nothing of
 the value it was called on: an assignment of a field in it, or of a field on a path of fields from it,
@@ -1191,6 +1190,16 @@ Case: [data/body-field-private-assigned.kz](../corpus/data/body-field-private-as
 ```kurz
 data Order(int Price, int Count) {
     mut int Total = Price * Count
+}
+
+mut o = Order(3, 2)
+o.Total = 1
+```
+
+Case: [data/body-field-private-immutable-assigned.kz](../corpus/data/body-field-private-immutable-assigned.kz)
+```kurz
+data Order(int Price, int Count) {
+    int Total = Price * Count
 }
 
 mut o = Order(3, 2)

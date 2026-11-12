@@ -198,9 +198,11 @@ public sealed partial class Checker
         }
 
         var self = new Parameter(f.Line, false, new NamedType(f.Line, symbol.Name, []), "this", null);
+        // `Total = value` of such a field, in a lambda's block, assigns the field of `this`, as in a lambda of a method (K7, F11)
         var value = SyntaxCopy.Copy(
             f.Value,
-            (e, _) => e is NameExpression n && above.Contains(n.Name) ? new MemberAccess(n.Line, new NameExpression(n.Line, "this"), n.Name, false) : null);
+            (e, _) => e is NameExpression n && above.Contains(n.Name) ? new MemberAccess(n.Line, new NameExpression(n.Line, "this"), n.Name, false) : null,
+            (s, copy) => s is AssignOrDeclare a && above.Contains(a.Name) ? new Assignment(a.Line, new MemberAccess(a.Line, new NameExpression(a.Line, "this"), a.Name, false), copy(a.Value)) : null);
         var real = new FunctionDeclaration(f.Line, Modifiers.None, f.Type!, $"{symbol.Name}.{f.Name}", [], [self], value, null);
         DeclareFunction(real);
         var function = model.FunctionOf(real);

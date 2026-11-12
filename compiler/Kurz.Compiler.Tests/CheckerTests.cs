@@ -5442,12 +5442,17 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.FieldUnassigned, 2)], Errors("data P(int A) {\n    pub int B\n}\n\nprint(P(1))\n"));
         Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Redeclared, 4)], Errors("data P(int A) {\n    pub int A = 1\n    pub int B = A\n    pub int B() => 2\n}\n\nprint(P(1))\n"));
 
-        // a lambda's parameter, a local of a lambda's block and an arm's binding inside an initializer, named like a field above it, are
-        // `redeclared` (V9), as inside a method, so that no name in an initializer that names a field above it binds anything else, and
-        // the copy of the initializer, which reads each such name as the field, meets none; the same names not taken are the control
-        const string shadows = "data P(int A, List<int | string> Xs) {\n    pub int B = A * 2\n    pub int C = Xs.Where(A => true).Count\n    pub int D = Xs.Where(x => {\n        B = 1\n        return B > 0\n    }).Count\n    pub int E = Xs.Where(x => {\n        match x {\n            int B => return B > 1\n            string s => return false\n        }\n    }).Count\n}\n\nprint(P(1, [1, \"a\"]))\n";
+        // a lambda's parameter, a local of a lambda's block declared with its type and an arm's binding inside an initializer, named like a
+        // field above it, are `redeclared` (V9), as inside a method, so that no name in an initializer that names a field above it binds
+        // anything else, and the copy of the initializer, which reads each such name as the field, meets none; the same names not taken are
+        // the control; and `B = 1` in a lambda's block there, the form that in a lambda of a method assigns the field, assigns it here too,
+        // a change of the lambda's copy of `this`: `capture-assign` in both (F11, K7, D16)
+        const string shadows = "data P(int A, List<int | string> Xs) {\n    pub int B = A * 2\n    pub int C = Xs.Where(A => true).Count\n    pub int D = Xs.Where(x => {\n        int B = 1\n        return B > 0\n    }).Count\n    pub int E = Xs.Where(x => {\n        match x {\n            int B => return B > 1\n            string s => return false\n        }\n    }).Count\n}\n\nprint(P(1, [1, \"a\"]))\n";
         Assert.Equal([(ErrorIds.Redeclared, 3), (ErrorIds.Redeclared, 5), (ErrorIds.Redeclared, 10)], Errors(shadows));
-        Assert.Empty(Errors(shadows.Replace("Where(A =>", "Where(a =>").Replace("        B = 1\n        return B", "        b = 1\n        return b").Replace("int B => return B", "int n => return n")));
+        var unshadowed = shadows.Replace("Where(A =>", "Where(a =>").Replace("int B => return B", "int n => return n");
+        Assert.Empty(Errors(unshadowed.Replace("        int B = 1\n        return B", "        int b = 1\n        return b")));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors(unshadowed.Replace("        int B = 1\n", "        B = 1\n")));
+        Assert.Equal([(ErrorIds.CaptureAssign, 5)], Errors("data P(int A, List<int> Xs) {\n    pub int B = A\n\n    pub int Get() => Xs.Where(x => {\n        B = 1\n        return true\n    }).Count\n}\n\nprint(P(1, []).Get())\n"));
         Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.UnknownName, 3), (ErrorIds.UnknownName, 4)], Errors("data P(int A) {\n    pub int B = C + A\n    pub int C = this.A\n    pub int D = Get()\n\n    pub int Get() => A\n}\n\nprint(P(1))\n"));
         Assert.Equal([(ErrorIds.AssignImmutable, 14), (ErrorIds.AssignImmutable, 15), (ErrorIds.NotVisible, 16), (ErrorIds.NotVisible, 17)], Errors(order + "mut o = Order(3, 2)\no = o with { Total = 1 }\no.Total = 5\nprint(o.Twice)\no.Twice = 1\n"));
         Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("data P(int A) {\n    pub mut void Set() {\n        B = 2\n    }\n\n    pub int B = A\n}\n\nmut p = P(1)\np.Set()\nprint(p)\n"));
