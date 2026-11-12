@@ -256,6 +256,7 @@ public sealed partial class Emitter
             module.Add(f);
         }
 
+        EmitRegexTable(); // G4: the one global of the tables, once every pattern is emitted
         return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86));
     }
 

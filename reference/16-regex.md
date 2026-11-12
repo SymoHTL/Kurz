@@ -62,6 +62,23 @@ which the bound does not count, as Rust's `size_limit` does not count the `PikeV
 §12: the states and the ranges of each construct, a size at the bound that builds, and the time and the
 memory of a search)*
 
+The lazy DFA runs before the Pike VM: its states are sets of the automaton's states, each with what
+the character before its position is to the assertions, and each transition is made on the first
+character of its class that needs it and read from a table after that, over classes of code points
+where Rust's are of bytes, the code points that every operation of the automaton and every assertion
+read alike being one class, made once with the pattern. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace` and
+`Split` run the Pike VM only where it finds a match left, from the last position before that match's
+end at which its state held no thread of an earlier start, before which no match starts. Its cache
+is made for each call, beside
+the automaton and outside its bound, and counts a state as 4 bytes for each column of its row and
+each of its members and 32 bytes of its own; it is emptied when the next state does not fit, and the
+search goes to the Pike VM where it was emptied three times and the search read fewer than 10 bytes
+for each state since, as Rust's meta engine sets `minimum_cache_clear_count` and
+`minimum_bytes_per_state`, or where it cannot hold two states of every state of the automaton, as
+Rust's `minimum_cache_capacity` asks, so that a search's time stays in proportion to the pattern's
+size times the text's length. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state)*
+
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
 simple case folding, the flag in force at the backreference deciding, as .NET's does, so that `(?i)(a)\1`
@@ -75,15 +92,16 @@ engine does not take is `Unsupported` there, which the parse reports before the 
 the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
 single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
-parse refuses a construct after such a backreference, the backreference is the error, as .NET, which
-counts the groups before it parses, reports `\9(`; a group after that construct is not read, so that
-`\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
+parse refuses a construct, a backreference it read before it stopped, to a group it did not read, is
+the error, as .NET, which counts the groups before it parses, reports `\9(` and `(\9`; a group after
+the refused construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
 after its `\`, so that `\10` names group 10 and is `Syntax` in a pattern of fewer groups, where .NET
 reads a number of two or more digits that names no group as an octal escape (`(a)\10` matches `a`
 and U+0008 there), and `\0` is `Unsupported`, as on the linear engine. A search keeps its choices
 on a stack in memory, not on the process's stack, as .NET's interpreter does, a stack that grows
 with the text's length times the choices a way keeps open, beside the automaton and outside its
-bound, as the Pike VM's lists of threads are; a loop that comes back
+bound, where the Pike VM's lists of threads, outside it too, are sized by the automaton's states,
+and a stack that cannot grow ends the process with `allocation-failed`, as a list's does (M9); a loop that comes back
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
 a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
 .NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
@@ -180,18 +198,27 @@ with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
 owner)* The flags `U`, `R` and `u` read as Rust's crate reads them: `U` swaps greedy and lazy; under
-`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` a `.` takes neither;
+`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` and without `(?s)` a `.` takes neither;
 and `u` is in force from the start, without it `\d`, `\w`, `\s`, the word boundaries and the folding
-of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a negated class,
-`\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above ASCII, is `Syntax` at its start (G3).
+of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a class that holds
+more than ASCII after its negation, `\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above
+ASCII, is `Syntax` at its start (G3), after any error of the parse and of the levels, and among
+several the first that Rust's translator meets, a class's items before the class.
 *(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
 request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
-name as Rust's crate reads it, from the tables of the version §12 pins: a general category, a script, a binary property,
-`Any`, `ASCII` and `Assigned` alone, or by value the general category, the script, the script extensions, the age, which
-holds every version up to it, and the three break properties, as `name=value`, `name:value` or `name!=value`, which
-negates the class once more; a name is compared with a first `is`, ` `, `_` and `-` set aside and its capitals made small.
-A name the crate does not know, and a `\p` under `(?-u)`, is `Syntax` at its `\` (G3). *(assumed, §12: the defaults of
-the questions put to the owner on 2026-11-12, issue 176, comment 6812529825)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+name as Rust's crate reads it, from the tables of the version §12 pins, where the crate holds 16.0.0, so that a name or a
+code point of 17.0.0 alone is a class here and `Syntax` or no match in Rust: a general category, a script, a binary
+property the crate has a table for, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
+value the general category, the script, the script extensions, the age, which holds every version up to it, and the break
+properties Grapheme_Cluster_Break, Sentence_Break and Word_Break, as `name=value`, `name:value` or `name!=value`, which
+negates the class once more. A name is compared with a first `is`, ` `, `_` and `-` set aside, every byte above ASCII
+dropped and its capitals made small, but `isc` stays `isc`; a name alone is a binary property's, but for `cf`, `sc` and
+`lc`, then a general category's, then a script's, and the name alone of a property that is not binary is no class. Under
+`(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
+that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
+error of the parse and of the levels, the first of several first; a class the pattern's end cuts off is `Syntax` at the
+end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
+the questions put to the owner on 2026-11-12, issue 176, comment 6812529825, and the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 

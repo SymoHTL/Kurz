@@ -1816,7 +1816,15 @@ ask about it.
 - G2 to G4: a `Regex` is the standard library's: the pattern parsed into a tree, the automaton's size counted from the tree
   before anything is built (G2), then the automaton of Thompson's construction, which a Pike VM runs, as Rust's `PikeVM`, so
   that a search takes time in proportion to the automaton's states times one more than the positions a thread carries
-  times the text's bytes (G2); the lazy DFA of G2 is not built, which changes the time of a search and none of its matches. The parse is
+  times the text's bytes (G2). Before the Pike VM a lazy DFA, as Rust's hybrid DFA, answers whether a match is left
+  (`RegexDfa`): its states are sets of the automaton's states with what the character before is to the assertions, made
+  on the first character of a class that needs them, over classes of code points where Rust's are of bytes, since the
+  automaton reads code points, the code points that every operation and assertion read alike being one class, which
+  `Regex.New` makes once (`RegexParser.Tests` and `RegexParser.Classes`), each set of ranges read once and the pieces a test
+  takes moved out of their class, as a partition is refined; `IsMatch` takes its answer, and the other searches run the Pike VM only where it finds a
+  match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
+  fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM. *(assumed: the
+  defaults of issue 176, comment 6813110851)* The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
   sequence of two items or more, an alternation, a repetition, a bracketed class, a bracket inside one, a class's union of two
@@ -1850,7 +1858,8 @@ ask about it.
   backreferences `\1` and `\k<name>`, the four lookarounds and the atomic group, and the same automaton, counted and bounded
   as the linear engine's, a backreference one state and a lookaround or an atomic group two beside its content; a
   backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses, and one to no group the
-  parse read before a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0. A search tries the ways of the
+  parse read before it stopped at a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0
+  and `(\9` at 1. A search tries the ways of the
   automaton one after another from each start, in the order of the Pike VM's priorities, so that a pattern both engines take
   gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
   stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails
