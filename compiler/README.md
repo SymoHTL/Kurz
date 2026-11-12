@@ -1813,6 +1813,15 @@ ask about it.
   programs of `ListTests` and by the cases `control/match-interface-arm.kz`,
   `control/match-base-class-arm.kz`, `control/match-interface-test.kz`, `control/match-data-base-arm.kz`
   and `outcomes/else-interface-arm.kz`.
+- G2 to G4: a `Regex` is the standard library's: the pattern parsed into a tree, the automaton's size counted from the tree
+  before anything is built (G2), then the automaton of Thompson's construction, which a Pike VM runs, as Rust's `PikeVM`, so
+  that a search takes time in proportion to the automaton's states times the text's bytes; the lazy DFA of G2 is not built,
+  which changes the time of a search and none of its matches. A group, a class and a repetition of a repetition nest 250
+  deep at most, Rust's `nest_limit`, and a pattern that nests deeper is `Syntax` where the nesting passes it. The flag `U`,
+  which swaps greedy and lazy, is read as Rust's syntax reads it. A `Match` copies its `Value` out of the text when it is
+  made, so that a chain of `?.` reads it as a field (N5): a copy per match, read or not. The ranges of `\d`, `\w` and `\s`
+  and the folding of `(?i)` are one global of a program that makes a `Regex`, written once (`Emitter.Regex.cs`), which
+  `Regex.New` reads. *(assumed)* Pinned by `RegexTests` and the cases of `corpus/regex/`.
 
 ## What the compiler says about a program
 
@@ -2012,7 +2021,9 @@ among them, are a package's, and the checker reads a program), 14 (hashes: H1 to
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
 `HttpError` by the body `std/` declares, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
-file's own declaration of one is the file's own, where W1 makes it `redeclared`), 17 (logging: P1 and P2, a call site's record
+file's own declaration of one is the file's own, where W1 makes it `redeclared`), 16 (regular expressions: G1, the names `Regex`, `Match`,
+`RegexError` and `RegexKind` among those `Checker.Prelude` names, G2's linear engine, G3, whose check of a literal pattern is
+`RegexPattern`, a copy of the standard library's parse and count that `RegexTests` holds to it, and G4), 17 (logging: P1 and P2, a call site's record
 of P3 and its category of P6), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
@@ -2155,9 +2166,10 @@ larger type each time makes without end, by a call T34's walk does not read: out
 bound, its outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
 the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
 ended; another outer call still makes its copies, and each one whose chain reaches the bound reports its own `not supported`
-(T33, assumed); the names `Regex`, `Match`, `RegexError` and `RegexKind`,
-under which regular expressions stand, and which every file sees, so that a file's own declaration of one is
-`redeclared` (G1 to G5); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
+(T33, assumed); of regular expressions, the backtracking engine, a flag `backtracking` of any value but the literal
+`false` (G2), `Replace` and `Split` (G5), and in a literal pattern a construct of Rust's syntax that the standard library's
+parse does not build, `\p` and `\P`, `\<` and `\>`, `\b{...}` and the flags `R` and `u`, where it is the pattern's first
+error, which a pattern that is no literal gets as the `RegexError` `Unsupported` when the program runs (G4); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,
 which is read before the overload is picked (T35, F12); a call in a `const assert`, which the build does not evaluate while the

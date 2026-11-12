@@ -1,0 +1,14 @@
+// expect: output
+// | a{655357}
+// | too big at 0
+// rules: G2
+
+void Try(string pattern) {
+    match Regex.New(pattern) {
+        Regex re => print(re)
+        RegexError e => print(e)
+    }
+}
+
+Try(r"a{655357}")
+Try(r"a{655358}")
