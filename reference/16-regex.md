@@ -66,18 +66,34 @@ The lazy DFA runs before the Pike VM: its states are sets of the automaton's sta
 the character before its position is to the assertions, and each transition is made on the first
 character of its class that needs it and read from a table after that, over classes of code points
 where Rust's are of bytes, the code points that every operation of the automaton and every assertion
-read alike being one class, made once with the pattern. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace` and
-`Split` run the Pike VM only where it finds a match left, from the last position before that match's
-end at which its state held no thread of an earlier start, before which no match starts. Its cache
-is made for each call, beside
-the automaton and outside its bound, and counts a state as 4 bytes for each column of its row and
-each of its members and 32 bytes of its own; it is emptied when the next state does not fit, and the
-search goes to the Pike VM where it was emptied three times and the search read fewer than 10 bytes
-for each state since, as Rust's meta engine sets `minimum_cache_clear_count` and
-`minimum_bytes_per_state`, or where it cannot hold two states of every state of the automaton, as
-Rust's `minimum_cache_capacity` asks, so that a search's time stays in proportion to the pattern's
-size times the text's length. *(assumed, §12: the defaults of the questions put to the owner on
-2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state)*
+read alike being one class, made once with the pattern. A state's members are the threads begun
+before its position: the thread a new start makes is added at each transition and not kept, so that
+a member reached both from an earlier start and from the current one keeps the earlier start, which
+costs time and never a match. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace`
+and `Split` run the Pike VM only where it finds a match left, from the last position up to that
+match's end, the end included, at which its state had no member, before which no match starts, so
+that `a*b` over `aab` runs the Pike VM from 0; where the DFA gives a search up or is not used, the
+Pike VM answers `IsMatch` and runs every other member alone. Its cache is made for each call, beside
+the automaton and outside its bound, and the searches of one `Matches`, `Replace` or `Split` share it
+and its count of emptyings, so that a call whose DFA gave up runs the Pike VM for the rest of the
+call. It counts a state as 4 bytes for each column of its row and each of its members and 32 bytes
+of its own, and it is emptied when the next state does not fit. At an emptying the DFA gives the
+search up where the cache was emptied three times before and the searches read fewer bytes of UTF-8
+since the last emptying than 10 times the states made since then, as Rust's meta engine sets
+`minimum_cache_clear_count` and `minimum_bytes_per_state` and its `try_clear_cache` checks before it
+clears; and the DFA is not used where two states that each hold every state of the automaton as a
+member, with their rows, and 8 bytes for each state of the automaton exceed the cache's 2 MiB, as
+Rust's `minimum_cache_capacity` asks room for two such states beside three sentinel states, which
+this cache does not have; so that a search's time stays in proportion to the pattern's size times
+the text's length. The cache and the Pike VM's lists of threads are lists, and one that cannot grow
+ends the process with `allocation-failed`, as a list's does (M9). The DFA costs `Regex.New` the
+making of its classes, 13.8 to 20.2 µs for the three patterns measured on 2026-11-12 for pull
+request 491, where it took 3.5 to 6.6 µs without them; a `Match` on a text of 19 bytes with a match
+at 0 1.41 times the time it took without the DFA, the cache being made for each call; and a call up
+to 2 MiB for its cache. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state, the members a state
+keeps, the cache the searches of one call share, the checks at an emptying and of the capacity, and
+the end of a list that cannot grow)*
 
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
@@ -92,8 +108,10 @@ engine does not take is `Unsupported` there, which the parse reports before the 
 the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
 backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
 single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
-parse refuses a construct, a backreference it read before it stopped, to a group it did not read, is
-the error, as .NET, which counts the groups before it parses, reports `\9(` and `(\9`; a group after
+parse refuses a construct, a backreference it read before it stopped, to a group whose `(` it did not read, is
+the error, the first such where it read several, as .NET, which counts the groups before it parses,
+reports `\9(` and `(\9`, so that `\8\9(` is `Syntax` at 0; a group whose `(` it read counts, so that
+`(a\1` is `Syntax` at its `(`, which no `)` closes; and a group after
 the refused construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
 after its `\`, so that `\10` names group 10 and is `Syntax` in a pattern of fewer groups, where .NET
 reads a number of two or more digits that names no group as an octal escape (`(a)\10` matches `a`
@@ -208,15 +226,19 @@ several the first that Rust's translator meets, a class's items before the class
 request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
 name as Rust's crate reads it, from the tables of the version §12 pins, where the crate holds 16.0.0, so that a name or a
 code point of 17.0.0 alone is a class here and `Syntax` or no match in Rust: a general category, a script, a binary
-property the crate has a table for, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
+property of that version's `PropList.txt`, `DerivedCoreProperties.txt` or `emoji-data.txt`, or `Bidi_Mirrored` of
+its `UnicodeData.txt`, the files the crate's tables of binary properties are made from, so that
+`Full_Composition_Exclusion` is no class, and `Any`, `ASCII` and `Assigned`, alone or as values of the general category, or by
 value the general category, the script, the script extensions, the age, which holds every version up to it, and the break
 properties Grapheme_Cluster_Break, Sentence_Break and Word_Break, as `name=value`, `name:value` or `name!=value`, which
-negates the class once more. A name is compared with a first `is`, ` `, `_` and `-` set aside, every byte above ASCII
-dropped and its capitals made small, but `isc` stays `isc`; a name alone is a binary property's, but for `cf`, `sc` and
+negates the class once more. A name is compared after three steps in turn: a first `is`, in either case of each
+letter, is set aside where the name begins with it as written; then ` `, `_` and `-` and every byte above ASCII are
+dropped and its capitals made small; then a name that had that `is` and is `c` alone is `isc`, so that `Is_C` is
+`isc` and `I_sGreek` keeps its `is`. A name alone is a binary property's, but for `cf`, `sc` and
 `lc`, then a general category's, then a script's, and the name alone of a property that is not binary is no class. Under
 `(?i)` a class is folded before `\P` or `!=` negates it, as Rust's translator folds it. A name for which the tables of
 that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
-error of the parse and of the levels, the first of several first; a class the pattern's end cuts off is `Syntax` at the
+error of the parse and of the levels, and among several the first Rust's translator meets, as for the flag `u`; a class the pattern's end cuts off is `Syntax` at the
 end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
 the questions put to the owner on 2026-11-12, issue 176, comment 6812529825, and the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
