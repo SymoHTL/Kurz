@@ -3069,12 +3069,16 @@ pub void | IoError | ExitError ChildWait(int* state, string program) {
 
 // S19: `WaitWithOutput()` on the child at `state`, as `ChildWait` reads it: what the pipes `outFd` and `errFd`
 // still give, -1 where the child's `File` is `null` or closed, read to their ends after the `outCount` and
-// `errCount` bytes their `File` read ahead, at `outAhead` and `errAhead`.
-pub ProcessOutput | IoError | ExitError ChildWaitWithOutput(int* state, string program, int outFd, byte* outAhead, long outCount, int errFd, byte* errAhead, long errCount) {
+// `errCount` bytes their `File` read ahead, at `outAhead` and `errAhead`. A wait that gives an `IoError` puts
+// what it gathered of each pipe, those bytes first, in `keptOut` and `keptErr`, which the caller gives back to
+// each `File` (the owner, 2026-11-12, issue 174, (a)).
+pub ProcessOutput | IoError | ExitError ChildWaitWithOutput(int* state, string program, int outFd, byte* outAhead, long outCount, int errFd, byte* errAhead, long errCount, mut Bytes keptOut, mut Bytes keptErr) {
     mut out = AheadBytes(outAhead, outCount)
     mut err = AheadBytes(errAhead, errCount)
     long result = WaitSpawned(state, outFd, errFd, mut out, mut err)
     if result < 0 {
+        keptOut = out
+        keptErr = err
         return IoError(ErrorKind(result), ErrorCode(result), program)
     }
 

@@ -210,7 +210,8 @@ No case: as P6's.
 Where a program declares a `Logging` part of its settings type, which wins (P4), the part and
 `KURZ_LOG` combine entry by entry: the part's entry wins for its prefix, and the variable's entries
 stand for every prefix the part does not name, as ASP.NET's configuration layers its providers key
-by key. The two lists are merged once, before the program's first statement, and a category takes
+by key. The two lists are merged before the program's first statement, and again at each reload
+that changes the part, a level the inspector set staying above both (B17), and a category takes
 its level from the merged list as P5 takes it, by the longest prefix it starts with, so that an
 operator turns a category up or down through `KURZ_LOG` where the part does not name its prefix:
 beside the part's `Orders=Warning`, `KURZ_LOG="OrdersAudit=Debug"` gives the category of a type
