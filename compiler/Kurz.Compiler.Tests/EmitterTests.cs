@@ -291,7 +291,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             + "}\nprint(b)\n";
         var program = Compile(text, Builder.CheckRuntime(Target.Linux), testBuild: true, "raw").Program;
         Assert.True(program is not null, "no program");
-        var calls = program.Ir.Split('\n').Where(l => l.Contains(" asm ", StringComparison.Ordinal) && l.Contains("call ", StringComparison.Ordinal) && !l.Contains("\"\", \"r,~{memory}\"", StringComparison.Ordinal))
+        var calls = program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => l.Contains(" asm ", StringComparison.Ordinal) && l.Contains("call ", StringComparison.Ordinal) && !l.Contains("\"\", \"r,~{memory}\"", StringComparison.Ordinal))
             .Select(l => Regex.Replace(l, @", !dbg !\d+$", string.Empty)).ToList(); // the line's location set aside
         var shown = string.Join("\n", calls);
         Assert.True(calls.Count == 6, shown);
@@ -315,14 +315,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var emitted = Compile(naked, Builder.CheckRuntime(target), testBuild: true, "raw").Program;
             Assert.True(emitted is not null, $"no program for {target}");
-            var module = string.Join("\n", emitted.Ir.Split('\n').Where(l => l.StartsWith("module asm ", StringComparison.Ordinal) || l.StartsWith("@llvm.compiler.used", StringComparison.Ordinal)));
+            var ir = emitted.Ir.ReplaceLineEndings("\n"); // the module's lines end as the system's do
+            var module = string.Join("\n", ir.Split('\n').Where(l => l.StartsWith("module asm ", StringComparison.Ordinal) || l.StartsWith("@llvm.compiler.used", StringComparison.Ordinal)));
             Assert.True(Regex.IsMatch(module, typed), $"{target}:\n{module}");
             Assert.Matches($@"module asm ""{symbol}:""", module);
             Assert.Contains("module asm \".p2align 4\"", module, StringComparison.Ordinal);
             Assert.Matches(@"module asm ""jmp \\22[^\\""]*\bNine\b[^\\""]*\\22""", module); // the `sym` as the symbol it names
             Assert.Matches(@"@llvm\.compiler\.used = appending global \[1 x ptr\] \[ptr @""[^""]*\bNine\b[^""]*""\]", module);
-            Assert.Matches(@"(?m)^declare dso_local i64 @""[^""]*\bForward\b[^""]*""\(\)$", emitted.Ir);
-            Assert.DoesNotMatch(@"(?m)^define [^\n]*@""[^""]*\bForward\b", emitted.Ir); // no body of LLVM's, so no prologue
+            Assert.Matches(@"(?m)^declare dso_local i64 @""[^""]*\bForward\b[^""]*""\(\)$", ir);
+            Assert.DoesNotMatch(@"(?m)^define [^\n]*@""[^""]*\bForward\b", ir); // no body of LLVM's, so no prologue
         }
     }
 
