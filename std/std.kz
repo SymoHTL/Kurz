@@ -9880,9 +9880,9 @@ pub class Match {
 
 // A pattern built for one of G2's two engines. For the linear engine, as Rust's `regex` builds one: the pattern parsed into a
 // tree (`RegexParser`), the tree compiled into a Thompson automaton, and a search a Pike VM that runs the automaton over the text
-// once, its time in proportion to the text's length times the automaton's states times the positions a thread carries, which it
-// copies from thread to thread as Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole match and two for
-// each group for the members that give a match (G2). For the backtracking engine, the same automaton, whose ways a search tries
+// once, its time in proportion to the text's length times the automaton's states times one more than the positions a thread
+// carries, which it copies from thread to thread as Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole
+// match and two for each group for the members that give a match (G2). For the backtracking engine, the same automaton, whose ways a search tries
 // one after another (`Backtrack`). `Regex.New` of a literal the compiler checked gives a `Regex`, and of any other string
 // `Regex | RegexError` (G3); the compiler calls `RegexNew` and `RegexChecked` with the tables of G4's classes. Its text is its
 // pattern, as Rust's `Display` gives it (G1).
@@ -10502,8 +10502,24 @@ pub class Regex {
     // Whether the assertion `kind` holds at `at`: the text's start, its end, a line's start and end under `(?m)`, where a line ends
     // at `\n` alone (G4), a word's boundary and no boundary, its start and its end (`\b{start}` and `\<`, `\b{end}` and `\>`),
     // and the halves `\b{start-half}`, no word's character before, and `\b{end-half}`, none after; a word's characters `\w`'s.
+    // Under `(?mR)` a line's start and end, 10 and 11, take `\r`, `\n` and `\r\n` as a line's end, as Rust's `StartCRLF` and
+    // `EndCRLF` do; 12 to 17 are the word's assertions of `(?-u)`, 4 to 9 with ASCII's word characters.
     bool Looks(int kind, Bytes b, int at) {
         n = b.Count
+        if kind == 10 {
+            return at == 0 || b[at - 1] == 10 || (b[at - 1] == 13 && (at >= n || b[at] != 10))
+        }
+
+        if kind == 11 {
+            return at == n || b[at] == 13 || (b[at] == 10 && (at == 0 || b[at - 1] != 13))
+        }
+
+        if kind >= 12 {
+            before = at > 0 && RegexAsciiWord(int(b[at - 1]))
+            after = at < n && RegexAsciiWord(int(b[at]))
+            return RegexWordLook(kind - 8, before, after)
+        }
+
         if kind == 0 {
             return at == 0
         }
@@ -10535,34 +10551,65 @@ pub class Regex {
             after = RegexIn(ranges, wordAt, wordCount, RegexDecode(b, at))
         }
 
-        if kind == 4 {
-            return before != after
-        }
-
-        if kind == 5 {
-            return before == after
-        }
-
-        if kind == 6 {
-            return !before && after
-        }
-
-        if kind == 7 {
-            return before && !after
-        }
-
-        if kind == 8 {
-            return !before
-        }
-
-        return !after
+        return RegexWordLook(kind, before, after)
     }
+}
+
+// Whether the word's assertion `kind`, 4 to 9 of `Regex.Looks`, holds between a character that is a word's or not and another.
+bool RegexWordLook(int kind, bool before, bool after) {
+    if kind == 4 {
+        return before != after
+    }
+
+    if kind == 5 {
+        return before == after
+    }
+
+    if kind == 6 {
+        return !before && after
+    }
+
+    if kind == 7 {
+        return before && !after
+    }
+
+    if kind == 8 {
+        return !before
+    }
+
+    return !after
+}
+
+// Whether the byte `c` is a word's character of ASCII, `\w` under `(?-u)`.
+bool RegexAsciiWord(int c) => c >= 48 && c <= 57 || c >= 65 && c <= 90 || c == 95 || c >= 97 && c <= 122
+
+// The ranges of `\d`, `\w` and `\s` under `(?-u)`, `which` 0, 1 and 2, ASCII's, as Rust's translator takes them.
+List<int> RegexAsciiPerl(int which) {
+    if which == 0 {
+        return [48, 57]
+    }
+
+    if which == 1 {
+        return [48, 57, 65, 90, 95, 95, 97, 122]
+    }
+
+    return [9, 13, 32, 32]
+}
+
+// `set` with every number moved by `shift`.
+List<int> RegexShift(List<int> set, int shift) {
+    mut out = List<int>()
+    for x in set {
+        out.Add(x + shift)
+    }
+
+    return out
 }
 
 // The two lists of threads of a search, each a sparse set of states with the slots of each thread, and the stack and the slots of
 // the thread being added, as Rust's `PikeVM` holds its `ActiveStates`; made once for a search, and for every search of `Matches`.
-// They take the automaton's states times the positions a thread carries, beside the automaton and outside its bound, as Rust's
-// `size_limit` does not count the `PikeVM`'s cache (G2).
+// They take the automaton's states times one more than the positions a thread carries, beside the automaton and outside its
+// bound, as Rust's `size_limit` does not count the `PikeVM`'s cache (G2).
 class RegexThreads {
     internal mut List<int> dense0 = List<int>()
     internal mut List<int> sparse0 = List<int>()
@@ -10661,8 +10708,11 @@ class RegexParser {
     internal mut int n = 0
     internal mut int at = 0
     internal mut long tables = 0
-    // the flags in force: 1 `i`, 2 `m`, 4 `s`, 8 `x` and 16 `U`
-    internal mut int mode = 0
+    // the flags in force: 1 `i`, 2 `m`, 4 `s`, 8 `x`, 16 `U`, 32 `R` and 64 `u`, which is in force from the start, as in Rust's
+    // crate
+    internal mut int mode = 64
+    // the position of the first construct Rust's translator refuses, which it reads after the parse and the levels: -1 for none
+    internal mut int laterAt = -1
     // the error: -1 none, 0 `Syntax`, 1 `Unsupported` and 2 `TooBig`, and its position
     internal mut int failKind = -1
     internal mut int failAt = 0
@@ -10888,7 +10938,7 @@ class RegexParser {
     // A character, and under `(?i)` the class of every character that folds with it (G4).
     internal int Literal(int cp) {
         if (mode & 1) != 0 {
-            set = Fold([cp, cp])
+            set = Folded([cp, cp])
             if set.Count > 2 {
                 return ClassNode(set)
             }
@@ -11045,6 +11095,11 @@ class RegexParser {
         deep = Deep(lastNest)
         if deep >= 0 {
             Fail(0, deep)
+            return -1
+        }
+
+        if laterAt >= 0 {
+            Fail(0, laterAt)
             return -1
         }
 
@@ -11317,8 +11372,7 @@ class RegexParser {
     }
 
     // Rust's `parse_flags`: the flags up to `:` or `)`; a second `-` and a flag given twice are `Syntax` at it, the end of the
-    // pattern at the end, a `-` with no flag after it at the `-`, and `(?)` at its `?`. `R` and `u`, which Rust's crate takes, are
-    // `Unsupported` at their letter.
+    // pattern at the end, a `-` with no flag after it at the `-`, and `(?)` at its `?`.
     internal int Flags(int inner) {
         mut negation = -1
         mut dangling = -1
@@ -11335,11 +11389,6 @@ class RegexParser {
                 dangling = at
             } else {
                 dangling = -1
-                if c == 82 || c == 117 {
-                    Fail(1, at)
-                    return -1
-                }
-
                 mut bit = 0
                 if c == 105 {
                     bit = 1
@@ -11351,6 +11400,10 @@ class RegexParser {
                     bit = 8
                 } else if c == 85 {
                     bit = 16
+                } else if c == 82 {
+                    bit = 32
+                } else if c == 117 {
+                    bit = 64
                 }
 
                 if bit == 0 || (seen & bit) != 0 {
@@ -11360,7 +11413,7 @@ class RegexParser {
 
                 seen = seen | bit
                 if negation >= 0 {
-                    mode = mode & (31 - bit)
+                    mode = mode & (127 - bit)
                 } else {
                     mode = mode | bit
                 }
@@ -11572,9 +11625,17 @@ class RegexParser {
     internal int Primitive() {
         c = int(p[at])
         if c == 46 {
+            if (mode & 64) == 0 {
+                Later(at)
+            }
+
             at = at + 1
             if (mode & 4) != 0 {
                 return ClassNode([0, 1114111])
+            }
+
+            if (mode & 32) != 0 {
+                return ClassNode([0, 9, 11, 12, 14, 1114111])
             }
 
             return ClassNode([0, 9, 11, 1114111])
@@ -11583,6 +11644,10 @@ class RegexParser {
         if c == 94 {
             at = at + 1
             if (mode & 2) != 0 {
+                if (mode & 32) != 0 {
+                    return Node(3, 10, 0, 0)
+                }
+
                 return Node(3, 2, 0, 0)
             }
 
@@ -11592,6 +11657,10 @@ class RegexParser {
         if c == 36 {
             at = at + 1
             if (mode & 2) != 0 {
+                if (mode & 32) != 0 {
+                    return Node(3, 11, 0, 0)
+                }
+
                 return Node(3, 3, 0, 0)
             }
 
@@ -11605,6 +11674,10 @@ class RegexParser {
             }
 
             if r == 1 {
+                if (mode & 64) == 0 && Byte() {
+                    Later(escStart)
+                }
+
                 return Literal(escCp)
             }
 
@@ -11626,12 +11699,44 @@ class RegexParser {
                 return node
             }
 
+            if (mode & 64) == 0 && escCp >= 4 {
+                return Node(3, escCp + 8, 0, 0)
+            }
+
             return Node(3, escCp, 0, 0)
         }
 
         cp = RegexDecode(p, at)
         at = at + RegexLength(p[at])
         return Literal(cp)
+    }
+
+    // Whether the escape just read is `\xNN` above 7F, which under `(?-u)` Rust's translator reads as a byte, and refuses: a byte
+    // above ASCII is no character. A character above ASCII written another way is taken as its UTF-8.
+    internal bool Byte() => escCp > 127 && p[escStart + 1] == 120 && p[at - 1] != 125
+
+    // A construct Rust's translator refuses, at `start`: the first one is the error once the parse and the levels found none.
+    internal void Later(int start) {
+        if laterAt < 0 {
+            laterAt = start
+        }
+    }
+
+    // `set` folded as `(?i)` folds it: by the simple case folding of G4's table, or under `(?-u)` ASCII's letters alone.
+    internal List<int> Folded(List<int> set) {
+        if (mode & 64) != 0 {
+            return Fold(set)
+        }
+
+        return RegexUnion(set, RegexUnion(RegexShift(RegexIntersect(set, [97, 122]), -32), RegexShift(RegexIntersect(set, [65, 90]), 32)))
+    }
+
+    // A class that is a set of bytes under `(?-u)`, at `start`: one that holds a character above ASCII, after its negation, is
+    // refused there, since it would match a byte of no character, as Rust's translator refuses it.
+    internal void Bytewise(List<int> set, int start) {
+        if (mode & 64) == 0 && set.Count > 0 && set[set.Count - 1] > 127 {
+            Later(start)
+        }
     }
 
     // Rust's `parse_escape`: 1 for a character in `escCp`, 2 for a class in `escSet`, 3 for an assertion in `escCp` (0 `\A`, 1 `\z`,
@@ -11704,10 +11809,16 @@ class RegexParser {
                 which = 2
             }
 
+            mut set = Table(which)
+            if (mode & 64) == 0 {
+                set = RegexAsciiPerl(which)
+            }
+
             if c < 97 {
-                escSet = RegexNegate(Table(which))
+                escSet = RegexNegate(set)
+                Bytewise(escSet, start)
             } else {
-                escSet = Table(which)
+                escSet = set
             }
 
             return 2
@@ -11759,7 +11870,7 @@ class RegexParser {
             return 0
         }
 
-        if escCp >= 4 {
+        if escCp >= 4 && (mode & 64) != 0 {
             usesWord = true
         }
 
@@ -12060,8 +12171,8 @@ class RegexParser {
         mut lhs = classLhs[k]
         mut rhs = setValue
         if (mode & 1) != 0 {
-            lhs = Fold(lhs)
-            rhs = Fold(rhs)
+            lhs = Folded(lhs)
+            rhs = Folded(rhs)
         }
 
         if op == 38 {
@@ -12083,7 +12194,7 @@ class RegexParser {
         at = at + 1
         mut set = setValue
         if (mode & 1) != 0 {
-            set = Fold(set)
+            set = Folded(set)
         }
 
         if classNegated[k] {
@@ -12091,6 +12202,7 @@ class RegexParser {
         }
 
         open = classOpen[k]
+        Bytewise(set, open)
         nest = NestOf(open, [setNest])
         classOpen.RemoveAt(k)
         classNegated.RemoveAt(k)
@@ -12179,6 +12291,7 @@ class RegexParser {
 
     // A backreference inside a class is `Unsupported` at its `\`, as Rust's parse reads one there.
     internal int ClassItem() {
+        start = at
         if p[at] == 92 {
             r = Escape()
             if r == 4 {
@@ -12186,11 +12299,19 @@ class RegexParser {
                 return 0
             }
 
+            if r == 1 && (mode & 64) == 0 && escCp > 127 {
+                Later(start)
+            }
+
             return r
         }
 
         escCp = RegexDecode(p, at)
         at = at + RegexLength(p[at])
+        if (mode & 64) == 0 && escCp > 127 {
+            Later(start)
+        }
+
         return 1
     }
 
@@ -12247,12 +12368,14 @@ class RegexParser {
         // Rust's `unicode_fold_and_negate`: under `(?i)` the class is folded before it is negated, so that `(?i)[[:^lower:]]`
         // takes no letter of either case.
         if (mode & 1) != 0 {
-            set = Fold(set)
+            set = Folded(set)
         }
 
+        begin = at
         at = k + 2
         if negated {
             asciiSet = RegexNegate(set)
+            Bytewise(asciiSet, begin)
         } else {
             asciiSet = set
         }

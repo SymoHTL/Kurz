@@ -23,7 +23,12 @@ internal sealed class RegexPattern
     private readonly byte[] p;
     private readonly int n;
     private int at;
-    private int flags;
+
+    // the flags in force: 1 `i`, 2 `m`, 4 `s`, 8 `x`, 16 `U`, 32 `R` and 64 `u`, which is in force from the start, as in Rust's crate
+    private int flags = 64;
+
+    // the position of the first construct Rust's translator refuses, which it reads after the parse and the levels: -1 for none
+    private int laterAt = -1;
     private int failKind = -1;
     private int failAt;
     private string? unbuilt;
@@ -237,7 +242,7 @@ internal sealed class RegexPattern
     {
         if ((flags & 1) != 0)
         {
-            var set = Fold([cp, cp]);
+            var set = Folded([cp, cp]);
             if (set.Count > 2)
             {
                 return ClassNode(set);
@@ -389,6 +394,12 @@ internal sealed class RegexPattern
         if (deep >= 0)
         {
             Fail(0, deep);
+            return -1;
+        }
+
+        if (laterAt >= 0)
+        {
+            Fail(0, laterAt);
             return -1;
         }
 
@@ -658,12 +669,6 @@ internal sealed class RegexPattern
             else
             {
                 dangling = -1;
-                if (c is 82 or 117)
-                {
-                    Unbuilt(at, c == 82 ? "the flag `R`" : "the flag `u`");
-                    return -1;
-                }
-
                 var bit = c switch
                 {
                     105 => 1,
@@ -671,6 +676,8 @@ internal sealed class RegexPattern
                     115 => 4,
                     120 => 8,
                     85 => 16,
+                    82 => 32,
+                    117 => 64,
                     _ => 0,
                 };
                 if (bit == 0 || (seen & bit) != 0)
@@ -680,7 +687,7 @@ internal sealed class RegexPattern
                 }
 
                 seen |= bit;
-                flags = negation >= 0 ? flags & (31 - bit) : flags | bit;
+                flags = negation >= 0 ? flags & (127 - bit) : flags | bit;
             }
 
             at++;
@@ -896,20 +903,27 @@ internal sealed class RegexPattern
         int c = p[at];
         if (c == 46)
         {
+            if ((flags & 64) == 0)
+            {
+                Later(at);
+            }
+
             at++;
-            return (flags & 4) != 0 ? ClassNode([0, 1114111]) : ClassNode([0, 9, 11, 1114111]);
+            return (flags & 4) != 0 ? ClassNode([0, 1114111])
+                : (flags & 32) != 0 ? ClassNode([0, 9, 11, 12, 14, 1114111])
+                : ClassNode([0, 9, 11, 1114111]);
         }
 
         if (c == 94)
         {
             at++;
-            return Node(3, (flags & 2) != 0 ? 2 : 0, 0, 0);
+            return Node(3, (flags & 2) == 0 ? 0 : (flags & 32) != 0 ? 10 : 2, 0, 0);
         }
 
         if (c == 36)
         {
             at++;
-            return Node(3, (flags & 2) != 0 ? 3 : 1, 0, 0);
+            return Node(3, (flags & 2) == 0 ? 1 : (flags & 32) != 0 ? 11 : 3, 0, 0);
         }
 
         if (c == 92)
@@ -917,16 +931,70 @@ internal sealed class RegexPattern
             return Escape() switch
             {
                 0 => -1,
-                1 => Literal(escCp),
+                1 => EscapedLiteral(),
                 2 => ClassNode(escSet),
                 4 => Reference(),
-                _ => Node(3, escCp, 0, 0),
+                _ => Assertion(),
             };
         }
 
         var cp = Decode(p, at);
         at += Length(p[at]);
         return Literal(cp);
+    }
+
+    /// <summary>
+    /// The character of an escape; under <c>(?-u)</c> <c>\xNN</c> above 7F, which Rust's translator reads as a byte, is refused,
+    /// since a byte above ASCII is no character. A character above ASCII written another way is taken as its UTF-8.
+    /// </summary>
+    private int EscapedLiteral()
+    {
+        if ((flags & 64) == 0 && escCp > 127 && p[escStart + 1] == 120 && p[at - 1] != 125)
+        {
+            Later(escStart);
+        }
+
+        return Literal(escCp);
+    }
+
+    /// <summary>
+    /// The assertion of an escape; under <c>(?-u)</c> the word's assertions of ASCII, 12 to 17.
+    /// </summary>
+    private int Assertion()
+    {
+        if ((flags & 64) == 0 && escCp >= 4)
+        {
+            return Node(3, escCp + 8, 0, 0);
+        }
+
+        return Node(3, escCp, 0, 0);
+    }
+
+    /// <summary>A construct Rust's translator refuses, at <paramref name="start"/>: the first one is the error once the parse and the levels found none.</summary>
+    private void Later(int start)
+    {
+        if (laterAt < 0)
+        {
+            laterAt = start;
+        }
+    }
+
+    /// <summary><paramref name="set"/> folded as <c>(?i)</c> folds it: by the simple case folding of G4's table, or under <c>(?-u)</c> ASCII's letters alone.</summary>
+    private List<int> Folded(List<int> set) => (flags & 64) != 0 ? Fold(set)
+        : Unite(set, Unite(Shift(Intersect(set, [97, 122]), -32), Shift(Intersect(set, [65, 90]), 32)));
+
+    private static List<int> Shift(List<int> set, int by) => [.. set.Select(x => x + by)];
+
+    /// <summary>
+    /// A class that is a set of bytes under <c>(?-u)</c>, at <paramref name="start"/>: one that holds a character above ASCII,
+    /// after its negation, is refused there, since it would match a byte of no character, as Rust's translator refuses it.
+    /// </summary>
+    private void Bytewise(List<int> set, int start)
+    {
+        if ((flags & 64) == 0 && set.Count > 0 && set[^1] > 127)
+        {
+            Later(start);
+        }
     }
 
     /// <summary>
@@ -1009,7 +1077,13 @@ internal sealed class RegexPattern
         {
             at++;
             var which = c is 119 or 87 ? 1 : c is 115 or 83 ? 2 : 0;
-            escSet = c < 97 ? Negate(Table(which)) : Table(which);
+            List<int> set = (flags & 64) != 0 ? Table(which) : which == 0 ? [48, 57] : which == 1 ? [48, 57, 65, 90, 95, 95, 97, 122] : [9, 13, 32, 32];
+            escSet = c < 97 ? Negate(set) : set;
+            if (c < 97)
+            {
+                Bytewise(escSet, start);
+            }
+
             return 2;
         }
 
@@ -1052,7 +1126,7 @@ internal sealed class RegexPattern
             return 0;
         }
 
-        if (escCp >= 4)
+        if (escCp >= 4 && (flags & 64) != 0)
         {
             usesWord = true;
         }
@@ -1382,8 +1456,8 @@ internal sealed class RegexPattern
         var rhs = setValue;
         if ((flags & 1) != 0)
         {
-            lhs = Fold(lhs);
-            rhs = Fold(rhs);
+            lhs = Folded(lhs);
+            rhs = Folded(rhs);
         }
 
         setValue = op == 38 ? Intersect(lhs, rhs)
@@ -1402,7 +1476,7 @@ internal sealed class RegexPattern
         var set = setValue;
         if ((flags & 1) != 0)
         {
-            set = Fold(set);
+            set = Folded(set);
         }
 
         if (classNegated[k])
@@ -1411,6 +1485,7 @@ internal sealed class RegexPattern
         }
 
         var open = classOpen[k];
+        Bytewise(set, open);
         var nest = NestOf(open, [setNest]);
         classOpen.RemoveAt(k);
         classNegated.RemoveAt(k);
@@ -1495,6 +1570,7 @@ internal sealed class RegexPattern
     /// <summary>A backreference inside a class is <c>Unsupported</c> at its <c>\</c>, as Rust's parse reads one there.</summary>
     private int ClassItem()
     {
+        var start = at;
         if (p[at] == 92)
         {
             var r = Escape();
@@ -1504,11 +1580,21 @@ internal sealed class RegexPattern
                 return 0;
             }
 
+            if (r == 1 && (flags & 64) == 0 && escCp > 127)
+            {
+                Later(start);
+            }
+
             return r;
         }
 
         escCp = Decode(p, at);
         at += Length(p[at]);
+        if ((flags & 64) == 0 && escCp > 127)
+        {
+            Later(start);
+        }
+
         return 1;
     }
 
@@ -1575,11 +1661,16 @@ internal sealed class RegexPattern
         // takes no letter of either case.
         if ((flags & 1) != 0)
         {
-            set = Fold(set);
+            set = Folded(set);
         }
 
+        var begin = at;
         at = k + 2;
         asciiSet = negated ? Negate(set) : set;
+        if (negated)
+        {
+            Bytewise(asciiSet, begin);
+        }
         return true;
     }
 

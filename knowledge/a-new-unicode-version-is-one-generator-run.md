@@ -11,7 +11,9 @@ Database that Rust's latest stable release pins as `char::UNICODE_VERSION`, gene
 "Generated, as Rust"), and the classes `\d`, `\w` and `\s`, the case folding and the characters of
 a group's name of a regular expression (G4) come from the same version, which Kurz takes for them:
 Rust's `regex-syntax` ships tables it generates at a Unicode version of its own, which need not be
-the one Rust's stable release pins. Nothing in the compiler
+the one Rust's stable release pins: `regex-syntax` 0.8.11, which Rust's `regex` 1.13.1 takes, states
+Unicode 16.0.0 in the header of each of its generated tables (`ucd-generate ... ucd-16.0.0`, read on
+2026-11-12), where Rust's stable release pins 17.0.0. Nothing in the compiler
 reads the database: `tools/unicode_tables.py` fetches UnicodeData.txt, SpecialCasing.txt,
 DerivedCoreProperties.txt, PropList.txt and CaseFolding.txt of the version it pins, refuses a file
 whose SHA-256 is not the one it pins, and writes `CaseTables.cs`, which the emitter writes into a
