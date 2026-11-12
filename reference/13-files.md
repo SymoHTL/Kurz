@@ -2539,7 +2539,7 @@ the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later 
 end, the child let go of, `Id`'s type, a pipe's `File` after the child, `Id` after the wait, `Kill()`'s
 error, no text and no `==`, the wait after a bound, `Status()` writing the input under `poll`, an empty input closed
 at once, a NUL byte in an input, the bound over the writing, a write that fails, a write that gets `EPIPE`, the input held as a `string`
-and its buffer, the order of the bytes a failed `WaitWithOutput()` gives back, the later read of a pipe whose read failed, the path and
+and its buffer, the order of the bytes a failed `WaitWithOutput()` gives back, the build's costs of the give-back (every `File` handle 8 bytes wider, 64 bytes, for the room of its reader's buffer, and the whole output a failed call gathered, of any size, held in the `File`'s buffer until the program reads it, where the build before freed it), the reader's lock held from the call's read of the bytes a `File` read ahead until they are taken or given back (so that a read through that `File` on another thread waits for the call, as a fill holds the lock across its read), the later read of a pipe whose read failed, the path and
 the number of the `InvalidInput` of an `Input` beside `Spawn()` or a `Stdin`, and a piped `Stderr` under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)

@@ -1230,7 +1230,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   bytes a `File` read ahead (S24) first, and a read that fails ends it at once with that `IoError`, under a bound as without
   one, the pipes left open and no child waited for or killed; a wait that gives an `IoError`, that read's or `TimedOut`, gives
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
-  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe (S19; the order of
+  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe, the reader's lock
+  held from the read of the bytes read ahead until they are taken or given back, so that a read through the `File` on another
+  thread waits for the call (S19; the order of
   the bytes given back is among S19's assumed readings). A later wait after one that waited for the child gives the first one's
   status, or `TimedOut` again, and one after a `WaitWithOutput()` whose read failed waits for the child, which that call left to
   a later `Wait()` or `Kill()` (S19, the owner's "Error, no wait"), and `Kill()` sends
