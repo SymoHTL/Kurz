@@ -226,7 +226,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and an empty look-behind holds at its position
     /// (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
     /// counts positions in UTF-16 units, and so is <c>(a*)*</c> on <c>aa</c>, where the loop that comes back with no character read
-    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2).
+    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2), inside a look-behind too, where
+    /// <c>(?&lt;=(a*)*)b</c> on <c>aab</c> gives group 1 as <c>aa</c> from 0 and .NET's is empty.
     /// </summary>
     [Fact]
     public void The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does()
@@ -294,15 +295,27 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
+            behind = Regex.New(r"(?<=(a*)*)b", backtracking: true)
+            after = behind.Match("aab")
+            if after != null {
+                h = after.Group(1)
+                if h != null {
+                    print("{after.Index},{after.Length},{h.Index},{h.Length}")
+                }
+            }
+
             """.Replace("KELVIN", "\u212A", StringComparison.Ordinal)), [], toolchain.Runtime, testBuild: true); // U+212A
         Assert.True(folded.Program is not null, string.Join("; ", folded.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(folded.Program, "regex-backtracking-fold"));
         Assert.Equal((0, ""), (code, error));
         // the Kelvin sign is three bytes, `K` and `k` one each; then `(a*)*` on `aa`, whose group 1 is `aa` on both engines, where
-        // .NET's last iteration reads no character and leaves it empty at 2
-        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2"], output);
+        // .NET's last iteration reads no character and leaves it empty at 2; then the same loop inside a look-behind, `(?<=(a*)*)b`
+        // on `aab`, whose group 1 is `aa` from 0, where .NET's is empty
+        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2", "2,1,0,2"], output);
         var empty = new Regex("(a*)*").Match("aa").Groups[1];
         Assert.Equal((true, 2, 0), (empty.Success, empty.Index, empty.Length));
+        var behindNet = new Regex("(?<=(a*)*)b").Match("aab");
+        Assert.Equal((true, 2, true, 0), (behindNet.Success, behindNet.Index, behindNet.Groups[1].Success, behindNet.Groups[1].Length));
     }
 
     /// <summary>
