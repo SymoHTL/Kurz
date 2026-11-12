@@ -47,7 +47,7 @@ both files, and not the path of `settings.kz` itself)*
 
 A file is a call of the type's constructor with named arguments that gives the fields its layer
 sets and no others, a nested `data` field by its own constructor's call,
-`AppSettings(Root: "/data", Server: ServerSettings(Port: 9000))`.
+`AppSettings(Root: "/data", Address: "0.0.0.0:9000")`.
 *(assumed, §12: the defaults of the round of 2026-11-11)*
 
 No case: as B1's.
@@ -57,8 +57,8 @@ No case: as B1's.
 A variable names a setting by each name of its path in upper snake case, `__` between the parts,
 after the prefix the declaration names, and with no prefix where it names none, as Rust's `config`
 and `figment` read variables: under `settings("APP_") data AppSettings(...)`, `APP_ACCESS_KEY` sets
-`AccessKey` and `APP_LOGGING__ORDERS` sets the key `Orders` of the map `Logging` (§12, the owner,
-2026-11-11, Q3 (b)), where the key arrives as `ORDERS`, the cost the option named. A key of a map
+`AccessKey` and `APP_LOGGING__ORDERS` sets `Orders` in `Logging` (§12, the owner, 2026-11-11,
+Q3 (b)); where `Logging` is a map, the key arrives as `ORDERS`, the cost the option named. A key of a map
 read from a variable is matched without case. *(assumed, §12: the words of the question's lean)* A list's item is a variable of its
 own, `NAME__0`, `NAME__1`. *(assumed, §12: the defaults of the round of 2026-11-11)*
 
@@ -90,7 +90,7 @@ No case: as B1's.
 A start with a missing setting, a value that its field's type cannot read or a value that the
 type's constraints refuse writes one line on standard error for each, naming the setting's path,
 the source of its value, a file and its line, a variable or an argument, and the reason, and ends the
-process with the exit code 1, before the program's first statement. The value of a `secret` field
+process with the exit code 1. The value of a `secret` field
 is never written. *(assumed, §12: the defaults of the round of 2026-11-11)*
 
 No case: a case's header holds no line of standard error, and as B1's.
