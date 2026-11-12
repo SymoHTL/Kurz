@@ -575,7 +575,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// T33: <c>for f in T.Fields</c> in a copy, unrolled: its body is checked once for each field of the primary constructor of the
-    /// <c>data</c> type the copy binds to <c>T</c> (D14), in the order of their declaration, each pass a copy of the body's syntax in which
+    /// <c>data</c> type the copy binds to <c>T</c> (D14), then for each <c>pub</c> field of its body (D16), in the order of their
+    /// declaration, each pass a copy of the body's syntax in which
     /// <c>f.Get(value)</c> reads <c>(value).Field</c> (section 4, assumed with "for f in T.Fields"); <c>f.Name</c> is a constant
     /// <c>string</c> there and <c>f.Type</c> the field's type. Where the copy binds a type of another kind, the loop is
     /// <c>kind-not-read</c> (section 4, assumed with "Fixed compile error"). A <c>break</c> and a <c>continue</c> of the loop are
@@ -609,7 +610,7 @@ public sealed partial class Checker
 
         var passes = new List<Block>();
         var redeclared = Redeclares(f.Variable, f.VariableLine); // V9: the loop's name, once, whatever the count of fields
-        foreach (var field in walked.Symbol.Fields)
+        foreach (var field in walked.Symbol.Fields.Where(f => f.IsPub)) // the primary constructor's, then the `pub` fields of the body (section 4, the owner, 2026-11-01, "Readable ones")
         {
             var pass = new FieldPass(f.Variable, n.Name, walked, field, SubstituteData(walked, field.Type));
             var body = SyntaxCopy.Copy(f.Body, (e, copyOf) => FieldGet(e, copyOf, pass), KeepOrigin);
@@ -696,7 +697,7 @@ public sealed partial class Checker
         }
 
         var arguments = new List<Argument>();
-        foreach (var field in made.Symbol.Fields)
+        foreach (var field in made.Symbol.ConstructorFields) // the primary constructor's alone: the body computes its own (section 4, the owner, 2026-11-01, "Readable ones")
         {
             var pass = new FieldPass(parameter.Name, n.Name, made, field, SubstituteData(made, field.Type));
             var argument = SyntaxCopy.Copy(body, (e, copyOf) => FieldGet(e, copyOf, pass), KeepOrigin);

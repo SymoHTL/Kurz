@@ -9,20 +9,60 @@ public sealed partial class Emitter
 {
     // ---- data values (D1 to D11, D15) -------------------------------------------------------------
 
-    /// <summary>D2, D7, D11: a data value of the fields in the order of their slots, the base's first, each the argument bound to it or its default.</summary>
+    /// <summary>
+    /// D2, D7, D11: a data value of the fields in the order of their slots, the base's first, each the argument bound to it or its
+    /// default; then the fields of its body, each computed by its initializer (D16, <see cref="BodyFields"/>).
+    /// </summary>
     private string EmitConstruction(CallExpression c, CallInfo info)
     {
         var type = (DataType)Sub(info.Result);
         var fields = Layout.Fields(type);
         var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false, owned: true);
-        return Make(type, arguments.Select((a, j) => a[(Ir(fields[j]).Length + 1)..]).ToList());
+        var values = arguments.Select((a, j) => a[(Ir(fields[j]).Length + 1)..]).ToList();
+        values.AddRange(fields.Skip(values.Count).Select(Zero)); // D16: the slots of the body, which no initializer reads before it set them
+        return BodyFields(type, Make(type, values), release: false);
+    }
+
+    /// <summary>
+    /// D16: the fields of the body of a value whose other fields are set, each computed in the order of the declarations by the function
+    /// of its initializer, which borrows the value and reads the fields above it alone, so that an initializer reads the value of every
+    /// field it names (§4, the owner, 2026-11-12); a plain value is given back with them in place, a block holds them. With
+    /// <paramref name="release"/> a block's slot lets go of the value it held, a copy's (<see cref="EmitWith"/>); else it held none.
+    /// </summary>
+    private string BodyFields(DataType type, string value, bool release)
+    {
+        var fields = Layout.Fields(type);
+        for (var i = 0; i < fields.Count; i++)
+        {
+            if (type.Symbol.Fields[i].Body is null)
+            {
+                continue;
+            }
+
+            var initializer = type.Symbol.Initializers[type.Symbol.Fields[i].Name];
+            var computed = fn.Value($"call {Ir(fields[i])} {Instance(initializer, NoMap)}({Ir(type)} {value})");
+            if (!layout.IsBlock(type))
+            {
+                value = fn.Value($"insertvalue {Ir(type)} {value}, {Ir(fields[i])} {computed}, {Number(i)}");
+            }
+            else if (release)
+            {
+                Store(computed, fields[i], FieldPointer(layout.Block(type.Symbol), value, i));
+            }
+            else
+            {
+                fn.Emit($"store {Ir(fields[i])} {computed}, ptr {FieldPointer(layout.Block(type.Symbol), value, i)}");
+            }
+        }
+
+        return value;
     }
 
     /// <summary>The default written for the field in the slot, in the declaration of the type that declares the field, and the file of that declaration (D7, D11).</summary>
     private (Expression Value, Unit File) FieldDefault(DataSymbol symbol, int slot)
     {
         var own = symbol.Declaration.PrimaryConstructor ?? [];
-        var inherited = symbol.Fields.Count - own.Count;
+        var inherited = symbol.ConstructorFields.Count - own.Count; // D16: the fields of the body follow, and no slot gives them
         if (slot < inherited)
         {
             return FieldDefault(symbol.Base ?? throw new InvalidOperationException($"`{symbol.Name}` has inherited fields and no base"), slot);
@@ -93,6 +133,7 @@ public sealed partial class Emitter
     /// D5: a copy of the value with the fields replaced, the values read in the order written after the value; a block is copied
     /// whole, as the type of the value it holds, so that a derived value stays one. The copy holds its replaced fields' values and
     /// the counted values of the fields it keeps once more: a block's copy lets go of the value of a replaced field it took a count of.
+    /// The fields of the body are computed again from the copy's (D16, the owner, 2026-11-12, B4), as a construction computes them.
     /// </summary>
     private string EmitWith(WithExpression w)
     {
@@ -112,14 +153,14 @@ public sealed partial class Emitter
                 Store(v, fields[index], FieldPointer(layout.Block(type.Symbol), copy, index));
             }
 
-            return copy;
+            return BodyFields(type, copy, release: true);
         }
 
         for (var i = 0; i < fields.Count; i++)
         {
-            if (Counted(fields[i]) && !replaced.Exists(r => r.Index == i))
+            if (Counted(fields[i]) && !replaced.Exists(r => r.Index == i) && type.Symbol.Fields[i].Body is null)
             {
-                Retain(fn.Value($"extractvalue {Ir(type)} {value}, {Number(i)}"), fields[i]);
+                Retain(fn.Value($"extractvalue {Ir(type)} {value}, {Number(i)}"), fields[i]); // D16: a field of the body is computed again below
             }
         }
 
@@ -128,7 +169,7 @@ public sealed partial class Emitter
             value = fn.Value($"insertvalue {Ir(type)} {value}, {Ir(fields[index])} {v}, {Number(index)}");
         }
 
-        return value;
+        return BodyFields(type, value, release: false);
     }
 
     /// <summary>
