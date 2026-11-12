@@ -598,7 +598,7 @@ call of one of them without `mut` is M7's `mut-at-call`, never a quiet pick of t
 parameter can have a default value, and an argument can be passed by name (D11). Which function a
 call picks when more than one fits is F13. *(proposed: what "differ" is, and the id)* Arguments are
 evaluated from left to right, as in C# *(assumed: proposed on 2026-10-09 and not objected to)*, in the
-order written at the call, named arguments included (the owner, 2026-10-10). A method's receiver is evaluated before its arguments: its value, or for a `mut` method the place of its value, so that an argument that assigns the variable the receiver reads leaves the call with the value the receiver read, as C# evaluates the target of a call first (§8, the owner, 2026-11-12, issue 39, comment 6819138235, item 12). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
+order written at the call, named arguments included (the owner, 2026-10-10). A method's receiver is evaluated before its arguments: its value, or for a `mut` method the place of its value, so that an argument that assigns the variable the receiver of a method without `mut` reads leaves that call with the value the receiver read, as Rust evaluates a method's receiver first, and as C# evaluates the target of a call first where it is an instance of a class; for a struct C# passes the variable as `ref this`, which its method reads after the arguments ran, so that `c.Show(Set(ref c))` gives `901` there where Kurz gives `101`, and a `mut` method works on what its place holds when its body runs (D16) (§8, the owner, 2026-11-12, issue 39, comment 6819138235, item 12, and comment 6821484835, which kept the value read first for a `data` value against C#'s order for a struct). A parameter's default value is a constant expression, as C# requires of it: a literal, `null`, a
 value of an `enum` or `flags`, a `data` value without fields, or an expression of literals that T6
 folds (the owner, 2026-10-11, confirming the reading proposed after the review of round 14), and a
 `data` value made by its name whose every argument is such a constant, `Rate(240, 5s)`, which goes
@@ -649,6 +649,54 @@ int Set(mut P p) {
 mut c = P(1)
 print(c.Show(Set(mut c)))
 print(c.N)
+```
+
+Case: [values/mut-method-place.kz](../corpus/values/mut-method-place.kz)
+```kurz
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+class H(mut Inner In)
+
+int Replace(H h) {
+    h.In = Inner(D(5, "new{2}"))
+    return 1
+}
+
+top = H(Inner(D(1, "old{1}")))
+old = top.In
+top.In.V.Add(Replace(top))
+print(top.In.V.N)
+print(top.In.V.S)
+print(old.V.N)
+print(old.V.S)
+```
+
+Case: [values/mut-method-field-assigned.kz](../corpus/values/mut-method-field-assigned.kz)
+```kurz
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+
+int SetV(Inner i) {
+    i.V = D(7, "set{1}")
+    return 1
+}
+
+box = Inner(D(1, "old{1}"))
+box.V.Add(SetV(box))
+print(box.V.N)
+print(box.V.S)
 ```
 
 Case: [functions/default-not-constant.kz](../corpus/functions/default-not-constant.kz)
