@@ -1246,6 +1246,12 @@ public sealed partial class Checker
     /// <summary>K7: <c>this</c>, the instance a method was called on; outside a method no <c>this</c> is visible (V10), and a <c>static</c> member has none (K19).</summary>
     private Typed CheckThis(ThisExpression t)
     {
+        if (checking?.DataField is not null)
+        {
+            Report(ErrorIds.UnknownName, t.Line, "a field's default reads no `this`: its value is being built (D16, K7, V10)");
+            return Typed.Error;
+        }
+
         if (CurrentClass() is null)
         {
             Report(ErrorIds.UnknownName, t.Line, "`this` is the instance inside a method of a class, and no method is around it (K7, V10)");

@@ -1670,7 +1670,8 @@ public sealed partial class Checker
         {
             frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = d.Line, TypeParameters = d.TypeParameters };
             var written = d.Declaration.PrimaryConstructor ?? [];
-            var own = d.Fields.Skip(d.Fields.Count - written.Count); // the type's own fields follow the base's, one per written parameter (D7)
+            var given = d.ConstructorFields;
+            var own = given.Skip(given.Count - written.Count); // the type's own fields follow the base's, one per written parameter (D7), and those of its body follow them (D16)
             foreach (var (p, field) in written.Zip(own))
             {
                 if (p.Default is not null)
@@ -2647,6 +2648,23 @@ public sealed partial class Checker
             through = through is { } p ? p with { Fields = p.Fields.Length == 0 ? m.Member : p.Fields + "." + m.Member } : null;
             if (current is DataType d && d.Symbol.Field(m.Member) is { } field)
             {
+                if (!DataFieldVisible(field, d.Symbol, m.Line))
+                {
+                    current = Types.Error;
+                    last = null;
+                    break;
+                }
+
+                if (field is { Body: not null, Mut: false } && changed is not null)
+                {
+                    // D16: a field of the body without `mut` is given by its initializer alone (§4, the owner, 2026-11-12), so neither it nor
+                    // a field of the value it holds is assigned; a path from a variable without `mut` is refused at its root alone
+                    Report(ErrorIds.AssignImmutable, m.Line, $"`{m.Member}` is a field of the body without `mut`, which its initializer alone gives (D16)");
+                    current = Types.Error;
+                    last = null;
+                    break;
+                }
+
                 last = field;
                 current = SubstituteData(d, field.Type);
                 model.RecordType(m, new Typed(current));

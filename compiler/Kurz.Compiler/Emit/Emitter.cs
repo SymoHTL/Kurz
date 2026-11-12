@@ -292,6 +292,11 @@ public sealed partial class Emitter
                             owners[method.Real!] = u; // D16: emitted when called, as a function is
                         }
 
+                        foreach (var initializer in symbol.Initializers.Values)
+                        {
+                            owners[initializer] = u; // D16: a field of the body, computed by a construction and a `with`
+                        }
+
                         break;
                     }
                 case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:

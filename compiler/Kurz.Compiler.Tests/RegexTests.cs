@@ -214,12 +214,16 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G2: the backtracking engine's own constructs, a backreference by number and by name, the four look-arounds, a look-behind of
     /// any length among them, and the atomic group, match as .NET's do, held to .NET over written rows and 300 generated patterns of
-    /// them, 12 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
+    /// them, 18 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
     /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
-    /// The generator puts no group inside a look-behind, whose groups .NET takes from right to left, and no repetition of what can
-    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference
-    /// deciding (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and a look-behind tries its own position
-    /// first (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
+    /// A look-behind reads its content from right to left, as .NET's does: a sequence last first, a repetition greedy to the left,
+    /// an alternation in its order, a backreference ending at the position, a look-ahead inside it forward again and an atomic
+    /// group in the direction it stands in, so that
+    /// <c>(?&lt;=(a+))b</c> over <c>aaab</c> gives group 1 <c>aaa</c> from 0 and <c>(?&lt;=\1(a))b</c> matches <c>aab</c>; written
+    /// rows and generated ones put groups inside it. The generator puts no repetition of what can match nothing. Under
+    /// <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference deciding
+    /// (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and an empty look-behind holds at its position
+    /// (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
     /// counts positions in UTF-16 units, and so is <c>(a*)*</c> on <c>aa</c>, where the loop that comes back with no character read
     /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2).
     /// </summary>
@@ -231,9 +235,13 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             @"(\w+) \1", @"\d+(?= kg)", @"(a|b\1)+", @"(?<=a+)b", @"(?<!a)b", @"(?>a+)b", @"(?>a|ab)c", @"(?=(a+))a*b\1",
             @"(?i)(a)\1", @"\2(a)(b)", @"(a)|\1b", @"(?!a)\w", @"(?<n>a)\k<n>", @"(?<=\b)a(?!a)", @"(?<=ab|b)a", @"a(?=b(?=c))",
             @"(a)(?i)\1", @"(?i)(a)(?-i)\1", @"(?<=)b", @"(?<=a*)b",
+            @"(?<=(a+))b", @"(?<=(a+?))b", @"(?<=(a*)(a*))b", @"(?<=(a|aa))b", @"(?<=(a)\1)b", @"(?<=\1(a))b", @"(?<=(?i)\1(a))b",
+            @"(?<=(?=(a))a)b", @"(?<=(?<=(a))b)c", @"(?<=(?>a+))b", @"(?<=(ab|a)+)c", @"(?<=^(a+))b", @"(?<=(\w+) )x",
+            @"(?<=(?>(a+)))b", @"(?<=(?>(a+))a)b",
         ];
         string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
-            "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))"];
+            "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))", "(?<=(a+))", "(?<=(a|ab)b?)",
+            "(?<!(b))"];
         var random = new Random(Seed + 7);
         var patterns = written.Select(p => (p, Groups(p))).ToList();
         while (patterns.Count < written.Length + 300)
@@ -250,7 +258,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         Assert.All(patterns, p => Assert.Null(RegexPattern.Check(p.Item1, backtracking: true)));
         Assert.All(patterns.Take(written.Length), p => Assert.NotNull(RegexPattern.Check(p.Item1))); // the linear engine takes none of the written ones
-        string[] fixedTexts = ["", "a", "ab", "aba", "aab b", "say hello hello there", "5 m, 12 kg", "aA", "abab", "abc"];
+        string[] fixedTexts = ["", "a", "ab", "aba", "aab b", "say hello hello there", "5 m, 12 kg", "aA", "abab", "abc", "aaab", "Aab", "abac",
+            "hi there x"];
         var texts = fixedTexts.Concat(Enumerable.Range(0, 4).Select(_ => new string(Enumerable.Range(0, random.Next(8)).Select(_ => "aab "[random.Next(4)]).ToArray()))).ToList();
         var expected = new List<string>();
         foreach (var (p, groups) in patterns)
