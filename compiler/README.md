@@ -1833,7 +1833,9 @@ ask about it.
   takes moved out of their class, as a partition is refined; `IsMatch` takes its answer, and the other searches run the Pike VM only where it finds a
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
   fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM (the owner, 2026-11-12, issue 176,
-  comment 6819137493, Q1, Q2 and Q4 of comment 6813110851); the text length below which Q3 of that comment has the Pike VM
+  comment 6819137493, Q1, Q2 and Q4 of comment 6813110851) *(assumed, as the record and G2 keep them: the members a state
+  keeps, the cache the searches of one call share, its 2 MiB and the checks at an emptying and of the capacity)*; the text
+  length below which Q3 of that comment has the Pike VM
   run alone is not built, and the DFA runs first at every length. The parse is
   Rust's `ParserI`, one pass with stacks of the open groups, sequences, alternations and brackets, so that a pattern gives
   the error Rust's gives at the byte Rust's names, and the levels of Rust's `NestLimiter` are counted after it, a group, a
@@ -1874,19 +1876,21 @@ ask about it.
   gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
   stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails
   that way, as the Pike VM's thread that comes back to a state at the same position ends. A lookaround and an atomic group
-  run their content as a search of its own; a lookbehind tries its position and each one before it, the nearest first, its content ending at its
-  position; a
+  run their content as a search of its own; a lookbehind reads its content from its position back, from right to left, as
+  .NET's `RegexOptions.RightToLeft` reads it: the parse builds that content with a sequence's items last first, states that
+  read a character, a class or a backreference's text backward and a group's end set at its left, and a lookahead inside it
+  forward again and an atomic group in the direction it stands in (`RegexParser.Emit`), so that `(?<=(a+))b` over `aaab` gives group 1 `aaa`; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
   backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, counted
   and bounded as the linear engine's, a lookbehind of any length and the case folding of a backreference: the owner, 2026-11-12, issue 176,
-  comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642; the lookbehind's start, the nearest first, is not what Q15
-  of comment 6812042360 chose that day, a lookbehind matched from right to left as .NET's, which is not built) *(assumed:
+  comment 6819137493, Q1 to Q7 and Q10 of comment 6811727642, and the lookbehind matched from right to left as .NET's, Q15
+  of comment 6812042360) *(assumed:
   the stack in memory, Q9 of comment 6811727642 at its default; the states each construct counts, the flag in force at
   the backreference, the loop's end, the errors and the digits of a
   backreference and when a group's positions are set, proposed with the record and not put to the owner)* Pinned by
   `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
-  patterns of its own constructs, and `corpus/regex/backtracking.kz`.
+  patterns of its own constructs, groups inside a lookbehind among them, and `corpus/regex/backtracking.kz`.
 - G5: `Replace` and `Split` walk the matches `Matches` walks, Rust's `find_iter` (one method, `Next`). `Replace` reads the
   replacement once into its pieces, counts the result's length and writes it into one string, as Rust's `replace_all` writes
   into one `String`; a text with no match is given back as it is. `Split` adds a match's groups in the order of their numbers,
