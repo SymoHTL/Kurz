@@ -10811,10 +10811,11 @@ class RegexParser {
         names.Add("")
         root = Parse()
         if failKind >= 0 {
+            Refs(failAt)
             return
         }
 
-        Refs()
+        Refs(n + 1)
         if failKind >= 0 {
             return
         }
@@ -10843,10 +10844,16 @@ class RegexParser {
         }
     }
 
-    // The backreferences, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has and a name no
-    // group has are `Syntax` at the `\`, the first such one in the pattern.
-    internal void Refs() {
+    // The backreferences before `before`, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has
+    // and a name no group has are `Syntax` at the `\`, the first such one in the pattern. Where the parse refused a construct, at
+    // `before`, a backreference before it to no group the parse read is the error instead, as .NET, which counts the groups before
+    // it parses, reports `\9(`; a group after that construct is not read, so that `\2(a)\q(b)` is `Syntax` at 0 (G2).
+    internal void Refs(int before) {
         for i in 0..<refNode.Count {
+            if refAt[i] >= before {
+                return
+            }
+
             mut group = refNumber[i]
             if group < 0 {
                 for j in 1..<names.Count {
@@ -10857,7 +10864,8 @@ class RegexParser {
             }
 
             if group < 0 || group >= names.Count {
-                Fail(0, refAt[i])
+                failKind = 0
+                failAt = refAt[i]
                 return
             }
 
@@ -10886,7 +10894,8 @@ class RegexParser {
 
     // A node, with whether the most it matches is no character, as Rust's `maximum_len` of `Some(0)`: the empty node and an
     // assertion; a group of such a node; a sequence or an alternation of such nodes only; and a repetition of such a node or of
-    // at most 0.
+    // at most 0. A lookaround is such a node, and an atomic group as its content; a backreference is not, even to a group that
+    // reads no character (`()\1`), since its group is resolved after the parse, so that its repetition is counted in full.
     internal int Node(int k, int a, int b, int c) {
         mut none = false
         if k == 0 || k == 3 {

@@ -1849,15 +1849,21 @@ ask about it.
 - G2's backtracking engine, `Regex.New(pattern, backtracking: true)`: the same parse, which under the flag takes the
   backreferences `\1` and `\k<name>`, the four lookarounds and the atomic group, and the same automaton, counted and bounded
   as the linear engine's, a backreference one state and a lookaround or an atomic group two beside its content; a
-  backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses. A search tries the ways of the
+  backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses, and one to no group the
+  parse read before a construct it refuses is the error instead, at its `\`, so that `\9(` is `Syntax` at 0. A search tries the ways of the
   automaton one after another from each start, in the order of the Pike VM's priorities, so that a pattern both engines take
   gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
   stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails
   that way, as the Pike VM's thread that comes back to a state at the same position ends. A lookaround and an atomic group
-  run their content as a search of its own; a lookbehind tries each start before its position, the nearest first; a
+  run their content as a search of its own; a lookbehind tries its position and each one before it, the nearest first, its content ending at its
+  position; a
   positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
-  backreference compares by the simple case folding. *(assumed: the defaults of issue 176, comment 6811727642)* Pinned by
+  backreference compares by the simple case folding, the flag in force at the backreference deciding. *(assumed: the
+  constructs, their count and bound, a lookbehind of any length and the case folding of a backreference, the defaults
+  of issue 176, comment 6811727642, Q1 to Q7 and Q10; the stack in memory, Q9 of that comment at its default; the
+  lookbehind's start, Q15 of comment 6812042360 at its default; the loop's end, the errors and the digits of a
+  backreference and when a group's positions are set, proposed with the record and not put to the owner)* Pinned by
   `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
   patterns of its own constructs, and `corpus/regex/backtracking.kz`.
 - G5: `Replace` and `Split` walk the matches `Matches` walks, Rust's `find_iter` (one method, `Next`). `Replace` reads the

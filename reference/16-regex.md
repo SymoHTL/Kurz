@@ -64,22 +64,32 @@ memory of a search)*
 
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
-simple case folding, so that `(?i)(a)\1` matches `aA`; a backreference to a later group or to its own
+simple case folding, the flag in force at the backreference deciding, as .NET's does, so that `(?i)(a)\1`
+and `(a)(?i)\1` match `aA` and `(?i)(a)(?-i)\1` does not; a backreference to a later group or to its own
 group parses and fails while the group has no text, so that `(a|b\1)+` matches `aba`; a positive
 lookaround keeps the groups it took and a negative one none; `\k<name>` is the one spelling of a
 named backreference; a search has no limit on its steps; and the automaton is counted and bounded as
 the linear engine's, a backreference one state and a lookaround or an atomic group two beside its
-content, so that a pattern is `TooBig` on both engines or on neither. *(assumed, §12: the defaults of
+content, so that a pattern both engines take is `TooBig` on both or on neither; a construct the linear
+engine does not take is `Unsupported` there, which the parse reports before the automaton is counted. *(assumed, §12: the defaults of
 the questions put to the owner on 2026-11-12, issue 176, comment 6811727642, Q1 to Q7 and Q10)* A
-backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one when
-the pattern is made, and one inside a class is `Unsupported` at its `\`. A backreference by number
-reads every digit after its `\`, so that `\10` names group 10, and `\0` is `Unsupported`, as on the
-linear engine. A search keeps its choices
-on a stack in memory, not on the process's stack, as .NET's interpreter does; a loop that comes back
+backreference to a group the pattern does not have is `Syntax` at its `\`, as .NET refuses one of a
+single digit when the pattern is made, and one inside a class is `Unsupported` at its `\`. Where the
+parse refuses a construct after such a backreference, the backreference is the error, as .NET, which
+counts the groups before it parses, reports `\9(`; a group after that construct is not read, so that
+`\2(a)\q(b)` is `Syntax` at 0 where .NET reports the `\q`. A backreference by number reads every digit
+after its `\`, so that `\10` names group 10 and is `Syntax` in a pattern of fewer groups, where .NET
+reads a number of two or more digits that names no group as an octal escape (`(a)\10` matches `a`
+and U+0008 there), and `\0` is `Unsupported`, as on the linear engine. A search keeps its choices
+on a stack in memory, not on the process's stack, as .NET's interpreter does, a stack that grows
+with the text's length times the choices a way keeps open, beside the automaton and outside its
+bound, as the Pike VM's lists of threads are; a loop that comes back
 to its start with no character read since fails that way, as the Pike VM's thread that comes back to
-a state at the same position ends, so that `(a*)*` ends and both engines give the same match; and a
-lookbehind tries the starts before its position from the nearest one on, so that a group inside a
-lookbehind takes the text of the nearest start its content matches from, where .NET matches a
+a state at the same position ends, so that `(a*)*` ends and both engines give the same match, where
+.NET takes a last iteration that reads no character: on `aa` group 1 is `aa` here and empty at 2 in
+.NET; and a lookbehind tries its position and each one before it, the nearest first, its content
+ending at its position, so that `(?<=)b` and `(?<=a*)b` match `b` and a group inside a lookbehind
+takes the text of the nearest start its content matches from, where .NET matches a
 lookbehind from right to left. *(assumed, §12: Q9 of that comment, taken at its default; the
 lookbehind's start, the default of Q15, put to the owner on 2026-11-12, issue 176, comment
 6812042360; and the rest proposed with this record and not put to the owner)*
@@ -162,7 +172,9 @@ match Regex.New("{word}+") {
 `Index` and `Length`, and `m.Group(n)` and `m.Group(name)` give a group, a `Match?`, `null` for a
 group that did not take part and for one the pattern does not have, `m.Group(0)` the whole match. A
 position and a length count bytes, as a position in a string does (X2), and `\d`, `\w`, `\s`, `\b`
-and a match that ignores case take Unicode's classes from the tables of the version §12 pins. The syntax is that of Rust's `regex` crate, Perl's without backreferences and lookaround,
+and a match that ignores case take Unicode's classes from the tables of the version §12 pins. The syntax is that of Rust's `regex` crate, Perl's without backreferences and lookaround on the
+linear engine, to which `backtracking: true` adds the backreferences, lookarounds and atomic group
+of G2,
 with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)` and `(?x)`; a
 `Regex` has members alone, with no static `Regex.IsMatch(input, pattern)`. *(assumed, §12: the
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they

@@ -256,11 +256,10 @@ def merge(found):
     return merged
 
 
-def categories(unicode_data, names):
-    """The merged ranges of the code points of UnicodeData.txt whose general category is one of `names`; a range
-    the file writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole."""
-    found = []
-    first = None
+def category_ranges(unicode_data):
+    """{general category: the ranges of its code points in UnicodeData.txt, in the file's order}; a range the file
+    writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole."""
+    category, first = {}, None
     for line in unicode_data.splitlines():
         if not line.strip():
             continue
@@ -271,9 +270,14 @@ def categories(unicode_data, names):
             continue
         start = first if first is not None and f[1].endswith(", Last>") else cp
         first = None
-        if f[2] in names:
-            found.append((start, cp))
-    return merge(found)
+        category.setdefault(f[2], []).append((start, cp))
+    return category
+
+
+def categories(unicode_data, names):
+    """The merged ranges of the code points of UnicodeData.txt whose general category is one of `names`."""
+    found = category_ranges(unicode_data)
+    return merge([r for name in names for r in found.get(name, [])])
 
 
 def folds(case_folding):
@@ -368,18 +372,7 @@ def property_sets(unicode_data, properties, prop_list, texts):
             values.setdefault(prop, {})[normalized(alias)] = f[2]
         shorts.setdefault(prop, {})[f[1]] = f[2]
     values["Script_Extensions"] = values.get("Script", {})
-    category, first = {}, None
-    for line in unicode_data.splitlines():
-        if not line.strip():
-            continue
-        f = line.split(";")
-        cp = int(f[0], 16)
-        if f[1].endswith(", First>"):
-            first = cp
-            continue
-        start = first if first is not None and f[1].endswith(", Last>") else cp
-        first = None
-        category.setdefault(f[2], []).append((start, cp))
+    category = category_ranges(unicode_data)
     category["Cn"] = invert(merge([r for found in category.values() for r in found]))
     gc_long = shorts.get("General_Category", {})
     gc = {gc_long.get(short, short): chars(found) for short, found in category.items() if short != "Cs"}

@@ -134,10 +134,11 @@ internal sealed class RegexPattern
         var root = Parse();
         if (failKind >= 0)
         {
+            Refs(failAt);
             return;
         }
 
-        Refs();
+        Refs(p.Length + 1);
         if (failKind >= 0)
         {
             return;
@@ -156,17 +157,21 @@ internal sealed class RegexPattern
     }
 
     /// <summary>
-    /// The backreferences, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a number no group has and a name no
-    /// group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern.
+    /// The backreferences before <paramref name="before"/>, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a
+    /// number no group has and a name no group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern. Where the
+    /// parse refused a construct, at <paramref name="before"/>, a backreference before it to no group the parse read is the error
+    /// instead, as .NET, which counts the groups before it parses, reports <c>\9(</c>; a group after that construct is not read,
+    /// so that <c>\2(a)\q(b)</c> is <c>Syntax</c> at 0 (G2).
     /// </summary>
-    private void Refs()
+    private void Refs(int before)
     {
-        for (var i = 0; i < refNode.Count; i++)
+        for (var i = 0; i < refNode.Count && refAt[i] < before; i++)
         {
             var group = refNumber[i] >= 0 ? refNumber[i] : names.IndexOf(refName[i], 1);
             if (group < 0 || group >= names.Count)
             {
-                Fail(0, refAt[i]);
+                failKind = 0;
+                failAt = refAt[i];
                 return;
             }
 
@@ -186,7 +191,8 @@ internal sealed class RegexPattern
     /// <summary>
     /// A node, with whether the most it matches is no character, as Rust's <c>maximum_len</c> of <c>Some(0)</c>: the empty node and an
     /// assertion; a group of such a node; a sequence or an alternation of such nodes only; and a repetition of such a node or of at
-    /// most 0.
+    /// most 0. A lookaround is such a node, and an atomic group as its content; a backreference is not, even to a group that reads
+    /// no character (<c>()\1</c>), since its group is resolved after the parse, so that its repetition is counted in full.
     /// </summary>
     private int Node(int k, int a, int b, int c)
     {

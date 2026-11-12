@@ -215,8 +215,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// them, 12 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
     /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
     /// The generator puts no group inside a look-behind, whose groups .NET takes from right to left, and no repetition of what can
-    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, so <c>k</c> and the Kelvin sign are
-    /// one, a row with its own expectation, since .NET counts positions in UTF-16 units.
+    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference
+    /// deciding (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and a look-behind tries its own position
+    /// first (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
+    /// counts positions in UTF-16 units, and so is <c>(a*)*</c> on <c>aa</c>, where the loop that comes back with no character read
+    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2).
     /// </summary>
     [Fact]
     public void The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does()
@@ -225,6 +228,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         [
             @"(\w+) \1", @"\d+(?= kg)", @"(a|b\1)+", @"(?<=a+)b", @"(?<!a)b", @"(?>a+)b", @"(?>a|ab)c", @"(?=(a+))a*b\1",
             @"(?i)(a)\1", @"\2(a)(b)", @"(a)|\1b", @"(?!a)\w", @"(?<n>a)\k<n>", @"(?<=\b)a(?!a)", @"(?<=ab|b)a", @"a(?=b(?=c))",
+            @"(a)(?i)\1", @"(?i)(a)(?-i)\1", @"(?<=)b", @"(?<=a*)b",
         ];
         string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
             "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))"];
@@ -268,26 +272,44 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
+            for loop in [Regex.New(r"(a*)*"), Regex.New(r"(a*)*", backtracking: true)] {
+                m = loop.Match("aa")
+                if m != null {
+                    g = m.Group(1)
+                    if g != null {
+                        print("{m.Index},{m.Length},{g.Index},{g.Length}")
+                    }
+                }
+            }
+
             """.Replace("KELVIN", "\u212A", StringComparison.Ordinal)), [], toolchain.Runtime, testBuild: true); // U+212A
         Assert.True(folded.Program is not null, string.Join("; ", folded.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(folded.Program, "regex-backtracking-fold"));
         Assert.Equal((0, ""), (code, error));
-        Assert.Equal(["1,4", "0,4", "-"], output); // the Kelvin sign is three bytes, `K` and `k` one each
+        // the Kelvin sign is three bytes, `K` and `k` one each; then `(a*)*` on `aa`, whose group 1 is `aa` on both engines, where
+        // .NET's last iteration reads no character and leaves it empty at 2
+        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2"], output);
+        var empty = new Regex("(a*)*").Match("aa").Groups[1];
+        Assert.Equal((true, 2, 0), (empty.Success, empty.Index, empty.Length));
     }
 
     /// <summary>
     /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
     /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
-    /// at its <c>\</c>, after any error of the parse; one inside a class is <c>Unsupported</c> at its <c>\</c>; <c>\k</c>
-    /// without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every digit after the <c>\</c>, <c>\0</c>
-    /// <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
+    /// at its <c>\</c>, and before a construct the parse refuses after it, where the parse read no such group before that construct
+    /// (<c>\9(</c>, <c>\2[\1]</c>, and <c>\2(a)\q(b)</c>, whose group 2 stands after the <c>\q</c>), while the parse's own error
+    /// stands where the group was read (<c>\1(a</c>) or the backreference comes after it (<c>a)\2</c>); one inside a class is
+    /// <c>Unsupported</c> at its <c>\</c>; <c>\k</c> without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every
+    /// digit after the <c>\</c>, <c>\0</c> <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
     /// </summary>
     [Fact]
     public void The_backtracking_engine_refuses_a_reference_to_no_group_at_its_backslash()
     {
         (string Pattern, string Reading)[] rows =
         [
-            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 2"),
+            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 0"),
+            (@"\9(", "syntax at 0"), (@"\2[\1]", "syntax at 0"), (@"\2(a)\q(b)", "syntax at 0"), (@"\1(a", "syntax at 2"),
+            (@"a)\2", "syntax at 1"),
             (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
             (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
         ];
