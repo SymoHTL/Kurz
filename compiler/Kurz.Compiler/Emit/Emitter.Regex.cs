@@ -22,15 +22,17 @@ public sealed partial class Emitter
 
     /// <summary>
     /// The global that holds G4's tables, written once into a program that makes a <c>Regex</c>, as the standard library's
-    /// <c>RegexTablePart</c> reads it: four counts of 32 bits, of the numbers of the ranges of <c>\d</c>, <c>\w</c> and <c>\s</c> and
-    /// of the pairs of the folding, then those numbers, 32 bits each, from <see cref="CaseTables"/>.
+    /// <c>RegexTablePart</c> reads it: six counts of 32 bits, of the numbers of the ranges of <c>\d</c>, <c>\w</c> and <c>\s</c>, of
+    /// the pairs of the folding and of the ranges of the characters of a group's name, Alphabetic and the categories Nd, Nl and No,
+    /// then those numbers, 32 bits each, from <see cref="CaseTables"/>.
     /// </summary>
     private string RegexTable()
     {
         const string name = "@\"regex.tables\"";
         if (helpers.Add(name))
         {
-            int[][] parts = [CaseTables.RegexDigit, CaseTables.RegexWord, CaseTables.RegexSpace, CaseTables.RegexFold];
+            int[][] parts = [CaseTables.RegexDigit, CaseTables.RegexWord, CaseTables.RegexSpace, CaseTables.RegexFold, CaseTables.RegexAlpha,
+                CaseTables.RegexNumber];
             int[] all = [.. parts.Select(p => p.Length), .. parts.SelectMany(p => p)];
             module.Global($"{name} = private unnamed_addr constant [{all.Length} x i32] [{string.Join(", ", all.Select(w => $"i32 {w}"))}], align 4");
         }

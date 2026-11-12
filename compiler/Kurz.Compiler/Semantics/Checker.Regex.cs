@@ -18,8 +18,8 @@ public sealed partial class Checker
     /// library's: one that does not parse, that takes a construct the linear engine does not take, or whose automaton passes the
     /// bound (G2) is <c>regex-invalid</c> at the literal, with the words the <c>RegexError</c> of the same pattern prints and no word
     /// of the pattern, and the call gives a <c>Regex</c>; any other string gives <c>Regex | RegexError</c> when the program runs
-    /// (section 12, the owner, 2026-11-01, "Compile time for literals"). A flag <c>backtracking</c> of any value but the literal
-    /// <c>false</c> is <c>not supported</c>: the backtracking engine (G2) is not built; and so is a literal whose first error is a construct
+    /// (section 12, the owner, 2026-11-01, "Compile time for literals"). A flag <c>backtracking</c>, named or the second argument, of
+    /// any value but the literal <c>false</c> is <c>not supported</c>: the backtracking engine (G2) is not built; and so is a literal whose first error is a construct
     /// of Rust's syntax (G4) that the standard library's parse does not build, which gives <c>Unsupported</c> when the pattern is no literal.
     /// </summary>
     private Typed CheckRegexFunction(MemberAccess m, CallExpression c)
@@ -36,7 +36,8 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var flag = c.Arguments.FirstOrDefault(a => a.Name == "backtracking");
+        var flag = c.Arguments.FirstOrDefault(a => a.Name == "backtracking")
+            ?? (c.Arguments.Count > 1 && c.Arguments[1].Name is null ? c.Arguments[1] : null);
         if (flag is not null && Unwrap(flag.Value) is not BoolLiteral { Value: false })
         {
             NotSupported(c.Line, "the backtracking engine, `backtracking: true` of `Regex.New` (G2)");

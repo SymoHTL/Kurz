@@ -39,6 +39,9 @@ What the tables hold, as Rust's generator takes them:
   DerivedCoreProperties.txt, the marks Mn, Mc and Me, Nd and Pc from UnicodeData.txt and Join_Control from
   PropList.txt, merged, for `\\w`; and of White_Space from PropList.txt for `\\s`. A range UnicodeData.txt
   writes as its first and its last line, `<..., First>` and `<..., Last>`, is taken whole;
+- the characters of a group's name, as `regex-syntax` reads one (`is_capture_char`, through Rust's
+  `char::is_alphabetic` and `char::is_numeric`): the ranges of Alphabetic from DerivedCoreProperties.txt, of
+  which a name's first character is one, and of the general categories Nd, Nl and No from UnicodeData.txt;
 - the simple case folding of CaseFolding.txt, its statuses C and S, as Rust's `regex` folds a pattern under
   `(?i)`: each set of the code points that fold together, as a cycle of each code point and the next of
   its set in ascending order, the last with the first.
@@ -75,13 +78,14 @@ BLOCK = 32
 PLANES = 0x20000
 MARK = 0x8000
 # the entries each table holds at the least; 17.0.0 holds 69 and 82 blocks of deltas, 1 and 102 multis, 158 and 464
-# ranges, and 72, 802 and 10 ranges of the classes and 2994 code points that fold
+# ranges, and 72, 802 and 10 ranges of the classes, 2994 code points that fold, and 761 and 146 ranges of a name's characters
 FLOORS = {"LowerDeltas": 30, "UpperDeltas": 30, "LowerMultis": 1, "UpperMultis": 50, "Cased": 100, "CaseIgnorable": 300,
-          "RegexDigit": 60, "RegexWord": 700, "RegexSpace": 8, "RegexFold": 2500}
+          "RegexDigit": 60, "RegexWord": 700, "RegexSpace": 8, "RegexFold": 2500, "RegexAlpha": 700, "RegexNumber": 130}
 WIDTH = {"LowerIndex": 1, "UpperIndex": 1, "LowerDeltas": BLOCK, "UpperDeltas": BLOCK, "LowerMultis": 4, "UpperMultis": 4,
-         "Cased": 2, "CaseIgnorable": 2, "RegexDigit": 2, "RegexWord": 2, "RegexSpace": 2, "RegexFold": 2}
+         "Cased": 2, "CaseIgnorable": 2, "RegexDigit": 2, "RegexWord": 2, "RegexSpace": 2, "RegexFold": 2,
+         "RegexAlpha": 2, "RegexNumber": 2}
 NAMES = ("LowerIndex", "LowerDeltas", "LowerMultis", "UpperIndex", "UpperDeltas", "UpperMultis", "Cased", "CaseIgnorable",
-         "RegexDigit", "RegexWord", "RegexSpace", "RegexFold")
+         "RegexDigit", "RegexWord", "RegexSpace", "RegexFold", "RegexAlpha", "RegexNumber")
 
 
 class Unread(Exception):
@@ -283,6 +287,8 @@ def generate(unicode_data, special_casing, properties, prop_list, case_folding, 
                                        + ranges(prop_list, "Join_Control")) for x in r],
         "RegexSpace": [x for r in ranges(prop_list, "White_Space") for x in r],
         "RegexFold": [x for pair in folds(case_folding) for x in pair],
+        "RegexAlpha": [x for r in ranges(properties, "Alphabetic") for x in r],
+        "RegexNumber": [x for r in categories(unicode_data, {"Nd", "Nl", "No"}) for x in r],
     }
     for name, floor in floors.items():
         if len(out[name]) // WIDTH[name] < floor:
@@ -302,6 +308,8 @@ SUMMARIES = {
     "RegexDigit": "G4: the ranges of the general category Nd, which <c>\\d</c> matches, as <see cref=\"Cased\"/> holds its ranges.",
     "RegexWord": "G4: the ranges <c>\\w</c> matches, as Rust's <c>regex</c> reads it: Alphabetic, the marks Mn, Mc and Me, Nd, Pc and Join_Control, merged, as <see cref=\"Cased\"/> holds its ranges.",
     "RegexSpace": "G4: the ranges of the property White_Space, which <c>\\s</c> matches, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexAlpha": "G4: the ranges of the property Alphabetic, of which the first character of a group's name is one, as Rust's <c>regex-syntax</c> reads a name through <c>char::is_alphabetic</c>, as <see cref=\"Cased\"/> holds its ranges.",
+    "RegexNumber": "G4: the ranges of the general categories Nd, Nl and No, of which a later character of a group's name may be one beside Alphabetic, as Rust's <c>char::is_numeric</c> reads them, as <see cref=\"Cased\"/> holds its ranges.",
     "RegexFold": "G4: the simple case folding of the statuses C and S, which a pattern under <c>(?i)</c> reads, two numbers each: a code point that folds with another and the next code point of its set in ascending order, the last of a set with its first, in the order of the code points.",
 }
 
@@ -368,7 +376,7 @@ def expand(arrays):
         multis = arrays.get(f"{kind}Multis", [])
         for at in range(0, len(multis) - 3, 4):
             found[(kind.lower(), multis[at])] = tuple(c for c in multis[at + 1:at + 4] if c)
-    for kind in ("Cased", "CaseIgnorable", "RegexDigit", "RegexWord", "RegexSpace"):
+    for kind in ("Cased", "CaseIgnorable", "RegexDigit", "RegexWord", "RegexSpace", "RegexAlpha", "RegexNumber"):
         values = arrays.get(kind, [])
         for at in range(0, len(values) - 1, 2):
             for cp in range(values[at], values[at + 1] + 1):
@@ -512,7 +520,8 @@ def self_test():
 
     classes = "\n".join([cat("0030", "Nd"), cat("0031", "Nd"), cat("005F", "Pc"), cat("0300", "Mn"), cat("0903", "Mc"), cat("20DD", "Me"),
                          cat("0660", "Nd"), cat("2160", "Nl"), cat("3400", "Lo", "<CJK Ideograph Extension A, First>"),
-                         cat("4DBF", "Lo", "<CJK Ideograph Extension A, Last>"), cat("1D7CE", "Nd"), cat("1D7CF", "Nd")])
+                         cat("4DBF", "Lo", "<CJK Ideograph Extension A, Last>"), cat("1D7CE", "Nd"), cat("1D7CF", "Nd"),
+                         cat("00B2", "No")])
     cases.append(("categories: Nd's ranges, adjacent ones merged, other categories out",
                   categories(classes, {"Nd"}) == [(0x30, 0x31), (0x660, 0x660), (0x1D7CE, 0x1D7CF)], categories(classes, {"Nd"})))
     cases.append(("categories: a range written as its First and Last lines is taken whole",
@@ -527,6 +536,18 @@ def self_test():
     cases.append(("generate: \\s is White_Space and \\d is Nd",
                   not isinstance(out, Exception) and out["RegexSpace"] == [0x9, 0xD, 0x20, 0x20, 0x85, 0x85]
                   and out["RegexDigit"] == [0x30, 0x31, 0x660, 0x660, 0x1D7CE, 0x1D7CF], out))
+    cases.append(("generate: a name's first character is Alphabetic, and a later one Alphabetic or of Nd, Nl or No",
+                  not isinstance(out, Exception) and out["RegexAlpha"] == [0x41, 0x5A, 0x61, 0x7A, 0x2160, 0x2160]
+                  and out["RegexNumber"] == [0x30, 0x31, 0xB2, 0xB2, 0x660, 0x660, 0x2160, 0x2160, 0x1D7CE, 0x1D7CF], out))
+    # the floor of each table of G4 is held to the table: one above what the fixture gives is refused, one at it passes
+    regex_floors = {"RegexDigit": 3, "RegexWord": 11, "RegexSpace": 3, "RegexAlpha": 3, "RegexNumber": 5}
+    above = {name: got(lambda: generate(classes, "", word_props, plist, "", floors={name: floor + 1})) for name, floor in regex_floors.items()}
+    cases.append(("generate: a table of G4 with one entry fewer than its floor is refused, each of them",
+                  all(isinstance(o, ValueError) and name in str(o) for name, o in above.items()), above))
+    at = got(lambda: generate(classes, "", word_props, plist, "", floors=regex_floors))
+    cases.append(("generate: the tables of G4 at their floors pass", not isinstance(at, Exception), at))
+    cases.append(("floors: every table but the two indexes has a floor",
+                  all(FLOORS.get(name, 0) > 0 for name in NAMES if not name.endswith("Index")), FLOORS))
     folding = "\n".join(["# a comment", "004B; C; 006B; # K", "212A; C; 006B; # KELVIN SIGN", "00DF; F; 0073 0073; # SHARP S",
                           "1E9E; F; 0073 0073; # CAPITAL SHARP S", "1E9E; S; 00DF; # CAPITAL SHARP S", "0049; C; 0069; # I",
                           "0049; T; 0131; # I, Turkic", "0130; F; 0069 0307; # I WITH DOT ABOVE"])

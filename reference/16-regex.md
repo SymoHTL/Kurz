@@ -42,7 +42,21 @@ the flag, the flag's name and type, the constructs under it, no time bound, the 
 engines and the two bounds)* The automaton's size is counted as 16 bytes for each of its states and 4
 bytes for each number that bounds a range of its classes, the same in the check of a literal (G3) and
 in `Regex.New`, so that `a{655357}` builds and `a{655358}` is `TooBig`. *(assumed, §12: the default
-of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)*
+of the question put to the owner on 2026-11-11, issue 176, comment 6808653712)* The states are three
+for the whole match, its start, its end and the match; one for a character, a class or an assertion;
+two for a group with a name or a number beside its content; the sum of a sequence's items; the sum of
+an alternation's branches with two for each `|`; and for a repetition `{n,m}` n copies of its item and
+m - n optional copies of one state more each, for `*` one copy and two states, for `{n,}` n copies and
+one state. A class counts the numbers of its ranges once where it is written, after `(?i)` folded it
+and after its negation, a letter that `(?i)` gives another case counts as the class of its cases, and
+a pattern with a word boundary counts the numbers of `\w`'s ranges once more. A size at the bound
+builds. A search takes time in proportion to the text's length times the automaton's states times the
+positions a thread carries, none for `IsMatch` and for the members that give a match two for the whole
+match and two for each group, which the Pike VM copies from thread to thread as Rust's `PikeVM` copies
+its slots; beside the automaton a search holds two lists of threads, its states times those positions,
+which the bound does not count, as Rust's `size_limit` does not count the `PikeVM`'s cache. *(assumed,
+§12: the states and the ranges of each construct, a size at the bound that builds, and the time and the
+memory of a search)*
 
 Case: [regex/backtracking.kz](../corpus/regex/backtracking.kz)
 ```kurz
@@ -194,7 +208,8 @@ added for grouping alone changes the result, and a group that did not take part 
 leaves it out. `re.Replace(s, replacement)` replaces every match, as C#'s `Replace` and Rust's
 `replace_all`, and reads the replacement as Rust's does: `$name` takes the longest run of letters,
 digits and `_`, so that `$1a` names a group `1a`, a name of digits alone names a group by its number,
-`${name}` ends the name at its brace, `$$` is a `$`, and a group that does not exist or did not take
+with `0`s before it or not, as does a name of one `+` and digits inside braces, `${+1}`, as Rust's
+parse of a `usize` reads one, `${name}` ends the name at its brace, `$$` is a `$`, and a group that does not exist or did not take
 part gives no text. A replacement with `${name}` is written as a raw literal (L20), since `{` opens
 an interpolation in every other literal (L6). A `$` that names no group, at the end, before a byte
 that is no letter, digit or `_`, or before a `{` without its `}`, is a `$`. *(assumed, §12: the group left out of `Split`,
@@ -213,6 +228,7 @@ print(date.Replace("2026-11", r"${month}.${year}"))
 print(date.Replace("2026-11", r"${1}a"))
 print(date.Replace("2026-11", "$1a"))
 print(date.Replace("2026-11", "$$"))
+print(date.Replace("2026-11", r"${+1}"))
 print(Regex.New("a").Replace("banana", "o"))
 ```
 
