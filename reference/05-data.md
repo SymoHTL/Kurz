@@ -1087,8 +1087,7 @@ takes as `mut` (M7), so a read of that value that the call's arguments still hol
 `changed-while-held`. Its call takes its receiver, the place of its value, before its arguments (F12),
 and a `mut` method on a `mut` field of an instance writes into the place its call took: where an
 argument replaces the instance that held the field, into that field of the old instance, and where
-an argument assigns the field itself, into the new value, as C# writes through `ref this` (§4, the
-owner, 2026-11-12, issue 39, comment 6819138235, item 13). A method takes no name of a field of its type, and inside a method a parameter or
+an argument assigns the field itself, into the new value, as C# writes through `ref this` (§4, the owner, 2026-11-12, issue 39, comment 6819138235, item 13). The cost is a write into an instance the path no longer holds, which a later read through the path does not see, with no error. *(assumed, §4: that the call holds a count of the instance whose field it took, from before its arguments to the end of the statement, so that an argument that replaces the instance does not free the place the call writes into, at the cost of a count taken and given back for each such call; that a `mut` method whose own body assigns the field its call took writes after that into the new value, as an argument that assigns the field does; and that an argument that reaches the receiver's place through an instance of a class, `b` in `b.D.Reset(b)`, holds that instance and not the value of its field, so that it is no read `changed-while-held` names)* A method takes no name of a field of its type, and inside a method a parameter or
 a variable takes no name of a member of its type (`redeclared`, V9), and a `Text()` without `pub`
 gives no text to `print`, an interpolation or `string.Join` (X6), inside its type too (`not-visible`, A9)
 *(assumed, §4: those readings)*.
@@ -1245,9 +1244,34 @@ int Replace(H h) {
 }
 
 top = H(Inner(D(1, "old{1}")))
+old = top.In
 top.In.V.Add(Replace(top))
 print(top.In.V.N)
 print(top.In.V.S)
+print(old.V.N)
+print(old.V.S)
+```
+
+Case: [values/mut-method-field-assigned.kz](../corpus/values/mut-method-field-assigned.kz)
+```kurz
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+
+int SetV(Inner i) {
+    i.V = D(7, "set{1}")
+    return 1
+}
+
+box = Inner(D(1, "old{1}"))
+box.V.Add(SetV(box))
+print(box.V.N)
+print(box.V.S)
 ```
 
 ### D17 (decided, §4) How sets of flags are combined
