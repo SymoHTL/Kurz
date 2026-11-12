@@ -1,0 +1,19 @@
+// expect: output
+// | B { X = 3, P = 103, Y = 7, Q = 14 }
+// | B { X = 1, P = 101, Y = 7, Q = 14 }
+// | B { X = 1, P = 101, Y = 2, Q = 4 }
+// | B { X = 3, P = 103, Y = 5, Q = 10 }
+// rules: D16
+
+data A(int X = 3) {
+    pub int P = X + 100
+}
+
+data B(int Y = 7) : A {
+    pub int Q = Y * 2
+}
+
+print(B())
+print(B(1))
+print(B(1, 2))
+print(B(Y: 5))

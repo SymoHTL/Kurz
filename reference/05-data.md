@@ -1059,7 +1059,7 @@ print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
 A `data` type takes its methods between braces after its constructor, in the form of a class body
 (K7), but for a property, which §14 leaves open. A `data` type that derives from another, or that
 another derives from, takes `virtual` and `override` in its body as a class does (K7) (§4, the owner,
-2026-11-11, "A class's rules"); an `override` is `mut` exactly when the method it overrides is, else `override-mut` (§4, the owner, 2026-11-12, comment 6819137865, H1); a type derived from one with a body holds each type's fields of the primary constructor and of the body together, the base's first, in `==`, the hash and the text (H2); a `with` on a value of a base that holds a value of a derived type gives a value of the derived type, every field of its body computed again (H3) *(assumed, §4: the rest as a class's, H4 of that product pass, which the owner left at its default: an override takes `pub` as written (the owner, 2026-11-02); a method of a derived type with the name and the parameter types of a base's `pub` method and no `override` is `hides-member`, an `override` of a method neither `virtual` nor `override` `override-without-virtual`, and one with another return type `override-return-type`; a member of a derived type's body named like a field or a method of a base's body, and a field of its primary constructor named like a field of a base's body, are `redeclared` (V9); the initializers of a derived type's body run before its base's, in a class's order (the owner, 2026-11-03, #39, comment 6600033456), so that an initializer of a derived type reads the fields of every primary constructor, which the construction gives first, and the fields of its own body above it, and a field of a base's body is no name there (V10); a private member of a base's body is visible to the base alone (F9); and the text of a value is that of the type it holds when the program runs, its own `Text()` or the nearest one a base's body declares, else A3's; the cost is a branch on the number of the type a value holds at each call of a `virtual` method that a type derived from the receiver's overrides, and at each `with` and each text of a value of a type another derives from)*; a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
+2026-11-11, "A class's rules"); an `override` is `mut` exactly when the method it overrides is, else `override-mut` (§4, the owner, 2026-11-12, comment 6819137865, H1); a type derived from one with a body holds each type's fields of the primary constructor and of the body together, the base's first, in `==`, the hash and the text (H2); a `with` on a value of a base that holds a value of a derived type gives a value of the derived type, every field of its body computed again (H3), and of the body of every type of its chain, in the order of a construction, the derived type's first, the result's static type the receiver's *(assumed, §4: that order and that type)* *(assumed, §4: the rest as a class's, H4 of that product pass, which the owner left at its default: an override takes `pub` as written (the owner, 2026-11-02); a method of a derived type with the name and the parameter types of a base's `pub` method and no `override` is `hides-member`, an `override` of a method neither `virtual` nor `override` `override-without-virtual`, as is an `override` in a type without a base, which overrides nothing, whether another type derives from it or none does, and one with another return type `override-return-type`; a field of a derived type's body named like a field of a base or a `pub` method of a base's body, a method of it named like a field of a base, and a field of its primary constructor named like a field of a base's body, are `redeclared` (V9), and a method of it named like a method of a base's body is read by the rules of an override, `hides-member` and its kin (K7); the initializers of a derived type's body run before its base's, in a class's order (the owner, 2026-11-03, #39, comment 6600033456), so that an initializer of a derived type reads the fields of every primary constructor, which the construction gives first, and the fields of its own body above it, and a field of a base's body is no name there (V10); a private member of a base's body is visible to the base alone (F9), and a member of a derived type's body may take the name of a private method of a base's body, which it does not see, as a member of a derived class may (K7); and the text of a value is that of the type it holds when the program runs, its own `Text()` or the nearest one a base's body declares, else A3's; the cost is a branch on the number of the type a value holds at each call of a `virtual` method that a type derived from the receiver's overrides, and at each `with` and each text of a value of a type another derives from)*; a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
 text (§4, the owner, 2026-11-11, "Every field counts"), and in `with` what B4 and comment 6821275386
 make it, computed again and never named; and a `static` method of the body is read as one of a class body is (K7, K18, K19) (§4, the
 owner, 2026-11-11, option (a) of the question of comment 6788371936). A field of the body is written
@@ -1069,10 +1069,8 @@ comment 6819137865, B1). The initializer reads the fields of the primary constru
 body above it (B2), and runs once, when the value is made, by a construction or `T.Make` (B3); a field
 below it, a method of the type and `this` are `unknown-name` there, as in the default of a class's
 field (K7) *(assumed, §4)*. `with` computes the fields of the body again from the copy's fields (B4),
-and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The
-text writes them after the fields of the primary constructor, in the order of their declaration (B5), one
-without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is `not-visible` (F9), and an assignment of it there
-is `not-visible` too, where it has no `mut` either, since its access is read before the assignment, as C# reports a
+and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The text of one type writes them after the fields of its primary constructor, in the order of their declaration (B5), and the text of a derived type each type's fields together, the base's first (H2), one
+without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is `not-visible` (F9), and an assignment of it there is `not-visible` too, with `mut` or without; where it has no `mut`, this is the error and not `assign-immutable`, since its access is read before the assignment, as C# reports a
 private field's access before its `readonly` *(assumed, §4: the assignment and that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a field of the value it holds,
 inside its type, or outside it where it is `pub`, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a `mut` method (B7), and through a `mut` variable as D4 lets a field of the primary
 constructor be, inside its type, or outside it where it is `pub` too *(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
@@ -1404,6 +1402,33 @@ box = Inner(D(1, "x"))
 box.V.Reset(box)
 print(box.V.N)
 print(box.V.S)
+```
+
+Case: [data/body-inherit-defaults.kz](../corpus/data/body-inherit-defaults.kz)
+```kurz
+data A(int X = 3) {
+    pub int P = X + 100
+}
+
+data B(int Y = 7) : A {
+    pub int Q = Y * 2
+}
+
+print(B())
+print(B(1))
+print(B(1, 2))
+print(B(Y: 5))
+```
+
+Case: [data/body-override-nothing.kz](../corpus/data/body-override-nothing.kz)
+```kurz
+data Shape(int W) {
+    pub override string Kind() => "shape"
+}
+
+data Box(int D) : Shape
+
+print(Box(1, 2).Kind())
 ```
 
 ### D17 (decided, §4) How sets of flags are combined
