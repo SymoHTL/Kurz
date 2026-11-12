@@ -1,0 +1,24 @@
+// expect: output
+// | 5
+// | new2
+// rules: D16
+
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+class H(mut Inner In)
+
+int Replace(H h) {
+    h.In = Inner(D(5, "new{2}"))
+    return 1
+}
+
+top = H(Inner(D(1, "old{1}")))
+top.In.V.Add(Replace(top))
+print(top.In.V.N)
+print(top.In.V.S)

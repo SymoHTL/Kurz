@@ -5403,7 +5403,10 @@ public sealed class CheckerTests
     [InlineData(3, "D16, D6", "data A(int X)\ndata B(int Y) : A {\n    pub int Get() => Y\n}\n\nprint(1)")]
     [InlineData(2, "D16, K5", "data D(int X) {\n    pub bool Equals(D other) => true\n}\n\nprint(1)")]
     [InlineData(2, "D16, K5", "data D(int X) {\n    pub int GetHashCode() => 1\n}\n\nprint(1)")]
-    [InlineData(2, "D16, F9", "data D(int X) {\n    pub int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D8, D16", "data D {\n    pub int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D16, K18", "data D(int X) {\n    pub static int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D16, F9", "data D(int X) {\n    internal int Y = 1\n}\n\nprint(1)")]
+    [InlineData(2, "D16, V2", "data D(int X) {\n    mut Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, K14", "data D(int X) {\n    pub D() : this(1) { }\n}\n\nprint(1)")]
     [InlineData(2, "D16, K7", "data D(int X) {\n    pub virtual int Get() => X\n}\n\nprint(1)")]
     [InlineData(2, "D16, F9", "data D(int X) {\n    prot int Get() => X\n}\n\nprint(1)")]
@@ -5415,12 +5418,31 @@ public sealed class CheckerTests
     [InlineData(7, "D16, K19", "data Counter(int Count) {\n    pub mut void Increment() {\n        Count = Count + 1\n    }\n}\n\nprint(Counter.Increment)")]
     public void A_part_of_a_data_body_the_checker_does_not_read_is_not_supported_at_its_line(int line, string rule, string program)
     {
-        // D16: what a body holds beside its methods, a method with what this build does not read, and a body it does not read; section 14
-        // leaves open a property, `Equals` and `GetHashCode`, a field of the body (question 4 of the product pass of issue 455), a body in
-        // a relation of inheritance with `virtual` and `override` (question 6) and a `mut` method on an item of a list (question 1b); a
-        // `static` method (question 3, parked for the owner), a constructor, `prot`, a method's own type parameters, a `mut` `Text`, the
-        // body of a generic type, a member read through the type's name and a method named without a call are what this build does not read
+        // D16: what a body holds beside its methods and fields, a method or a field with what this build does not read, and a body it does
+        // not read; section 14 leaves open a property, `Equals` and `GetHashCode`, and a `mut` method on an item of a list (question 1b); a
+        // body in a relation of inheritance with `virtual` and `override` (question 6), a `static` method (question 3), a field of a type
+        // without a primary constructor, a `static` field, an `internal` one, one without a written type, a constructor, `prot`, a method's
+        // own type parameters, a `mut` `Text`, the body of a generic type, a member read through the type's name and a method named without
+        // a call are what this build does not read
         NotSupportedAt(line, rule, program);
+    }
+
+    [Fact]
+    public void A_field_of_a_data_body_is_given_by_its_initializer_alone_which_reads_the_fields_above_it()
+    {
+        // D16 (§4, the owner, 2026-11-12, B1, B2, B7, B10 of issue 455, comment 6819137865, and the `with` of comment 6821275386): a field
+        // of the body has an initializer, which reads the primary fields and the fields of the body above it and no field below it, no
+        // method and no `this` (V10, as K7); one named like a field above it, or a method named like it, is `redeclared` (V9); `with`
+        // names none of them, and one without `mut` is assigned by nothing, through a `mut` variable and in a `mut` method too, where one
+        // with `mut` is; one without `pub` is read inside its type alone (F9)
+        const string order = "data Order(int Price, int Count) {\n    pub int Total = Price * Count\n    int Twice = Total * 2\n    pub mut int Seen = 0\n\n    pub int Get() => Twice\n\n    pub mut void Look() {\n        Seen = Seen + Twice\n    }\n}\n\n";
+        Assert.Empty(Errors(order + "mut o = Order(3, 2)\no.Look()\no.Seen = 4\nprint(o.Total + o.Get() + o.Seen)\nprint(o with { Price = 1 })\n"));
+        Assert.Equal([(ErrorIds.FieldUnassigned, 2)], Errors("data P(int A) {\n    pub int B\n}\n\nprint(P(1))\n"));
+        Assert.Equal([(ErrorIds.Redeclared, 2), (ErrorIds.Redeclared, 4)], Errors("data P(int A) {\n    pub int A = 1\n    pub int B = A\n    pub int B() => 2\n}\n\nprint(P(1))\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 2), (ErrorIds.UnknownName, 3), (ErrorIds.UnknownName, 4)], Errors("data P(int A) {\n    pub int B = C + A\n    pub int C = this.A\n    pub int D = Get()\n\n    pub int Get() => A\n}\n\nprint(P(1))\n"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 14), (ErrorIds.AssignImmutable, 15), (ErrorIds.NotVisible, 16), (ErrorIds.NotVisible, 17)], Errors(order + "mut o = Order(3, 2)\no = o with { Total = 1 }\no.Total = 5\nprint(o.Twice)\no.Twice = 1\n"));
+        Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("data P(int A) {\n    pub mut void Set() {\n        B = 2\n    }\n\n    pub int B = A\n}\n\nmut p = P(1)\np.Set()\nprint(p)\n"));
+        Assert.Empty(Errors("data P(int A) {\n    pub mut void Set() {\n        B = 2\n    }\n\n    pub mut int B = A\n}\n\nmut p = P(1)\np.Set()\nprint(p)\n"));
     }
 
     [Fact]

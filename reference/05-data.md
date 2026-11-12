@@ -1062,14 +1062,33 @@ another derives from, takes `virtual` and `override` in its body as a class does
 2026-11-11, "A class's rules"); a field declared in the body is a field as one of the primary
 constructor is, in `==`, the hash, the text and `with` (§4, the owner, 2026-11-11, "Every field
 counts"); and a `static` method of the body is read as one of a class body is (K7, K18, K19) (§4, the
-owner, 2026-11-11, option (a) of the question of comment 6788371936). A method without `mut` changes nothing of
+owner, 2026-11-11, option (a) of the question of comment 6788371936). A field of the body is written
+`Type Name = value`, `pub` before it where code outside the type reads it (F9) and `mut` where it is
+assigned, and has an initializer: one without `=` is `field-unassigned` (§4, the owner, 2026-11-12,
+comment 6819137865, B1). The initializer reads the fields of the primary constructor and those of the
+body above it (B2), and runs once, when the value is made, by a construction or `T.Make` (B3); a field
+below it, a method of the type and `this` are `unknown-name` there, as in the default of a class's
+field (K7) *(assumed, §4)*. `with` computes the fields of the body again from the copy's fields (B4),
+and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The
+text writes them after the fields of the primary constructor, in the order of their declaration (B5), one
+without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is
+`not-visible` (F9). One without `mut` is given by its initializer alone, so an assignment of it, or of a
+field of the value it holds, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a
+`mut` method (B7), and through a `mut` variable as D4 lets a field of the primary constructor be
+*(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
+constructor may (B9), and one named like a field above it, a method or a parameter is `redeclared` (V9)
+(B10). A method without `mut` changes nothing of
 the value it was called on: an assignment of a field in it, or of a field on a path of fields from it,
 is `assign-immutable`, and a call of a `mut` method on its value or on such a path, a call of a `mut`
 method of its type by its name alone and a field passed as `mut` are `mut-required`. A `mut` method is
 called on a `mut` variable, on a path of `data` fields from one and on a `mut` field of an instance
 (M5), and §14 leaves its call on an item of a list or a value of a map open. Its value is what its call
 takes as `mut` (M7), so a read of that value that the call's arguments still hold is
-`changed-while-held`. A method takes no name of a field of its type, and inside a method a parameter or
+`changed-while-held`. Its call takes its receiver, the place of its value, before its arguments (F12),
+and a `mut` method on a `mut` field of an instance writes into the place its call took: where an
+argument replaces the instance that held the field, into that field of the old instance, and where
+an argument assigns the field itself, into the new value, as C# writes through `ref this` (§4, the
+owner, 2026-11-12, issue 39, comment 6819138235, item 13). A method takes no name of a field of its type, and inside a method a parameter or
 a variable takes no name of a member of its type (`redeclared`, V9), and a `Text()` without `pub`
 gives no text to `print`, an interpolation or `string.Join` (X6), inside its type too (`not-visible`, A9)
 *(assumed, §4: those readings)*.
@@ -1090,6 +1109,113 @@ print(c.Count)
 print(before.Count)
 ```
 
+Case: [data/body-fields.kz](../corpus/data/body-fields.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+    string Note = "{Total} in all"
+}
+
+o = Order(3, 2)
+print(o)
+print(o.Total)
+p = o with { Price = 5 }
+print(p)
+print(o == Order(3, 2))
+print(o == p)
+```
+
+Case: [data/body-field-mut.kz](../corpus/data/body-field-mut.kz)
+```kurz
+data Counter(int Start) {
+    pub mut int Count = Start
+
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(5)
+c.Increment()
+c.Increment()
+print(c)
+print(c with { Start = 1 })
+```
+
+Case: [data/body-field-with.kz](../corpus/data/body-field-with.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+}
+
+o = Order(3, 2)
+p = o with { Total = 5 }
+print(p)
+```
+
+Case: [data/body-field-unassigned.kz](../corpus/data/body-field-unassigned.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total
+}
+
+print(Order(3, 2))
+```
+
+Case: [data/body-field-not-mut.kz](../corpus/data/body-field-not-mut.kz)
+```kurz
+data Counter(int Start) {
+    pub int Count = Start
+
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(5)
+c.Increment()
+print(c)
+```
+
+Case: [data/body-field-private.kz](../corpus/data/body-field-private.kz)
+```kurz
+data Order(int Price, int Count) {
+    int Total = Price * Count
+}
+
+o = Order(3, 2)
+print(o.Total)
+```
+
+Case: [data/body-field-later.kz](../corpus/data/body-field-later.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count + Fee
+    pub int Fee = 1
+}
+
+print(Order(3, 2))
+```
+
+Case: [types/type-fields-body.kz](../corpus/types/type-fields-body.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+    string Note = "{Total} in all"
+}
+
+void ShowFields<T>(T value) {
+    for f in T.Fields {
+        print("{f.Name} = {f.Get(value)}")
+    }
+}
+
+T Remake<T>(T value) => T.Make(f => f.Get(value))
+
+ShowFields(Order(3, 2))
+print(Remake(Order(5, 2)))
+```
+
 Case: [data/text-declared.kz](../corpus/data/text-declared.kz)
 ```kurz
 data User(int Id, string Name) {
@@ -1099,6 +1225,29 @@ data User(int Id, string Name) {
 u = User(1, "Ann")
 print(u)
 print("got {u}")
+```
+
+Case: [values/mut-method-place.kz](../corpus/values/mut-method-place.kz)
+```kurz
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+class H(mut Inner In)
+
+int Replace(H h) {
+    h.In = Inner(D(5, "new{2}"))
+    return 1
+}
+
+top = H(Inner(D(1, "old{1}")))
+top.In.V.Add(Replace(top))
+print(top.In.V.N)
+print(top.In.V.S)
 ```
 
 ### D17 (decided, §4) How sets of flags are combined

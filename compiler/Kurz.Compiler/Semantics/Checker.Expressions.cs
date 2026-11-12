@@ -845,7 +845,7 @@ public sealed partial class Checker
                     var field = d.Symbol.Field(member);
                     if (field is not null)
                     {
-                        return new Typed(Types.Read(SubstituteData(d, field.Type))); // R3
+                        return DataFieldVisible(field, d.Symbol, line) ? new Typed(Types.Read(SubstituteData(d, field.Type))) : Typed.Error; // R3
                     }
 
                     if (BodyDeclares(d.Symbol, member))
@@ -1920,6 +1920,14 @@ public sealed partial class Checker
             if (field is null)
             {
                 Report(ErrorIds.UnknownName, a.Line, $"`{d.Symbol.Name}` has no field `{a.Field}` (D5)");
+                CheckExpression(a.Value, Untyped(a.Value));
+                continue;
+            }
+
+            if (field.Body is not null)
+            {
+                // D5, D16: `with` computes the fields of the body again from the copy's (the owner, 2026-11-12, comment 6821275386)
+                Report(ErrorIds.AssignImmutable, a.Line, $"`{a.Field}` is a field of the body, which its initializer gives (D16)");
                 CheckExpression(a.Value, Untyped(a.Value));
                 continue;
             }

@@ -1,0 +1,20 @@
+// expect: output
+// | Order { Price = 3, Count = 2, Total = 6, Note = 6 in all }
+// | 6
+// | Order { Price = 5, Count = 2, Total = 10, Note = 10 in all }
+// | true
+// | false
+// rules: D16
+
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+    string Note = "{Total} in all"
+}
+
+o = Order(3, 2)
+print(o)
+print(o.Total)
+p = o with { Price = 5 }
+print(p)
+print(o == Order(3, 2))
+print(o == p)

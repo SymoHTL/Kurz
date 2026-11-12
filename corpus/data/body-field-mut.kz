@@ -1,0 +1,18 @@
+// expect: output
+// | Counter { Start = 5, Count = 7 }
+// | Counter { Start = 1, Count = 1 }
+// rules: D16
+
+data Counter(int Start) {
+    pub mut int Count = Start
+
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(5)
+c.Increment()
+c.Increment()
+print(c)
+print(c with { Start = 1 })

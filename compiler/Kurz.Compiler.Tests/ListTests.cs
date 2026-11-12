@@ -2493,7 +2493,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // the body declares in `print`, in an interpolation, in the text of a value that holds one and of a list (A5), a `mut` method on a
     // `mut` field of an instance (K2), a method on a value read from that field that replaces the field while it runs, and a `mut`
     // method on a value inside an instance's block that replaces the instance holding it while it runs, whose place that instance's read
-    // keeps (K2)
+    // keeps (K2), and one on a `mut` field of an instance that assigns that field while it runs, whose writes land in the new value
+    // (D16)
     private const string DataBodies = """
         data Counter(int Count, string Name) {
             pub mut void Increment() {
@@ -2543,6 +2544,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 h.In = Box(Counter(9, "m"))
                 Count = Count + 1
             }
+
+            pub mut void Reset(Box b) {
+                keep = Name
+                b.D = Counter(5, "r{1}")
+                Count = Count + 1
+                Name = "{Name}+{keep}"
+            }
         }
 
         data Outer(Counter C, List<string> Tags)
@@ -2584,6 +2592,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         hg = hd
         hd.In.D.Moved(hg)
         print(hd.In.D)
+        bx.D.Reset(bx)
+        print(bx.D)
         """;
 
     private static readonly string[] DataBodiesPrint =
@@ -2603,6 +2613,68 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "z!=2", // the value read from the instance's field, which the read holds while the method replaces the field (K2)
         "x",
         "<m=9>", // the instance the method put in place of the one that held its receiver, whose block the read kept for the write (K2)
+        "<r1+x=6>", // the value the method assigned to the field it was called on, which its writes reach through the place its call took (D16)
+    ];
+
+    // the fields of a `data` body (D16): strings and lists each initializer makes, from the primary fields and the fields above it, a
+    // `mut` one a method replaces, which lets go of the string it held while a copy made before keeps its own, a `with` that computes
+    // them again, in a plain value and in a block (a type that holds a value of its own type), whose copy lets go of the values its slots
+    // of the body held, and a field of the body that shares the list a primary field holds, computed again by a `with` that replaces it
+    private const string DataBodyFields = """
+        data Tag(string Name, int N) {
+            pub string Label = "{Name}#{N}"
+            pub List<string> Parts = [Name, Label]
+            pub mut string Note = Label
+
+            pub mut void Mark(string s) {
+                Note = "{Note}+{s}"
+            }
+        }
+
+        data Node(string V, Node? Next) {
+            pub string Label = "n{V}"
+            pub List<string> Seen = [Label, V]
+        }
+
+        data Bag(List<string> Items) {
+            pub List<string> Same = Items
+            pub int Count = Same.Count
+        }
+
+        mut t = Tag("a", 1)
+        kept = t
+        t.Mark("x")
+        t.Mark("y")
+        print(t)
+        print(kept)
+        u = t with { N = 2 }
+        print(u)
+        print(t.Note)
+        n = Node("a", Node("b", null))
+        print(n)
+        m = n with { V = "c" }
+        print(m)
+        print(n.Label)
+        items = ["p", "q"]
+        b = Bag(items)
+        c = b with { Items = ["r"] }
+        print(b)
+        print(c)
+        print(b == Bag(["p", "q"]))
+        """;
+
+    private static readonly string[] DataBodyFieldsPrint =
+    [
+        "Tag { Name = a, N = 1, Label = a#1, Parts = [a, a#1], Note = a#1+x+y }",
+        "Tag { Name = a, N = 1, Label = a#1, Parts = [a, a#1], Note = a#1 }", // the copy made before the changes keeps its note (M3)
+        "Tag { Name = a, N = 2, Label = a#2, Parts = [a, a#2], Note = a#2 }", // `with` computes the body again, the note among it (B4)
+        "a#1+x+y",
+        "Node { V = a, Next = Node { V = b, Next = null, Label = nb, Seen = [nb, b] }, Label = na, Seen = [na, a] }",
+        "Node { V = c, Next = Node { V = b, Next = null, Label = nb, Seen = [nb, b] }, Label = nc, Seen = [nc, c] }",
+        "na",
+        "Bag { Items = [p, q], Same = [p, q], Count = 2 }",
+        "Bag { Items = [r], Same = [r], Count = 1 }",
+        "true",
     ];
 
     // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets
@@ -4382,6 +4454,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Fields, fenced, "field-collections-fenced"), 0, FieldsPrint, "");
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         Ran(BuildAndRun(DataBodies, fenced, "data-bodies-fenced"), 0, DataBodiesPrint, "");
+        Ran(BuildAndRun(DataBodyFields, fenced, "data-body-fields-fenced"), 0, DataBodyFieldsPrint, "");
         // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
         // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
         // change stands (X8, section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that frees the instance whose field holds
