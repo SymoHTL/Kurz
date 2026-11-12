@@ -1231,7 +1231,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   one, the pipes left open and no child waited for or killed. A later wait gives the first one's status, or `TimedOut` again, and `Kill()` sends
   `SIGKILL` to a child not yet waited for alone, whose number the system cannot have given away. The result is a
   union the runtime makes, whose tags are the program's (D9, above); `ExitError`'s text is `ExitErrorText` of
-  `runtime/common/`. `Command`, `Stdio`, `ExitStatus`, `ProcessOutput` and `ExitError` are names every file sees, so that a
+  `runtime/common/`. `Command`, `Stdio`, `ExitStatus`, `ProcessOutput`, `ExitError` and `ChildProcess` are names every file sees, so that a
   file's own declaration of one is `redeclared` (V9). A build for Windows says `not supported` at the first call on a command,
   where the build stops. `ChildTests` pins what no case can: a chain and `cmd = cmd.Arg(x)` built with no copy, under a runtime
   whose copy of a list fails; both pipes filled past what a pipe holds; the environment a child gets; the places a program is

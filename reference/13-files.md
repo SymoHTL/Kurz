@@ -2507,30 +2507,37 @@ ExitError` as `Output()` does, `Kill()` sends it `SIGKILL` and gives `void | IoE
 process's number, an `int`. `Input(bytes)` gives the child an input that the call that waits writes
 while it reads the output, so that neither side waits on a full pipe (§12, the owner, 2026-11-01, "Both
 forms"). `Input` takes `Bytes` or a `string`, whose UTF-8 bytes are the input, so that a call that fits
-neither is `argument-mismatch` (F13) (§12, the owner, 2026-11-11, "Bytes and string"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1), with the program as its path and the number 0 (S1, S21), at the call that
+neither is `argument-mismatch` (F13) (§12, the owner, 2026-11-11, "Bytes and string"). `Input` beside `Spawn()`, or beside a member `Stdin`, is `InvalidInput` (S1) at the call that
 starts the child, so that a spawned child takes its input through `child.Stdin`, and `Status()` writes
 the input and closes the child's input (§12, the owner, 2026-11-02, "`Input` beside `Spawn()` or beside
-a `Stdin` member is `InvalidInput` at the start"). An empty input is closed at once, a NUL byte in an
+a `Stdin` member is `InvalidInput` at the start"). That `InvalidInput` has the program as its path, as a
+start that fails has (S21), and the number 0, the number of an error that is not the system's (S1). An empty input is closed at once, a NUL byte in an
 input is data, the bound of `Timeout(d)` holds the writing (S20), and a write of the input that fails, but for a child that
-closed its input (`EPIPE`), is handled as a read that fails is (S18): every pipe the call holds to the child is closed, the child's end is waited for under the bound, and the write's `IoError`, named by the program, is the call's whatever status the child ends with, the first failure of a read or a write being the one that stays. `Status()` with a `Stdout` set to `Stdio.Piped`
+closed its input (`EPIPE`), is handled as a read that fails is (S18): every pipe the call holds to the child is closed, the child's end is waited for under the bound, and the write's `IoError`, named by the program, is the call's whatever status the child ends with, the first failure of a read or a write being the one that stays. A write that gets `EPIPE` gives no error: the
+program's end of the input is closed and the rest of the input dropped, and the call reads the output and
+waits as before. The command holds the input as a `string`, each byte of 128 or more as two bytes, so that
+an input of N bytes takes up to 2N, the `string` form copying the text's bytes first, and the call that
+writes decodes it, piece by piece, into a buffer of 64 KiB that it writes from. `Status()` with a `Stdout` set to `Stdio.Piped`
 closes the program's end of that pipe at once, so that a child that writes there is ended by `SIGPIPE`
 (S21) and the call gives an `ExitError` (§12, the owner, 2026-11-02, "`Status()` with a piped Stdout
-closes the program's end of that pipe at once"). A second wait of either kind gives the status the
-first gave, and `WaitWithOutput()` reads each pipe from where the program stopped, a pipe read to its
+closes the program's end of that pipe at once"). A second wait of either kind after a first that waited for
+the child gives the status the first gave, and a wait after a `WaitWithOutput()` whose read failed waits
+for the child; `WaitWithOutput()` reads each pipe from where the program stopped, a pipe read to its
 end or closed giving empty `Bytes`; `Kill()` on a child that ended or was waited for gives `void` and
 sends no signal; a child let go of without a `Wait()` is neither waited for nor killed, and a pipe's `File`
 outlives it, a holder of its own (S5). `Id` stays the number after the wait; `Kill()`'s `IoError` has the
-program as its path; a `ChildProcess` has no text and no `==`; and a later wait after a bound that passed
-gives `TimedOut` again (S20). A copy of a `ChildProcess` holds the one child; `Wait()` and `WaitWithOutput()`
+program as its path; a `ChildProcess` has no text and no `==`; and a later wait after a wait that gave
+`TimedOut` gives `TimedOut` again (S20). A copy of a `ChildProcess` holds the one child; `Wait()` and `WaitWithOutput()`
 close a piped `Stdin` before they wait; and a pipe's `File` has the program as its path (§12, the owner,
 2026-11-11, "All three as built"). `WaitWithOutput()` whose read of a pipe fails gives that `IoError`, with
 the program as its path, at once and waits for no child, so that a later `Wait()` or `Kill()` still reaches
-it (§12, the owner, 2026-11-11, "Error, no wait"). *(assumed, §12:
+it (§12, the owner, 2026-11-11, "Error, no wait"). A `WaitWithOutput()` that gives an `IoError`, the failed read's or
+`TimedOut`, takes none of the bytes its `File` read ahead, which stay with the `File`. *(assumed, §12:
 the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
 end, the child let go of, `Id`'s type, a pipe's `File` after the child, `Id` after the wait, `Kill()`'s
 error, no text and no `==`, the wait after a bound, `Status()` writing the input under `poll`, an empty input closed
-at once, a NUL byte in an input, the bound over the writing, a write that fails, and a piped `Stderr` under `Status()` closed
-as a piped `Stdout` is)*
+at once, a NUL byte in an input, the bound over the writing, a write that fails, a write that gets `EPIPE`, the input held as a `string`
+and its buffer, the bytes read ahead after a `WaitWithOutput()` that gives an `IoError`, and a piped `Stderr` under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 ```kurz
@@ -2660,12 +2667,14 @@ the bound gives its own status under `Output()` and `Status()` as under `Spawn()
 where a process it left behind still holds a pipe (§12, the owner, 2026-11-11, "All four as built" and
 "Child's end decides"). Under `Spawn()` the bound is
 held by `Wait()` and `WaitWithOutput()`, so that a read of the child's pipe before them and a child let go
-of are not bounded. After a read of the output that failed (S18), the wait is held to the bound, and when
-it passes the child is killed and the read's `IoError` stays the call's error. Where the system refuses
+of are not bounded. Under `Output()` and `Status()`, after a read of the output or a write of the input that failed (S18,
+S19), the wait is held to the bound, and when it passes the child is killed and that `IoError` stays the
+call's error; a `WaitWithOutput()` whose read fails waits for no child (S19) and kills none at the bound, as
+before it. Where the system refuses
 `pidfd_open`, through which a call whose command has a bound waits for the child's end, the call kills the
 child, waits for its end and gives the system's error at once, with the program as its path (S1 gives its
 kind and number). *(assumed, §12: the bound under `Spawn()`, the bound after a failed
-read and a refused `pidfd_open`)*
+read or write, no kill at the bound after a `WaitWithOutput()` whose read failed, and a refused `pidfd_open`)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)
 ```kurz
