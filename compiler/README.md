@@ -2281,7 +2281,7 @@ reached through an item or a call, or into a path that goes on after the key or 
 on an element of a list and an element of a list passed as `mut` (M7, M9); of the body of a `data`
 type (D16), a property, which section 14 leaves open, a field of a type without a primary constructor, a `static` field, a field without
 a written type and one with a modifier but `pub` and `mut`, a constructor, a `static` method, and, as in a class (K7),
-one marked both or `virtual` without `pub`, a method marked `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
+a method marked both `virtual` and `override`, or `virtual` without `pub`, a method marked `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
 type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type, a member the body declares after the type's name, where a name it does
 not declare is `unknown-name` as after a type without a body (V10), and a method named without a
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
