@@ -188,7 +188,11 @@ bound. `At` is the position in the pattern, counted in bytes, where the construc
 error gives its span, and 0 for `TooBig`. Its text is the words of its kind in lower case and its
 position, `syntax at 1`, as a `HexError`'s (H7), and it holds nothing of the pattern or of a text it
 was matched against. *(assumed, §12: the id, the `Regex` of a checked literal, the flag written as a
-literal, the error's type, kinds, position and text)*
+literal, the error's type, kinds, position and text)* A `data` type of a file may derive from
+`RegexError` as from one of the file (D6, D16) (§12, the owner, 2026-11-12, issue 457, comment
+6833680029, "Every one"), and prints that text, since its `Text()` is not `virtual`: an `override`
+of it is `override-without-virtual` (D16, K7). *(assumed, §12: `RegexError`'s `Text()` as `std/`
+declares it, which no answer made `virtual`)*
 
 Case: [regex/invalid-literal.kz](../corpus/regex/invalid-literal.kz)
 ```kurz
@@ -214,6 +218,15 @@ match Regex.New("{word}+") {
     Regex re => print(re)
     RegexError e => print(e.Kind)
 }
+```
+
+Case: [regex/regex-error-derived.kz](../corpus/regex/regex-error-derived.kz)
+```kurz
+data Located(string Pattern) : RegexError
+
+r = Located(RegexKind.Syntax, 1, "(")
+print(r)
+print(r.Pattern)
 ```
 
 ### G4 (assumed, §12) Matching
