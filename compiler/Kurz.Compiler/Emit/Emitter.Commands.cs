@@ -148,12 +148,13 @@ public sealed partial class Emitter
     /// 6790379522). <c>WaitWithOutput()</c> reads each pipe from where the program stopped: the bytes its <c>File</c> read ahead first,
     /// taken from it once the wait gives no <c>IoError</c>, then what the pipe still gives; a <c>File</c> that a <c>Close</c> marked gives
     /// none. A wait that gives an <c>IoError</c> gives every byte it gathered of a pipe back to that pipe's <c>File</c>, before the rest
-    /// of the pipe (the owner, 2026-11-12, issue 174, (a)), those its <c>File</c> read ahead first, S19's assumed order
+    /// of the pipe (the owner, 2026-11-12, issue 174, comment 6819138844), those its <c>File</c> read ahead first, S19's assumed order
     /// (<see cref="GiveBack"/>). The runtime tries each pipe's reader lock at each wake of its poll and never waits on one, reading a
     /// pipe only once it took its lock (the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll";
     /// <see cref="TryReader"/>), and each lock it took is held until the bytes are taken or given back (<see cref="LetGo"/>). Once
-    /// the child ended, a lock another holder holds is tried no more and that pipe is left to its holder (the owner, 2026-11-12,
-    /// issue 174, comment 6825493833, "Child's end decides"). The call is in flight on each pipe's <c>File</c> from before the
+    /// the child ended, a lock another holder holds is tried once more at the wake after that end and then no more, and that pipe is
+    /// left to its holder (the owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides"; the last try is S19's assumed
+    /// reading). The call is in flight on each pipe's <c>File</c> from before the
     /// runtime's call until after its lock is let go of (<see cref="Pipe"/>, <see cref="Leave"/>). Each call is
     /// <c>not supported</c> in a build for Windows (S11), where no child exists.
     /// </summary>
