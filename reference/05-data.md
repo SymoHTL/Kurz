@@ -1183,6 +1183,16 @@ o = Order(3, 2)
 print(o.Total)
 ```
 
+Case: [data/body-field-later.kz](../corpus/data/body-field-later.kz)
+```kurz
+data Order(int Price, int Count) {
+    pub int Total = Price * Count + Fee
+    pub int Fee = 1
+}
+
+print(Order(3, 2))
+```
+
 Case: [types/type-fields-body.kz](../corpus/types/type-fields-body.kz)
 ```kurz
 data Order(int Price, int Count) {
