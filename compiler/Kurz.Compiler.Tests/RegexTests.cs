@@ -626,25 +626,30 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// G2: the lazy DFA's cache of 2 MiB fills, is emptied and fills again, and the searches give the Pike VM's answers all the same:
-    /// <c>[ab]*a[ab]{15}c</c> over a text of 200,000 random <c>a</c>s and <c>b</c>s has a DFA state for each of the 65,536 ways the
-    /// last 16 characters can read, of which the text reaches some 62,000, each of at least 4 * (5 columns + 1 member) + 32 = 56
-    /// bytes (a class for <c>a</c>, <c>b</c>, <c>c</c> and every other character, and the end of the text), so that the cache
-    /// holds at most some 37,000 of them. The text ends in <c>c</c>, with an <c>a</c> 16 characters before
-    /// it in one text and a <c>b</c> in the other, so that only the states made after the last emptying find the one match, or find
-    /// none; <c>IsMatch</c>, <c>Match</c> and <c>Matches</c> are held to the answer of .NET's non-backtracking engine for each,
-    /// which its backtracking one would take time quadratic in the text's length to give.
+    /// G2: the lazy DFA's cache of 2 MiB fills and is emptied, and the searches give the Pike VM's answers all the same:
+    /// <c>[ab]*a[ab]{15}c</c> over random <c>a</c>s and <c>b</c>s makes a new DFA state at almost every character, one for each way
+    /// the last 16 characters can read, each of 4 bytes for every column (a class for <c>a</c>, <c>b</c>, <c>c</c> and every other
+    /// character, and the end of the text) and every member, and 32 of its own, so that the cache holds some 24,000 of them, which
+    /// some 30,000 characters fill. A copy of the standard library that printed each emptying, run on these texts on 2026-11-12,
+    /// emptied it twice over the 60,000 characters of the shorter two, the DFA then giving its answer from the states made after
+    /// the second emptying, and three times over the 200,000 of the longer three, where at the fourth the searches had read fewer
+    /// than 10 bytes for each state and the DFA gave the search up to the Pike VM. A text of each length ends in <c>c</c>, with an
+    /// <c>a</c> 16 characters before it in one and a <c>b</c> in the other, so that one has the one match and the other none;
+    /// <c>IsMatch</c>, <c>Match</c> and <c>Matches</c> are held to the answer of .NET's non-backtracking engine for each, which its
+    /// backtracking one would take time quadratic in the text's length to give.
     /// </summary>
     [Fact]
     public void The_lazy_dfa_gives_the_pike_vms_answers_after_its_cache_is_emptied()
     {
         var random = new Random(Seed + 11);
         var body = new string(Enumerable.Range(0, 200000).Select(_ => "ab"[random.Next(2)]).ToArray());
-        string[] texts = [body + "a" + new string('b', 15) + "c", body + "b" + new string('b', 15) + "c", body];
+        var shorter = body[..60000];
+        string[] texts = [body + "a" + new string('b', 15) + "c", body + "b" + new string('b', 15) + "c", body,
+            shorter + "a" + new string('b', 15) + "c", shorter + "b" + new string('b', 15) + "c"];
         const string pattern = "[ab]*a[ab]{15}c";
         var dotnet = new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         var expected = texts.Select(t => dotnet.Match(t) is { Success: true } m ? $"true {m.Index},{m.Length} 1" : "false - 0").ToList();
-        Assert.Equal(["true 0,200017 1", "false - 0", "false - 0"], expected);
+        Assert.Equal(["true 0,200017 1", "false - 0", "false - 0", "true 0,60017 1", "false - 0"], expected);
         var program = new StringBuilder("texts = [\n");
         foreach (var t in texts)
         {
