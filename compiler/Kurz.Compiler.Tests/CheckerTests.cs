@@ -5421,7 +5421,7 @@ public sealed class CheckerTests
     {
         // D16: what a body holds beside its methods and fields, a method or a field with what this build does not read, and a body it does
         // not read; section 14 leaves open a property, `Equals` and `GetHashCode`, and a `mut` method on an item of a list (question 1b);
-        // `virtual` and `override` on a type that derives from none and from which none derives (question 6), a `static` method (question 3), a field of a type
+        // `virtual` on a type that derives from none and from which none derives (question 6), a `static` method (question 3), a field of a type
         // without a primary constructor, a `static` field, an `internal` one, one without a written type, a constructor, `prot`, a method's
         // own type parameters, a `mut` `Text`, the body of a generic type, a member read through the type's name and a method named without
         // a call are what this build does not read; such a field without `=` is `not supported` too, before `field-unassigned`
@@ -5465,11 +5465,14 @@ public sealed class CheckerTests
         // D16 (§4, the owner, 2026-11-12, issue 455, comment 6819137865, H1 (a), and H4 at its default): an `override` is `mut` exactly
         // when the method it overrides is, else `override-mut`, either way round; the rest as a class's (K7): a method with the name and
         // the parameter types of a base's `pub` one and no `override` is `hides-member`, an `override` of a method neither `virtual` nor
-        // `override` is `override-without-virtual`, another return type `override-return-type`; a private member of a base's body is
-        // visible to the base alone (F9); an initializer of a derived type's body reads the fields of every primary constructor and its own
-        // body's above it, and a base's field of the body, computed after it in a class's order, is no name there (V10); a member of the
-        // derived type's body named like a member of a base's body, and a field of its primary constructor named like a base's field of the
-        // body, are `redeclared` (V9). The base and the control derive and override as the rules let them, with no error.
+        // `override` is `override-without-virtual`, as is an `override` in a type without a base, with a type derived from it or without
+        // one, another return type `override-return-type`; a private member of a base's body is visible to the base alone (F9), and a
+        // member of the derived type's body may take the name of a private method of a base's body, which it does not see; an initializer
+        // of a derived type's body reads the fields of every primary constructor and its own body's above it, and a base's field of the
+        // body, computed after it in a class's order, is no name there (V10); a field of the derived type's body named like a field of a
+        // base or a `pub` method of a base's body, a method of it named like a field of a base, and a field of its primary constructor named
+        // like a base's field of the body, are `redeclared` (V9). The base and the control derive and override as the rules let them, with
+        // no error.
         const string a = "data A(int X) {\n    pub int P = X * 2\n    int Hidden = 1\n\n    pub virtual mut void Bump() {\n        X = X + 1\n    }\n\n    pub virtual int Get() => X\n\n    pub int Plain() => X\n\n    pub int Shown() => Own() + Hidden\n\n    int Own() => 1\n}\n\n";
         const string tail = "}\n\nprint(B(1, 2))\n";
         Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Q = X + Y\n\n    pub override mut void Bump() {\n        Y = Y + 1\n    }\n\n    pub override int Get() => Y + P\n}\n\nmut b = B(1, 2)\nb.Bump()\nprint(b.Get() + b.Plain() + b.Shown() + b.Q)\n"));
@@ -5484,6 +5487,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Get = 1\n" + tail));
         Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int P() => Y\n" + tail));
         Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int P) : A\n\nprint(B(1, 2))\n"));
+        Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Own = Y\n\n    pub int Next() => Own + 1\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Plain = Y\n" + tail));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\ndata S(int Y) : R\n\nprint(S(1, 2).Get())\n"));
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\nprint(R(1).Get())\n"));
+        Assert.Empty(Errors("data R(int X) {\n    pub virtual int Get() => X\n}\n\ndata S(int Y) : R {\n    pub override int Get() => Y\n}\n\nprint(S(1, 2).Get())\n"));
     }
 
     [Fact]
