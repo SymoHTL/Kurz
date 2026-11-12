@@ -20,9 +20,7 @@ public sealed partial class Checker
     /// of the pattern, and the call gives a <c>Regex</c>; any other string gives <c>Regex | RegexError</c> when the program runs
     /// (section 12, the owner, 2026-11-01, "Compile time for literals"). A flag <c>backtracking</c>, named or the second argument,
     /// picks the engine (G2); the literal is checked for that engine where the flag is absent or written as <c>true</c> or
-    /// <c>false</c>, and any other flag leaves the check to the run, as for a pattern that is no literal (G3). A literal whose first
-    /// error is a construct
-    /// of Rust's syntax (G4) that the standard library's parse does not build, which gives <c>Unsupported</c> when the pattern is no literal.
+    /// <c>false</c>, and any other flag leaves the check to the run, as for a pattern that is no literal (G3).
     /// </summary>
     private Typed CheckRegexFunction(MemberAccess m, CallExpression c)
     {
@@ -56,15 +54,8 @@ public sealed partial class Checker
         var typed = Record(c, CallKind.RegexNew, Call([candidate], c, null, out var picked), picked);
         if (literal is not null && RegexPattern.Check(literal, backtracking == true) is { } failed)
         {
-            if (failed.Unbuilt is { } construct)
-            {
-                NotSupported(pattern!.Line, $"{construct} in a pattern (G4)");
-            }
-            else
-            {
-                var rules = failed.Kind == RegexPattern.Kind.Syntax ? "G3" : "G2, G3";
-                Report(ErrorIds.RegexInvalid, pattern!.Line, $"`Regex.New` of this literal gives `{RegexPattern.Words(failed.Kind, failed.At)}` ({rules})");
-            }
+            var rules = failed.Kind == RegexPattern.Kind.Syntax ? "G3" : "G2, G3";
+            Report(ErrorIds.RegexInvalid, pattern!.Line, $"`Regex.New` of this literal gives `{RegexPattern.Words(failed.Kind, failed.At)}` ({rules})");
         }
 
         return typed;

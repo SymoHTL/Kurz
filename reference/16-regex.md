@@ -173,7 +173,13 @@ and `u` is in force from the start, without it `\d`, `\w`, `\s`, the word bounda
 of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a negated class,
 `\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above ASCII, is `Syntax` at its start (G3).
 *(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
-request 484 asked, issue 39, comment 6810616304)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+request 484 asked, issue 39, comment 6810616304)* The classes `\p{...}` and `\P{...}`, and `\pX` of one letter, read a
+name as Rust's crate reads it, from the tables of the version §12 pins: a general category, a script, a binary property,
+`Any`, `ASCII` and `Assigned` alone, or by value the general category, the script, the script extensions, the age, which
+holds every version up to it, and the three break properties, as `name=value`, `name:value` or `name!=value`, which
+negates the class once more; a name is compared with a first `is`, ` `, `_` and `-` set aside and its capitals made small.
+A name the crate does not know, and a `\p` under `(?-u)`, is `Syntax` at its `\` (G3). *(assumed, §12: the defaults of
+the questions put to the owner on 2026-11-12, issue 176, comment 6812529825)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 
