@@ -547,6 +547,32 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Fact]
+    public void A_wait_with_output_without_a_bound_where_the_system_refuses_pidfd_open_gives_the_refusal_and_leaves_the_child()
+    {
+        // S19, S20 (assumed, §12): a `WaitWithOutput()` with a pipe's `File` polls the child's end through the descriptor
+        // `pidfd_open` gives, without a bound too, so that a lock another holder holds is given up at that end; where the system
+        // refuses it (a kernel before 5.3, or a filter), the wait gives the system's error, here `ENOSYS` (38), `Unsupported`, at
+        // once, and leaves the child, which `Kill()` then ends; a wait that went on without the descriptor would wait for the child's
+        // end, as the positive control, under this machine's runtime, does
+        var text = Program("""
+                start = instant.Now
+                child = Command.New("sleep").Arg("3").Stdout(Stdio.Piped).Spawn()
+                print(Gathered(child))
+                child.Kill()
+                print(Joined(child))
+                print(start.Elapsed < 2s)
+            """) + Children;
+        if (Ran(text, "child-wait-no-pidfd", runtime: ListTests.Edited(("runtime/linux/linux.kz", "process = int(syscall(434, long(state[0]), long(0)))", "process = int(syscall(-1, long(state[0]), long(0)))"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Unsupported [sleep] 38", "signal 9: sleep", "true"], ran.Output);
+            var control = Ran(text, "child-wait-pidfd-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["0 0", "ended", "false"], control.Output);
+        }
+    }
+
     /// <summary>A line of a program that fills <c>big</c>, a <c>mut</c> variable of <c>Bytes</c>, with a MiB of <c>x</c>, more than a pipe holds.</summary>
     private const string Big = """
                 mut big = Bytes()
@@ -1091,32 +1117,181 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var given = At(waiting, line => Ends(line, "give.done"));
         Assert.Equal((2, 2, 2), (unlocks.Length, moved.Length, given.Length));
         Assert.All(unlocks, at => Assert.True(at > moved.Max() && at > given.Max(), "a reader's lock let go of before its position moved or its bytes were given back"));
+
+        // item 3 of the round of pull request 509: each lock is let go of in a block that one branch alone reaches, the branch on
+        // the mark the runtime wrote for that pipe in `held`, and the lock let go of is the reader's of the handle that mark chose, so
+        // that the function lets go of the locks the runtime took and of no other
+        var marks = new List<string>();
+        foreach (var at in unlocks)
+        {
+            var block = BlockOf(waiting, at);
+            var branch = Assert.Single(waiting, line => System.Text.RegularExpressions.Regex.IsMatch(line, $@"label %{System.Text.RegularExpressions.Regex.Escape(block)}(,|$)"));
+            var condition = Matched(branch, $@"^\s*br i1 (%[\w.]+), label %{System.Text.RegularExpressions.Regex.Escape(block)},");
+            var handle = Operand(waiting, condition, @"icmp ne ptr (%[\w.]+), null$");
+            var mark = Operand(waiting, handle, @"select i1 (%[\w.]+), ptr %[\w.]+, ptr null$");
+            var word = Operand(waiting, mark, @"icmp ne i32 (%[\w.]+), 0$");
+            var slot = Operand(waiting, word, @"load i32, ptr (%[\w.]+)$");
+            marks.Add(Operand(waiting, slot, @"getelementptr \[2 x i32\], ptr %[\w.]+, i64 0, i64 (\d)$"));
+            var lockWord = Matched(waiting[at], @"call void @""unlock.reader""\(ptr (%[\w.]+)\)");
+            var reader = Operand(waiting, lockWord, @"getelementptr i8, ptr (%[\w.]+), i64 16$");
+            Assert.Equal(handle, Operand(waiting, reader, @"getelementptr i8, ptr (%[\w.]+), i64 32$"));
+        }
+
+        Assert.Equal("0 1", string.Join(" ", marks.Order(StringComparer.Ordinal)));
+
+        // item 6 of that round: the function is in flight on each pipe's `File` from before the runtime's call until after every lock
+        // is let go of, so that a `Close` through another holder meanwhile leaves the descriptor to its end (S5)
+        var enters = At(waiting, line => line.Contains("call i1 @\"enter.handle\"(", StringComparison.Ordinal));
+        var leaves = At(waiting, line => line.Contains("call void @\"leave.handle\"(", StringComparison.Ordinal));
+        Assert.Equal((2, 2), (enters.Length, leaves.Length));
+        Assert.All(enters, at => Assert.True(at < call, "a pipe's handle entered after the runtime's call"));
+        Assert.All(leaves, at => Assert.True(at > unlocks.Max(), "a pipe's handle left before its lock was let go of"));
+
         var tries = Assert.Single(functions, f => f.StartsWith("internal i64 @\"try.reader\"", StringComparison.Ordinal)).Split('\n');
         var swap = Assert.Single(At(tries, line => line.Contains(" cmpxchg ", StringComparison.Ordinal)));
         var loads = At(tries, line => line.Contains(" = load ", StringComparison.Ordinal));
         Assert.Equal(3, loads.Length); // the buffer, the position and the count
         Assert.All(loads, at => Assert.True(at > swap, "a reader's state read before its lock was taken"));
+
+        // item 4 of that round: the swap's success flag branches to a block that every load comes after, and its failure to a block
+        // that returns -1 at once, so that no load is reached where the swap failed
+        var swapped = Matched(tries[swap], @"^\s*(%[\w.]+) = cmpxchg ");
+        var success = Matched(Assert.Single(tries, line => line.Contains($"extractvalue {{ i32, i1 }} {swapped}, 1", StringComparison.Ordinal)), @"^\s*(%[\w.]+) = ");
+        var onSwap = Assert.Single(tries, line => line.TrimStart().StartsWith($"br i1 {success}, ", StringComparison.Ordinal));
+        var taken = Array.IndexOf(tries, Matched(onSwap, @"label %([\w.]+), label") + ":");
+        var refused = Array.IndexOf(tries, Matched(onSwap, @", label %([\w.]+)$") + ":");
+        Assert.True(taken > 0 && refused > 0, onSwap);
+        Assert.All(loads, at => Assert.True(at > taken, "a reader's state read where the swap may have failed"));
+        Assert.StartsWith("ret i64 -1", tries[refused + 1].Trim(), StringComparison.Ordinal);
+    }
+
+    /// <summary>The label of the block that holds the line at <paramref name="at"/>.</summary>
+    private static string BlockOf(string[] lines, int at)
+    {
+        for (var i = at; i >= 0; i--)
+        {
+            if (System.Text.RegularExpressions.Regex.Match(lines[i], @"^([\w.]+):") is { Success: true } label)
+            {
+                return label.Groups[1].Value;
+            }
+        }
+
+        throw new InvalidOperationException("a line outside any block");
+    }
+
+    /// <summary>The operand <paramref name="pattern"/> captures in the one line that defines <paramref name="value"/>.</summary>
+    private static string Operand(string[] lines, string value, string pattern) =>
+        Matched(Assert.Single(lines, line => line.TrimStart().StartsWith($"{value} = ", StringComparison.Ordinal)), pattern);
+
+    /// <summary>What <paramref name="pattern"/> captures in <paramref name="line"/>, read without the line's debug location.</summary>
+    private static string Matched(string line, string pattern)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(System.Text.RegularExpressions.Regex.Replace(line, @", !dbg !\d+$", ""), pattern);
+        Assert.True(match.Success, $"{pattern} in {line}");
+        return match.Groups[1].Value;
     }
 
     [Fact]
-    public void A_wait_with_output_reads_a_pipe_whose_lock_another_holder_holds_once_it_lets_go_and_drains_the_other_meanwhile()
+    public void A_wait_with_output_drains_the_output_while_another_holder_holds_the_error_pipes_lock_and_reads_that_pipe_once_it_lets_go()
     {
-        // S19 (the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll"; items 2, 5 and 6 of the round of
-        // pull request 502): the wait never waits on a reader's lock. The build's `try.reader` is swapped for a helper that reports the
-        // error pipe's lock held by another holder for its first 40 tries, as a read through that `File` on another thread holds it
-        // while its fill waits (S16), and then tries it. The wait drains the output meanwhile, so that the child, which writes 70000
-        // bytes there, more than a pipe holds, and then `e` on its error, ends, and it reads the error pipe from the wake after that
-        // holder let go. A wait that took each lock before its poll, as the build before did, waits on the error pipe's lock while the
-        // child waits on the full output pipe, for ever where the holder's read waits on the child; one that tried a lock once and
-        // never again reads no error pipe and never ends
+        // S19 (the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll"; item 5 of the round of pull request
+        // 509): the wait never waits on a reader's lock. The build's `try.reader` is swapped for a helper that reports the error pipe's
+        // lock held by another holder until the output pipe is drained and closed by its writer, as a read through that `File` on
+        // another thread holds it while its fill waits (S16), and then tries it. The child writes 70000 bytes on its output, more than
+        // a pipe holds, closes it, writes `e` on its error and lives on a little, so that the lock is let go of before its end. A wait
+        // that polled no pipe while a lock waited leaves the child waiting on the full output pipe, which then never ends, so the
+        // helper never lets go and the wait ends at its bound with `TimedOut`
         var text = Program("""
-                child = Command.New("sh").Args(["-c", "head -c 70000 /dev/zero; printf e >&2"]).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Spawn()
+                child = Command.New("sh").Args(["-c", "head -c 70000 /dev/zero; exec >&-; printf e >&2; sleep 1"]).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Timeout(10s).Spawn()
                 print(Gathered(child))
             """) + Children;
-        if (Ran(text, "child-wait-lock-let-go", edit: ir => HeldElsewhere(ir, 40)) is { } ran)
+        if (Ran(text, "child-wait-lock-let-go", edit: ir => HeldElsewhere(ir, UntilTheOutputEnds(ir))) is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["70000 1"], ran.Output);
+        }
+    }
+
+    [Fact]
+    public void A_wait_with_output_whose_lock_another_holder_never_lets_go_gives_the_childs_status_once_the_child_ended()
+    {
+        // S19 (the owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides"; item 1 of the round of pull request 509):
+        // once the child ended and the pipes whose lock the wait took are read to their ends, the wait gives the child's status, with a
+        // bound and without one. The swapped helper reports the error pipe's lock held at every try; the wait gives the output's `a`,
+        // nothing of the error, and leaves its `b` in its pipe for the holder of its lock, so that a read through it after the wait gives
+        // it. A wait that went on trying the lock gives `TimedOut` at its bound, and without one never ends
+        foreach (var (bound, name) in new[] { ("", "child-wait-lock-held-ended"), (".Timeout(20s)", "child-wait-lock-held-ended-bound") })
+        {
+            var text = Program("""
+                    child = Command.New("sh").Args(["-c", "printf a; printf b >&2"]).Stdout(Stdio.Piped).Stderr(Stdio.Piped)BOUND.Spawn()
+                    print(Gathered(child))
+                    match child.Stdout {
+                        File out => {
+                            mut rest = Bytes()
+                            print(out.Read(mut rest, 10))
+                            print(string.FromUtf8(rest))
+                        }
+                        null => print("no output")
+                    }
+
+                    match child.Stderr {
+                        File err => {
+                            mut rest = Bytes()
+                            print(err.Read(mut rest, 10))
+                            print(string.FromUtf8(rest))
+                        }
+                        null => print("no error output")
+                    }
+                """.Replace("BOUND", bound, StringComparison.Ordinal)) + Children;
+            if (Ran(text, name, edit: ir => HeldElsewhere(ir, Never)) is { } ran)
+            {
+                Assert.Equal((0, ""), (ran.Code, ran.Error));
+                Assert.Equal(["1 0", "0", "", "1", "b"], ran.Output);
+            }
+        }
+    }
+
+    [Fact]
+    public void A_close_through_another_holder_while_a_wait_with_output_polls_a_pipe_leaves_its_descriptor_to_the_waits_end()
+    {
+        // S19, S5 (item 6 of the round of pull request 509): the swapped helper closes the error pipe's `File` through another holder
+        // at the wait's first try of its lock, after the wait read the handle's mark and descriptor and before it polls that descriptor,
+        // as a `Close` on another thread can land there; no program can make that race, since no handle reaches a second thread (R10).
+        // The wait is in flight on the handle, so the `Close` marks it and leaves the descriptor open to the wait, which reads the pipe
+        // whole, and the read through the `File` after it gives the closed handle's error. A wait that read the mark and the descriptor
+        // and was not in flight polls a descriptor the `Close` released, whose read fails
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf o; printf e >&2"]).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Spawn()
+                print(Gathered(child))
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                    }
+                    null => print("no output")
+                }
+
+                match child.Stderr {
+                    File err => {
+                        mut rest = Bytes()
+                        print(err.Read(mut rest, 10) else {
+                            IoError e => -e.Code
+                        })
+                    }
+                    null => print("no error output")
+                }
+            """) + Children;
+        if (Ran(text, "child-wait-close-in-flight", edit: ir => HeldElsewhere(ir, ClosedAtTheFirstTry)) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["1 1", "0", "-9"], ran.Output);
+        }
+
+        // the positive control: built as it is, nothing closes the error pipe's `File`, and the read after the wait finds its end
+        if (Ran(text, "child-wait-close-in-flight-open") is { } open)
+        {
+            Assert.Equal((0, ""), (open.Code, open.Error));
+            Assert.Equal(["1 1", "0", "0"], open.Output);
         }
     }
 
@@ -1150,7 +1325,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     null => print("no error output")
                 }
             """) + Children;
-        if (Ran(text, "child-wait-lock-held", edit: ir => HeldElsewhere(ir, int.MaxValue)) is { } ran)
+        if (Ran(text, "child-wait-lock-held", edit: ir => HeldElsewhere(ir, Never)) is { } ran)
         {
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["TimedOut [sh] 0", "1", "a", "1", "b"], ran.Output);
@@ -1160,17 +1335,16 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// S19: the program's IR with <c>try.reader</c>, the emitter's helper the runtime tries each reader's lock with, swapped
     /// in the wait's call for a helper that tries the first reader it is given, the output's, which the runtime tries first, at once,
-    /// and reports every other lock held by another holder for its first <paramref name="tries"/> tries, then tries it, as a holder
-    /// that lets go after them leaves it.
+    /// and at each try of any other runs <paramref name="other"/>, IR that branches to <c>%real</c> to try it or to <c>%elsewhere</c> to
+    /// report it held by another holder; the reader is <c>%reader</c> and the output's <c>%first</c>.
     /// </summary>
-    private static string HeldElsewhere(string ir, int tries)
+    private static string HeldElsewhere(string ir, string other)
     {
         const string Try = "ptr @\"try.reader\"";
         Assert.Equal(2, ir.Split(Try).Length); // the one call that hands it to the runtime
         return ir.Replace(Try, "ptr @\"test.try.reader\"", StringComparison.Ordinal) + $$"""
 
             @"test.first" = internal global ptr null
-            @"test.tries" = internal global i32 0
 
             define internal i64 @"test.try.reader"(ptr %reader, ptr %ahead) {
             entry:
@@ -1184,11 +1358,7 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
               %same = icmp eq ptr %first, %reader
               br i1 %same, label %real, label %other
             other:
-              %tried = load i32, ptr @"test.tries"
-              %next = add i32 %tried, 1
-              store i32 %next, ptr @"test.tries"
-              %held = icmp ult i32 %tried, {{tries}}
-              br i1 %held, label %elsewhere, label %real
+            {{other}}
             elsewhere:
               ret i64 -1
             real:
@@ -1198,6 +1368,50 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
     }
+
+    /// <summary>S19: the other lock held by another holder at every try (<see cref="HeldElsewhere"/>).</summary>
+    private const string Never = "  br label %elsewhere";
+
+    /// <summary>
+    /// S19: the other lock held by another holder until the output pipe is drained and closed by its writers, which a <c>poll</c> of its
+    /// descriptor shows as a hang-up with nothing to read (<see cref="HeldElsewhere"/>). The descriptor is read from the output's
+    /// <c>File</c>: its reader's state sits 32 bytes into the handle, and the descriptor 8 bytes in (<c>ReaderAt</c>, <c>HandleDescriptor</c>).
+    /// </summary>
+    private static string UntilTheOutputEnds(string ir)
+    {
+        Assert.Contains("declare i32 @poll(ptr, i64, i32)", ir, StringComparison.Ordinal); // the runtime's own `poll`
+        return """
+              %handle = getelementptr i8, ptr %first, i64 -32
+              %at = getelementptr i8, ptr %handle, i64 8
+              %fd = load i32, ptr %at
+              %polled = alloca [8 x i8]
+              store i32 %fd, ptr %polled
+              %events = getelementptr i8, ptr %polled, i64 4
+              store i16 1, ptr %events
+              %revents = getelementptr i8, ptr %polled, i64 6
+              store i16 0, ptr %revents
+              %ready = call i32 @poll(ptr %polled, i64 1, i32 0)
+              %got = load i16, ptr %revents
+              %hup = and i16 %got, 16
+              %in = and i16 %got, 1
+              %hung = icmp ne i16 %hup, 0
+              %drained = icmp eq i16 %in, 0
+              %ended = and i1 %hung, %drained
+              br i1 %ended, label %real, label %elsewhere
+            """;
+    }
+
+    /// <summary>
+    /// S19, S5: the other pipe's <c>File</c> closed through another holder (<c>close.handle</c>, which the wait's close of the input
+    /// builds) at its first try, then tried: the handle sits 32 bytes before its reader's state (<c>ReaderAt</c>). A <c>Close</c> that
+    /// gives anything but 0 reports the lock held, so that the wait reads nothing of that pipe.
+    /// </summary>
+    private const string ClosedAtTheFirstTry = """
+          %handle = getelementptr i8, ptr %reader, i64 -32
+          %closed = call i64 @"close.handle"(ptr %handle, i1 false)
+          %deferred = icmp eq i64 %closed, 0
+          br i1 %deferred, label %real, label %elsewhere
+        """;
 
     [Fact]
     public void A_wait_with_output_whose_read_fails_on_the_look_at_its_bound_kills_no_child()

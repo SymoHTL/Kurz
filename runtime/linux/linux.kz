@@ -3111,7 +3111,9 @@ pub void | IoError ChildKill(int* state, string program) {
 // (`Drive`), each from the wake that took the lock of its reader, at `outReader` and `errReader`, null where
 // none is held, by `take`, which `held` names, under its bound: the status `waitpid` gave, or a failure below
 // 0, -4100 where the bound passed, the child killed and waited for. A child waited for before gives the status
-// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline.
+// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline. Where a
+// reader is given, the child's end is polled with or without a bound, so that a lock another holder holds is
+// given up at that end (`Drive`).
 long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errReader, extern "C" (byte*, long*) => long take, int* held, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
@@ -3128,7 +3130,7 @@ long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errRea
     raw {
         long deadline = *Ptr<long>(Ptr<byte>(state) + 8)
         mut int process = -1
-        if deadline >= 0 && state[1] == 0 {
+        if (deadline >= 0 || outReader != null || errReader != null) && state[1] == 0 {
             process = int(syscall(434, long(state[0]), long(0)))
             if process < 0 {
                 failure = -long(*__errno_location())
@@ -3943,8 +3945,9 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
 }
 
 // The pipes at `fds[2]` and `fds[4]` read into `out` and `err` until their ends, with `fed` the input `feed`
-// written to `fds[1]` as `RunCommand` says, and while a bound holds the child's end polled through `process`
-// until `deadline` passes on the monotonic clock, `endSeen` where the child's end was seen before: 0, -errno
+// written to `fds[1]` as `RunCommand` says, the child's end polled through `process` where it is not -1, and
+// while a bound holds until `deadline` passes on the monotonic clock, `endSeen` where the child's end was seen
+// before: 0, -errno
 // where `poll` or a write fails, or -4100, `TimedOut`, where the bound passed before the child's end, the
 // child killed with `SIGKILL` (S19, S20). `memory` holds the buffer of a read, 65536 bytes, then the room
 // `RunCommand` lays out, and `staging` the buffer of a write. With `owned` a pipe read to its end is closed;
@@ -3952,7 +3955,9 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
 // `errReader` is read only once `take` took the lock of that reader, which it tries at each wake and never
 // waits on, and from then on after the bytes the reader held ahead; `held` gets 1 for each lock it took, at
 // the first `int` for the output's and at the second for the error's (S19, the owner, 2026-11-12, issue 174,
-// comment 6821985043, "Try the lock inside the poll").
+// comment 6821985043, "Try the lock inside the poll"). From the wake after the child's end, a lock it did not
+// take is tried no more, and that pipe is left to the holder of its lock, with or without a bound (S19, the
+// owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides").
 long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long deadline, bool owned, int* fds, byte* outReader, byte* errReader, extern "C" (byte*, long*) => long take, int* held, byte* staging, string feed, bool fed, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
@@ -3960,7 +3965,7 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         int* polled = Ptr<int>(memory + 65536 + 64)
         byte* clock = memory + 65536 + 104
         // `poll` on the pipes still open, each read into its list until its end, and on the child's end
-        // while a bound holds, until the bound passes
+        // where `process` is not -1, while a bound holds until the bound passes
         mut int pending = 0
         mut bool polling = true
         mut bool exited = endSeen
@@ -4027,6 +4032,25 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
                 errWaits = false
                 held[1] = 1
                 polled[2] = fds[4]
+            }
+
+            // S19: the child's end decides: once it ended, a lock that the try just made did not take is given up,
+            // its pipe left to its holder with the bytes it holds, and the call ends once the pipes whose lock it took
+            // are read to their ends (the owner, 2026-11-12, issue 174, comment 6825493833, "Child's end decides")
+            if exited && (outWaits || errWaits) {
+                if outWaits {
+                    outWaits = false
+                    pending = pending - 1
+                }
+
+                if errWaits {
+                    errWaits = false
+                    pending = pending - 1
+                }
+
+                if pending == 0 && !writing {
+                    break
+                }
             }
 
             mut int wait = -1
