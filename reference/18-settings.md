@@ -171,7 +171,7 @@ No case: as B1's.
 The four layers are read and merged first; each source of the program's own is made from that value
 (B15); and the whole is checked once the sources' first loads have answered, bounded by a time the
 declaration names, a source that has not answered in it refusing the start (B7) (§12, the owner,
-2026-11-12, B11 (a)). A source is not configured by its own layer.
+2026-11-12, B11 (a), the chosen option's words). A source is not configured by its own layer.
 
 No case: as B1's.
 
@@ -188,7 +188,8 @@ No case: as B1's.
 The two files are watched and read again on a change where the declaration turns their watch on
 (B14), and are read once, at the start, where it does not; the variables and the command line are
 read once, at the start (§12, the owner, 2026-11-12, B13 (b), "but its default disabled").
-*(assumed, §12: the runtime watches the files through the system's notification of a change,
+*(assumed, §12: the watch holds both files, where the answer said "the settings file", as ASP.NET's
+host turns `reloadOnChange` on for both of its files; the runtime watches the files through the system's notification of a change,
 inotify on Linux, as Rust's crate `notify` watches a file)*
 
 No case: as B1's.
@@ -206,8 +207,8 @@ No case: as B1's.
 The declaration names a function of the program, `settings("APP_", sources: Sources)`, which the
 runtime calls with the value the four layers gave (B11), and which builds each source with its
 services as its constructor's arguments, as §11 wires a service, and gives the sources with the
-place of each among the layers (§12, the owner, 2026-11-12, B15). The form of that place stands open
-(§14).
+place of each among the layers (§12, the owner, 2026-11-12, B15). The form of that place, and the
+type of the value the function receives, stand open (§14).
 
 No case: as B1's.
 
@@ -241,7 +242,8 @@ No case: as B1's.
 ### B19 (decided, §12) The interface of a source
 
 `interface SettingsSource { Map<string, string> | IoError Load(); void Watch(SettingsReload reload) }`:
-`Load` gives pairs of a setting's path and its text, each read as a variable's value is (B4), and the
+`Load` gives pairs of a setting's path and its text, each read as a variable's value is (B4), the
+spelling of the path standing open (§14), and the
 runtime calls `Watch` once after the first load, in an actor of its own, so that a source waits there
 on its source and calls the handle of B12; a source whose source never changes returns from `Watch`
 at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
