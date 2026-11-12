@@ -20,7 +20,7 @@ method of every file sees `settings`, where the top-level statements alone see `
 (B9) (§12, the owner, 2026-11-12, the reading said back, and B9). A second type with the modifier in
 one program is `redeclared` at the second, as a second declaration of a name is (V9). The modifier
 stands on a `data` type alone, and on another type or on a generic `data` type is a compile error
-(§12, the owner, 2026-11-12, details 1 and 9). The type's constraints check the value the layers
+(§12, the owner, 2026-11-12, details 1 and 9), whose id §14 leaves open. The type's constraints check the value the layers
 give (B2), and a program with a settings type is `not supported` in a build for Windows, as one that
 reads a file is (§12, the owner, 2026-10-30, "Not supported, as files"). *(assumed, §12: the name
 stands in a program that declares a settings type, where a declaration of the program's own named
@@ -43,8 +43,9 @@ The layers merge a nested `data` leaf by leaf, a `List` item by item by its inde
 key, as ASP.NET's configuration merges, so that a list a later layer shortens keeps the lower layer's
 later items (§12, the owner, 2026-11-12, detail 3). The sources of the program's own (B8) stand among
 the layers where the function that makes them places each (B15). The variables and the command line
-are read once, at the start; the two files are read again where the declaration turns their watch on
+are read once, at the start; the settings file is read again where the declaration turns its watch on
 (B13, B14), and a source where it says that its source changed (B12) (§12, the owner, 2026-11-12).
+*(assumed, §12: `settings.<env>.kz` with it, as B13 reads the answer)*
 
 No case: as B1's.
 
@@ -89,7 +90,7 @@ new key arriving in upper case, and two keys of one file that differ in case alo
 capital that follows a small letter or a digit, and before the last capital of a run that a small
 letter follows, `HTTPPort` as `HTTP_PORT` and `http-port` (B5), as the crate `heck` splits a name, and
 two fields of one type whose names meet in one name are a compile error (§12, the owner, 2026-11-12,
-detail 8). An empty value is an empty `string`, and a value that any other type's `Parse` refuses,
+detail 8), whose id §14 leaves open. An empty value is an empty `string`, and a value that any other type's `Parse` refuses,
 and no variable sets `null`, at the cost that no variable clears a nullable field (§12, the owner,
 2026-11-12, detail 5). A list's item is a variable of its own, `NAME__0`, `NAME__1`. *(assumed, §12:
 the defaults of the round of 2026-11-11)*
@@ -106,7 +107,10 @@ setting is left to the program, as ASP.NET leaves it (§12, the owner, 2026-11-1
 back, and detail 13). An option with no value, `--verbose`, sets a `bool` field to `true`, as `clap`'s
 flag, and another option with no value, last or followed by an argument that starts with `--`,
 refuses the start; an empty value is read as a variable's is (B4); and a map's key from an option is
-matched as one from a variable (§12, the owner, 2026-11-12, details 5, 11 and 12). A list's item is an
+matched as one from a variable (§12, the owner, 2026-11-12, details 5, 11 and 12). So a `bool`
+option followed by an argument that does not start with `--` takes that argument as its value, as
+any option does: `--verbose input.txt` gives `input.txt` to `Parse`, which refuses the start (B7),
+where `clap`'s flag takes no value, and `--verbose=false` sets the field to `false`. A list's item is an
 option repeated, `--hosts a --hosts b`. *(assumed, §12: the defaults of the round of 2026-11-11)*
 
 No case: as B1's.
@@ -119,7 +123,7 @@ a nested `data` type; a nullable of one of these; a `List` of one of these, from
 file, the variables of B4 and the options of B5; or a `Map` with `string` keys. *(assumed, §12: the
 defaults of the round of 2026-11-11)* An `enum`'s member is read without case in every layer, as
 `Enum.Parse` with `ignoreCase` and `clap`'s value enums read it; a field of another type is a compile
-error; and a `Map`'s values are of the types above, written in a file as a map literal (§12, the
+error, whose id §14 leaves open; and a `Map`'s values are of the types above, written in a file as a map literal (§12, the
 owner, 2026-11-12, details 12 and 14).
 
 No case: as B1's.
@@ -132,7 +136,8 @@ the source of its value, a file and its line, a variable, an argument or a sourc
 own (B8), and the reason, and ends the process with the exit code 1. The value of a `secret` field
 is never written. *(assumed, §12: the defaults of the round of 2026-11-11)* The reason for a `secret`
 field names the error's id and the field's type, never the message of `Parse` or of a constraint,
-which can quote the value (§12, the owner, 2026-11-12, detail 15).
+which can quote the value (§12, the owner, 2026-11-12, detail 15); §14 leaves those ids open, with the
+text of the line.
 
 No case: a case's header holds no line of standard error, and as B1's.
 
@@ -154,7 +159,7 @@ A reload builds a new value from every layer and source, checks it as the start 
 it by one atomic swap of a pointer to the new value, which is never changed, as Rust's `arc-swap`
 swaps an `Arc`, so that a reader sees the old value or the new one, whole. An actor reads the value
 once for each message, as it stood when the message began (§12, the owner, 2026-11-12, B9 (b)), and
-B16 gives the code that handles no message.
+B16 gives the code that handles no message. *(assumed, §12: the value carries a count, as the `Arc` a snapshot of section 11 is published in does, which a message and a handler call take at their start and give back at their end, so that an old value lives while a call that began on it runs and is freed when the last such call ends, its memory held beside the new value's until then, and the count costs two atomic changes of it for each message and each handler call, beside the load of the pointer)*
 
 No case: as B1's.
 
@@ -178,15 +183,21 @@ No case: as B1's.
 ### B12 (decided, §12) A source says that its source changed
 
 The runtime gives each source a handle, `SettingsReload`, which the source calls,
-`reload.Changed()`, when its source changed; the runtime then loads that source again, merges,
-checks and publishes (B9) (§12, the owner, 2026-11-12, B12 (a)).
+`reload.Changed()`, when its source changed (§12, the owner, 2026-11-12, B12 (a), and B19, "Load +
+Watch", the option whose words name the call, "... and calls `reload.Changed()`", comment
+6819483332, recorded in comment 6819319795). `Changed()` runs the source's `Load` in the actor that
+called it and hands the pairs it gave to the runtime, which merges, checks and publishes them (B9);
+at the start the source's first `Load` runs before `Watch` begins (B19), so that the two never
+overlap and a source is reached from one actor at a time, as ASP.NET's reload token calls its
+provider's `Load` on the thread that fires it, at the cost of a `Watch` held while `Load` runs (§12,
+the owner, 2026-11-12, comment 6820218118, "Changed() calls Load").
 
 No case: as B1's.
 
-### B13 (decided, §12) The files are watched where the program turns it on
+### B13 (decided, §12) The settings file is watched where the program turns it on
 
-The two files are watched and read again on a change where the declaration turns their watch on
-(B14), and are read once, at the start, where it does not; the variables and the command line are
+The settings file is watched and read again on a change where the declaration turns its watch on
+(B14), and is read once, at the start, where it does not; the variables and the command line are
 read once, at the start (§12, the owner, 2026-11-12, B13 (b), "but its default disabled").
 *(assumed, §12: the watch holds both files, where the answer said "the settings file", as ASP.NET's
 host turns `reloadOnChange` on for both of its files; the runtime watches the files through the system's notification of a change,
@@ -234,7 +245,7 @@ No case: as B1's, and as P4's.
 A read of `settings` in a field's default or in a constraint of the settings type, as C# refuses a
 field initializer that reads `this` (CS0236), and one that the checker finds reachable from the
 function of B15 or from a source's `Load`, is a compile error (§12, the owner, 2026-11-12, detail 2
-and B18). *(assumed, §12: a read the checker cannot see, through a method of an interface or a
+and B18), whose id §14 leaves open. *(assumed, §12: a read the checker cannot see, through a method of an interface or a
 message to an actor, refuses the start at run time as B7 does)*
 
 No case: as B1's.
@@ -245,8 +256,9 @@ No case: as B1's.
 `Load` gives pairs of a setting's path and its text, each read as a variable's value is (B4), the
 spelling of the path standing open (§14), and the
 runtime calls `Watch` once after the first load, in an actor of its own, so that a source waits there
-on its source and calls the handle of B12; a source whose source never changes returns from `Watch`
-at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
+on its source and calls the handle of B12, whose `Changed()` runs `Load` in that actor (§12, the
+owner, 2026-11-12, comment 6820218118, "Changed() calls Load"); a source whose source never changes
+returns from `Watch` at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
 published the value, so that `Watch` may read `settings`, and `Watch` has a body that returns at once,
 which such a source keeps)*
 
