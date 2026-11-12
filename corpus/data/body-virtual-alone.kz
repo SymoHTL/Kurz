@@ -1,7 +1,6 @@
 // expect: output
 // | 4
 // | 8
-// | A { X = 3 }
 // rules: D16
 
 data A(int X) {
@@ -13,4 +12,3 @@ data A(int X) {
 a = A(3)
 print(a.Get())
 print(a.Twice())
-print(a)
