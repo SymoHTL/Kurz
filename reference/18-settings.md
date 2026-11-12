@@ -100,7 +100,7 @@ No case: as B1's.
 ### B5 (decided, §12) The command line
 
 An option names a setting by each name of its path in kebab case, `.` between the parts, its value
-the next argument or after `=`: `--access-key AK`, `--access-key=AK`, `--logging.orders warning`
+the next argument or after `=`, a `bool` field's only after `=` (below): `--access-key AK`, `--access-key=AK`, `--logging.orders warning`
 (§12, the owner, 2026-11-11, Q4 (b)). `args` keeps every argument (S13), a `secret` field's value given
 there among them, as a plain `string`, as ASP.NET keeps `args` whole, and an argument that names no
 setting is left to the program, as ASP.NET leaves it (§12, the owner, 2026-11-12, the reading said
