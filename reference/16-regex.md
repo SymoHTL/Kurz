@@ -62,6 +62,23 @@ which the bound does not count, as Rust's `size_limit` does not count the `PikeV
 §12: the states and the ranges of each construct, a size at the bound that builds, and the time and the
 memory of a search)*
 
+The lazy DFA runs before the Pike VM: its states are sets of the automaton's states, each with what
+the character before its position is to the assertions, and each transition is made on the first
+character of its class that needs it and read from a table after that, over classes of code points
+where Rust's are of bytes, the code points that every operation of the automaton and every assertion
+read alike being one class, made once with the pattern. `IsMatch` takes its answer from it, and `Match`, `Matches`, `Replace` and
+`Split` run the Pike VM only where it finds a match left, from the last position before that match's
+end at which its state held no thread of an earlier start, before which no match starts. Its cache
+is made for each call, beside
+the automaton and outside its bound, and counts a state as 4 bytes for each column of its row and
+each of its members and 32 bytes of its own; it is emptied when the next state does not fit, and the
+search goes to the Pike VM where it was emptied three times and the search read fewer than 10 bytes
+for each state since, as Rust's meta engine sets `minimum_cache_clear_count` and
+`minimum_bytes_per_state`, or where it cannot hold two states of every state of the automaton, as
+Rust's `minimum_cache_capacity` asks, so that a search's time stays in proportion to the pattern's
+size times the text's length. *(assumed, §12: the defaults of the questions put to the owner on
+2026-11-12, issue 176, comment 6813110851, Q1 to Q4, and the count of a state)*
+
 The backtracking engine reads its constructs as .NET's does: a lookbehind of any length; a
 backreference of a group that did not take part fails; under `(?i)` a backreference compares by the
 simple case folding, the flag in force at the backreference deciding, as .NET's does, so that `(?i)(a)\1`
