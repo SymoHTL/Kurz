@@ -149,8 +149,10 @@ public sealed partial class Emitter
     /// taken from it once the wait gives no <c>IoError</c>, then what the pipe still gives; a <c>File</c> that a <c>Close</c> marked gives
     /// none. A wait that gives an <c>IoError</c> gives every byte it gathered of a pipe back to that pipe's <c>File</c>, before the rest
     /// of the pipe (the owner, 2026-11-12, issue 174, (a)), those its <c>File</c> read ahead first, S19's assumed order
-    /// (<see cref="GiveBack"/>). Each pipe's reader is locked from the read of the bytes it read ahead until they are taken or given
-    /// back (<see cref="Ahead"/>). Each call is <c>not supported</c> in a build for Windows (S11), where no child exists.
+    /// (<see cref="GiveBack"/>). The runtime tries each pipe's reader lock at each wake of its poll and never waits on one, reading a
+    /// pipe only once it took its lock (the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll";
+    /// <see cref="TryReader"/>), and each lock it took is held until the bytes are taken or given back (<see cref="LetGo"/>). Each
+    /// call is <c>not supported</c> in a build for Windows (S11), where no child exists.
     /// </summary>
     private string EmitChildCall(CallExpression c, CallInfo info)
     {
@@ -181,111 +183,131 @@ public sealed partial class Emitter
             return fn.Value($"call {union} {SysFunction("ChildWait")}(ptr {state}, %kz.str {program})");
         }
 
-        var (outFd, outAhead, outCount, outTaken, outHandle) = Ahead(child, ChildStdout);
-        var (errFd, errAhead, errCount, errTaken, errHandle) = Ahead(child, ChildStdout + 8);
+        var (outFd, outHandle) = Pipe(child, ChildStdout);
+        var (errFd, errHandle) = Pipe(child, ChildStdout + 8);
         var outKept = fn.Alloca("ptr", "kept.out");
         var errKept = fn.Alloca("ptr", "kept.err");
         fn.Emit($"store ptr null, ptr {outKept}");
         fn.Emit($"store ptr null, ptr {errKept}");
-        var result = fn.Value($"call {union} {SysFunction("ChildWaitWithOutput")}(ptr {state}, %kz.str {program}, i32 {outFd}, ptr {outAhead}, i64 {outCount}, i32 {errFd}, ptr {errAhead}, i64 {errCount}, ptr {outKept}, ptr {errKept})");
+        var held = fn.Alloca("[2 x i32]", "held");
+        fn.Emit($"store [2 x i32] zeroinitializer, ptr {held}");
+        var result = fn.Value($"call {union} {SysFunction("ChildWaitWithOutput")}(ptr {state}, %kz.str {program}, i32 {outFd}, ptr {Reader(outHandle)}, i32 {errFd}, ptr {Reader(errHandle)}, ptr {TryReader()}, ptr {held}, ptr {outKept}, ptr {errKept})");
+        var outTook = Took(held, 0, outHandle);
+        var errTook = Took(held, 1, errHandle);
         var type = (UnionType)Sub(info.Result);
         var take = fn.Label("ahead.take");
         var given = fn.Label("ahead.given");
         var done = fn.Label("ahead.done");
         fn.CondBranch(IsCase(Tag(result, type), type, type.Cases.Single(IsIoError)), given, take);
         fn.Block(take);
-        Taken(outTaken);
-        Taken(errTaken);
+        Taken(outTook);
+        Taken(errTook);
         fn.Branch(done);
         fn.Block(given);
-        GiveBack(outHandle, outKept);
-        GiveBack(errHandle, errKept);
+        GiveBack(outTook, outKept);
+        GiveBack(errTook, errKept);
         fn.Branch(done);
         fn.Block(done);
-        LetGo(outHandle);
-        LetGo(errHandle);
+        LetGo(outTook);
+        LetGo(errTook);
         return result;
     }
 
     /// <summary>
-    /// S19: the reader's position moved past the bytes <see cref="Ahead"/> handed to a wait that read the pipes, once the wait gave no
-    /// <c>IoError</c>; a wait that gave one, a failed read's or <c>TimedOut</c>, gives them back with the rest it read instead
-    /// (<see cref="GiveBack"/>).
+    /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, and that handle, -1 and null
+    /// where it is null or a <c>Close</c> marked it (S5). The <c>ChildProcess</c> holds the <c>File</c> through the call, so that nothing
+    /// frees the reader the runtime tries the lock of (<see cref="TryReader"/>).
     /// </summary>
-    private void Taken(string taken)
-    {
-        var position = fn.Value($"load ptr, ptr {taken}");
-        var move = fn.Label("ahead.move");
-        var moved = fn.Label("ahead.moved");
-        fn.CondBranch(fn.Value($"icmp ne ptr {position}, null"), move, moved);
-        fn.Block(move);
-        var reader = fn.Value($"getelementptr i8, ptr {position}, i64 {ReaderCount - ReaderPosition}");
-        fn.Emit($"store i32 {fn.Value($"load i32, ptr {reader}")}, ptr {position}");
-        fn.Branch(moved);
-        fn.Block(moved);
-    }
-
-    /// <summary>
-    /// S19: the descriptor of the pipe whose handle is at <paramref name="offset"/> in the child's block, -1 where it is null or a
-    /// <c>Close</c> marked it (S5), the bytes its reader holds ahead of the program (S16), and the place of the reader's position,
-    /// null where it holds none, which <see cref="Taken"/> moves past them once the wait took them. It takes the reader's lock before
-    /// it reads them, which <see cref="LetGo"/> lets go of once they were taken or given back, so that a read through the <c>File</c>
-    /// on another thread waits for the call, as a fill holds the lock across its read (S16), and neither takes the bytes the call takes
-    /// nor fills and replaces the buffer the runtime copies them from.
-    /// </summary>
-    private (string Fd, string Ahead, string Count, string Taken, string Handle) Ahead(string child, int offset)
+    private (string Fd, string Handle) Pipe(string child, int offset)
     {
         var fd = fn.Alloca("i32", "pipe");
         var open = fn.Alloca("ptr", "pipe.handle");
-        fn.Emit($"store ptr null, ptr {open}");
-        var ahead = fn.Alloca("ptr", "ahead");
-        var count = fn.Alloca("i64", "ahead.count");
-        var taken = fn.Alloca("ptr", "ahead.position");
         fn.Emit($"store i32 -1, ptr {fd}");
-        fn.Emit($"store ptr null, ptr {ahead}");
-        fn.Emit($"store i64 0, ptr {count}");
-        fn.Emit($"store ptr null, ptr {taken}");
+        fn.Emit($"store ptr null, ptr {open}");
         var handle = fn.Value($"load ptr, ptr {HandleField(child, offset)}");
-        var held = fn.Label("pipe.held");
+        var present = fn.Label("pipe.present");
         var unmarked = fn.Label("pipe.open");
-        var buffered = fn.Label("pipe.buffered");
         var done = fn.Label("pipe.done");
-        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), held, done);
-        fn.Block(held);
+        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), present, done);
+        fn.Block(present);
         var word = fn.Value($"load atomic i32, ptr {HandleField(handle, InFlightAt)} monotonic, align 4");
         fn.CondBranch(fn.Value($"icmp eq i32 {fn.Value($"and i32 {word}, 1")}, 0"), unmarked, done);
         fn.Block(unmarked);
-        var reader = HandleField(handle, ReaderAt);
-        fn.Emit($"call void {LockReader()}(ptr {ReaderField(reader, ReaderLock)})");
         fn.Emit($"store i32 {HandleDescriptor(handle)}, ptr {fd}");
         fn.Emit($"store ptr {handle}, ptr {open}");
-        var buffer = fn.Value($"load ptr, ptr {ReaderField(reader, ReaderBuffer)}");
-        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, done);
-        fn.Block(buffered);
-        var at = fn.Value($"load i32, ptr {ReaderField(reader, ReaderPosition)}");
-        var end = fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}");
-        fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr {ahead}");
-        fn.Emit($"store i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}, ptr {count}");
-        // the runtime copies them under the reader's lock; the address of the position stays good until `Taken` writes it, since the
-        // `ChildProcess` holds the `File` through the call, so that nothing frees the reader, and the lock keeps another thread's read
-        // from moving the position or replacing the buffer
-        fn.Emit($"store ptr {ReaderField(reader, ReaderPosition)}, ptr {taken}");
         fn.Branch(done);
         fn.Block(done);
-        return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {ahead}"), fn.Value($"load i64, ptr {count}"), taken, open);
+        return (fn.Value($"load i32, ptr {fd}"), fn.Value($"load ptr, ptr {open}"));
+    }
+
+    /// <summary>S19: the reader's state of the handle <paramref name="handle"/>, null where it is null, which the runtime hands to <see cref="TryReader"/>.</summary>
+    private string Reader(string handle) =>
+        fn.Value($"select i1 {fn.Value($"icmp ne ptr {handle}, null")}, ptr {HandleField(handle, ReaderAt)}, ptr null");
+
+    /// <summary>S19: the handle <paramref name="handle"/> where the runtime took its reader's lock, which it marks at <paramref name="index"/> of <paramref name="held"/>, and null where it did not.</summary>
+    private string Took(string held, int index, string handle)
+    {
+        var mark = fn.Value($"load i32, ptr {fn.Value($"getelementptr [2 x i32], ptr {held}, i64 0, i64 {index}")}");
+        return fn.Value($"select i1 {fn.Value($"icmp ne i32 {mark}, 0")}, ptr {handle}, ptr null");
+    }
+
+    /// <summary>
+    /// S19: the helper the runtime calls at each wake of a <c>WaitWithOutput()</c>'s poll, through its address, to try the lock of the
+    /// reader at <c>%a0</c> once and never wait on it, since Kurz has no atomic form of its own: -1 where another holder holds it, else
+    /// the lock held, as <see cref="LockReader"/> takes a free one, and the count of the bytes the reader holds ahead of the program,
+    /// whose address it writes at <c>%a1</c>, read only once the lock is held, so that no other holder takes them or replaces the
+    /// buffer they sit in (S16; the owner, 2026-11-12, issue 174, comment 6821985043, "Try the lock inside the poll").
+    /// </summary>
+    private string TryReader() => Helper("try.reader", "i64", ["ptr", "ptr"], () =>
+    {
+        var tried = fn.Value($"cmpxchg ptr {ReaderField("%a0", ReaderLock)}, i32 0, i32 1 acquire monotonic");
+        var locked = fn.Label("locked");
+        var elsewhere = fn.Label("elsewhere");
+        var buffered = fn.Label("buffered");
+        var empty = fn.Label("empty");
+        fn.CondBranch(fn.Value($"extractvalue {{ i32, i1 }} {tried}, 1"), locked, elsewhere);
+        fn.Block(elsewhere);
+        fn.Return("i64 -1");
+        fn.Block(locked);
+        var buffer = fn.Value($"load ptr, ptr {ReaderField("%a0", ReaderBuffer)}");
+        fn.CondBranch(fn.Value($"icmp ne ptr {buffer}, null"), buffered, empty);
+        fn.Block(empty);
+        fn.Return("i64 0");
+        fn.Block(buffered);
+        var at = fn.Value($"load i32, ptr {ReaderField("%a0", ReaderPosition)}");
+        var end = fn.Value($"load i32, ptr {ReaderField("%a0", ReaderCount)}");
+        fn.Emit($"store ptr {fn.Value($"getelementptr i8, ptr {buffer}, i64 {fn.Value($"sext i32 {at} to i64")}")}, ptr %a1");
+        fn.Return($"i64 {fn.Value($"sext i32 {fn.Value($"sub i32 {end}, {at}")} to i64")}");
+    });
+
+    /// <summary>
+    /// S19: the reader's position of the handle <paramref name="handle"/>, whose lock the runtime took (<see cref="Took"/>), moved past
+    /// the bytes <see cref="TryReader"/> handed to a wait that read the pipes, once the wait gave no <c>IoError</c>; a wait that gave
+    /// one, a failed read's or <c>TimedOut</c>, gives them back with the rest it read instead (<see cref="GiveBack"/>). Null where the
+    /// runtime took no lock of the pipe.
+    /// </summary>
+    private void Taken(string handle)
+    {
+        var move = fn.Label("ahead.move");
+        var moved = fn.Label("ahead.moved");
+        fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), move, moved);
+        fn.Block(move);
+        var reader = HandleField(handle, ReaderAt);
+        fn.Emit($"store i32 {fn.Value($"load i32, ptr {ReaderField(reader, ReaderCount)}")}, ptr {ReaderField(reader, ReaderPosition)}");
+        fn.Branch(moved);
+        fn.Block(moved);
     }
 
     /// <summary>
     /// S19: the bytes a <c>WaitWithOutput()</c> that gave an <c>IoError</c> gathered of one pipe, in the list at <paramref name="kept"/>,
     /// given back to that <c>File</c>'s reader (<see cref="KeepRest"/>), so that a later read takes them before the rest of the pipe and
     /// sees the output whole (the owner, 2026-11-12, issue 174, (a), against the bytes dropped), those its <c>File</c> read ahead first,
-    /// S19's assumed order; under the reader's lock that <see cref="Ahead"/> took, which this takes no second time; the handle at
-    /// <paramref name="open"/> is the <c>File</c> the wait read, null where it read none, which the <c>ChildProcess</c> holds through the
-    /// call, as <see cref="Ahead"/> says. The list is let go of either way.
+    /// S19's assumed order; under the reader's lock that the runtime took, which this takes no second time; <paramref name="handle"/>
+    /// is the <c>File</c> whose lock the runtime took (<see cref="Took"/>), null where it took none and so gathered nothing of it. The
+    /// list is let go of either way.
     /// </summary>
-    private void GiveBack(string open, string kept)
+    private void GiveBack(string handle, string kept)
     {
-        var handle = fn.Value($"load ptr, ptr {open}");
         var list = fn.Value($"load ptr, ptr {kept}");
         var give = fn.Label("give.back");
         var given = fn.Label("give.done");
@@ -298,12 +320,11 @@ public sealed partial class Emitter
     }
 
     /// <summary>
-    /// S19: the reader's lock that <see cref="Ahead"/> took let go of, where it took one, once the wait's bytes were taken
-    /// (<see cref="Taken"/>) or given back (<see cref="GiveBack"/>).
+    /// S19: the reader's lock of the handle <paramref name="handle"/> that the runtime took (<see cref="Took"/>) let go of, null where
+    /// it took none, once the wait's bytes were taken (<see cref="Taken"/>) or given back (<see cref="GiveBack"/>).
     /// </summary>
-    private void LetGo(string open)
+    private void LetGo(string handle)
     {
-        var handle = fn.Value($"load ptr, ptr {open}");
         var held = fn.Label("ahead.held");
         var free = fn.Label("ahead.free");
         fn.CondBranch(fn.Value($"icmp ne ptr {handle}, null"), held, free);
