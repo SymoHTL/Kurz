@@ -4,6 +4,7 @@
 // | 2026a
 // | 
 // | $
+// | 2026
 // | bonono
 // rules: G5
 
@@ -13,4 +14,5 @@ print(date.Replace("2026-11", r"${month}.${year}"))
 print(date.Replace("2026-11", r"${1}a"))
 print(date.Replace("2026-11", "$1a"))
 print(date.Replace("2026-11", "$$"))
+print(date.Replace("2026-11", r"${+1}"))
 print(Regex.New("a").Replace("banana", "o"))

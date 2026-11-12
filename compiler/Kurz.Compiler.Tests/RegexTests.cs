@@ -21,19 +21,72 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     private const int Seed = 1101;
 
-    /// <summary>Patterns written by hand: each kind of error at its byte, constructs the linear engine does not take, and the bound.</summary>
-    private static readonly string[] Written =
+    /// <summary>
+    /// Patterns written by hand, each with the reading Rust's <c>regex-syntax</c> 0.8 gives it in the words of <c>RegexError</c>, but
+    /// where G2 or G4 states Kurz's own, which its comment names: each kind of error at its byte, constructs the linear engine does
+    /// not take, the levels of nesting, and the bound.
+    /// </summary>
+    private static readonly (string Pattern, string Reading)[] Written =
     [
-        "", "a", "a)", "(a", "((a)", "[a", "[]", "[]a]", "[^]a]", "a{", "a{1", "a{1,", "a{2,1}", "a{,2}", "{1}", "*a", "a**", "a|*",
-        "(?", "(?:", "(?i", "(?i)", "(?i-i)", "(?ii)", "(?-)", "(?z)", "(?R)", "(?u)", "(?U)a*", "(?x) a b # c", "(?s).", "(?m)^a$",
-        @"\", @"\q", @"\d\D\w\W\s\S", @"\x41", @"\x{1F600}", @"\x{110000}", @"\x4", @"\u0041", @"\p{L}", @"\P{L}", @"\pL", @"\k<a>",
-        @"\1", @"(a)\1", @"\<", @"\>", @"\b{start}", @"\A\z", @"\Z", @"\G", "(?=a)", "(?!a)", "(?<=a)", "(?<!a)", "(?>a)", "(?<n>a)",
-        "(?P<n>a)", "(?<n>a)(?<n>b)", "(?<1n>a)", "(?<>a)", "(?P=n)", "[[:alpha:]]", "[[:word:]]", "[[:foo:]]", "[a-]", "[-a]", "[z-a]",
-        "[a&&b]", "[a--b]", "[a~~b]", "[\\d-z]", "é(", "é{", "[é-a]", "a{1001}", "(?:a{1000}){1000}", @"(?:\w{1000}){1000}",
-        "a{655357}", "a{655358}", "(a){327677}", "x{4294967296}",
-        string.Concat(Enumerable.Repeat("(", 250)) + "a" + string.Concat(Enumerable.Repeat(")", 250)),
-        string.Concat(Enumerable.Repeat("(", 251)) + "a" + string.Concat(Enumerable.Repeat(")", 251)),
+        ("", "ok"), ("a", "ok"), ("a)", "syntax at 1"), ("(a", "syntax at 0"), ("((a)", "syntax at 0"), ("[a", "syntax at 0"),
+        ("[]", "syntax at 0"), ("[]a]", "ok"), ("[^]a]", "ok"), ("a{", "syntax at 1"), ("a{1", "syntax at 1"), ("a{1,", "syntax at 1"),
+        ("a{2,1}", "syntax at 1"), ("a{,2}", "syntax at 2"), ("{1}", "syntax at 0"), ("*a", "syntax at 0"), ("a**", "ok"),
+        ("a|*", "syntax at 2"), ("(?", "syntax at 0"), ("(?:", "syntax at 0"), ("(?i", "syntax at 3"), ("(?i)", "ok"),
+        ("(?i-i)", "syntax at 4"), ("(?ii)", "syntax at 3"), ("(?-)", "syntax at 2"), ("(?z)", "syntax at 2"),
+        ("(?R)", "unsupported at 2"), // G4: a flag Rust's syntax has that the build does not hold
+        ("(?u)", "unsupported at 2"),
+        ("(?U)a*", "ok"), ("(?x) a b # c", "ok"), ("(?s).", "ok"), ("(?m)^a$", "ok"), ("\\", "syntax at 0"), ("\\q", "syntax at 0"),
+        ("\\d\\D\\w\\W\\s\\S", "ok"), ("\\x41", "ok"), ("\\x{1F600}", "ok"), ("\\x{110000}", "syntax at 3"), ("\\x4", "syntax at 3"),
+        ("\\u0041", "ok"),
+        ("\\p{L}", "unsupported at 0"), // G4: a class of Unicode by its name, Rust's syntax the build does not hold
+        ("\\P{L}", "unsupported at 0"),
+        ("\\pL", "unsupported at 0"),
+        ("\\k<a>", "unsupported at 0"), // the backtracking engine's (G4), where Rust's syntax has no such escape
+        ("\\1", "unsupported at 0"), ("(a)\\1", "unsupported at 3"), ("\\<", "ok"), ("\\>", "ok"), ("\\b{start}", "ok"),
+        ("\\A\\z", "ok"), ("\\Z", "syntax at 0"), ("\\G", "syntax at 0"), ("(?=a)", "unsupported at 0"), ("(?!a)", "unsupported at 0"),
+        ("(?<=a)", "unsupported at 0"), ("(?<!a)", "unsupported at 0"),
+        ("(?>a)", "unsupported at 0"), // the backtracking engine's (G4), where Rust's syntax has no such group
+        ("(?<n>a)", "ok"), ("(?P<n>a)", "ok"), ("(?<n>a)(?<n>b)", "syntax at 10"), ("(?<1n>a)", "syntax at 3"),
+        ("(?<>a)", "syntax at 3"), ("(?P=n)", "syntax at 2"), ("[[:alpha:]]", "ok"), ("[[:word:]]", "ok"), ("[[:foo:]]", "ok"),
+        ("[a-]", "ok"), ("[-a]", "ok"), ("[z-a]", "syntax at 1"), ("[a&&b]", "ok"), ("[a--b]", "ok"), ("[a~~b]", "ok"),
+        ("[\\d-z]", "syntax at 1"), ("é(", "syntax at 2"), ("é{", "syntax at 2"), ("[é-a]", "syntax at 1"), ("a{1001}", "ok"),
+        ("(?:a{1000}){1000}", "too big at 0"), ("(?:\\w{1000}){1000}", "too big at 0"),
+        ("a{655357}", "ok"), // the bound's own line (G2), where Rust's automaton counts its states otherwise
+        ("a{655358}", "too big at 0"), ("(a){327677}", "too big at 0"), ("x{4294967296}", "syntax at 2"), ("a{ 2 }", "ok"),
+        ("a{2 ,3}", "ok"), ("a{2\u00a0}", "ok"), ("a{}", "syntax at 2"), ("a{x}", "syntax at 2"), ("a{,}", "syntax at 2"),
+        ("a{99999999999}", "syntax at 2"), ("a{4294967295}", "too big at 0"), ("(?:){4294967295}", "ok"), ("\\b{4294967295}", "ok"),
+        ("a{2}?", "ok"), ("(?x)a{2} ?", "ok"), ("a{2", "syntax at 1"), ("a{2,", "syntax at 1"), ("a{2x}", "syntax at 1"),
+        ("(?)", "syntax at 1"), ("( ?)", "ok"), ("(?x)( ?)", "syntax at 6"), ("(?i-)", "syntax at 3"), ("(?--i)", "syntax at 3"),
+        ("(?i:", "syntax at 0"), ("(?x)( ?:a)", "ok"), ("(?x)( a)", "ok"), ("(?<a", "syntax at 4"), ("(?<", "syntax at 3"),
+        ("(?P<", "syntax at 4"), ("(?<a-", "syntax at 4"), ("(?<a²>x)", "ok"), ("(?<\u0663x>x)", "syntax at 3"),
+        ("(?<a\u0301>x)", "syntax at 4"), ("(?<a.b[c]>x)", "ok"), ("(?<_1>x)", "ok"), ("\\x", "syntax at 2"), ("\\x{}", "syntax at 2"),
+        ("\\x{D800}", "syntax at 3"), ("\\x{ 41 }", "syntax at 3"), ("\\x{000000041}", "ok"), ("\\x{FFFFFFFFF}", "syntax at 3"),
+        ("(?x)\\x4 1", "ok"), ("\\é", "syntax at 0"), ("\\ ", "ok"), ("\\-", "ok"), ("\\b{end}", "ok"), ("\\b{start-half}", "ok"),
+        ("\\b{end-half}", "ok"), ("\\b{foo}", "syntax at 3"), ("\\b{", "syntax at 0"), ("\\b{start", "syntax at 2"),
+        ("\\B{start}", "syntax at 3"), ("\\b{2}", "ok"), ("(?x)\\b{ start }", "ok"), ("[\\<]", "syntax at 1"), ("[\\b]", "syntax at 1"),
+        ("[\\b{start}]", "syntax at 1"), ("[a-\\d]", "syntax at 3"), ("[\\d-\\w]", "syntax at 1"), ("[--a]", "ok"), ("[]-a]", "ok"),
+        ("[&&a]", "ok"), ("[a&&]", "ok"), ("[^-]", "ok"), ("[a-[]", "syntax at 1"), ("[[a]", "syntax at 0"), ("[a[]]", "syntax at 0"),
+        ("[a-]b]", "ok"), ("(?x)[a - z]", "ok"), ("(?x)[z - a]", "syntax at 5"), ("(?x)[\\d - z]", "syntax at 5"),
+        ("(?x)[a-#c\nz]", "ok"), ("(?x)[ ^a]", "ok"), ("[[:^digit:]]", "ok"), ("[:alpha:]", "ok"), ("((((a", "syntax at 3"),
+        ("a))", "syntax at 1"), ("(a|b", "syntax at 0"), ("a|b)", "syntax at 3"), ("(?i)a(", "syntax at 5"), ("[a&&[b", "syntax at 4"),
+        (")", "syntax at 0"),
+        ("\\pL)", "unsupported at 0"), // the first error of the pattern decides, as the parse reads it
+        ("a)\\pL", "syntax at 1"),
+        ("(?R)a)", "unsupported at 2"),
+        ("a)(?R)", "syntax at 1"),
+        // the levels of Rust's `NestLimiter`, at most 250, each counted after the whole pattern was read, at the start of the node past it
+        (Repeat("(", 250) + "a" + Repeat(")", 250), "ok"), (Repeat("(", 251) + "a" + Repeat(")", 251), "syntax at 250"),
+        ("a" + Repeat("(", 249) + "a" + Repeat(")", 249), "ok"), ("a" + Repeat("(", 250) + "a" + Repeat(")", 250), "syntax at 250"),
+        ("x" + Repeat("(x", 124) + "|y" + Repeat(")", 124), "ok"), ("x" + Repeat("(x", 125) + Repeat(")", 125) + "|y", "syntax at 249"),
+        ("a" + Repeat("*", 250), "ok"), ("a" + Repeat("*", 251), "syntax at 0"),
+        (Repeat("(?:", 250) + "a" + Repeat(")", 250), "ok"), (Repeat("(?:", 251) + "a" + Repeat(")", 251), "syntax at 750"),
+        (Repeat("[", 250) + "a" + Repeat("]", 250), "ok"), (Repeat("[", 251) + "a" + Repeat("]", 251), "syntax at 250"),
+        ("[" + Repeat("a&&", 249) + "b]", "ok"), ("[" + Repeat("a&&", 250) + "b]", "syntax at 1"),
+        // an error the parse finds after the levels is the pattern's error: no level is counted before the whole pattern was read
+        (Repeat("(", 251) + "a" + Repeat(")", 250), "syntax at 0"), (Repeat("(", 251) + "a" + Repeat(")", 251) + "\\", "syntax at 503"),
     ];
+
+    private static string Repeat(string s, int count) => string.Concat(Enumerable.Repeat(s, count));
 
     /// <summary>The characters of the syntax, one of which is put into a generated pattern.</summary>
     private const string Syntax = "()[]{}*+?\\|^$.-,:<>";
@@ -42,16 +95,22 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static readonly string[] Bound = ["a{655357}", "a{655358}"];
 
     /// <summary>
-    /// G3: the checker's copy of the parse and the count gives every pattern what the standard library's <c>Regex.New</c> gives it
-    /// when the program runs: the error's kind and byte, or a pattern that builds. The patterns are the written ones, generated ones,
-    /// which all build, and each generated one with a character of the syntax put in at a place, most of which do not.
+    /// G3: the checker's copy of the parse and the count, and the standard library's <c>Regex.New</c> when the program runs, give each
+    /// written pattern the reading written beside it, and every generated pattern the same reading as each other: the error's kind and
+    /// byte, or a pattern that builds. The generated patterns all build, and each of them with a character of the syntax put in at a
+    /// place mostly does not.
     /// </summary>
     [Fact]
     public void The_checkers_reading_of_a_pattern_is_what_regex_new_gives_when_the_program_runs()
     {
         var generator = new Generator(Seed);
         var random = new Random(Seed + 1);
-        var patterns = new List<string>(Written);
+        foreach (var (p, reading) in Written)
+        {
+            Assert.True(Read(p) == reading, $"`{p}`: written `{reading}`, the checker reads `{Read(p)}`");
+        }
+
+        var patterns = Written.Select(w => w.Pattern).ToList();
         for (var i = 0; i < 150; i++)
         {
             var p = generator.Pattern();
@@ -60,15 +119,15 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             patterns.Add(p[..at] + Syntax[random.Next(Syntax.Length)] + p[at..]);
         }
 
-        patterns.RemoveAll(p => p.Contains('"', StringComparison.Ordinal));
-        var expected = patterns.Select(p => RegexPattern.Check(p) is { } failed ? RegexPattern.Words(failed.Kind, failed.At) : "ok").ToList();
+        Assert.DoesNotContain(patterns, p => p.Contains('"', StringComparison.Ordinal));
+        var expected = Written.Select(w => w.Reading).Concat(patterns.Skip(Written.Length).Select(Read)).ToList();
         Assert.Contains(expected, e => e.StartsWith("syntax at ", StringComparison.Ordinal));
         Assert.Contains(expected, e => e.StartsWith("unsupported at ", StringComparison.Ordinal));
         Assert.Contains(expected, e => e.StartsWith("too big at ", StringComparison.Ordinal));
         Assert.True(expected.Count(e => e == "ok") > 150, "the generated patterns build");
 
         // the bound of the automaton (G2): the largest count of one character under it builds, the next is too big
-        Assert.Equal(["ok", "too big at 0"], Bound.Select(p => RegexPattern.Check(p) is { } f ? RegexPattern.Words(f.Kind, f.At) : "ok"));
+        Assert.Equal(["ok", "too big at 0"], Bound.Select(Read));
 
         var program = new StringBuilder("patterns = [\n");
         foreach (var p in patterns)
@@ -266,6 +325,65 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    /// <summary>
+    /// G4: the constructs .NET does not read as Rust does, each row with the matches Rust's <c>regex</c> 1.13 gives, written by hand as
+    /// it writes them, each match's start and end: the start and the end of a word, <c>\b{start}</c> and <c>\&lt;</c>, <c>\b{end}</c>
+    /// and <c>\&gt;</c>, and the halves <c>\b{start-half}</c> and <c>\b{end-half}</c>, of Unicode's word characters; a class's
+    /// <c>-</c> right after its <c>[</c> and its <c>]</c> first, each a character and no range; each side of <c>&amp;&amp;</c>,
+    /// <c>--</c> and <c>~~</c> folded under <c>(?i)</c> before the operation, as Rust's translator folds them; an ASCII class folded
+    /// under <c>(?i)</c> before it is negated, so that <c>[:^lower:]</c> takes no letter of either case; a range with white space
+    /// around its <c>-</c> under <c>(?x)</c>; a counted repetition with white space inside its braces; and a repetition of what matches
+    /// no character, taken at most once.
+    /// </summary>
+    [Fact]
+    public void The_constructs_net_reads_otherwise_match_as_rust_matches_them()
+    {
+        (string Pattern, string Text, string Matches)[] rows =
+        [
+            (@"\b{start}\w", "ab cd", "0-1 3-4"),
+            (@"\w\b{end}", "ab cd", "1-2 4-5"),
+            (@"\<\w+", "ab cd", "0-2 3-5"),
+            (@"\w+\>", "ab cd", "0-2 3-5"),
+            (@"\b{start-half}x", "x ax xx", "0-1 5-6"),
+            (@"x\b{end-half}", "x xa xx", "0-1 6-7"),
+            (@"\b{start-half}", "a b", "0-0 2-2"),
+            (@"\b{end-half}", "a b", "1-1 3-3"),
+            ("é\\b{end}", "é é1", "0-2"),
+            (@"(?x)\b{ end }a", "a", ""),
+            ("[--a]+", "-a--b", "0-4"),
+            ("[]-a]+", "]-a^b", "0-3"),
+            ("[-a-c]+", "-b-d", "0-3"),
+            ("(?i)[a&&A]", "aA", "0-1 1-2"),
+            ("(?i)[k--K]", "kK\u212a", ""),
+            ("(?i)[a~~A]+", "aAb", ""),
+            ("(?i)[^a&&A]", "aAb", "2-3"),
+            ("(?i)[[a]&&[A]]", "aA", "0-1 1-2"),
+            ("(?i)[[:^lower:]]", "A]&K&", "1-2 2-3 4-5"),
+            ("(?i)[^[:^lower:]]+", "aB1\u212a-", "0-2 3-6"),
+            ("(?x)[a - c]+", "a-b c d", "0-1 2-3 4-5"),
+            ("a{ 2 }", "aaa", "0-2"),
+            ("(?:){5}", "ab", "0-0 1-1 2-2"),
+            (@"\b{3}a", "a ba", "0-1"),
+        ];
+        var program = new StringBuilder();
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var (pattern, text, _) = rows[i];
+            program.Append($"mut line{i} = \"\"\nfor m in Regex.New(\"{Escaped(pattern)}\").Matches(\"{Escaped(text)}\") {{\n")
+                .Append($"    if line{i} != \"\" {{\n        line{i} = \"{{line{i}}} \"\n    }}\n\n")
+                .Append($"    line{i} = \"{{line{i}}}{{m.Index}}-{{m.Index + m.Length}}\"\n}}\n\nprint(\"<{{line{i}}}>\")\n");
+        }
+
+        foreach (var (runtime, suffix) in new[] { (toolchain.Runtime, ""), (ListTests.Fenced, "-fenced") })
+        {
+            var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], runtime, testBuild: true);
+            Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-rust" + suffix));
+            Assert.Equal((0, ""), (code, error));
+            Assert.Equal(rows.Select(r => $"<{r.Matches}>"), output);
+        }
+    }
+
     /// <summary>The line the program prints for a pattern and a text: .NET's matches walked as Rust's <c>find_iter</c>, then <c>IsMatch</c> and the first match's position.</summary>
     private static string Walked(Regex regex, int groups, string text)
     {
@@ -302,8 +420,12 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         return $"{line}{(first.Success ? "true" : "false")}@{(first.Success ? first.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-")}";
     }
 
-    /// <summary>A pattern or a text written into a Kurz string literal: its backslash, its quote and its opening braces escaped (L20).</summary>
-    private static string Escaped(string s) => s.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("{", "\\{", StringComparison.Ordinal);
+    /// <summary>The checker's reading of a pattern in the words of <c>RegexError</c>, or <c>ok</c>.</summary>
+    private static string Read(string pattern) => RegexPattern.Check(pattern) is { } f ? RegexPattern.Words(f.Kind, f.At) : "ok";
+
+    /// <summary>A pattern or a text written into a Kurz string literal: its backslash, its quote, its opening braces and its line ends escaped (L20).</summary>
+    private static string Escaped(string s) => s.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("{", "\\{", StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal);
 
     /// <summary>
     /// G1 to G4: a use of a name of regular expressions that the build refuses, where it stands: a pattern written as a literal that
@@ -321,13 +443,14 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Regex.New(r\"(?:a{1000}){1000}\").IsMatch(\"a\"))\n", "regex-invalid", 1)]
     [InlineData("print(Regex.New(r\"\\p{L}\").IsMatch(\"a\"))\n", "", 1)] // G4: Rust's syntax that the build does not hold
     [InlineData("print(Regex.New(r\"a\\P{L}\").IsMatch(\"a\"))\n", "", 1)]
-    [InlineData("print(Regex.New(r\"\\<a\").IsMatch(\"a\"))\n", "", 1)]
-    [InlineData("print(Regex.New(r\"\\b{start}a\").IsMatch(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.New(\"(?u)a\").IsMatch(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.New(\"(?R)a\").IsMatch(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.New(r\"a)\\p{L}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // the first error of the pattern decides
     [InlineData("print(Regex.New(\"a\", backtracking: true).IsMatch(\"a\"))\n", "", 1)] // G2: the backtracking engine
     [InlineData("b = false\nprint(Regex.New(\"a\", backtracking: b).IsMatch(\"a\"))\n", "", 2)] // not the literal `false`
+    [InlineData("print(Regex.New(\"a\", true).IsMatch(\"a\"))\n", "", 1)] // the flag by its place, the second argument
+    [InlineData("print(Regex.New(\"a\", false).IsMatch(\"a\"))\n", "", 0)]
+    [InlineData("print(Regex.New(\"a\", backtracking: false).IsMatch(\"a\"))\n", "", 0)]
     [InlineData("print(Regex.Make(\"a\"))\n", "unknown-name", 1)] // V10: `New` is the one function
     [InlineData("print(Regex.New<int>(\"a\"))\n", "syntax", 1)] // T17
     [InlineData("p = \"a\"\nRegex re = Regex.New(p)\nprint(re)\n", "unlisted-case", 2)] // G3: `Regex | RegexError`, whose error top-level code passes to no caller (O9)

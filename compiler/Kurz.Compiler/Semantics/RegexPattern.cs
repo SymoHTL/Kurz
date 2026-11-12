@@ -31,15 +31,60 @@ internal sealed class RegexPattern
     private readonly List<int> na = [];
     private readonly List<int> nb = [];
     private readonly List<int> nc = [];
+    private readonly List<bool> zero = [];
     private readonly List<int> kids = [];
     private int ranges;
     private readonly List<string> names = [];
     private bool usesWord;
     private int escCp;
     private List<int> escSet = [];
-    private int countMin;
-    private int countMax;
     private List<int> asciiSet = [];
+    private int capture;
+    private int decimalAt;
+
+    // the levels of Rust's `NestLimiter`: each node of Rust's syntax tree that counts one, by its start, its height and its children
+    private readonly List<int> nestStart = [];
+    private readonly List<int> nestHeight = [];
+    private readonly List<int> nestFirst = [];
+    private readonly List<int> nestCount = [];
+    private readonly List<int> nestKids = [];
+    private int lastNest = -1;
+
+    // the items of the open sequences, the innermost last, as Rust's `Concat`s on its stack: the node of each (-1 for flags), its
+    // level and its start; the branches of the open alternations; and the open groups, each with what its opening put aside
+    private readonly List<int> itemNode = [];
+    private readonly List<int> itemNest = [];
+    private readonly List<int> itemStart = [];
+    private readonly List<int> branchNode = [];
+    private readonly List<int> branchNest = [];
+    private readonly List<int> groupOpen = [];
+    private readonly List<int> groupCapture = [];
+    private readonly List<int> groupFlags = [];
+    private readonly List<int> groupItems = [];
+    private readonly List<int> groupConcat = [];
+    private readonly List<int> groupBranches = [];
+    private readonly List<int> groupAlt = [];
+    private int items0;
+    private int concatAt;
+    private int branches0;
+    private int altAt = -1;
+
+    // the open brackets of a class, the innermost last, as Rust's `ClassState`s: where each opened, whether it is negated, its union
+    // of items so far with their count, the start of the first and their levels, and the operation waiting for its right side
+    private readonly List<int> classOpen = [];
+    private readonly List<bool> classNegated = [];
+    private readonly List<List<int>> classUnion = [];
+    private readonly List<int> classCount = [];
+    private readonly List<int> classFirst = [];
+    private readonly List<int> classItems = [];
+    private readonly List<int> unionNest = [];
+    private readonly List<int> classOp = [];
+    private readonly List<List<int>> classLhs = [];
+    private readonly List<int> classLhsNest = [];
+    private readonly List<int> classLhsStart = [];
+    private List<int> setValue = [];
+    private int setNest;
+    private int setStart;
 
     private RegexPattern(string pattern)
     {
@@ -70,15 +115,9 @@ internal sealed class RegexPattern
     private void Build()
     {
         names.Add("");
-        var root = Alt(0);
+        var root = Parse();
         if (failKind >= 0)
         {
-            return;
-        }
-
-        if (at < n)
-        {
-            Fail(0, at);
             return;
         }
 
@@ -117,12 +156,26 @@ internal sealed class RegexPattern
         Fail(1, position);
     }
 
+    /// <summary>
+    /// A node, with whether the most it matches is no character, as Rust's <c>maximum_len</c> of <c>Some(0)</c>: the empty node and an
+    /// assertion; a group of such a node; a sequence or an alternation of such nodes only; and a repetition of such a node or of at
+    /// most 0.
+    /// </summary>
     private int Node(int k, int a, int b, int c)
     {
+        var none = k switch
+        {
+            0 or 3 => true,
+            4 => zero[b],
+            5 or 6 => Enumerable.Range(a, b).All(i => zero[kids[i]]),
+            7 or 8 => c == 0 || zero[a],
+            _ => false,
+        };
         kind.Add(k);
         na.Add(a);
         nb.Add(b);
         nc.Add(c);
+        zero.Add(none);
         return kind.Count - 1;
     }
 
@@ -162,6 +215,10 @@ internal sealed class RegexPattern
         _ => CaseTables.RegexFold,
     }];
 
+    /// <summary>Rust's <c>char::is_whitespace</c>: the property White_Space.</summary>
+    private static bool White(int cp) => cp == 32 || (cp >= 9 && cp <= 13) || (cp >= 128 && In(CaseTables.RegexSpace, cp));
+
+    /// <summary>Rust's <c>bump_space</c>: under <c>(?x)</c>, the white space and the comments from a <c>#</c> to the line's end.</summary>
     private void Skip()
     {
         if ((flags & 8) == 0)
@@ -181,8 +238,7 @@ internal sealed class RegexPattern
                 continue;
             }
 
-            var cp = Decode(p, at);
-            if (cp != 32 && (cp < 9 || cp > 13) && (cp < 128 || !In(CaseTables.RegexSpace, cp)))
+            if (!White(Decode(p, at)))
             {
                 return;
             }
@@ -191,159 +247,523 @@ internal sealed class RegexPattern
         }
     }
 
-    private int Alt(int depth)
+    private bool Starts(string s)
     {
-        var items = new List<int>();
-        while (true)
-        {
-            var item = Concat(depth);
-            if (failKind >= 0)
-            {
-                return -1;
-            }
-
-            items.Add(item);
-            if (at < n && p[at] == 124)
-            {
-                at++;
-                continue;
-            }
-
-            break;
-        }
-
-        return items.Count == 1 ? items[0] : Node(6, Kids(items), items.Count, 0);
-    }
-
-    private int Concat(int depth)
-    {
-        var items = new List<int>();
-        while (true)
-        {
-            Skip();
-            if (at >= n || p[at] == 124 || p[at] == 41)
-            {
-                break;
-            }
-
-            var atom = Atom(depth);
-            if (failKind >= 0)
-            {
-                return -1;
-            }
-
-            if (atom == -2)
-            {
-                continue;
-            }
-
-            var node = atom;
-            var stacked = 0;
-            while (true)
-            {
-                Skip();
-                if (at >= n)
-                {
-                    break;
-                }
-
-                var op = at;
-                int d = p[at];
-                var min = 0;
-                var max = -1;
-                if (d == 42)
-                {
-                    at++;
-                }
-                else if (d == 43)
-                {
-                    min = 1;
-                    at++;
-                }
-                else if (d == 63)
-                {
-                    max = 1;
-                    at++;
-                }
-                else if (d == 123)
-                {
-                    if (!Counted())
-                    {
-                        return -1;
-                    }
-
-                    min = countMin;
-                    max = countMax;
-                }
-                else
-                {
-                    break;
-                }
-
-                var greedy = true;
-                if (at < n && p[at] == 63)
-                {
-                    greedy = false;
-                    at++;
-                }
-
-                if ((flags & 16) != 0)
-                {
-                    greedy = !greedy;
-                }
-
-                stacked++;
-                if (depth + stacked > 250)
-                {
-                    Fail(0, op);
-                    return -1;
-                }
-
-                node = Node(greedy ? 7 : 8, node, min, max);
-            }
-
-            items.Add(node);
-        }
-
-        return items.Count switch
-        {
-            0 => Node(0, 0, 0, 0),
-            1 => items[0],
-            _ => Node(5, Kids(items), items.Count, 0),
-        };
-    }
-
-    private bool Counted()
-    {
-        var open = at;
-        at++;
-        Skip();
-        var lo = Decimal(open);
-        if (lo < 0)
+        if (at + s.Length > n)
         {
             return false;
         }
 
-        var hi = lo;
-        Skip();
-        if (at < n && p[at] == 44)
+        for (var i = 0; i < s.Length; i++)
         {
-            at++;
-            Skip();
-            if (at < n && p[at] == 125)
+            if (p[at + i] != s[i])
             {
-                hi = -1;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_with_comments</c>: one pass over the pattern with a stack of the open groups and alternations instead of the
+    /// call stack, so that no depth of nesting runs out of it; then the end of the open groups (<c>pop_group_end</c>) and the count of
+    /// the levels (<c>NestLimiter</c>), each only once the whole pattern was read.
+    /// </summary>
+    private int Parse()
+    {
+        while (true)
+        {
+            Skip();
+            if (at >= n)
+            {
+                break;
+            }
+
+            int c = p[at];
+            var start = at;
+            if (c == 40)
+            {
+                if (!Open())
+                {
+                    return -1;
+                }
+            }
+            else if (c == 41)
+            {
+                if (!Close())
+                {
+                    return -1;
+                }
+            }
+            else if (c == 124)
+            {
+                Alternate();
+                at++;
+                concatAt = at;
+            }
+            else if (c == 91)
+            {
+                var set = Class();
+                if (failKind >= 0)
+                {
+                    return -1;
+                }
+
+                Push(ClassNode(set), setNest, start);
+            }
+            else if (c is 42 or 43 or 63)
+            {
+                if (!Repeat())
+                {
+                    return -1;
+                }
+            }
+            else if (c == 123)
+            {
+                if (!Counted())
+                {
+                    return -1;
+                }
             }
             else
             {
-                hi = Decimal(open);
-                if (hi < 0)
+                var node = Primitive();
+                if (failKind >= 0)
                 {
-                    return false;
+                    return -1;
                 }
 
-                Skip();
+                Push(node, -1, start);
             }
+        }
+
+        var root = Level();
+        if (groupOpen.Count > 0)
+        {
+            Fail(0, groupOpen[^1]);
+            return -1;
+        }
+
+        var deep = Deep(lastNest);
+        if (deep >= 0)
+        {
+            Fail(0, deep);
+            return -1;
+        }
+
+        return root;
+    }
+
+    private void Push(int node, int nest, int start)
+    {
+        itemNode.Add(node);
+        itemNest.Add(nest);
+        itemStart.Add(start);
+    }
+
+    /// <summary>The sequence being read, as Rust's <c>Concat::into_ast</c>, its level in <see cref="lastNest"/>.</summary>
+    private int Sequence()
+    {
+        var nodes = new List<int>();
+        var nests = new List<int>();
+        for (var i = items0; i < itemNode.Count; i++)
+        {
+            if (itemNode[i] >= 0)
+            {
+                nodes.Add(itemNode[i]);
+            }
+
+            nests.Add(itemNest[i]);
+        }
+
+        var count = itemNode.Count - items0;
+        itemNode.RemoveRange(items0, count);
+        itemNest.RemoveRange(items0, count);
+        itemStart.RemoveRange(items0, count);
+        lastNest = count switch
+        {
+            0 => -1,
+            1 => nests[0],
+            _ => NestOf(concatAt, nests),
+        };
+        return nodes.Count switch
+        {
+            0 => Node(0, 0, 0, 0),
+            1 => nodes[0],
+            _ => Node(5, Kids(nodes), nodes.Count, 0),
+        };
+    }
+
+    /// <summary>A <c>|</c>: the sequence before it is a branch of the alternation, which starts where its first branch does.</summary>
+    private void Alternate()
+    {
+        var node = Sequence();
+        if (altAt < 0)
+        {
+            altAt = concatAt;
+        }
+
+        branchNode.Add(node);
+        branchNest.Add(lastNest);
+    }
+
+    /// <summary>The sequence being read, or the alternation of it and the branches before it.</summary>
+    private int Level()
+    {
+        var node = Sequence();
+        if (altAt < 0)
+        {
+            return node;
+        }
+
+        var nodes = branchNode.GetRange(branches0, branchNode.Count - branches0);
+        var nests = branchNest.GetRange(branches0, branchNest.Count - branches0);
+        nodes.Add(node);
+        nests.Add(lastNest);
+        branchNode.RemoveRange(branches0, branchNode.Count - branches0);
+        branchNest.RemoveRange(branches0, branchNest.Count - branches0);
+        lastNest = NestOf(altAt, nests);
+        altAt = -1;
+        return Node(6, Kids(nodes), nodes.Count, 0);
+    }
+
+    /// <summary>Rust's <c>push_group</c>: a group opens a sequence of its own, and flags alone are an item of the one being read.</summary>
+    private bool Open()
+    {
+        var open = at;
+        var saved = flags;
+        var r = Group();
+        if (r < 0)
+        {
+            return false;
+        }
+
+        if (r == 0)
+        {
+            Push(-1, -1, open);
+            return true;
+        }
+
+        groupOpen.Add(open);
+        groupCapture.Add(capture);
+        groupFlags.Add(saved);
+        groupItems.Add(items0);
+        groupConcat.Add(concatAt);
+        groupBranches.Add(branches0);
+        groupAlt.Add(altAt);
+        items0 = itemNode.Count;
+        concatAt = at;
+        branches0 = branchNode.Count;
+        altAt = -1;
+        return true;
+    }
+
+    /// <summary>Rust's <c>pop_group</c>: a <c>)</c> no group opened is <c>Syntax</c> at it.</summary>
+    private bool Close()
+    {
+        if (groupOpen.Count == 0)
+        {
+            Fail(0, at);
+            return false;
+        }
+
+        var child = Level();
+        var childNest = lastNest;
+        at++;
+        var g = groupOpen.Count - 1;
+        var open = groupOpen[g];
+        var index = groupCapture[g];
+        flags = groupFlags[g];
+        items0 = groupItems[g];
+        concatAt = groupConcat[g];
+        branches0 = groupBranches[g];
+        altAt = groupAlt[g];
+        groupOpen.RemoveAt(g);
+        groupCapture.RemoveAt(g);
+        groupFlags.RemoveAt(g);
+        groupItems.RemoveAt(g);
+        groupConcat.RemoveAt(g);
+        groupBranches.RemoveAt(g);
+        groupAlt.RemoveAt(g);
+        Push(index < 0 ? child : Node(4, index, child, 0), NestOf(open, [childNest]), open);
+        return true;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_group</c>: a look-around is <c>Unsupported</c> at the <c>(</c>, as Kurz reads an atomic group <c>(?&gt;</c>
+    /// (G4); 1 for a group, its capture in <see cref="capture"/> (-1 for none), 0 for flags alone and -1 for an error.
+    /// </summary>
+    private int Group()
+    {
+        var open = at;
+        at++;
+        Skip();
+        if (Starts("?=") || Starts("?!") || Starts("?<=") || Starts("?<!") || Starts("?>"))
+        {
+            Fail(1, open);
+            return -1;
+        }
+
+        var inner = at;
+        if (Starts("?P<") || Starts("?<"))
+        {
+            at += p[at + 1] == 80 ? 3 : 2;
+            var name = Name();
+            if (failKind >= 0)
+            {
+                return -1;
+            }
+
+            capture = names.Count;
+            names.Add(name);
+            return 1;
+        }
+
+        if (at < n && p[at] == 63)
+        {
+            at++;
+            if (at >= n)
+            {
+                Fail(0, open);
+                return -1;
+            }
+
+            return Flags(inner);
+        }
+
+        capture = names.Count;
+        names.Add("");
+        return 1;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_capture_name</c>: the name's first character is <c>_</c> or alphabetic, and a later one also <c>.</c>,
+    /// <c>[</c>, <c>]</c> or numeric (<c>is_capture_char</c>); an empty name and a name given twice are <c>Syntax</c> at its start.
+    /// </summary>
+    private string Name()
+    {
+        if (at >= n)
+        {
+            Fail(0, at);
+            return "";
+        }
+
+        var start = at;
+        while (p[at] != 62)
+        {
+            var cp = Decode(p, at);
+            var named = cp == 95 || In(CaseTables.RegexAlpha, cp)
+                || (at > start && (cp is 46 or 91 or 93 || In(CaseTables.RegexNumber, cp)));
+            if (!named)
+            {
+                Fail(0, at);
+                return "";
+            }
+
+            at += Length(p[at]);
+            if (at >= n)
+            {
+                Fail(0, at);
+                return "";
+            }
+        }
+
+        var name = Encoding.UTF8.GetString(p, start, at - start);
+        at++;
+        if (name.Length == 0 || names.Contains(name))
+        {
+            Fail(0, start);
+            return "";
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_flags</c>: the flags up to <c>:</c> or <c>)</c>; a second <c>-</c> and a flag given twice are <c>Syntax</c> at
+    /// it, the end of the pattern at the end, a <c>-</c> with no flag after it at the <c>-</c>, and <c>(?)</c> at its <c>?</c>.
+    /// </summary>
+    private int Flags(int inner)
+    {
+        var negation = -1;
+        var dangling = -1;
+        var seen = 0;
+        while (p[at] != 58 && p[at] != 41)
+        {
+            int c = p[at];
+            if (c == 45)
+            {
+                if (negation >= 0)
+                {
+                    Fail(0, at);
+                    return -1;
+                }
+
+                negation = at;
+                dangling = at;
+            }
+            else
+            {
+                dangling = -1;
+                if (c is 82 or 117)
+                {
+                    Unbuilt(at, c == 82 ? "the flag `R`" : "the flag `u`");
+                    return -1;
+                }
+
+                var bit = c switch
+                {
+                    105 => 1,
+                    109 => 2,
+                    115 => 4,
+                    120 => 8,
+                    85 => 16,
+                    _ => 0,
+                };
+                if (bit == 0 || (seen & bit) != 0)
+                {
+                    Fail(0, at);
+                    return -1;
+                }
+
+                seen |= bit;
+                flags = negation >= 0 ? flags & (31 - bit) : flags | bit;
+            }
+
+            at++;
+            if (at >= n)
+            {
+                Fail(0, at);
+                return -1;
+            }
+        }
+
+        if (dangling >= 0)
+        {
+            Fail(0, dangling);
+            return -1;
+        }
+
+        var alone = p[at] == 41;
+        at++;
+        if (alone && seen == 0 && negation < 0)
+        {
+            Fail(0, inner);
+            return -1;
+        }
+
+        capture = -1;
+        return alone ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_uncounted_repetition</c>: <c>*</c>, <c>+</c> or <c>?</c> of the item before it, lazy with a <c>?</c> right after
+    /// it; with no item before it, or flags, <c>Syntax</c> at it.
+    /// </summary>
+    private bool Repeat()
+    {
+        var last = itemNode.Count - 1;
+        if (last < items0 || itemNode[last] < 0)
+        {
+            Fail(0, at);
+            return false;
+        }
+
+        int d = p[at];
+        at++;
+        var lazy = at < n && p[at] == 63;
+        if (lazy)
+        {
+            at++;
+        }
+
+        Repeated(d == 43 ? 1 : 0, d == 63 ? 1 : -1, lazy);
+        return true;
+    }
+
+    /// <summary>
+    /// The last item repeated, the other way round under <c>(?U)</c>; a node that matches no character is repeated at most once, as
+    /// Rust's <c>Hir::repetition</c> does, so that <c>(?:){4294967295}</c> builds.
+    /// </summary>
+    private void Repeated(long min, long max, bool lazy)
+    {
+        var last = itemNode.Count - 1;
+        var child = itemNode[last];
+        if (zero[child])
+        {
+            min = Math.Min(min, 1);
+            max = max < 0 ? 1 : Math.Min(max, 1);
+        }
+
+        var greedy = lazy == ((flags & 16) != 0);
+        itemNode[last] = Node(greedy ? 7 : 8, child, (int)Math.Min(min, int.MaxValue), (int)Math.Min(max, int.MaxValue));
+        itemNest[last] = NestOf(itemStart[last], [itemNest[last]]);
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_counted_repetition</c>: <c>{n}</c>, <c>{n,}</c> or <c>{n,m}</c>, each count up to 4294967295; the end of the
+    /// pattern, and a brace not closed, are <c>Syntax</c> at the brace, a missing or too large count at its digits, and a most below the
+    /// least at the brace.
+    /// </summary>
+    private bool Counted()
+    {
+        var open = at;
+        var last = itemNode.Count - 1;
+        if (last < items0 || itemNode[last] < 0)
+        {
+            Fail(0, at);
+            return false;
+        }
+
+        at++;
+        Skip();
+        if (at >= n)
+        {
+            Fail(0, open);
+            return false;
+        }
+
+        var lo = Decimal();
+        var loAt = decimalAt;
+        if (at >= n)
+        {
+            Fail(0, open);
+            return false;
+        }
+
+        long hi = lo;
+        if (p[at] == 44)
+        {
+            at++;
+            Skip();
+            if (at >= n)
+            {
+                Fail(0, open);
+                return false;
+            }
+
+            if (lo < 0)
+            {
+                Fail(0, loAt);
+                return false;
+            }
+
+            hi = -1;
+            if (p[at] != 125)
+            {
+                hi = Decimal();
+                if (hi < 0)
+                {
+                    Fail(0, decimalAt);
+                    return false;
+                }
+            }
+        }
+        else if (lo < 0)
+        {
+            Fail(0, loAt);
+            return false;
         }
 
         if (at >= n || p[at] != 125)
@@ -353,56 +773,64 @@ internal sealed class RegexPattern
         }
 
         at++;
-        if (hi >= 0 && hi < lo)
+        Skip();
+        var lazy = at < n && p[at] == 63;
+        if (lazy)
+        {
+            at++;
+        }
+
+        if (hi >= 0 && lo > hi)
         {
             Fail(0, open);
             return false;
         }
 
-        countMin = lo;
-        countMax = hi;
+        Repeated(lo, hi, lazy);
         return true;
     }
 
-    private int Decimal(int open)
+    /// <summary>
+    /// Rust's <c>parse_decimal</c>: white space before and after the digits whether or not <c>(?x)</c> holds, the digits' start in
+    /// <see cref="decimalAt"/>; -1 for no digit and -2 for a count above 4294967295, Rust's <c>u32</c>.
+    /// </summary>
+    private long Decimal()
     {
-        var start = at;
+        while (at < n && White(Decode(p, at)))
+        {
+            at += Length(p[at]);
+        }
+
+        decimalAt = at;
         long value = 0;
+        var digits = false;
+        var big = false;
         while (at < n && p[at] >= 48 && p[at] <= 57)
         {
             value = value * 10 + (p[at] - 48);
-            if (value > int.MaxValue)
+            if (value > 4294967295)
             {
-                Fail(0, open);
-                return -1;
+                big = true;
+                value = 4294967295;
             }
 
+            digits = true;
             at++;
+            Skip();
         }
 
-        if (at == start)
+        while (at < n && White(Decode(p, at)))
         {
-            Fail(0, open);
-            return -1;
+            at += Length(p[at]);
+            Skip();
         }
 
-        return (int)value;
+        return !digits ? -1 : big ? -2 : value;
     }
 
-    private int Atom(int depth)
+    private int Primitive()
     {
         int c = p[at];
-        if (c == 40)
-        {
-            return Group(depth);
-        }
-
-        if (c == 91)
-        {
-            var set = Bracket(depth);
-            return failKind >= 0 ? -1 : ClassNode(set);
-        }
-
         if (c == 46)
         {
             at++;
@@ -423,7 +851,7 @@ internal sealed class RegexPattern
 
         if (c == 92)
         {
-            return Escape(false) switch
+            return Escape() switch
             {
                 0 => -1,
                 1 => Literal(escCp),
@@ -432,228 +860,18 @@ internal sealed class RegexPattern
             };
         }
 
-        if (c is 42 or 43 or 63 or 123)
-        {
-            Fail(0, at);
-            return -1;
-        }
-
         var cp = Decode(p, at);
         at += Length(p[at]);
         return Literal(cp);
     }
 
-    private int Group(int depth)
-    {
-        var open = at;
-        if (depth >= 250)
-        {
-            Fail(0, open);
-            return -1;
-        }
-
-        at++;
-        var saved = flags;
-        var capture = -1;
-        if (at < n && p[at] == 63)
-        {
-            at++;
-            if (at >= n)
-            {
-                Fail(0, open);
-                return -1;
-            }
-
-            int c = p[at];
-            if (c == 61 || c == 33 || c == 62 || (c == 60 && at + 1 < n && (p[at + 1] == 61 || p[at + 1] == 33)))
-            {
-                Fail(1, open);
-                return -1;
-            }
-
-            if (c == 60 || (c == 80 && at + 1 < n && p[at + 1] == 60))
-            {
-                if (c == 80)
-                {
-                    at++;
-                }
-
-                at++;
-                var name = Name(open);
-                if (failKind >= 0)
-                {
-                    return -1;
-                }
-
-                capture = names.Count;
-                names.Add(name);
-            }
-            else
-            {
-                var r = Flags(open);
-                if (r < 0)
-                {
-                    return -1;
-                }
-
-                if (r == 0)
-                {
-                    return -2;
-                }
-            }
-        }
-        else
-        {
-            capture = names.Count;
-            names.Add("");
-        }
-
-        var child = Alt(depth + 1);
-        if (failKind >= 0)
-        {
-            return -1;
-        }
-
-        if (at >= n || p[at] != 41)
-        {
-            Fail(0, open);
-            return -1;
-        }
-
-        at++;
-        flags = saved;
-        return capture < 0 ? child : Node(4, capture, child, 0);
-    }
-
-    private string Name(int open)
-    {
-        var start = at;
-        while (at < n && p[at] != 62)
-        {
-            at++;
-        }
-
-        if (at >= n)
-        {
-            Fail(0, open);
-            return "";
-        }
-
-        if (at == start)
-        {
-            Fail(0, start);
-            return "";
-        }
-
-        var k = start;
-        while (k < at)
-        {
-            var cp = Decode(p, k);
-            var letter = cp == 95 || (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) || (cp >= 128 && In(CaseTables.RegexWord, cp));
-            var later = k > start && ((cp >= 48 && cp <= 57) || cp == 46 || cp == 91 || cp == 93);
-            if (!letter && !later)
-            {
-                Fail(0, k);
-                return "";
-            }
-
-            k += Length(p[k]);
-        }
-
-        var name = Encoding.UTF8.GetString(p, start, at - start);
-        if (names.Contains(name))
-        {
-            Fail(0, start);
-            return "";
-        }
-
-        at++;
-        return name;
-    }
-
-    private int Flags(int open)
-    {
-        var negate = false;
-        var seen = 0;
-        var dash = false;
-        var any = false;
-        while (true)
-        {
-            if (at >= n)
-            {
-                Fail(0, open);
-                return -1;
-            }
-
-            int c = p[at];
-            if (c == 41 || c == 58)
-            {
-                if (dash)
-                {
-                    Fail(0, at - 1);
-                    return -1;
-                }
-
-                if (c == 41 && !any)
-                {
-                    Fail(0, open);
-                    return -1;
-                }
-
-                at++;
-                return c == 41 ? 0 : 1;
-            }
-
-            if (c == 45)
-            {
-                if (negate)
-                {
-                    Fail(0, at);
-                    return -1;
-                }
-
-                negate = true;
-                dash = true;
-                at++;
-                continue;
-            }
-
-            var bit = c switch
-            {
-                105 => 1,
-                109 => 2,
-                115 => 4,
-                120 => 8,
-                85 => 16,
-                _ => 0,
-            };
-            if (c is 82 or 117)
-            {
-                Unbuilt(at, c == 82 ? "the flag `R`" : "the flag `u`");
-                return -1;
-            }
-
-            if (bit == 0)
-            {
-                Fail(0, at);
-                return -1;
-            }
-
-            if ((seen & bit) != 0)
-            {
-                Fail(0, at);
-                return -1;
-            }
-
-            seen |= bit;
-            flags = negate ? flags & (31 - bit) : flags | bit;
-            dash = false;
-            any = true;
-            at++;
-        }
-    }
-
-    private int Escape(bool inClass)
+    /// <summary>
+    /// Rust's <c>parse_escape</c>: 1 for a character in <see cref="escCp"/>, 2 for a class in <see cref="escSet"/>, 3 for an assertion
+    /// in <see cref="escCp"/> (0 <c>\A</c>, 1 <c>\z</c>, 4 <c>\b</c>, 5 <c>\B</c>, 6 <c>\b{start}</c> and <c>\&lt;</c>, 7
+    /// <c>\b{end}</c> and <c>\&gt;</c>, 8 <c>\b{start-half}</c>, 9 <c>\b{end-half}</c>) and 0 for an error; a backreference is
+    /// <c>Unsupported</c> at the <c>\</c>, the backtracking engine's (G4), and so is <c>\k</c>.
+    /// </summary>
+    private int Escape()
     {
         var start = at;
         at++;
@@ -664,117 +882,15 @@ internal sealed class RegexPattern
         }
 
         int c = p[at];
-        if (c is 100 or 68 or 119 or 87 or 115 or 83)
+        if ((c >= 48 && c <= 57) || c == 107)
         {
-            at++;
-            var which = c is 119 or 87 ? 1 : c is 115 or 83 ? 2 : 0;
-            escSet = c < 97 ? Negate(Table(which)) : Table(which);
-            return 2;
-        }
-
-        if (c is 98 or 66 or 65 or 122)
-        {
-            if (inClass)
-            {
-                Fail(0, start);
-                return 0;
-            }
-
-            if (c == 98 && at + 1 < n && p[at + 1] == 123)
-            {
-                Unbuilt(start, "a word boundary of one side, `\\b{start}` and its kind");
-                return 0;
-            }
-
-            at++;
-            if (c == 65)
-            {
-                escCp = 0;
-            }
-            else if (c == 122)
-            {
-                escCp = 1;
-            }
-            else
-            {
-                usesWord = true;
-                escCp = c == 98 ? 4 : 5;
-            }
-
-            return 3;
-        }
-
-        var simple = c switch
-        {
-            110 => 10,
-            116 => 9,
-            114 => 13,
-            102 => 12,
-            118 => 11,
-            97 => 7,
-            _ => -1,
-        };
-        if (simple >= 0)
-        {
-            at++;
-            escCp = simple;
-            return 1;
+            Fail(1, start);
+            return 0;
         }
 
         if (c is 120 or 117 or 85)
         {
-            at++;
-            var digits = c == 117 ? 4 : c == 85 ? 8 : 2;
-            long value = 0;
-            if (at < n && p[at] == 123)
-            {
-                at++;
-                var count = 0;
-                while (at < n && p[at] != 125)
-                {
-                    var h = Hex(p[at]);
-                    if (h < 0 || count >= 8)
-                    {
-                        Fail(0, start);
-                        return 0;
-                    }
-
-                    value = value * 16 + h;
-                    count++;
-                    at++;
-                }
-
-                if (at >= n || count == 0)
-                {
-                    Fail(0, start);
-                    return 0;
-                }
-
-                at++;
-            }
-            else
-            {
-                for (var k = 0; k < digits; k++)
-                {
-                    if (at >= n || Hex(p[at]) < 0)
-                    {
-                        Fail(0, start);
-                        return 0;
-                    }
-
-                    value = value * 16 + Hex(p[at]);
-                    at++;
-                }
-            }
-
-            if (value > 1114111 || (value >= 55296 && value <= 57343))
-            {
-                Fail(0, start);
-                return 0;
-            }
-
-            escCp = (int)value;
-            return 1;
+            return HexEscape(c) ? 1 : 0;
         }
 
         if (c is 112 or 80)
@@ -783,180 +899,535 @@ internal sealed class RegexPattern
             return 0;
         }
 
-        if (c is 60 or 62)
-        {
-            Unbuilt(start, "the start or the end of a word, `\\<` and `\\>`");
-            return 0;
-        }
-
-        if ((c >= 48 && c <= 57) || c == 107)
-        {
-            Fail(1, start);
-            return 0;
-        }
-
-        if (c < 128 && !((c >= 65 && c <= 90) || (c >= 97 && c <= 122)))
+        if (c is 100 or 68 or 119 or 87 or 115 or 83)
         {
             at++;
+            var which = c is 119 or 87 ? 1 : c is 115 or 83 ? 2 : 0;
+            escSet = c < 97 ? Negate(Table(which)) : Table(which);
+            return 2;
+        }
+
+        at += Length(p[at]);
+        if (c < 128 && !(c >= 65 && c <= 90) && !(c >= 97 && c <= 122) && c != 60 && c != 62)
+        {
             escCp = c;
             return 1;
         }
 
-        Fail(0, start);
-        return 0;
+        var simple = c switch
+        {
+            97 => 7,
+            102 => 12,
+            116 => 9,
+            110 => 10,
+            114 => 13,
+            118 => 11,
+            _ => -1,
+        };
+        if (simple >= 0)
+        {
+            escCp = simple;
+            return 1;
+        }
+
+        escCp = c switch
+        {
+            65 => 0,
+            122 => 1,
+            98 => 4,
+            66 => 5,
+            60 => 6,
+            62 => 7,
+            _ => -1,
+        };
+        if (escCp < 0)
+        {
+            Fail(0, start);
+            return 0;
+        }
+
+        if (escCp >= 4)
+        {
+            usesWord = true;
+        }
+
+        if (c == 98 && at < n && p[at] == 123)
+        {
+            return Boundary(start) ? 3 : 0;
+        }
+
+        return 3;
     }
 
-    private List<int> Bracket(int depth)
+    /// <summary>
+    /// Rust's <c>maybe_parse_special_word_boundary</c>: <c>\b{start}</c>, <c>\b{end}</c>, <c>\b{start-half}</c> or
+    /// <c>\b{end-half}</c>; a brace whose next character is no letter and no <c>-</c> is a counted repetition of <c>\b</c>.
+    /// </summary>
+    private bool Boundary(int start)
     {
-        var open = at;
-        if (depth >= 250)
+        var brace = at;
+        at++;
+        Skip();
+        if (at >= n)
         {
-            Fail(0, open);
-            return [];
+            Fail(0, start);
+            return false;
+        }
+
+        var contents = at;
+        static bool Letter(byte b) => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45;
+        if (!Letter(p[at]))
+        {
+            at = brace;
+            return true;
+        }
+
+        var word = new StringBuilder();
+        while (at < n && Letter(p[at]))
+        {
+            word.Append((char)p[at]);
+            at++;
+            Skip();
+        }
+
+        if (at >= n || p[at] != 125)
+        {
+            Fail(0, brace);
+            return false;
         }
 
         at++;
-        var negated = false;
-        if (at < n && p[at] == 94)
+        escCp = word.ToString() switch
         {
-            negated = true;
-            at++;
+            "start" => 6,
+            "end" => 7,
+            "start-half" => 8,
+            "end-half" => 9,
+            _ => -1,
+        };
+        if (escCp < 0)
+        {
+            Fail(0, contents);
+            return false;
         }
 
-        var set = Union(open, depth, true);
+        return true;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_hex</c>: <c>\x</c> of two digits, <c>\u</c> of four, <c>\U</c> of eight, or any of them with any number of
+    /// digits in braces; a value that is no scalar value is <c>Syntax</c> at its first digit.
+    /// </summary>
+    private bool HexEscape(int c)
+    {
+        at++;
+        Skip();
+        if (at >= n)
+        {
+            Fail(0, at);
+            return false;
+        }
+
+        long value = 0;
+        int first;
+        if (p[at] == 123)
+        {
+            var brace = at;
+            first = at + 1;
+            var count = 0;
+            while (true)
+            {
+                at++;
+                Skip();
+                if (at >= n || p[at] == 125)
+                {
+                    break;
+                }
+
+                var h = Hex(p[at]);
+                if (h < 0)
+                {
+                    Fail(0, at);
+                    return false;
+                }
+
+                value = Math.Min(value * 16 + h, 1114112);
+                count++;
+            }
+
+            if (at >= n)
+            {
+                Fail(0, brace);
+                return false;
+            }
+
+            at++;
+            Skip();
+            if (count == 0)
+            {
+                Fail(0, brace);
+                return false;
+            }
+        }
+        else
+        {
+            first = at;
+            var digits = c == 120 ? 2 : c == 117 ? 4 : 8;
+            for (var i = 0; i < digits; i++)
+            {
+                if (i > 0)
+                {
+                    at++;
+                    Skip();
+                    if (at >= n)
+                    {
+                        Fail(0, at);
+                        return false;
+                    }
+                }
+
+                var h = Hex(p[at]);
+                if (h < 0)
+                {
+                    Fail(0, at);
+                    return false;
+                }
+
+                value = value * 16 + h;
+            }
+
+            at++;
+            Skip();
+        }
+
+        if (value > 1114111 || (value >= 55296 && value <= 57343))
+        {
+            Fail(0, first);
+            return false;
+        }
+
+        escCp = (int)value;
+        return true;
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_set_class</c>: a bracketed class and every class nested in it in one pass, with a stack of the open brackets;
+    /// its level in <see cref="setNest"/>. The end of the pattern inside it is <c>Syntax</c> at the innermost open bracket.
+    /// </summary>
+    private List<int> Class()
+    {
+        OpenClass();
         while (failKind < 0)
         {
             Skip();
             if (at >= n)
             {
-                Fail(0, open);
+                Fail(0, classOpen[^1]);
                 break;
             }
 
             int c = p[at];
+            var start = at;
+            if (c == 91)
+            {
+                if (Ascii())
+                {
+                    AddItem(asciiSet, -1, start);
+                }
+                else
+                {
+                    OpenClass();
+                }
+
+                continue;
+            }
+
             if (c == 93)
             {
-                at++;
-                break;
+                if (CloseClass())
+                {
+                    return setValue;
+                }
+
+                continue;
             }
 
-            at += 2;
-            var right = Union(open, depth, false);
-            if (failKind >= 0)
+            if (at + 1 < n && (c is 38 or 45 or 126) && p[at + 1] == c)
             {
-                break;
+                at += 2;
+                var k = classOpen.Count - 1;
+                IntoItem(k);
+                classLhs[k] = setValue;
+                classLhsNest[k] = setNest;
+                classLhsStart[k] = setStart;
+                classOp[k] = c;
+                classUnion[k] = [];
+                classCount[k] = 0;
+                classFirst[k] = at;
+                continue;
             }
 
-            set = c == 38 ? Intersect(set, right)
-                : c == 45 ? Intersect(set, Negate(right))
-                : Unite(Intersect(set, Negate(right)), Intersect(right, Negate(set)));
+            Range();
         }
 
-        if (failKind >= 0)
+        return [];
+    }
+
+    /// <summary>
+    /// Rust's <c>parse_set_class_open</c>: a <c>[</c>, its <c>^</c>, every <c>-</c> right after them as a character, then a <c>]</c>
+    /// as a character where no item came before it.
+    /// </summary>
+    private void OpenClass()
+    {
+        var open = at;
+        at++;
+        Skip();
+        if (at >= n)
         {
-            return [];
+            Fail(0, open);
+            return;
         }
 
+        var negated = false;
+        if (p[at] == 94)
+        {
+            negated = true;
+            at++;
+            Skip();
+            if (at >= n)
+            {
+                Fail(0, open);
+                return;
+            }
+        }
+
+        classOpen.Add(open);
+        classNegated.Add(negated);
+        classUnion.Add([]);
+        classCount.Add(0);
+        classFirst.Add(at);
+        classItems.Add(unionNest.Count);
+        classOp.Add(-1);
+        classLhs.Add([]);
+        classLhsNest.Add(-1);
+        classLhsStart.Add(0);
+        while (p[at] == 45)
+        {
+            AddItem([45, 45], -1, at);
+            at++;
+            Skip();
+            if (at >= n)
+            {
+                Fail(0, open);
+                return;
+            }
+        }
+
+        if (classCount[^1] == 0 && p[at] == 93)
+        {
+            AddItem([93, 93], -1, at);
+            at++;
+            Skip();
+            if (at >= n)
+            {
+                Fail(0, open);
+            }
+        }
+    }
+
+    private void AddItem(List<int> set, int nest, int start)
+    {
+        var k = classOpen.Count - 1;
+        classUnion[k] = Unite(classUnion[k], set);
+        if (classCount[k] == 0)
+        {
+            classFirst[k] = start;
+        }
+
+        classCount[k]++;
+        unionNest.Add(nest);
+    }
+
+    /// <summary>
+    /// Rust's <c>ClassSetUnion::into_item</c> and <c>pop_class_op</c>: the items of the innermost bracket since its opening or its last
+    /// operation, then that operation applied, each side folded first under <c>(?i)</c> as Rust's translator folds them; the set, its
+    /// level and its start in <see cref="setValue"/>, <see cref="setNest"/> and <see cref="setStart"/>.
+    /// </summary>
+    private void IntoItem(int k)
+    {
+        var count = classCount[k];
+        var b = classItems[k];
+        setValue = classUnion[k];
+        setStart = classFirst[k];
+        setNest = count switch
+        {
+            0 => -1,
+            1 => unionNest[b],
+            _ => NestOf(setStart, unionNest.GetRange(b, count)),
+        };
+        unionNest.RemoveRange(b, unionNest.Count - b);
+        var op = classOp[k];
+        if (op < 0)
+        {
+            return;
+        }
+
+        var lhs = classLhs[k];
+        var rhs = setValue;
+        if ((flags & 1) != 0)
+        {
+            lhs = Fold(lhs);
+            rhs = Fold(rhs);
+        }
+
+        setValue = op == 38 ? Intersect(lhs, rhs)
+            : op == 45 ? Intersect(lhs, Negate(rhs))
+            : Unite(Intersect(lhs, Negate(rhs)), Intersect(rhs, Negate(lhs)));
+        setNest = NestOf(classLhsStart[k], [classLhsNest[k], setNest]);
+        setStart = classLhsStart[k];
+    }
+
+    /// <summary>Rust's <c>pop_class</c>: a <c>]</c>, true where it closes the outermost bracket.</summary>
+    private bool CloseClass()
+    {
+        var k = classOpen.Count - 1;
+        IntoItem(k);
+        at++;
+        var set = setValue;
         if ((flags & 1) != 0)
         {
             set = Fold(set);
         }
 
-        return negated ? Negate(set) : set;
-    }
-
-    private List<int> Union(int open, int depth, bool first)
-    {
-        var set = new List<int>();
-        var firstItem = first;
-        while (true)
+        if (classNegated[k])
         {
-            Skip();
-            if (at >= n)
-            {
-                Fail(0, open);
-                return set;
-            }
-
-            int c = p[at];
-            if (c == 93 && !firstItem)
-            {
-                return set;
-            }
-
-            if (!firstItem && at + 1 < n && (c is 38 or 45 or 126) && p[at + 1] == c)
-            {
-                return set;
-            }
-
-            firstItem = false;
-            if (c == 91)
-            {
-                if (at + 1 < n && p[at + 1] == 58 && Ascii())
-                {
-                    set = Unite(set, asciiSet);
-                    continue;
-                }
-
-                var inner = Bracket(depth + 1);
-                if (failKind >= 0)
-                {
-                    return set;
-                }
-
-                set = Unite(set, inner);
-                continue;
-            }
-
-            var itemAt = at;
-            var lo = ClassChar();
-            if (failKind >= 0)
-            {
-                return set;
-            }
-
-            if (lo == -2)
-            {
-                set = Unite(set, escSet);
-                continue;
-            }
-
-            var hi = lo;
-            if (at + 1 < n && p[at] == 45 && p[at + 1] != 93 && p[at + 1] != 45)
-            {
-                at++;
-                hi = ClassChar();
-                if (failKind >= 0)
-                {
-                    return set;
-                }
-
-                if (hi == -2 || hi < lo)
-                {
-                    Fail(0, itemAt);
-                    return set;
-                }
-            }
-
-            set = Unite(set, [lo, hi]);
+            set = Negate(set);
         }
+
+        var open = classOpen[k];
+        var nest = NestOf(open, [setNest]);
+        classOpen.RemoveAt(k);
+        classNegated.RemoveAt(k);
+        classUnion.RemoveAt(k);
+        classCount.RemoveAt(k);
+        classFirst.RemoveAt(k);
+        classItems.RemoveAt(k);
+        classOp.RemoveAt(k);
+        classLhs.RemoveAt(k);
+        classLhsNest.RemoveAt(k);
+        classLhsStart.RemoveAt(k);
+        if (k == 0)
+        {
+            setValue = set;
+            setNest = nest;
+            return true;
+        }
+
+        AddItem(set, nest, open);
+        return false;
     }
 
-    private int ClassChar()
+    /// <summary>
+    /// Rust's <c>parse_set_class_range</c>: an item, or two joined by <c>-</c> where the next character past white space under
+    /// <c>(?x)</c> is no <c>]</c> and no <c>-</c>. An assertion is <c>Syntax</c> at its start, a side that is no character at that
+    /// side, and a range whose end is below its start at its start.
+    /// </summary>
+    private void Range()
+    {
+        var first = at;
+        var k1 = ClassItem();
+        if (k1 == 0)
+        {
+            return;
+        }
+
+        var lo = escCp;
+        var set = escSet;
+        Skip();
+        if (at >= n)
+        {
+            Fail(0, classOpen[^1]);
+            return;
+        }
+
+        if (p[at] != 45 || PeekSpace() is 93 or 45)
+        {
+            if (k1 == 3)
+            {
+                Fail(0, first);
+                return;
+            }
+
+            AddItem(k1 == 2 ? set : [lo, lo], -1, first);
+            return;
+        }
+
+        at++;
+        Skip();
+        if (at >= n)
+        {
+            Fail(0, classOpen[^1]);
+            return;
+        }
+
+        var second = at;
+        var k2 = ClassItem();
+        if (k2 == 0)
+        {
+            return;
+        }
+
+        if (k1 != 1 || k2 != 1 || escCp < lo)
+        {
+            Fail(0, k1 == 1 && k2 != 1 ? second : first);
+            return;
+        }
+
+        AddItem([lo, escCp], -1, first);
+    }
+
+    private int ClassItem()
     {
         if (p[at] == 92)
         {
-            return Escape(true) switch
-            {
-                0 => -1,
-                2 => -2,
-                _ => escCp,
-            };
+            return Escape();
         }
 
-        var cp = Decode(p, at);
+        escCp = Decode(p, at);
         at += Length(p[at]);
-        return cp;
+        return 1;
+    }
+
+    /// <summary>
+    /// Rust's <c>peek_space</c>: the character after the one being read, past white space and one <c>#</c> under <c>(?x)</c>; -1 at
+    /// the pattern's end.
+    /// </summary>
+    private int PeekSpace()
+    {
+        var k = at + Length(p[at]);
+        if ((flags & 8) != 0)
+        {
+            var comment = false;
+            while (k < n)
+            {
+                var cp = Decode(p, k);
+                if (White(cp))
+                {
+                    k += Length(p[k]);
+                }
+                else if (!comment && cp == 35)
+                {
+                    comment = true;
+                    k++;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        return k < n ? Decode(p, k) : -1;
     }
 
     private bool Ascii()
@@ -975,7 +1446,7 @@ internal sealed class RegexPattern
             k++;
         }
 
-        if (k == nameAt || k + 1 >= n || p[k] != 58 || p[k + 1] != 93)
+        if (k == nameAt || k + 1 >= n || p[k] != 58 || p[k + 1] != 93 || at + 1 >= n || p[at + 1] != 58)
         {
             return false;
         }
@@ -986,9 +1457,65 @@ internal sealed class RegexPattern
             return false;
         }
 
+        // Rust's `unicode_fold_and_negate`: under `(?i)` the class is folded before it is negated, so that `(?i)[[:^lower:]]`
+        // takes no letter of either case.
+        if ((flags & 1) != 0)
+        {
+            set = Fold(set);
+        }
+
         at = k + 2;
         asciiSet = negated ? Negate(set) : set;
         return true;
+    }
+
+    /// <summary>A level of Rust's <c>NestLimiter</c> that starts at <paramref name="start"/>, over its children, -1 for none.</summary>
+    private int NestOf(int start, List<int> children)
+    {
+        var first = nestKids.Count;
+        var height = 0;
+        foreach (var child in children)
+        {
+            if (child >= 0)
+            {
+                nestKids.Add(child);
+                height = Math.Max(height, nestHeight[child]);
+            }
+        }
+
+        nestStart.Add(start);
+        nestHeight.Add(height + 1);
+        nestFirst.Add(first);
+        nestCount.Add(nestKids.Count - first);
+        return nestStart.Count - 1;
+    }
+
+    /// <summary>
+    /// Rust's <c>NestLimiter</c> over the whole tree: the start of the first node, in the order it visits them, that is more than 250
+    /// levels deep, its <c>nest_limit</c>, or -1 where none is.
+    /// </summary>
+    private int Deep(int root)
+    {
+        if (root < 0 || nestHeight[root] <= 250)
+        {
+            return -1;
+        }
+
+        var node = root;
+        for (var depth = 1; depth <= 250; depth++)
+        {
+            for (var i = 0; i < nestCount[node]; i++)
+            {
+                var child = nestKids[nestFirst[node] + i];
+                if (nestHeight[child] >= 251 - depth)
+                {
+                    node = child;
+                    break;
+                }
+            }
+        }
+
+        return nestStart[node];
     }
 
     private static List<int> Fold(List<int> set)
