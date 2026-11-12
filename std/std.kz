@@ -9878,13 +9878,14 @@ pub class Match {
     pub string Text() => Value
 }
 
-// A pattern built for the linear engine (G2), as Rust's `regex` builds one: the pattern parsed into a tree (`RegexParser`), the tree
-// compiled into a Thompson automaton, and a search a Pike VM that runs the automaton over the text once, its time in proportion to
-// the text's length times the automaton's states times the positions a thread carries, which it copies from thread to thread as
-// Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole match and two for each group for the members that
-// give a match (G2). `Regex.New` of a literal the compiler checked gives a `Regex`, and of any other
-// string `Regex | RegexError` (G3); the compiler calls `RegexNew` and `RegexChecked` with the tables of G4's classes. Its text is
-// its pattern, as Rust's `Display` gives it (G1).
+// A pattern built for one of G2's two engines. For the linear engine, as Rust's `regex` builds one: the pattern parsed into a
+// tree (`RegexParser`), the tree compiled into a Thompson automaton, and a search a Pike VM that runs the automaton over the text
+// once, its time in proportion to the text's length times the automaton's states times the positions a thread carries, which it
+// copies from thread to thread as Rust's `PikeVM` copies its slots: none for `IsMatch`, and two for the whole match and two for
+// each group for the members that give a match (G2). For the backtracking engine, the same automaton, whose ways a search tries
+// one after another (`Backtrack`). `Regex.New` of a literal the compiler checked gives a `Regex`, and of any other string
+// `Regex | RegexError` (G3); the compiler calls `RegexNew` and `RegexChecked` with the tables of G4's classes. Its text is its
+// pattern, as Rust's `Display` gives it (G1).
 pub class Regex {
     string pattern
     // the automaton: each state's operation (`RegexParser.State`) and its two operands
@@ -9898,6 +9899,10 @@ pub class Regex {
     // where the ranges of `\w` stand among `ranges` for a word boundary, and how many there are, 0 where the pattern has none
     int wordAt
     int wordCount
+    // whether the pattern runs on the backtracking engine (G2), and the simple case folding its backreferences under `(?i)`
+    // compare by, empty where none does
+    bool backtracking
+    List<int> fold
 
     Regex(string p, RegexParser parsed) {
         pattern = p
@@ -9908,12 +9913,14 @@ pub class Regex {
         names = parsed.names
         wordAt = parsed.wordAt
         wordCount = parsed.wordCount
+        backtracking = parsed.backtracking
+        fold = parsed.RefFold()
     }
 
     // The pattern built, or the error of the first construct the parse refuses, of an automaton above the bound (G2, G3).
-    internal static Regex | RegexError Make(string text, byte* tables) {
+    internal static Regex | RegexError Make(string text, byte* tables, bool backtrack) {
         parsed = RegexParser()
-        parsed.Build(text, tables)
+        parsed.Build(text, tables, backtrack)
         if parsed.failKind == 0 {
             return RegexError(RegexKind.Syntax, parsed.failAt)
         }
@@ -10077,6 +10084,10 @@ pub class Regex {
     // its start the first, as Rust's `PikeVM` searches. A thread that reaches the match ends every thread after it. The positions of
     // the match's `count` slots are written into `found`; with no slot, the first match ends the search.
     bool Search(Bytes b, int from, mut List<int> found, int count, RegexThreads t) {
+        if backtracking {
+            return Backtrack(b, from, mut found, count)
+        }
+
         n = b.Count
         t.Clear(0)
         mut matched = false
@@ -10209,6 +10220,283 @@ pub class Regex {
                 break
             }
         }
+    }
+
+    // The backtracking engine (G2): from each start on from `from`, the ways of the automaton one after another in the order of
+    // their priority, as .NET's interpreter and Rust's `fancy-regex` walk them, so that the first match is the leftmost and, among
+    // the alternatives at its start, the first, as the Pike VM gives it. The ways it may come back to are frames of a stack in
+    // memory, not calls, and no time is bounded (G2). A group's positions are set when it closes, its start kept aside until then,
+    // so that a backreference inside its own group reads the group's last text, as .NET's does; the first `count` positions are
+    // written into `found`. `slots` holds the groups' positions, two for each, then each group's start kept aside, then for each
+    // state the position the way last came to it at, which only a split reads.
+    bool Backtrack(Bytes b, int from, mut List<int> found, int count) {
+        n = b.Count
+        mut slots = List<int>()
+        for k in 0..<3 * names.Count + ops.Count {
+            slots.Add(-1)
+        }
+
+        mut stack = List<int>()
+        mut start = from
+        while start <= n {
+            if Run(b, 0, start, -1, mut slots, mut stack) >= 0 {
+                for k in 0..<count {
+                    if found.Count <= k {
+                        found.Add(slots[k])
+                    } else {
+                        found[k] = slots[k]
+                    }
+                }
+
+                return true
+            }
+
+            if start == n {
+                return false
+            }
+
+            start = start + RegexLength(b[start])
+        }
+
+        return false
+    }
+
+    // The first way from state `first` at `from` to the match, or to the end of the look-around or the atomic group it starts in,
+    // there at `end` where `end` is not -1: the position it ends at, with `slots` holding its groups; -1 where no way gets there,
+    // with `slots` as they were. A frame of `stack` is three numbers: 0, a state and the position to try it at; or 1, a slot and
+    // the position it held before the way changed it. A split the way comes back to at the position it last came to it at closes
+    // a loop that read no character since, and that way fails, as the Pike VM's thread that comes back to a state at the same
+    // position ends; so `(a*)*` ends, and the loop's other way is tried. The way that gets there keeps its groups, and gives the
+    // positions of the splits back, so that a look-around tried again at the same position starts afresh.
+    int Run(Bytes b, int first, int from, int end, mut List<int> slots, mut List<int> stack) {
+        n = b.Count
+        marked = 3 * names.Count
+        base = stack.Count
+        stack.Add(0)
+        stack.Add(first)
+        stack.Add(from)
+        while stack.Count > base {
+            top = stack.Count - 3
+            tag = stack[top]
+            mut pc = stack[top + 1]
+            mut at = stack[top + 2]
+            stack.RemoveAt(top + 2)
+            stack.RemoveAt(top + 1)
+            stack.RemoveAt(top)
+            if tag == 1 {
+                slots[pc] = at
+                continue
+            }
+
+            mut going = true
+            while going {
+                op = ops[pc]
+                if op == 0 || op == 9 || op == 11 {
+                    if end < 0 || at == end {
+                        while stack.Count > base {
+                            last = stack.Count - 3
+                            if stack[last] == 1 && stack[last + 1] >= marked {
+                                slots[stack[last + 1]] = stack[last + 2]
+                            }
+
+                            stack.RemoveAt(last + 2)
+                            stack.RemoveAt(last + 1)
+                            stack.RemoveAt(last)
+                        }
+
+                        return at
+                    }
+
+                    going = false
+                } else if op == 1 || op == 2 {
+                    mut c = -1
+                    if at < n {
+                        c = RegexDecode(b, at)
+                    }
+
+                    if c >= 0 && (op == 1 && c == xs[pc] || op == 2 && RegexIn(ranges, xs[pc], ys[pc], c)) {
+                        at = at + RegexLength(b[at])
+                        pc = pc + 1
+                    } else {
+                        going = false
+                    }
+                } else if op == 3 {
+                    if slots[marked + pc] == at {
+                        going = false
+                    } else {
+                        Set(marked + pc, at, mut slots, mut stack)
+                        stack.Add(0)
+                        stack.Add(ys[pc])
+                        stack.Add(at)
+                        pc = xs[pc]
+                    }
+                } else if op == 4 {
+                    pc = xs[pc]
+                } else if op == 5 {
+                    slot = xs[pc]
+                    if slot % 2 == 0 {
+                        Set(2 * names.Count + slot / 2, at, mut slots, mut stack)
+                    } else {
+                        Set(slot - 1, slots[2 * names.Count + slot / 2], mut slots, mut stack)
+                        Set(slot, at, mut slots, mut stack)
+                    }
+
+                    pc = pc + 1
+                } else if op == 6 {
+                    if Looks(xs[pc], b, at) {
+                        pc = pc + 1
+                    } else {
+                        going = false
+                    }
+                } else if op == 7 {
+                    to = Same(b, xs[pc], ys[pc] == 1, at, slots)
+                    if to < 0 {
+                        going = false
+                    } else {
+                        at = to
+                        pc = pc + 1
+                    }
+                } else if op == 8 {
+                    if Around(b, pc, at, mut slots, mut stack) {
+                        pc = ys[pc]
+                    } else {
+                        going = false
+                    }
+                } else {
+                    saved = RegexHead(slots, marked)
+                    to = Run(b, pc + 1, at, -1, mut slots, mut stack)
+                    if to < 0 {
+                        going = false
+                    } else {
+                        Keep(saved, slots, mut stack)
+                        at = to
+                        pc = ys[pc]
+                    }
+                }
+            }
+        }
+
+        return -1
+    }
+
+    // Slot `slot` set to `value`, with a frame that gives it its old position back when the search comes back past it.
+    void Set(int slot, int value, mut List<int> slots, mut List<int> stack) {
+        stack.Add(1)
+        stack.Add(slot)
+        stack.Add(slots[slot])
+        slots[slot] = value
+    }
+
+    // Frames that give each group's slot a look-around or an atomic group changed the position `saved` holds for it back.
+    void Keep(List<int> saved, List<int> slots, mut List<int> stack) {
+        for k in 0..<saved.Count {
+            if slots[k] != saved[k] {
+                stack.Add(1)
+                stack.Add(k)
+                stack.Add(saved[k])
+            }
+        }
+    }
+
+    // Whether the look-around at state `pc` holds at `at`: `(?=` and `(?!` from `at` on, `(?<=` and `(?<!` from a start before
+    // `at` to `at` itself, the nearest start first, as .NET takes a look-behind of any length (G2). A positive one that holds keeps
+    // the groups its way took, with frames that give them back when the search comes back past it; a negative one keeps none.
+    bool Around(Bytes b, int pc, int at, mut List<int> slots, mut List<int> stack) {
+        kind = xs[pc]
+        saved = RegexHead(slots, 3 * names.Count)
+        mut to = -1
+        if kind < 2 {
+            to = Run(b, pc + 1, at, -1, mut slots, mut stack)
+        } else {
+            mut start = at
+            while true {
+                to = Run(b, pc + 1, start, at, mut slots, mut stack)
+                if to >= 0 || start == 0 {
+                    break
+                }
+
+                start = start - 1
+                while start > 0 && (int(b[start]) & 192) == 128 {
+                    start = start - 1
+                }
+            }
+        }
+
+        if kind == 0 || kind == 2 {
+            if to < 0 {
+                return false
+            }
+
+            Keep(saved, slots, mut stack)
+            return true
+        }
+
+        if to < 0 {
+            return true
+        }
+
+        for k in 0..<saved.Count {
+            slots[k] = saved[k]
+        }
+
+        return false
+    }
+
+    // Where the text of group `group` ends when it is read again at `at`, byte by byte, or under `(?i)` character by character by
+    // the simple case folding (G2, G4); -1 where it is not there, and where the group has no text, so that `\1` of a group that
+    // took no part fails, as .NET's does.
+    int Same(Bytes b, int group, bool folded, int at, List<int> slots) {
+        start = slots[2 * group]
+        end = slots[2 * group + 1]
+        if start < 0 || end < 0 {
+            return -1
+        }
+
+        n = b.Count
+        mut i = start
+        mut j = at
+        while i < end {
+            if j >= n {
+                return -1
+            }
+
+            if folded {
+                c = RegexDecode(b, i)
+                d = RegexDecode(b, j)
+                if c != d && !Folds(c, d) {
+                    return -1
+                }
+
+                i = i + RegexLength(b[i])
+                j = j + RegexLength(b[j])
+            } else {
+                if b[i] != b[j] {
+                    return -1
+                }
+
+                i = i + 1
+                j = j + 1
+            }
+        }
+
+        return j
+    }
+
+    // Whether `d` is in the cycle of the simple case folding that `c` is in.
+    bool Folds(int c, int d) {
+        count = fold.Count / 2
+        mut e = RegexNextFold(fold, count, c)
+        mut steps = 0
+        while e != c && steps < 8 {
+            if e == d {
+                return true
+            }
+
+            e = RegexNextFold(fold, count, e)
+            steps = steps + 1
+        }
+
+        return false
     }
 
     // Whether the assertion `kind` holds at `at`: the text's start, its end, a line's start and end under `(?m)`, where a line ends
@@ -10449,17 +10737,34 @@ class RegexParser {
     internal mut List<int> alpha = List<int>()
     internal mut List<int> number = List<int>()
     internal mut List<bool> loaded = [false, false, false, false, false, false]
+    // the backtracking engine's (G2): whether the pattern is built for it; its backreferences, each by its node, the position of
+    // its `\`, and the group's number, or -1 with its name; whether one compares under `(?i)`; and what an escape that is one gave
+    internal mut bool backtracking = false
+    internal mut List<int> refNode = List<int>()
+    internal mut List<int> refAt = List<int>()
+    internal mut List<int> refNumber = List<int>()
+    internal mut List<string> refName = List<string>()
+    internal mut bool foldRefs = false
+    internal mut int escStart = 0
+    internal mut int escRef = 0
+    internal mut string escName = ""
 
     // The automaton of `pattern`, or the error in `failKind` and `failAt`. Its size is counted from the tree before it is built,
     // each state 16 bytes and each number of a range 4, and one above 10 MiB, the default of Rust's `size_limit`, is `TooBig`
     // (G2); the count and the states built are the same, or the program stops, a defect of the standard library.
-    internal void Build(string pattern, byte* t) {
+    internal void Build(string pattern, byte* t, bool flag) {
+        backtracking = flag
         text = pattern
         p = pattern.Bytes
         n = p.Count
         tables = long(t)
         names.Add("")
         root = Parse()
+        if failKind >= 0 {
+            return
+        }
+
+        Refs()
         if failKind >= 0 {
             return
         }
@@ -10488,6 +10793,40 @@ class RegexParser {
         }
     }
 
+    // The backreferences, resolved once every group is known, as .NET resolves `\2(a)(b)`: a number no group has and a name no
+    // group has are `Syntax` at the `\`, the first such one in the pattern.
+    internal void Refs() {
+        for i in 0..<refNode.Count {
+            mut group = refNumber[i]
+            if group < 0 {
+                for j in 1..<names.Count {
+                    if group < 0 && names[j] == refName[i] {
+                        group = j
+                    }
+                }
+            }
+
+            if group < 0 || group >= names.Count {
+                Fail(0, refAt[i])
+                return
+            }
+
+            na[refNode[i]] = group
+            if nb[refNode[i]] == 1 {
+                foldRefs = true
+            }
+        }
+    }
+
+    // The simple case folding a backreference under `(?i)` compares by, empty where none does.
+    internal List<int> RefFold() {
+        if foldRefs {
+            return Table(3)
+        }
+
+        return List<int>()
+    }
+
     internal void Fail(int k, int position) {
         if failKind < 0 {
             failKind = k
@@ -10514,6 +10853,10 @@ class RegexParser {
             }
         } else if k == 7 || k == 8 {
             none = c == 0 || zero[a]
+        } else if k == 10 {
+            none = true
+        } else if k == 11 {
+            none = zero[b]
         }
 
         kind.Add(k)
@@ -10846,6 +11189,10 @@ class RegexParser {
         mut node = child
         if index >= 0 {
             node = Node(4, index, child, 0)
+        } else if index == -6 {
+            node = Node(11, 0, child, 0)
+        } else if index <= -2 {
+            node = Node(10, -2 - index, child, 0)
         }
 
         nest = NestOf(open, [childNest])
@@ -10853,15 +11200,38 @@ class RegexParser {
         return true
     }
 
-    // Rust's `parse_group`: a look-around is `Unsupported` at the `(`, as Kurz reads an atomic group `(?>` (G4); 1 for a group, its
-    // capture in `capture` (-1 for none), 0 for flags alone and -1 for an error.
+    // Rust's `parse_group`: a look-around is `Unsupported` at the `(`, as Kurz reads an atomic group `(?>` (G4), but for the
+    // backtracking engine, which takes them (G2); 1 for a group, its capture in `capture` (-1 for none, and for the backtracking
+    // engine -2 for `(?=`, -3 `(?!`, -4 `(?<=`, -5 `(?<!` and -6 `(?>`), 0 for flags alone and -1 for an error.
     internal int Group() {
         open = at
         at = at + 1
         Skip()
         if Starts("?=") || Starts("?!") || Starts("?<=") || Starts("?<!") || Starts("?>") {
-            Fail(1, open)
-            return -1
+            if !backtracking {
+                Fail(1, open)
+                return -1
+            }
+
+            mut look = 4
+            if Starts("?=") {
+                look = 0
+            } else if Starts("?!") {
+                look = 1
+            } else if Starts("?<=") {
+                look = 2
+            } else if Starts("?<!") {
+                look = 3
+            }
+
+            if look == 2 || look == 3 {
+                at = at + 3
+            } else {
+                at = at + 2
+            }
+
+            capture = -2 - look
+            return 1
         }
 
         inner = at
@@ -10872,7 +11242,7 @@ class RegexParser {
                 at = at + 2
             }
 
-            name = Name()
+            name = Name(true)
             if failKind >= 0 {
                 return -1
             }
@@ -10898,8 +11268,9 @@ class RegexParser {
     }
 
     // Rust's `parse_capture_name`: the name's first character is `_` or alphabetic, and a later one also `.`, `[`, `]` or numeric
-    // (`is_capture_char`); an empty name and a name given twice are `Syntax` at its start.
-    internal string Name() {
+    // (`is_capture_char`); an empty name, and a group's name given twice, are `Syntax` at its start. A backreference's name,
+    // `fresh` false, names a group that has it.
+    internal string Name(bool fresh) {
         if at >= n {
             Fail(0, at)
             return ""
@@ -10933,10 +11304,12 @@ class RegexParser {
             return ""
         }
 
-        for given in names {
-            if given == name {
-                Fail(0, start)
-                return ""
+        if fresh {
+            for given in names {
+                if given == name {
+                    Fail(0, start)
+                    return ""
+                }
             }
         }
 
@@ -11239,6 +11612,20 @@ class RegexParser {
                 return ClassNode(escSet)
             }
 
+            if r == 4 {
+                mut folded = 0
+                if (mode & 1) != 0 {
+                    folded = 1
+                }
+
+                node = Node(9, 0, folded, 0)
+                refNode.Add(node)
+                refAt.Add(escStart)
+                refNumber.Add(escRef)
+                refName.Add(escName)
+                return node
+            }
+
             return Node(3, escCp, 0, 0)
         }
 
@@ -11249,9 +11636,12 @@ class RegexParser {
 
     // Rust's `parse_escape`: 1 for a character in `escCp`, 2 for a class in `escSet`, 3 for an assertion in `escCp` (0 `\A`, 1 `\z`,
     // 4 `\b`, 5 `\B`, 6 `\b{start}` and `\<`, 7 `\b{end}` and `\>`, 8 `\b{start-half}`, 9 `\b{end-half}`) and 0 for an error; a
-    // backreference is `Unsupported` at the `\`, the backtracking engine's (G4), and so are `\k` and `\p`.
+    // backreference is `Unsupported` at the `\`, the backtracking engine's (G4), and so are `\k` and `\p`. For the backtracking
+    // engine (G2), 4 for a backreference: `\` and a digit from 1 on, the group of the number its digits write, or `\k<name>`, in
+    // `escRef`, -1 with the name in `escName`.
     internal int Escape() {
         start = at
+        escStart = at
         at = at + 1
         if at >= n {
             Fail(0, start)
@@ -11259,6 +11649,39 @@ class RegexParser {
         }
 
         c = int(p[at])
+        if backtracking && c >= 49 && c <= 57 {
+            mut written = 0
+            while at < n && int(p[at]) >= 48 && int(p[at]) <= 57 {
+                if written < 100000000 {
+                    written = written * 10 + int(p[at]) - 48
+                }
+
+                at = at + 1
+            }
+
+            escRef = written
+            escName = ""
+            return 4
+        }
+
+        if backtracking && c == 107 {
+            at = at + 1
+            if at >= n || p[at] != 60 {
+                Fail(0, start)
+                return 0
+            }
+
+            at = at + 1
+            name = Name(false)
+            if failKind >= 0 {
+                return 0
+            }
+
+            escRef = -1
+            escName = name
+            return 4
+        }
+
         if c >= 48 && c <= 57 || c == 107 || c == 112 || c == 80 {
             Fail(1, start)
             return 0
@@ -11754,9 +12177,16 @@ class RegexParser {
         AddItem([lo, hi], -1, first)
     }
 
+    // A backreference inside a class is `Unsupported` at its `\`, as Rust's parse reads one there.
     internal int ClassItem() {
         if p[at] == 92 {
-            return Escape()
+            r = Escape()
+            if r == 4 {
+                Fail(1, escStart)
+                return 0
+            }
+
+            return r
         }
 
         escCp = RegexDecode(p, at)
@@ -11936,11 +12366,11 @@ class RegexParser {
             return 0
         }
 
-        if k <= 3 {
+        if k <= 3 || k == 9 {
             return 1
         }
 
-        if k == 4 {
+        if k == 4 || k == 10 || k == 11 {
             return RegexCap(2 + Size(nb[node]))
         }
 
@@ -11978,7 +12408,8 @@ class RegexParser {
     }
 
     // The states of a node, as Thompson's construction builds them and Rust's `regex-automata` compiles a pattern: an alternation
-    // a split before each but the last, which jumps past the rest; `x*` a split, `x` and a jump back; `x{n,}` n - 1 copies of `x`,
+    // a split before each but the last, which jumps past the rest; a look-around and an atomic group a state before their content,
+    // which names the state past them, and one after it; `x*` a split, `x` and a jump back; `x{n,}` n - 1 copies of `x`,
     // then `x` and a split back; `x{n,m}` n copies, then m - n of a split and `x`, each split past all of them. A greedy split tries
     // `x` first, a lazy one the way past it.
     internal void Emit(int node) {
@@ -11999,6 +12430,24 @@ class RegexParser {
 
         if k == 3 {
             State(6, na[node], 0)
+            return
+        }
+
+        if k == 9 {
+            State(7, na[node], nb[node])
+            return
+        }
+
+        if k == 10 || k == 11 {
+            mut op = 10
+            if k == 10 {
+                op = 8
+            }
+
+            opened = State(op, na[node], 0)
+            Emit(nb[node])
+            State(op + 1, 0, 0)
+            ys[opened] = ops.Count
             return
         }
 
@@ -12089,16 +12538,28 @@ class RegexParser {
     }
 }
 
-// `Regex.New(pattern)` of a string the compiler did not check: the `Regex`, or the error of the pattern (G3). The compiler calls it
-// with the table of G4's classes and folding it writes into the program (`Emitter.RegexTable`).
-pub Regex | RegexError RegexNew(string pattern, byte* tables) => Regex.Make(pattern, tables)
+// `Regex.New(pattern, backtracking)` of a string the compiler did not check: the `Regex`, on the engine the flag names, or the error
+// of the pattern (G2, G3). The compiler calls it with the table of G4's classes and folding it writes into the program
+// (`Emitter.RegexTable`).
+pub Regex | RegexError RegexNew(string pattern, byte* tables, bool backtracking) => Regex.Make(pattern, tables, backtracking)
 
-// `Regex.New(pattern)` of a literal the compiler checked (G3), which builds: an error stops the program, a defect of the compiler.
-pub Regex RegexChecked(string pattern, byte* tables) {
-    match Regex.Make(pattern, tables) {
+// `Regex.New(pattern, backtracking)` of a literal the compiler checked (G3), which builds: an error stops the program, a defect of
+// the compiler.
+pub Regex RegexChecked(string pattern, byte* tables, bool backtracking) {
+    match Regex.Make(pattern, tables, backtracking) {
         Regex r => return r
         RegexError e => throw "the pattern of a literal the compiler checked gives `{e}`"
     }
+}
+
+// A copy of the first `count` items of `a`.
+List<int> RegexHead(List<int> a, int count) {
+    mut out = List<int>()
+    for k in 0..<count {
+        out.Add(a[k])
+    }
+
+    return out
 }
 
 // A `Match` of the text `s`, which a `Regex` makes: its own name is a method there.

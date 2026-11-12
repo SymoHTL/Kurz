@@ -1833,6 +1833,20 @@ ask about it.
   the folding of `(?i)` and the characters of a group's name are one global of a program that makes a `Regex`, written once
   (`Emitter.Regex.cs`), which `Regex.New` reads. *(assumed)* Pinned by `RegexTests`, whose written patterns carry the reading
   of Rust's `regex-syntax` 0.8 of each, and the cases of `corpus/regex/`.
+- G2's backtracking engine, `Regex.New(pattern, backtracking: true)`: the same parse, which under the flag takes the
+  backreferences `\1` and `\k<name>`, the four lookarounds and the atomic group, and the same automaton, counted and bounded
+  as the linear engine's, a backreference one state and a lookaround or an atomic group two beside its content; a
+  backreference's group is found once the whole pattern is read, so that `\2(a)(b)` parses. A search tries the ways of the
+  automaton one after another from each start, in the order of the Pike VM's priorities, so that a pattern both engines take
+  gives the same match, and keeps its choices and the positions a way changed on a stack in memory, never on the process's
+  stack, as .NET's interpreter keeps its own. A loop that comes back to a split at the position it last came to it at fails
+  that way, as the Pike VM's thread that comes back to a state at the same position ends. A lookaround and an atomic group
+  run their content as a search of its own; a lookbehind tries each start before its position, the nearest first; a
+  positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
+  closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
+  backreference compares by the simple case folding. *(assumed: the defaults of issue 176, comment 6811727642)* Pinned by
+  `RegexTests`, which holds both engines to .NET's `Regex` over generated patterns, and the backtracking engine over
+  patterns of its own constructs, and `corpus/regex/backtracking.kz`.
 - G5: `Replace` and `Split` walk the matches `Matches` walks, Rust's `find_iter` (one method, `Next`). `Replace` reads the
   replacement once into its pieces, counts the result's length and writes it into one string, as Rust's `replace_all` writes
   into one `String`; a text with no match is given back as it is. `Split` adds a match's groups in the order of their numbers,
@@ -2182,8 +2196,7 @@ larger type each time makes without end, by a call T34's walk does not read: out
 bound, its outer call makes no further copy, and the copies made before it stay and report their errors, while a copy of
 the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
 ended; another outer call still makes its copies, and each one whose chain reaches the bound reports its own `not supported`
-(T33, assumed); of regular expressions, the backtracking engine, a flag `backtracking`, named or the second argument, of any
-value but the literal `false` (G2), and in a literal pattern a construct of Rust's syntax that the standard library's
+(T33, assumed); of regular expressions, in a literal pattern a construct of Rust's syntax that the standard library's
 parse does not build, `\p` and `\P` and the flags `R` and `u`, where it is the pattern's first
 error, which a pattern that is no literal gets as the `RegexError` `Unsupported` when the program runs (G4); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two

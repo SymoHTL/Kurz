@@ -11,11 +11,12 @@ namespace Kurz.Compiler.Tests;
 /// The decisions of regular expressions (G1 to G5) that the corpus cases do not pin. The checker's reading of a literal pattern
 /// (<see cref="RegexPattern"/>) is a copy of the standard library's parse and count, so a program built here gives every pattern of a
 /// list, written by hand and generated, to <c>Regex.New</c> at run time and prints what it makes, which the copy must give alike: the
-/// error and its byte, or a pattern that builds, on both sides of the bound of the automaton (G2). The linear engine's matches are held
+/// error and its byte, or a pattern that builds, on both sides of the bound of the automaton (G2). The matches of both engines are held
 /// to .NET's backtracking engine, whose leftmost-first order is Rust's, over generated patterns of ASCII letters, classes, anchors,
 /// groups, alternatives and repetitions greedy and lazy, on generated texts without a line end, where the two read every construct
 /// alike; .NET's matches are walked as Rust's <c>find_iter</c> walks them, an empty match that ends where the last one ended passed
-/// over. Both programs run a second time under the allocator that makes every block it frees inaccessible.
+/// over; so are the backtracking engine's backreferences, look-arounds and atomic groups. Both programs run a second time under the
+/// allocator that makes every block it frees inaccessible.
 /// </summary>
 public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -151,14 +152,14 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     /// <summary>
-    /// G2, G4: the matches of the linear engine, <c>Matches</c>, <c>Match</c> and <c>IsMatch</c>, each match's position, its length and
+    /// G2, G4: the matches of each engine, <c>Matches</c>, <c>Match</c> and <c>IsMatch</c>, each match's position, its length and
     /// every group's, are .NET's for the same pattern and text, walked as Rust's <c>find_iter</c> walks them, over 300 generated
     /// patterns and 12 texts each. The generator writes no named group, which .NET numbers after the others, no repetition of what
     /// can match nothing, where backtracking engines stop a loop early, and no line end in a text, where .NET's <c>$</c> matches before
     /// one.
     /// </summary>
     [Fact]
-    public void The_linear_engine_finds_the_matches_and_groups_a_leftmost_first_engine_finds()
+    public void Both_engines_find_the_matches_and_groups_a_leftmost_first_engine_finds()
     {
         var generator = new Generator(Seed + 2);
         var random = new Random(Seed + 3);
@@ -176,13 +177,127 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         foreach (var (p, groups) in patterns)
         {
             var dotnet = new Regex(p, RegexOptions.CultureInvariant);
-            expected.AddRange(texts.Select(t => Walked(dotnet, groups, t)));
+            var lines = texts.Select(t => Walked(dotnet, groups, t)).ToList();
+            expected.AddRange(lines); // the linear engine
+            expected.AddRange(lines); // the backtracking engine
         }
 
         Assert.True(expected.Count(e => e.EndsWith("@-", StringComparison.Ordinal)) > 100, "texts no pattern matches");
         Assert.True(expected.Count(e => e.Contains(";-", StringComparison.Ordinal)) > 20, "groups that take no part");
         Assert.True(expected.Count(e => e.Contains(",0", StringComparison.Ordinal)) > 20, "empty matches");
+        HoldToNet(patterns, texts, expected, "[false, true]", "regex-matches", 2);
+    }
 
+    /// <summary>
+    /// G2: the backtracking engine's own constructs, a backreference by number and by name, the four look-arounds, a look-behind of
+    /// any length among them, and the atomic group, match as .NET's do, held to .NET over written rows and 300 generated patterns of
+    /// them, 12 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
+    /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
+    /// The generator puts no group inside a look-behind, whose groups .NET takes from right to left, and no repetition of what can
+    /// match nothing. Under <c>(?i)</c> a backreference compares by the simple case folding, so <c>k</c> and the Kelvin sign are
+    /// one, a row with its own expectation, since .NET counts positions in UTF-16 units.
+    /// </summary>
+    [Fact]
+    public void The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does()
+    {
+        string[] written =
+        [
+            @"(\w+) \1", @"\d+(?= kg)", @"(a|b\1)+", @"(?<=a+)b", @"(?<!a)b", @"(?>a+)b", @"(?>a|ab)c", @"(?=(a+))a*b\1",
+            @"(?i)(a)\1", @"\2(a)(b)", @"(a)|\1b", @"(?!a)\w", @"(?<n>a)\k<n>", @"(?<=\b)a(?!a)", @"(?<=ab|b)a", @"a(?=b(?=c))",
+        ];
+        string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
+            "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))"];
+        var random = new Random(Seed + 7);
+        var patterns = written.Select(p => (p, Groups(p))).ToList();
+        while (patterns.Count < written.Length + 300)
+        {
+            var p = string.Concat(Enumerable.Range(0, random.Next(1, 5)).Select(_ => atoms[random.Next(atoms.Length)]));
+            var groups = Groups(p);
+            if ((p.Contains(@"\1", StringComparison.Ordinal) && groups < 1) || (p.Contains(@"\2", StringComparison.Ordinal) && groups < 2))
+            {
+                continue; // a backreference to a group the pattern does not have is `Syntax` here and refused by .NET
+            }
+
+            patterns.Add((p, groups));
+        }
+
+        Assert.All(patterns, p => Assert.Null(RegexPattern.Check(p.Item1, backtracking: true)));
+        Assert.All(patterns.Take(written.Length), p => Assert.NotNull(RegexPattern.Check(p.Item1))); // the linear engine takes none of the written ones
+        string[] fixedTexts = ["", "a", "ab", "aba", "aab b", "say hello hello there", "5 m, 12 kg", "aA", "abab", "abc"];
+        var texts = fixedTexts.Concat(Enumerable.Range(0, 4).Select(_ => new string(Enumerable.Range(0, random.Next(8)).Select(_ => "aab "[random.Next(4)]).ToArray()))).ToList();
+        var expected = new List<string>();
+        foreach (var (p, groups) in patterns)
+        {
+            var dotnet = new Regex(p, RegexOptions.CultureInvariant);
+            expected.AddRange(texts.Select(t => Walked(dotnet, groups, t)));
+        }
+
+        Assert.True(expected.Count(e => !e.EndsWith("@-", StringComparison.Ordinal)) > 500, "texts a pattern matches");
+        Assert.True(expected.Count(e => e.Contains(";-", StringComparison.Ordinal)) > 50, "groups that take no part");
+        HoldToNet(patterns, texts, expected, "[true]", "regex-backtracking", 1);
+
+        var folded = Builder.Compile(SourceText.FromString("program.kz", """
+            re = Regex.New(r"(?i)(k)\1", backtracking: true) // a literal pattern: a `Regex`, checked by the compiler
+            for t in ["akKELVIN", "KKELVINk", "kx"] {
+                found = re.Match(t)
+                if found != null {
+                    print("{found.Index},{found.Length}")
+                } else {
+                    print("-")
+                }
+            }
+
+            """.Replace("KELVIN", "\u212A", StringComparison.Ordinal)), [], toolchain.Runtime, testBuild: true); // U+212A
+        Assert.True(folded.Program is not null, string.Join("; ", folded.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(folded.Program, "regex-backtracking-fold"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(["1,4", "0,4", "-"], output); // the Kelvin sign is three bytes, `K` and `k` one each
+    }
+
+    /// <summary>
+    /// G2, G3: the errors only the backtracking engine's parse gives, each with its kind and byte, in the checker's parse and in the
+    /// standard library's at run time: a backreference to a group the pattern does not have, by number or by name, is <c>Syntax</c>
+    /// at its <c>\</c>, after any error of the parse; one inside a class is <c>Unsupported</c> at its <c>\</c>; <c>\k</c>
+    /// without its <c>&lt;name&gt;</c> is <c>Syntax</c>; and a number reads every digit after the <c>\</c>, <c>\0</c>
+    /// <c>Unsupported</c> as on the linear engine. Patterns that build are the positive control.
+    /// </summary>
+    [Fact]
+    public void The_backtracking_engine_refuses_a_reference_to_no_group_at_its_backslash()
+    {
+        (string Pattern, string Reading)[] rows =
+        [
+            (@"\2(a)", "syntax at 0"), (@"\k<b>(?<a>x)", "syntax at 0"), (@"a\10(b)", "syntax at 1"), (@"\2(a", "syntax at 2"),
+            (@"[\1]", "unsupported at 1"), (@"(a)[^\1]", "unsupported at 5"), (@"\k", "syntax at 0"), (@"\ka", "syntax at 0"),
+            (@"(a)\0", "unsupported at 3"), (@"(a)\1", "ok"), (@"(?<n>a)\k<n>", "ok"), (@"\1(a)", "ok"),
+        ];
+        Assert.All(rows, r => Assert.Equal(r.Reading, RegexPattern.Check(r.Pattern, backtracking: true) is { } f ? RegexPattern.Words(f.Kind, f.At) : "ok"));
+        var program = new StringBuilder("patterns = [\n");
+        foreach (var (p, _) in rows)
+        {
+            program.Append("    \"").Append(Escaped(p)).Append("\",\n");
+        }
+
+        program.Append("]\nfor p in patterns {\n    match Regex.New(p, backtracking: true) {\n        Regex re => print(\"ok\")\n"
+            + "        RegexError e => print(e)\n    }\n}\n");
+        var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], toolchain.Runtime, testBuild: true);
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-backtracking-errors"));
+        Assert.Equal((0, ""), (code, error));
+        Assert.Equal(rows.Select(r => r.Reading), output);
+    }
+
+    /// <summary>The groups of a pattern the tests generate: its <c>(</c>s that open no <c>(?</c>.</summary>
+    private static int Groups(string pattern) => Enumerable.Range(0, pattern.Length)
+        .Count(i => pattern[i] == '(' && (i == 0 || pattern[i - 1] != '\\') && (i + 1 >= pattern.Length || pattern[i + 1] != '?'))
+        + pattern.Split("(?<n>").Length - 1;
+
+    /// <summary>
+    /// A program that runs every pattern on each engine <paramref name="engines"/> names, a Kurz list of the flag's values, and
+    /// prints for each text the line <see cref="Walked"/> writes of .NET's matches, held to <paramref name="expected"/> under both
+    /// runtimes, the fenced one among them.
+    /// </summary>
+    private void HoldToNet(List<(string Pattern, int Groups)> patterns, List<string> texts, List<string> expected, string engines, string name, int perPattern)
+    {
         var program = new StringBuilder("patterns = [\n");
         foreach (var (p, _) in patterns)
         {
@@ -195,10 +310,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             program.Append("    \"").Append(Escaped(t)).Append("\",\n");
         }
 
-        program.Append("""
-            ]
+        program.Append("]\nengines = ").Append(engines).Append("""
+
             for k in 0..<patterns.Count {
-                match Regex.New(patterns[k]) {
+                for engine in engines {
+                match Regex.New(patterns[k], backtracking: engine) {
                     Regex re => {
                         for t in texts {
                             mut line = ""
@@ -226,6 +342,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     }
                     RegexError e => print(e)
                 }
+                }
             }
 
             """);
@@ -233,12 +350,12 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         {
             var compilation = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], runtime, testBuild: true);
             Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
-            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-matches" + suffix));
+            var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, name + suffix));
             Assert.Equal((0, ""), (code, error));
             Assert.Equal(expected.Count, output.Count);
             for (var i = 0; i < expected.Count; i++)
             {
-                var (p, _) = patterns[i / texts.Count];
+                var (p, _) = patterns[i / (texts.Count * perPattern)];
                 Assert.True(expected[i] == output[i], $"`{p}` on `{texts[i % texts.Count]}`: .NET finds `{expected[i]}`, the program `{output[i]}`");
             }
         }
@@ -430,8 +547,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G1 to G4: a use of a name of regular expressions that the build refuses, where it stands: a pattern written as a literal that
     /// does not build (G3), at the literal, whatever line the call starts on, but for a construct of Rust's syntax that the build does not
-    /// hold (G4), which is <c>not supported</c> where it is the pattern's first error, as the backtracking engine (G2) is; a function of <c>Regex</c> other than <c>New</c>; a pattern that is no literal, whose
-    /// call gives <c>Regex | RegexError</c>; and a file's own type, function, variable or parameter of one of the four names (V9),
+    /// hold (G4), which is <c>not supported</c> where it is the pattern's first error; a literal checked for the engine its flag
+    /// names (G2), and not checked where the flag is no literal; a function of <c>Regex</c> other than <c>New</c>; a pattern that is no
+    /// literal, whose call gives <c>Regex | RegexError</c>; and a file's own type, function, variable or parameter of one of the four names (V9),
     /// while a field takes the name.
     /// </summary>
     [Theory]
@@ -446,9 +564,14 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Regex.New(\"(?u)a\").IsMatch(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.New(\"(?R)a\").IsMatch(\"a\"))\n", "", 1)]
     [InlineData("print(Regex.New(r\"a)\\p{L}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // the first error of the pattern decides
-    [InlineData("print(Regex.New(\"a\", backtracking: true).IsMatch(\"a\"))\n", "", 1)] // G2: the backtracking engine
-    [InlineData("b = false\nprint(Regex.New(\"a\", backtracking: b).IsMatch(\"a\"))\n", "", 2)] // not the literal `false`
-    [InlineData("print(Regex.New(\"a\", true).IsMatch(\"a\"))\n", "", 1)] // the flag by its place, the second argument
+    [InlineData("print(Regex.New(r\"(a)\\1\", backtracking: true).IsMatch(\"aa\"))\n", "", 0)] // G2: the backtracking engine takes it
+    [InlineData("print(Regex.New(r\"(a)\\1\", true).IsMatch(\"aa\"))\n", "", 0)] // the flag by its place, the second argument
+    [InlineData("print(Regex.New(r\"(?<=a)b(?!c)(?>d)\", true).IsMatch(\"abd\"))\n", "", 0)]
+    [InlineData("print(Regex.New(r\"(a)\\1\", false).IsMatch(\"aa\"))\n", "regex-invalid", 1)] // the linear engine does not
+    [InlineData("print(Regex.New(r\"\\2(a)\", true).IsMatch(\"aa\"))\n", "regex-invalid", 1)] // no group 2
+    [InlineData("print(Regex.New(r\"\\k<b>(?<a>x)\", true).IsMatch(\"aa\"))\n", "regex-invalid", 1)] // no group `b`
+    [InlineData("b = true\nRegex re = Regex.New(r\"(a)\\1\", backtracking: b)\nprint(re)\n", "unlisted-case", 2)] // a flag that is no literal: checked when it runs (G3)
+    [InlineData("b = false\nmatch Regex.New(r\"(a)\\1\", backtracking: b) {\n    Regex re => print(re)\n    RegexError e => print(e)\n}\n", "", 0)]
     [InlineData("print(Regex.New(\"a\", false).IsMatch(\"a\"))\n", "", 0)]
     [InlineData("print(Regex.New(\"a\", backtracking: false).IsMatch(\"a\"))\n", "", 0)]
     [InlineData("print(Regex.Make(\"a\"))\n", "unknown-name", 1)] // V10: `New` is the one function

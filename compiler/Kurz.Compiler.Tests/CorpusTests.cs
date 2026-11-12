@@ -64,7 +64,6 @@ public sealed class CorpusTests
     private static readonly Dictionary<string, string> UnsupportedByConstruct = new(StringComparer.Ordinal)
     {
         ["classes/static-reads-first-read.kz"] = "a `static` field whose initial value is no constant (K18)",
-        ["regex/backtracking.kz"] = "the backtracking engine, `backtracking: true` of `Regex.New` (G2)",
     };
 
     private static bool IsNotSupported(Diagnostic d) => d.Kind == DiagnosticKind.NotSupported;

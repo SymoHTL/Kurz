@@ -42,6 +42,17 @@ internal sealed class RegexPattern
     private int capture;
     private int decimalAt;
 
+    // the backtracking engine's (G2): whether the pattern is built for it; its backreferences, each by its node, the position of
+    // its `\`, and the group's number, or -1 with its name; and what an escape that is one gave
+    private readonly bool backtracking;
+    private readonly List<int> refNode = [];
+    private readonly List<int> refAt = [];
+    private readonly List<int> refNumber = [];
+    private readonly List<string> refName = [];
+    private int escStart;
+    private int escRef;
+    private string escName = "";
+
     // the levels of Rust's `NestLimiter`: each node of Rust's syntax tree that counts one, by its start, its height and its children
     private readonly List<int> nestStart = [];
     private readonly List<int> nestHeight = [];
@@ -86,20 +97,22 @@ internal sealed class RegexPattern
     private int setNest;
     private int setStart;
 
-    private RegexPattern(string pattern)
+    private RegexPattern(string pattern, bool backtracking)
     {
+        this.backtracking = backtracking;
         text = pattern;
         p = Encoding.UTF8.GetBytes(pattern);
         n = p.Length;
     }
 
     /// <summary>
-    /// The error <c>Regex.New(pattern)</c> gives, or null where it builds; with the words of the construct where the error is one of
-    /// Rust's syntax that the build does not hold (<see cref="Unbuilt"/>).
+    /// The error <c>Regex.New(pattern)</c> gives, or with <paramref name="backtracking"/> <c>Regex.New(pattern, backtracking:
+    /// true)</c>, or null where it builds; with the words of the construct where the error is one of Rust's syntax that the build does
+    /// not hold (<see cref="Unbuilt"/>).
     /// </summary>
-    public static (Kind Kind, int At, string? Unbuilt)? Check(string pattern)
+    public static (Kind Kind, int At, string? Unbuilt)? Check(string pattern, bool backtracking = false)
     {
-        var r = new RegexPattern(pattern);
+        var r = new RegexPattern(pattern, backtracking);
         r.Build();
         return r.failKind < 0 ? null : ((Kind)r.failKind, r.failAt, r.unbuilt);
     }
@@ -121,6 +134,12 @@ internal sealed class RegexPattern
             return;
         }
 
+        Refs();
+        if (failKind >= 0)
+        {
+            return;
+        }
+
         if (usesWord)
         {
             ranges += CaseTables.RegexWord.Length;
@@ -130,6 +149,25 @@ internal sealed class RegexPattern
         if (16 * size + 4 * (long)ranges > Bound)
         {
             Fail(2, 0);
+        }
+    }
+
+    /// <summary>
+    /// The backreferences, resolved once every group is known, as .NET resolves <c>\2(a)(b)</c>: a number no group has and a name no
+    /// group has are <c>Syntax</c> at the <c>\</c>, the first such one in the pattern.
+    /// </summary>
+    private void Refs()
+    {
+        for (var i = 0; i < refNode.Count; i++)
+        {
+            var group = refNumber[i] >= 0 ? refNumber[i] : names.IndexOf(refName[i], 1);
+            if (group < 0 || group >= names.Count)
+            {
+                Fail(0, refAt[i]);
+                return;
+            }
+
+            na[refNode[i]] = group;
         }
     }
 
@@ -169,6 +207,8 @@ internal sealed class RegexPattern
             4 => zero[b],
             5 or 6 => Enumerable.Range(a, b).All(i => zero[kids[i]]),
             7 or 8 => c == 0 || zero[a],
+            10 => true,
+            11 => zero[b],
             _ => false,
         };
         kind.Add(k);
@@ -486,13 +526,16 @@ internal sealed class RegexPattern
         groupConcat.RemoveAt(g);
         groupBranches.RemoveAt(g);
         groupAlt.RemoveAt(g);
-        Push(index < 0 ? child : Node(4, index, child, 0), NestOf(open, [childNest]), open);
+        var node = index >= 0 ? Node(4, index, child, 0) : index == -6 ? Node(11, 0, child, 0) : index <= -2 ? Node(10, -2 - index, child, 0) : child;
+        Push(node, NestOf(open, [childNest]), open);
         return true;
     }
 
     /// <summary>
     /// Rust's <c>parse_group</c>: a look-around is <c>Unsupported</c> at the <c>(</c>, as Kurz reads an atomic group <c>(?&gt;</c>
-    /// (G4); 1 for a group, its capture in <see cref="capture"/> (-1 for none), 0 for flags alone and -1 for an error.
+    /// (G4), but for the backtracking engine, which takes them (G2); 1 for a group, its capture in <see cref="capture"/> (-1 for
+    /// none, and for the backtracking engine -2 for <c>(?=</c>, -3 <c>(?!</c>, -4 <c>(?&lt;=</c>, -5 <c>(?&lt;!</c> and -6
+    /// <c>(?&gt;</c>), 0 for flags alone and -1 for an error.
     /// </summary>
     private int Group()
     {
@@ -501,15 +544,23 @@ internal sealed class RegexPattern
         Skip();
         if (Starts("?=") || Starts("?!") || Starts("?<=") || Starts("?<!") || Starts("?>"))
         {
-            Fail(1, open);
-            return -1;
+            if (!backtracking)
+            {
+                Fail(1, open);
+                return -1;
+            }
+
+            var look = Starts("?=") ? 0 : Starts("?!") ? 1 : Starts("?<=") ? 2 : Starts("?<!") ? 3 : 4;
+            at += look is 2 or 3 ? 3 : 2;
+            capture = -2 - look;
+            return 1;
         }
 
         var inner = at;
         if (Starts("?P<") || Starts("?<"))
         {
             at += p[at + 1] == 80 ? 3 : 2;
-            var name = Name();
+            var name = Name(true);
             if (failKind >= 0)
             {
                 return -1;
@@ -539,9 +590,10 @@ internal sealed class RegexPattern
 
     /// <summary>
     /// Rust's <c>parse_capture_name</c>: the name's first character is <c>_</c> or alphabetic, and a later one also <c>.</c>,
-    /// <c>[</c>, <c>]</c> or numeric (<c>is_capture_char</c>); an empty name and a name given twice are <c>Syntax</c> at its start.
+    /// <c>[</c>, <c>]</c> or numeric (<c>is_capture_char</c>); an empty name, and a group's name given twice, are <c>Syntax</c> at its
+    /// start. A backreference's name, <paramref name="fresh"/> false, names a group that has it.
     /// </summary>
-    private string Name()
+    private string Name(bool fresh)
     {
         if (at >= n)
         {
@@ -571,7 +623,7 @@ internal sealed class RegexPattern
 
         var name = Encoding.UTF8.GetString(p, start, at - start);
         at++;
-        if (name.Length == 0 || names.Contains(name))
+        if (name.Length == 0 || (fresh && names.Contains(name)))
         {
             Fail(0, start);
             return "";
@@ -828,6 +880,17 @@ internal sealed class RegexPattern
         return !digits ? -1 : big ? -2 : value;
     }
 
+    /// <summary>A backreference's node, its group resolved by <see cref="Refs"/> once every group is known.</summary>
+    private int Reference()
+    {
+        var node = Node(9, 0, (flags & 1) != 0 ? 1 : 0, 0);
+        refNode.Add(node);
+        refAt.Add(escStart);
+        refNumber.Add(escRef);
+        refName.Add(escName);
+        return node;
+    }
+
     private int Primitive()
     {
         int c = p[at];
@@ -856,6 +919,7 @@ internal sealed class RegexPattern
                 0 => -1,
                 1 => Literal(escCp),
                 2 => ClassNode(escSet),
+                4 => Reference(),
                 _ => Node(3, escCp, 0, 0),
             };
         }
@@ -869,11 +933,14 @@ internal sealed class RegexPattern
     /// Rust's <c>parse_escape</c>: 1 for a character in <see cref="escCp"/>, 2 for a class in <see cref="escSet"/>, 3 for an assertion
     /// in <see cref="escCp"/> (0 <c>\A</c>, 1 <c>\z</c>, 4 <c>\b</c>, 5 <c>\B</c>, 6 <c>\b{start}</c> and <c>\&lt;</c>, 7
     /// <c>\b{end}</c> and <c>\&gt;</c>, 8 <c>\b{start-half}</c>, 9 <c>\b{end-half}</c>) and 0 for an error; a backreference is
-    /// <c>Unsupported</c> at the <c>\</c>, the backtracking engine's (G4), and so is <c>\k</c>.
+    /// <c>Unsupported</c> at the <c>\</c>, the backtracking engine's (G4), and so is <c>\k</c>. For the backtracking engine (G2), 4 for a
+    /// backreference: <c>\</c> and a digit from 1 on, the group of the number its digits write, or <c>\k&lt;name&gt;</c>, in
+    /// <see cref="escRef"/>, -1 with the name in <see cref="escName"/>.
     /// </summary>
     private int Escape()
     {
         var start = at;
+        escStart = at;
         at++;
         if (at >= n)
         {
@@ -882,6 +949,45 @@ internal sealed class RegexPattern
         }
 
         int c = p[at];
+        if (backtracking && c >= 49 && c <= 57)
+        {
+            var number = 0;
+            while (at < n && p[at] >= 48 && p[at] <= 57)
+            {
+                if (number < 100000000)
+                {
+                    number = number * 10 + p[at] - 48;
+                }
+
+                at++;
+            }
+
+            escRef = number;
+            escName = "";
+            return 4;
+        }
+
+        if (backtracking && c == 107)
+        {
+            at++;
+            if (at >= n || p[at] != 60)
+            {
+                Fail(0, start);
+                return 0;
+            }
+
+            at++;
+            var name = Name(false);
+            if (failKind >= 0)
+            {
+                return 0;
+            }
+
+            escRef = -1;
+            escName = name;
+            return 4;
+        }
+
         if ((c >= 48 && c <= 57) || c == 107)
         {
             Fail(1, start);
@@ -1386,11 +1492,19 @@ internal sealed class RegexPattern
         AddItem([lo, escCp], -1, first);
     }
 
+    /// <summary>A backreference inside a class is <c>Unsupported</c> at its <c>\</c>, as Rust's parse reads one there.</summary>
     private int ClassItem()
     {
         if (p[at] == 92)
         {
-            return Escape();
+            var r = Escape();
+            if (r == 4)
+            {
+                Fail(1, escStart);
+                return 0;
+            }
+
+            return r;
         }
 
         escCp = Decode(p, at);
@@ -1606,12 +1720,12 @@ internal sealed class RegexPattern
             return 0;
         }
 
-        if (k <= 3)
+        if (k <= 3 || k == 9)
         {
             return 1;
         }
 
-        if (k == 4)
+        if (k is 4 or 10 or 11)
         {
             return Cap(2 + Size(nb[node]));
         }
