@@ -59,9 +59,6 @@ public sealed partial class Checker
     private static bool SeenBaseMethod(DataSymbol b, string name) =>
         b.Chain.Any(s => (s.Declaration.Members ?? []).OfType<FunctionDeclaration>().Any(m => m.Name == name && (m.Modifiers & Modifiers.Pub) != 0));
 
-    /// <summary>D6: whether the data type derives from another or another derives from it.</summary>
-    private bool InFamily(DataSymbol symbol) => symbol.Base is not null || dataDeclared.Any(other => ReferenceEquals(other.Base, symbol));
-
     /// <summary>
     /// D16, K7: the methods of a name a call on a value of the data type picks from (F13): its own, and those of each base up the chain
     /// that no method nearer the type has the parameter types of, so that an override stands for what it overrides; null where none has one.
@@ -80,6 +77,13 @@ public sealed partial class Checker
             if (symbol.Base is { } b)
             {
                 TakeBaseBodyFields(symbol, b);
+
+                // a field of the type's primary constructor named like a `pub` method of a base's body is `redeclared`, as a field of its
+                // body is; a private one it does not see (V9, F9, D16)
+                foreach (var p in (symbol.Declaration.PrimaryConstructor ?? []).Where(p => SeenBaseMethod(b, p.Name)))
+                {
+                    Report(ErrorIds.Redeclared, p.Line, $"`{p.Name}` is a method of a base of `{symbol.Name}` already (V9, D16)");
+                }
             }
 
             if (!dataBodies.Contains(symbol))
@@ -102,13 +106,13 @@ public sealed partial class Checker
 
             foreach (var member in members.Where(m => m is not FieldDeclaration))
             {
-                if (member is FunctionDeclaration f && UnreadDataMethod(symbol, f) is not { } construct)
+                if (member is FunctionDeclaration f && UnreadDataMethod(f) is not { } construct)
                 {
                     DeclareDataMethod(symbol, f);
                 }
                 else
                 {
-                    NotSupported(member.Line, member is FunctionDeclaration refused ? UnreadDataMethod(symbol, refused)! : member switch
+                    NotSupported(member.Line, member is FunctionDeclaration refused ? UnreadDataMethod(refused)! : member switch
                     {
                         ConstructorDeclaration => "a constructor in the body of a data type (D16, K14)",
                         _ => "a member of the body of a data type other than a method or a field (D16)",
@@ -123,7 +127,8 @@ public sealed partial class Checker
     /// them, its fields of the body among them, then the type's own, so that a block of the type starts as a block of its base does and
     /// each type's fields of the primary constructor and of the body stand together, the base's first (§4, the owner, 2026-11-12, issue
     /// 455, comment 6819137865, H2 (b)). The resolution copied the base's fields before any body was declared; a field of the type's
-    /// primary constructor named like a field of a base's body is <c>redeclared</c> (V9).
+    /// primary constructor named like a field of a base's body is <c>redeclared</c> (V9), and one named like a <c>pub</c> method of a
+    /// base's body is refused where the bodies are declared (<see cref="DeclareDataBodies"/>).
     /// </summary>
     private void TakeBaseBodyFields(DataSymbol symbol, DataSymbol b)
     {
@@ -219,12 +224,11 @@ public sealed partial class Checker
     }
 
     /// <summary>The part of a method of a data body that the checker does not read, or null where it reads all of it.</summary>
-    private string? UnreadDataMethod(DataSymbol symbol, FunctionDeclaration f) => f switch
+    private static string? UnreadDataMethod(FunctionDeclaration f) => f switch
     {
         { Property: true } => "a property of a data type, which section 14 leaves open (D16, K7)",
         { Name: "Equals" or "GetHashCode" } => $"a method named `{f.Name}` of a data type, which section 14 leaves open (D16, K5)",
         _ when (f.Modifiers & Modifiers.Static) != 0 => "a `static` method of a data type (D16, K19)",
-        _ when (f.Modifiers & Modifiers.Virtual) != 0 && !InFamily(symbol) => "a `virtual` method of a data type that derives from none and from which none derives (D16, K7)",
         _ when (f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut | Modifiers.Virtual | Modifiers.Override)) != 0 => $"the modifier `{(f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut | Modifiers.Virtual | Modifiers.Override)).ToString().ToLowerInvariant()}` of a method of a data type (D16, F9)",
         { Name: "Text" } when (f.Modifiers & Modifiers.Mut) != 0 => "a `mut` method named `Text` of a data type (D16, A5)",
         _ when f.TypeParameters.Count > 0 => "a method with type parameters of its own (section 4, T19)",
