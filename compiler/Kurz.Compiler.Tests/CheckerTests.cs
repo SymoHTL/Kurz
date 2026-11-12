@@ -5409,7 +5409,6 @@ public sealed class CheckerTests
     [InlineData(2, "D16, F9", "data D(int X) {\n    internal int Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, V2", "data D(int X) {\n    mut Y = 1\n}\n\nprint(1)")]
     [InlineData(2, "D16, K14", "data D(int X) {\n    pub D() : this(1) { }\n}\n\nprint(1)")]
-    [InlineData(2, "D16, K7", "data D(int X) {\n    pub virtual int Get() => X\n}\n\nprint(1)")]
     [InlineData(2, "D16, F9", "data D(int X) {\n    prot int Get() => X\n}\n\nprint(1)")]
     [InlineData(2, "D16, A5", "data D(int X) {\n    pub mut string Text() => \"d\"\n}\n\nprint(1)")]
     [InlineData(2, "section 4, T19", "data D(int X) {\n    pub T Id<T>(T v) => v\n}\n\nprint(1)")]
@@ -5421,10 +5420,10 @@ public sealed class CheckerTests
     {
         // D16: what a body holds beside its methods and fields, a method or a field with what this build does not read, and a body it does
         // not read; section 14 leaves open a property, `Equals` and `GetHashCode`, and a `mut` method on an item of a list (question 1b);
-        // `virtual` on a type that derives from none and from which none derives (question 6), a `static` method (question 3), a field of a type
-        // without a primary constructor, a `static` field, an `internal` one, one without a written type, a constructor, `prot`, a method's
-        // own type parameters, a `mut` `Text`, the body of a generic type, a member read through the type's name and a method named without
-        // a call are what this build does not read; such a field without `=` is `not supported` too, before `field-unassigned`
+        // a `static` method (question 3), a field of a type without a primary constructor, a `static` field, an `internal` one, one without
+        // a written type, a constructor, `prot`, a method's own type parameters, a `mut` `Text`, the body of a generic type, a member read
+        // through the type's name and a method named without a call are what this build does not read; such a field without `=` is `not
+        // supported` too, before `field-unassigned`
         NotSupportedAt(line, rule, program);
     }
 
@@ -5471,8 +5470,8 @@ public sealed class CheckerTests
         // of a derived type's body reads the fields of every primary constructor and its own body's above it, and a base's field of the
         // body, computed after it in a class's order, is no name there (V10); a field of the derived type's body named like a field of a
         // base or a `pub` method of a base's body, a method of it named like a field of a base, and a field of its primary constructor named
-        // like a base's field of the body, are `redeclared` (V9). The base and the control derive and override as the rules let them, with
-        // no error.
+        // like a base's field of the body or a `pub` method of a base's body, are `redeclared` (V9). The base and the control derive and
+        // override as the rules let them, with no error.
         const string a = "data A(int X) {\n    pub int P = X * 2\n    int Hidden = 1\n\n    pub virtual mut void Bump() {\n        X = X + 1\n    }\n\n    pub virtual int Get() => X\n\n    pub int Plain() => X\n\n    pub int Shown() => Own() + Hidden\n\n    int Own() => 1\n}\n\n";
         const string tail = "}\n\nprint(B(1, 2))\n";
         Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Q = X + Y\n\n    pub override mut void Bump() {\n        Y = Y + 1\n    }\n\n    pub override int Get() => Y + P\n}\n\nmut b = B(1, 2)\nb.Bump()\nprint(b.Get() + b.Plain() + b.Shown() + b.Q)\n"));
@@ -5489,9 +5488,12 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int P) : A\n\nprint(B(1, 2))\n"));
         Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Own = Y\n\n    pub int Next() => Own + 1\n" + tail));
         Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Plain = Y\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int Plain) : A\n\nprint(B(1, 2))\n"));
+        Assert.Empty(Errors(a + "data B(int Own) : A\n\nprint(B(1, 2))\n"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\ndata S(int Y) : R\n\nprint(S(1, 2).Get())\n"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\nprint(R(1).Get())\n"));
         Assert.Empty(Errors("data R(int X) {\n    pub virtual int Get() => X\n}\n\ndata S(int Y) : R {\n    pub override int Get() => Y\n}\n\nprint(S(1, 2).Get())\n"));
+        Assert.Empty(Errors("data R(int X) {\n    pub virtual int Get() => X\n}\n\nprint(R(1).Get())\n"));
     }
 
     [Fact]

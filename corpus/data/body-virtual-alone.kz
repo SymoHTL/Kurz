@@ -1,0 +1,16 @@
+// expect: output
+// | 4
+// | 8
+// | A { X = 3 }
+// rules: D16
+
+data A(int X) {
+    pub virtual int Get() => X + 1
+
+    pub int Twice() => Get() * 2
+}
+
+a = A(3)
+print(a.Get())
+print(a.Twice())
+print(a)
