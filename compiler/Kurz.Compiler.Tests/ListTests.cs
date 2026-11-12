@@ -2493,7 +2493,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // the body declares in `print`, in an interpolation, in the text of a value that holds one and of a list (A5), a `mut` method on a
     // `mut` field of an instance (K2), a method on a value read from that field that replaces the field while it runs, and a `mut`
     // method on a value inside an instance's block that replaces the instance holding it while it runs, whose place that instance's read
-    // keeps (K2)
+    // keeps (K2), and one on a `mut` field of an instance that assigns that field while it runs, whose writes land in the new value
+    // (D16)
     private const string DataBodies = """
         data Counter(int Count, string Name) {
             pub mut void Increment() {
@@ -2543,6 +2544,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 h.In = Box(Counter(9, "m"))
                 Count = Count + 1
             }
+
+            pub mut void Reset(Box b) {
+                keep = Name
+                b.D = Counter(5, "r{1}")
+                Count = Count + 1
+                Name = "{Name}+{keep}"
+            }
         }
 
         data Outer(Counter C, List<string> Tags)
@@ -2584,6 +2592,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         hg = hd
         hd.In.D.Moved(hg)
         print(hd.In.D)
+        bx.D.Reset(bx)
+        print(bx.D)
         """;
 
     private static readonly string[] DataBodiesPrint =
@@ -2603,6 +2613,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "z!=2", // the value read from the instance's field, which the read holds while the method replaces the field (K2)
         "x",
         "<m=9>", // the instance the method put in place of the one that held its receiver, whose block the read kept for the write (K2)
+        "<r1+x=6>", // the value the method assigned to the field it was called on, which its writes reach through the place its call took (D16)
     ];
 
     // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets
