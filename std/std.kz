@@ -6133,11 +6133,12 @@ pub long HexDecode(byte* text, long count, byte* digits, mut byte* made, mut lon
 // The failure of HTTP, a case of its own beside the network's `IoError`, and its kinds (design record,
 // section 12: the owner, 2026-10-31, "HttpError + record's rule", and 2026-11-01, Q4 (a)), types every
 // file sees (W1, W2). Its text is its detail alone, which the body gives (the owner, 2026-11-02, Q15 (a):
-// "`data HttpError` declares `Text()`, which prints its detail"; A5, D16).
+// "`data HttpError` declares `Text()`, which prints its detail"; A5, D16), `virtual`, so that a type of a program derived from
+// it gives its own text by `override` (the owner, 2026-11-12, issue 457, comment 6833680029, "Yes, virtual"; D6, D16).
 pub enum HttpKind { Protocol, TooLarge, Status, Unsupported }
 
 pub data HttpError(HttpKind Kind, string Detail) {
-    pub string Text() => Detail
+    pub virtual string Text() => Detail
 }
 
 // The headers of a request or a response, one ordered list of names and values (design record, section 12:
