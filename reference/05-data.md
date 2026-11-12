@@ -1069,7 +1069,11 @@ method of its type by its name alone and a field passed as `mut` are `mut-requir
 called on a `mut` variable, on a path of `data` fields from one and on a `mut` field of an instance
 (M5), and §14 leaves its call on an item of a list or a value of a map open. Its value is what its call
 takes as `mut` (M7), so a read of that value that the call's arguments still hold is
-`changed-while-held`. A method takes no name of a field of its type, and inside a method a parameter or
+`changed-while-held`. Its call takes its receiver, the place of its value, before its arguments (F12),
+and a `mut` method on a `mut` field of an instance writes into the place its call took: where an
+argument replaces the instance that held the field, into that field of the old instance, and where
+an argument assigns the field itself, into the new value, as C# writes through `ref this` (§4, the
+owner, 2026-11-12, issue 39, comment 6819138235, item 13). A method takes no name of a field of its type, and inside a method a parameter or
 a variable takes no name of a member of its type (`redeclared`, V9), and a `Text()` without `pub`
 gives no text to `print`, an interpolation or `string.Join` (X6), inside its type too (`not-visible`, A9)
 *(assumed, §4: those readings)*.
@@ -1099,6 +1103,29 @@ data User(int Id, string Name) {
 u = User(1, "Ann")
 print(u)
 print("got {u}")
+```
+
+Case: [values/mut-method-place.kz](../corpus/values/mut-method-place.kz)
+```kurz
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+class H(mut Inner In)
+
+int Replace(H h) {
+    h.In = Inner(D(5, "new{2}"))
+    return 1
+}
+
+top = H(Inner(D(1, "old{1}")))
+top.In.V.Add(Replace(top))
+print(top.In.V.N)
+print(top.In.V.S)
 ```
 
 ### D17 (decided, §4) How sets of flags are combined
