@@ -969,8 +969,8 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_wait_with_output_whose_read_fails_leaves_the_bytes_the_file_read_ahead_to_the_file()
     {
-        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a `WaitWithOutput()` that gives an `IoError` takes
-        // none of the bytes the pipe's `File` read ahead, so that the program reads them through the `File` after the error. The child
+        // S19 (the owner, 2026-11-12, issue 174, (a), the bytes given back): a `WaitWithOutput()` that gives an `IoError` gives the
+        // bytes the pipe's `File` read ahead back to it, so that the program reads them through the `File` after the error. The child
         // writes `abc`, of which the program takes one byte through the buffer of S24, then reads its input to the end, which the wait
         // closes first (Q6), and writes `d`, whose read fails; a wait that took the bytes ahead would leave the `File` to read `d`
         var text = Program("""
@@ -1005,9 +1005,61 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void A_wait_with_output_that_times_out_gives_every_byte_it_read_back_to_each_file_before_the_rest_of_its_pipe()
+    {
+        // S19 (the owner, 2026-11-12, issue 174, (a)): a `WaitWithOutput()` that gives an `IoError`, here `TimedOut`, gives what it
+        // read of each pipe back to that pipe's `File`, before the rest of the pipe, so that a later read sees the output whole, the bytes
+        // the `File` read ahead first (S19's assumed order). The program takes one byte of `abc` through the buffer of S24; the wait
+        // closes the input first (Q6), so that the child writes `def` and `ghi` on its error, which the wait reads, and sleeps past the
+        // bound, where the wait kills it (S20), so that the rest of the pipe is its end, which a later read gives after the bytes given
+        // back. A wait that dropped what it read would leave `bc` and nothing, as the build before the answer did; one that gave nothing
+        // back would leave the same, `bc` read ahead
+        var text = Program("""
+                child = Command.New("sh").Args(["-c", "printf abc; read x; printf def; printf ghi >&2; exec sleep 30"]).Stdin(Stdio.Piped).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Timeout(3s).Spawn()
+                match child.Stdout {
+                    File out => {
+                        mut first = Bytes()
+                        n = out.Fill(mut first)
+                        print(n)
+                        out.Consume(1)
+                    }
+                    null => print("no output")
+                }
+
+                print(Gathered(child))
+                match child.Stdout {
+                    File out => {
+                        mut rest = Bytes()
+                        print(out.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                        mut later = Bytes()
+                        print(out.Read(mut later, 10))
+                        print(string.FromUtf8(later))
+                    }
+                    null => print("no output")
+                }
+
+                match child.Stderr {
+                    File err => {
+                        mut rest = Bytes()
+                        print(err.Read(mut rest, 10))
+                        print(string.FromUtf8(rest))
+                    }
+                    null => print("no error output")
+                }
+            """) + Children;
+        if (Ran(text, "child-spawn-timed-out-gives-back") is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["3", "TimedOut [sh] 0", "5", "bcdef", "0", "", "3", "ghi"], ran.Output);
+        }
+    }
+
+    [Fact]
     public void A_wait_with_output_whose_read_fails_on_the_look_at_its_bound_kills_no_child()
     {
-        // S19, S20 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267): a read that fails on the look a wait takes at
+        // S19 (the owner, 2026-11-11, "Error, no wait", issue 174, comment 6806240267, for the error and no wait) and S20's assumed reading
+        // of it (no kill at the bound): a read that fails on the look a wait takes at
         // its bound, which the runtime here takes at the first look, gives its `IoError`, waits for no child and kills none, as a read
         // that fails before the bound does, so that the child still sleeps, as `/proc` shows. A wait that killed it and waited for none
         // would leave a process that no longer sleeps, as `/proc` shows of the probe `Kill()` ended, the positive control
