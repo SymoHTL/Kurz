@@ -214,18 +214,20 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>
     /// G2: the backtracking engine's own constructs, a backreference by number and by name, the four look-arounds, a look-behind of
     /// any length among them, and the atomic group, match as .NET's do, held to .NET over written rows and 300 generated patterns of
-    /// them, 18 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
+    /// them, 19 texts each: a backreference of a group that took no part fails, one inside its own group reads the group's last text
     /// (<c>(a|b\1)+</c> matches <c>aba</c>), a positive look-around keeps its groups, and nothing backtracks into an atomic group.
-    /// A look-behind reads its content from right to left, as .NET's does: a sequence last first, a repetition greedy to the left,
-    /// an alternation in its order, a backreference ending at the position, a look-ahead inside it forward again and an atomic
-    /// group in the direction it stands in, so that
-    /// <c>(?&lt;=(a+))b</c> over <c>aaab</c> gives group 1 <c>aaa</c> from 0 and <c>(?&lt;=\1(a))b</c> matches <c>aab</c>; written
+    /// A look-behind reads its content from right to left, as .NET's does: a sequence last first, a repetition taken toward the
+    /// text's start with its greed or laziness, an alternation in its order, a backreference ending at the position, a look-ahead
+    /// inside it forward again and an atomic group in the direction it stands in, so that <c>(?&lt;=(a+))b</c> over <c>aaab</c>
+    /// gives group 1 <c>aaa</c> from 0 and <c>(?&lt;=\1(a))b</c> matches <c>aab</c>; the match itself follows that reading, so that
+    /// <c>(?&lt;=(?&gt;a+)a)b</c> matches <c>aaab</c> and <c>(?&lt;=(a+))b\1</c> matches <c>baaa</c> in <c>aaabaaa</c>; written
     /// rows and generated ones put groups inside it. The generator puts no repetition of what can match nothing. Under
     /// <c>(?i)</c> a backreference compares by the simple case folding, the flag in force at the backreference deciding
     /// (<c>(a)(?i)\1</c> matches <c>aA</c>, <c>(?i)(a)(?-i)\1</c> does not), and an empty look-behind holds at its position
     /// (<c>(?&lt;=)b</c>), as .NET's do; <c>k</c> and the Kelvin sign are one, a row with its own expectation, since .NET
     /// counts positions in UTF-16 units, and so is <c>(a*)*</c> on <c>aa</c>, where the loop that comes back with no character read
-    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2).
+    /// gives group 1 as <c>aa</c> and .NET's last empty iteration leaves it empty (G2), inside a look-behind too, where
+    /// <c>(?&lt;=(a*)*)b</c> on <c>aab</c> gives group 1 as <c>aa</c> from 0 and .NET's is empty.
     /// </summary>
     [Fact]
     public void The_backtracking_engine_reads_backreferences_look_arounds_and_atomic_groups_as_net_does()
@@ -237,7 +239,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             @"(a)(?i)\1", @"(?i)(a)(?-i)\1", @"(?<=)b", @"(?<=a*)b",
             @"(?<=(a+))b", @"(?<=(a+?))b", @"(?<=(a*)(a*))b", @"(?<=(a|aa))b", @"(?<=(a)\1)b", @"(?<=\1(a))b", @"(?<=(?i)\1(a))b",
             @"(?<=(?=(a))a)b", @"(?<=(?<=(a))b)c", @"(?<=(?>a+))b", @"(?<=(ab|a)+)c", @"(?<=^(a+))b", @"(?<=(\w+) )x",
-            @"(?<=(?>(a+)))b", @"(?<=(?>(a+))a)b",
+            @"(?<=(?>(a+)))b", @"(?<=(?>(a+))a)b", @"(?<=(?>a+)a)b", @"(?<=(a+))b\1", @"(?<=(?>a|ab)c)",
         ];
         string[] atoms = ["a", "b", "[ab]", "(a|b)", "(a+)", "(b*)", @"\1", @"\2", "(?=a)", "(?!b)", "(?<=a)", "(?<!b)", "(?<=a+b?)",
             "(?>a+)", "(?>a|ab)", "a*", "b+?", "(?:ab|a)+", "(a|b)+", "(?=(ab))", "(?!(a))", "(?<=(a+))", "(?<=(a|ab)b?)",
@@ -259,7 +261,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.All(patterns, p => Assert.Null(RegexPattern.Check(p.Item1, backtracking: true)));
         Assert.All(patterns.Take(written.Length), p => Assert.NotNull(RegexPattern.Check(p.Item1))); // the linear engine takes none of the written ones
         string[] fixedTexts = ["", "a", "ab", "aba", "aab b", "say hello hello there", "5 m, 12 kg", "aA", "abab", "abc", "aaab", "Aab", "abac",
-            "hi there x"];
+            "hi there x", "aaabaaa"];
         var texts = fixedTexts.Concat(Enumerable.Range(0, 4).Select(_ => new string(Enumerable.Range(0, random.Next(8)).Select(_ => "aab "[random.Next(4)]).ToArray()))).ToList();
         var expected = new List<string>();
         foreach (var (p, groups) in patterns)
@@ -293,15 +295,27 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 }
             }
 
+            behind = Regex.New(r"(?<=(a*)*)b", backtracking: true)
+            after = behind.Match("aab")
+            if after != null {
+                h = after.Group(1)
+                if h != null {
+                    print("{after.Index},{after.Length},{h.Index},{h.Length}")
+                }
+            }
+
             """.Replace("KELVIN", "\u212A", StringComparison.Ordinal)), [], toolchain.Runtime, testBuild: true); // U+212A
         Assert.True(folded.Program is not null, string.Join("; ", folded.Diagnostics.Sorted));
         var (code, output, error) = Toolchain.Run(toolchain.Build(folded.Program, "regex-backtracking-fold"));
         Assert.Equal((0, ""), (code, error));
         // the Kelvin sign is three bytes, `K` and `k` one each; then `(a*)*` on `aa`, whose group 1 is `aa` on both engines, where
-        // .NET's last iteration reads no character and leaves it empty at 2
-        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2"], output);
+        // .NET's last iteration reads no character and leaves it empty at 2; then the same loop inside a look-behind, `(?<=(a*)*)b`
+        // on `aab`, whose group 1 is `aa` from 0, where .NET's is empty
+        Assert.Equal(["1,4", "0,4", "-", "0,2,0,2", "0,2,0,2", "2,1,0,2"], output);
         var empty = new Regex("(a*)*").Match("aa").Groups[1];
         Assert.Equal((true, 2, 0), (empty.Success, empty.Index, empty.Length));
+        var behindNet = new Regex("(?<=(a*)*)b").Match("aab");
+        Assert.Equal((true, 2, true, 0), (behindNet.Success, behindNet.Index, behindNet.Groups[1].Success, behindNet.Groups[1].Length));
     }
 
     /// <summary>

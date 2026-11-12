@@ -11,35 +11,37 @@ public sealed partial class Emitter
 
     /// <summary>
     /// D2, D7, D11: a data value of the fields in the order of their slots, the base's first, each the argument bound to it or its
-    /// default; then the fields of its body, each computed by its initializer (D16, <see cref="BodyFields"/>).
+    /// default; then the fields of its body, each computed by its initializer (D16, <see cref="BodyFields"/>). A base's fields of the body
+    /// stand between its fields and the type's own (§4, H2 (b)), so the slots of the arguments are the fields of no body, in their order.
     /// </summary>
     private string EmitConstruction(CallExpression c, CallInfo info)
     {
         var type = (DataType)Sub(info.Result);
         var fields = Layout.Fields(type);
-        var arguments = Arguments(c, info, j => fields[j], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false, owned: true);
-        var values = arguments.Select((a, j) => a[(Ir(fields[j]).Length + 1)..]).ToList();
-        values.AddRange(fields.Skip(values.Count).Select(Zero)); // D16: the slots of the body, which no initializer reads before it set them
+        var slots = Enumerable.Range(0, fields.Count).Where(i => type.Symbol.Fields[i].Body is null).ToList();
+        var arguments = Arguments(c, info, j => fields[slots[j]], _ => false, j => FieldDefault(type.Symbol, j), cConvention: false, owned: true);
+        var values = fields.Select(Zero).ToList(); // D16: the slots of the body, which no initializer reads before it set them
+        for (var j = 0; j < arguments.Count; j++)
+        {
+            values[slots[j]] = arguments[j][(Ir(fields[slots[j]]).Length + 1)..];
+        }
+
         return BodyFields(type, Make(type, values), release: false);
     }
 
     /// <summary>
     /// D16: the fields of the body of a value whose other fields are set, each computed in the order of the declarations by the function
     /// of its initializer, which borrows the value and reads the fields above it alone, so that an initializer reads the value of every
-    /// field it names (§4, the owner, 2026-11-12); a plain value is given back with them in place, a block holds them. With
+    /// field it names (§4, the owner, 2026-11-12), the type's own body first and then each base's up its chain, in a class's order (§4,
+    /// issue 455, comment 6808456513, H4); a plain value is given back with them in place, a block holds them. With
     /// <paramref name="release"/> a block's slot lets go of the value it held, a copy's (<see cref="EmitWith"/>); else it held none.
     /// </summary>
     private string BodyFields(DataType type, string value, bool release)
     {
         var fields = Layout.Fields(type);
-        for (var i = 0; i < fields.Count; i++)
+        foreach (var (i, owner) in type.Symbol.Chain.SelectMany(owner => Enumerable.Range(0, fields.Count).Where(i => type.Symbol.Fields[i].Body is not null && ReferenceEquals(type.Symbol.Declaring(type.Symbol.Fields[i]), owner)).Select(i => (i, owner))))
         {
-            if (type.Symbol.Fields[i].Body is null)
-            {
-                continue;
-            }
-
-            var initializer = type.Symbol.Initializers[type.Symbol.Fields[i].Name];
+            var initializer = owner.Initializers[type.Symbol.Fields[i].Name];
             var computed = fn.Value($"call {Ir(fields[i])} {Instance(initializer, NoMap)}({Ir(type)} {value})");
             if (!layout.IsBlock(type))
             {
@@ -153,7 +155,20 @@ public sealed partial class Emitter
                 Store(v, fields[index], FieldPointer(layout.Block(type.Symbol), copy, index));
             }
 
-            return BodyFields(type, copy, release: true);
+            if (!layout.Derived(type.Symbol).Any(d => !ReferenceEquals(d, type.Symbol) && d.Fields.Any(f => f.Body is not null)))
+            {
+                return BodyFields(type, copy, release: true);
+            }
+
+            // D16: the copy is of the type the block holds (§4, the owner, 2026-11-12, issue 455, comment 6819137865, H3 (a)), whose fields of
+            // the body its own initializers compute again
+            var again = Helper($"with.body.{Lower.Mangle(type)}", "void", ["ptr"], () => ByNumber("%a0", type.Symbol, held =>
+            {
+                BodyFields(new DataType(held, []), "%a0", release: true);
+                fn.Return(null);
+            }));
+            fn.Emit($"call void {again}(ptr {copy})");
+            return copy;
         }
 
         for (var i = 0; i < fields.Count; i++)
@@ -611,17 +626,23 @@ public sealed partial class Emitter
         {
             switch (type)
             {
-                case DataType { Symbol.TextMethod: { } text } d:
-                    fn.Return($"%kz.str {fn.Value($"call %kz.str {Instance(text.Real!, NoMap)}({Ir(d)} %a0)")}"); // A5, D16: the `Text()` its body declares
-                    break;
                 case DataType d when layout.IsBlock(d):
                     ByNumber("%a0", d.Symbol, held =>
                     {
+                        if (held.TextMethod is { } own)
+                        {
+                            fn.Return($"%kz.str {fn.Value($"call %kz.str {Instance(own.Real!, NoMap)}(ptr %a0)")}"); // A5, D16: the `Text()` of the type the block holds, its own or a base's
+                            return;
+                        }
+
                         var heldType = new DataType(held, []);
                         var block = layout.Block(held);
                         var fields = Layout.Fields(heldType).Select((f, i) => fn.Value($"load {Ir(f)}, ptr {FieldPointer(block, "%a0", i)}")).ToList();
                         fn.Return($"%kz.str {RecordText(heldType, fields, line)}");
                     });
+                    break;
+                case DataType { Symbol.TextMethod: { } text } d:
+                    fn.Return($"%kz.str {fn.Value($"call %kz.str {Instance(text.Real!, NoMap)}({Ir(d)} %a0)")}"); // A5, D16: the `Text()` its body declares
                     break;
                 case DataType d when IsIoError(d):
                     IoErrorText(d); // S1: its words and its path, in place of A3's text of a data value

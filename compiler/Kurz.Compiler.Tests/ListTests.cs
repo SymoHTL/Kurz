@@ -2494,7 +2494,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     // `mut` field of an instance (K2), a method on a value read from that field that replaces the field while it runs, and a `mut`
     // method on a value inside an instance's block that replaces the instance holding it while it runs, whose place that instance's read
     // keeps (K2), and one on a `mut` field of an instance that assigns that field while it runs, whose writes land in the new value
-    // (D16)
+    // (D16), and one whose argument replaces the instance that holds the field it was called on, so that nothing but the call's count
+    // keeps that instance while the method writes into it (D16)
     private const string DataBodies = """
         data Counter(int Count, string Name) {
             pub mut void Increment() {
@@ -2588,12 +2589,19 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         class Holder(mut Box In)
 
+        int Swap(Holder h) {
+            h.In = Box(Counter(7, "s{1}"))
+            return 1
+        }
+
         hd = Holder(Box(Counter(1, "h")))
         hg = hd
         hd.In.D.Moved(hg)
         print(hd.In.D)
         bx.D.Reset(bx)
         print(bx.D)
+        hd.In.D.Add(Swap(hd))
+        print(hd.In.D)
         """;
 
     private static readonly string[] DataBodiesPrint =
@@ -2614,12 +2622,16 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "x",
         "<m=9>", // the instance the method put in place of the one that held its receiver, whose block the read kept for the write (K2)
         "<r1+x=6>", // the value the method assigned to the field it was called on, which its writes reach through the place its call took (D16)
+        "<s1=7>", // the instance the argument put in place of the one whose field the call took, which the method's writes did not reach (D16)
     ];
 
     // the fields of a `data` body (D16): strings and lists each initializer makes, from the primary fields and the fields above it, a
     // `mut` one a method replaces, which lets go of the string it held while a copy made before keeps its own, a `with` that computes
     // them again, in a plain value and in a block (a type that holds a value of its own type), whose copy lets go of the values its slots
-    // of the body held, and a field of the body that shares the list a primary field holds, computed again by a `with` that replaces it
+    // of the body held, and a field of the body that shares the list a primary field holds, computed again by a `with` that replaces it;
+    // and bodies under inheritance (D16, section 4, H1 to H4): strings of a base's body and of a derived type's, a `mut` override called
+    // through a `mut` variable of the base, which writes into the block a copy made before shares no more, a `virtual` method that reads
+    // both bodies, and a `with` through the base whose copy keeps the type the block holds and lets go of the strings of both bodies
     private const string DataBodyFields = """
         data Tag(string Name, int N) {
             pub string Label = "{Name}#{N}"
@@ -2661,6 +2673,39 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         print(b)
         print(c)
         print(b == Bag(["p", "q"]))
+
+        data Pen(string Ink) {
+            pub string Tip = "{Ink}-tip"
+            pub mut string Log = Tip
+
+            pub virtual string Say() => Tip
+
+            pub virtual mut void Mark(string s) {
+                Log = "{Log}+{s}"
+            }
+        }
+
+        data Brush(string Hair) : Pen {
+            pub string Head = "{Hair}/{Ink}"
+
+            pub override string Say() => "{Head} {Tip}"
+
+            pub override mut void Mark(string s) {
+                Log = "{Log}*{s}"
+            }
+        }
+
+        mut Pen pen = Brush("red", "fox")
+        before = pen
+        pen.Mark("a")
+        print(pen)
+        print(before)
+        print(pen.Say())
+        bluer = pen with { Ink = "blue" }
+        print(bluer)
+        print(pen)
+        Pen plain = Pen("ink")
+        print(plain.Say())
         """;
 
     private static readonly string[] DataBodyFieldsPrint =
@@ -2675,6 +2720,12 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "Bag { Items = [p, q], Same = [p, q], Count = 2 }",
         "Bag { Items = [r], Same = [r], Count = 1 }",
         "true",
+        "Brush { Ink = red, Tip = red-tip, Log = red-tip*a, Hair = fox, Head = fox/red }", // the override the block's type gives (H1, H2)
+        "Brush { Ink = red, Tip = red-tip, Log = red-tip, Hair = fox, Head = fox/red }", // the copy made before keeps its log (M3)
+        "fox/red red-tip",
+        "Brush { Ink = blue, Tip = blue-tip, Log = blue-tip, Hair = fox, Head = fox/blue }", // a value of the type the block holds, both bodies again (H3)
+        "Brush { Ink = red, Tip = red-tip, Log = red-tip*a, Hair = fox, Head = fox/red }",
+        "ink-tip",
     ];
 
     // fields of a function type (R9, F11): a lambda stored by the primary constructor, called through the field and replaced, which lets

@@ -1,0 +1,21 @@
+// expect: output
+// | 6
+// | r1+x
+// rules: D16
+
+data D(int N, string S) {
+    pub mut void Reset(Inner b) {
+        keep = S
+        N = N + 100
+        b.V = D(5, "r1")
+        N = N + 1
+        S = "{S}+{keep}"
+    }
+}
+
+class Inner(mut D V)
+
+box = Inner(D(1, "x"))
+box.V.Reset(box)
+print(box.V.N)
+print(box.V.S)
