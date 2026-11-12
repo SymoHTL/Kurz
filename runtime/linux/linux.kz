@@ -3056,7 +3056,7 @@ pub IoError SpawnFailure(List<string> command, long result, int at) {
 pub void | IoError | ExitError ChildWait(int* state, string program) {
     mut out = List<byte>()
     mut err = List<byte>()
-    long result = WaitSpawned(state, -1, -1, mut out, mut err)
+    long result = WaitSpawned(state, -1, null, -1, null, NoReader, null, mut out, mut err)
     if result < 0 {
         return IoError(ErrorKind(result), ErrorCode(result), program)
     }
@@ -3068,14 +3068,16 @@ pub void | IoError | ExitError ChildWait(int* state, string program) {
 }
 
 // S19: `WaitWithOutput()` on the child at `state`, as `ChildWait` reads it: what the pipes `outFd` and `errFd`
-// still give, -1 where the child's `File` is `null` or closed, read to their ends after the `outCount` and
-// `errCount` bytes their `File` read ahead, at `outAhead` and `errAhead`. A wait that gives an `IoError` puts
-// what it gathered of each pipe, those bytes first, in `keptOut` and `keptErr`, which the caller gives back to
-// each `File` (the owner, 2026-11-12, issue 174, (a)).
-pub ProcessOutput | IoError | ExitError ChildWaitWithOutput(int* state, string program, int outFd, byte* outAhead, long outCount, int errFd, byte* errAhead, long errCount, mut Bytes keptOut, mut Bytes keptErr) {
-    mut out = AheadBytes(outAhead, outCount)
-    mut err = AheadBytes(errAhead, errCount)
-    long result = WaitSpawned(state, outFd, errFd, mut out, mut err)
+// still give, -1 where the child's `File` is `null` or closed, read to their ends after the bytes their `File`
+// read ahead, which `take` gives once it took the lock of the reader at `outReader` and `errReader` (`Drive`),
+// `held` saying whose lock it took, 1 at the first `int` for the output's and at the second for the error's.
+// A wait that gives an `IoError` puts what it gathered of each pipe, those bytes first, in `keptOut` and
+// `keptErr`, which the caller gives back to each `File` whose lock it took (the owner, 2026-11-12, issue 174,
+// (a)), the others' having given it nothing.
+pub ProcessOutput | IoError | ExitError ChildWaitWithOutput(int* state, string program, int outFd, byte* outReader, int errFd, byte* errReader, extern "C" (byte*, long*) => long take, int* held, mut Bytes keptOut, mut Bytes keptErr) {
+    mut out = List<byte>()
+    mut err = List<byte>()
+    long result = WaitSpawned(state, outFd, outReader, errFd, errReader, take, held, mut out, mut err)
     if result < 0 {
         keptOut = out
         keptErr = err
@@ -3106,10 +3108,11 @@ pub void | IoError ChildKill(int* state, string program) {
 }
 
 // The child at `state` waited for, its pipes `outFd` and `errFd` read into `out` and `err` until their ends
-// (`Drive`), under its bound: the status `waitpid` gave, or a failure below 0, -4100 where the bound passed,
-// the child killed and waited for. A child waited for before gives the status it gave, or -4100 again,
-// with what its pipes still give, read to their ends or to the deadline.
-long WaitSpawned(int* state, int outFd, int errFd, mut Bytes out, mut Bytes err) {
+// (`Drive`), each from the wake that took the lock of its reader, at `outReader` and `errReader`, null where
+// none is held, by `take`, which `held` names, under its bound: the status `waitpid` gave, or a failure below
+// 0, -4100 where the bound passed, the child killed and waited for. A child waited for before gives the status
+// it gave, or -4100 again, with what its pipes still give, read to their ends or to the deadline.
+long WaitSpawned(int* state, int outFd, byte* outReader, int errFd, byte* errReader, extern "C" (byte*, long*) => long take, int* held, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
         if state[1] == 2 {
@@ -3142,7 +3145,7 @@ long WaitSpawned(int* state, int outFd, int errFd, mut Bytes out, mut Bytes err)
         fds[2] = outFd
         fds[4] = errFd
         if failure == 0 {
-            failure = Drive(memory, state[0], process, state[1] != 0, deadline >= 0, deadline, false, fds, null, "", false, mut out, mut err)
+            failure = Drive(memory, state[0], process, state[1] != 0, deadline >= 0, deadline, false, fds, outReader, errReader, take, held, null, "", false, mut out, mut err)
         }
 
         if process >= 0 {
@@ -3192,6 +3195,25 @@ Bytes AheadBytes(byte* ahead, long aheadCount) {
     }
 
     return gathered
+}
+
+// S19: the lock of the reader at `reader` tried once by `take`, which never waits on it: where it took it, the
+// bytes the reader held ahead of the program, whose address it wrote at `ahead`, added to `into`, and true.
+bool Took(byte* reader, extern "C" (byte*, long*) => long take, long* ahead, mut Bytes into) {
+    mut long count = -1
+    raw {
+        count = take(reader, ahead)
+        if count > 0 {
+            into.AddRange(AheadBytes(Ptr<byte>(*ahead), count))
+        }
+    }
+
+    return count >= 0
+}
+
+// S19: the `take` of a wait that holds no reader, `Wait()`'s and a run's of `RunCommand`, which never calls it.
+extern "C" long NoReader(byte* reader, long* ahead) {
+    return -1
 }
 
 // The bound of `Timeout(d)` in nanoseconds, as `CommandTimeout` writes it in decimal; a bound below 0 is read
@@ -3873,7 +3895,7 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
         }
 
         if failure == 0 {
-            failure = Drive(memory, pid, process, false, bounded, deadline, true, fds, memory + size - 65536, feed, fed, mut out, mut err)
+            failure = Drive(memory, pid, process, false, bounded, deadline, true, fds, null, null, NoReader, null, memory + size - 65536, feed, fed, mut out, mut err)
             if failure == -4100 {
                 at = 0
             }
@@ -3926,8 +3948,12 @@ long RunCommand(List<string> command, int purpose, mut Bytes out, mut Bytes err,
 // where `poll` or a write fails, or -4100, `TimedOut`, where the bound passed before the child's end, the
 // child killed with `SIGKILL` (S19, S20). `memory` holds the buffer of a read, 65536 bytes, then the room
 // `RunCommand` lays out, and `staging` the buffer of a write. With `owned` a pipe read to its end is closed;
-// without, it is a `File` the program holds, which is left open (S19).
-long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long deadline, bool owned, int* fds, byte* staging, string feed, bool fed, mut Bytes out, mut Bytes err) {
+// without, it is a `File` the program holds, which is left open (S19). A pipe whose reader is at `outReader` or
+// `errReader` is read only once `take` took the lock of that reader, which it tries at each wake and never
+// waits on, and from then on after the bytes the reader held ahead; `held` gets 1 for each lock it took, at
+// the first `int` for the output's and at the second for the error's (S19, the owner, 2026-11-12, issue 174,
+// comment 6821985043, "Try the lock inside the poll").
+long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long deadline, bool owned, int* fds, byte* outReader, byte* errReader, extern "C" (byte*, long*) => long take, int* held, byte* staging, string feed, bool fed, mut Bytes out, mut Bytes err) {
     mut long failure = 0
     raw {
         byte* buffer = memory
@@ -3946,6 +3972,18 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         polled[3] = 1
         polled[4] = process
         polled[5] = 1
+        // S19: a pipe whose reader's lock is still to take, polled from the wake that takes it, the address of the
+        // bytes its reader held ahead given in the 8 bytes after the clock
+        long* ahead = Ptr<long>(memory + 65536 + 120)
+        mut bool outWaits = outReader != null && fds[2] >= 0
+        mut bool errWaits = errReader != null && fds[4] >= 0
+        if outWaits {
+            polled[0] = -1
+        }
+
+        if errWaits {
+            polled[2] = -1
+        }
         // S19: the input, decoded from the command's string into the buffer of a write, piece by piece
         byte* text = Ptr<byte>(feed.Pointer)
         long textCount = long(feed.Bytes.Count)
@@ -3977,6 +4015,20 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
         }
 
         while polling && (pending > 0 || writing || (bounded && !exited)) {
+            // S19: each lock still to take tried once at each wake, the output's first; one another holder holds
+            // is tried again at the next, and its pipe, which that holder reads, is not polled until then
+            if outWaits && Took(outReader, take, ahead, mut out) {
+                outWaits = false
+                held[0] = 1
+                polled[0] = fds[2]
+            }
+
+            if errWaits && Took(errReader, take, ahead, mut err) {
+                errWaits = false
+                held[1] = 1
+                polled[2] = fds[4]
+            }
+
             mut int wait = -1
             if bounded {
                 clock_gettime(1, Ptr<void>(clock))
@@ -4001,6 +4053,12 @@ long Drive(byte* memory, int pid, int process, bool endSeen, bool bounded, long 
                 if late {
                     wait = 0 // a last look at the bound, so that a child that ended before it gives its own status
                 }
+            }
+
+            // S19: while another holder holds a lock, the next wake within 4 ms, so that the lock is tried again
+            // soon after that holder lets go of it
+            if (outWaits || errWaits) && (wait < 0 || wait > 4) {
+                wait = 4
             }
 
             *Ptr<short>(Ptr<byte>(polled) + 6) = 0
