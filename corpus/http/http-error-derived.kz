@@ -1,0 +1,22 @@
+// expect: output
+// | 418 teapot
+// | 418 teapot
+// | teapot
+// | false
+// | 418 gone
+// | short
+// rules: W2
+
+data Coded(int Code) : HttpError {
+    pub override string Text() => "{Code} {Detail}"
+}
+
+data Plain(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e)
+print(e.Text())
+print(e.Detail)
+print(e == HttpError(HttpKind.Status, "teapot"))
+print(e with { Detail = "gone" })
+print(Plain(HttpKind.Protocol, "short", 1))

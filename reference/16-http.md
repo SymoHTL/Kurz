@@ -187,14 +187,19 @@ failure of the network, which stays an `IoError` (S1), neither wrapped in the ot
 `enum HttpKind { Protocol, TooLarge, Status, Unsupported }`. An `HttpError` prints its detail alone,
 `malformed response: no status line`, with no words of its kind (§12, the owner, 2026-11-01, Q4 (a)).
 It gives that text through a `Text()` that `std/` declares in its body, as a `data` type declares its
-text (A5) (§12, the owner, 2026-11-02). `std/` declares that body, `pub string Text() => Detail`, which the compiler reads as the body of any
+text (A5) (§12, the owner, 2026-11-02). `std/` declares that body, `pub virtual string Text() => Detail`, which the compiler reads as the body of any
 `data` type (D16): `print`, a hole of an interpolated string (L6) and `string.Join` (X6) take the text
 of an `HttpError` and of a value that holds one as any other's, an HTTP outcome
 `string | IoError | HttpError` the text of the case it holds (A4), and `e.Text()` is a call of that
-method; a `data` type of a file that derives from `HttpError` is `not supported` at its base, as a body
-in a relation of inheritance is (D16, §14) (§12, the owner, 2026-11-11, "(a) It lapses", issue 457,
-comment 6790380307: the `not supported` the owner chose on 2026-11-02 and 2026-11-03, while the
-compiler read no body of a `data` type, lapses with its cause).
+method (§12, the owner, 2026-11-11, "(a) It lapses", issue 457, comment 6790380307: the `not supported`
+the owner chose on 2026-11-02 and 2026-11-03, while the compiler read no body of a `data` type, lapses
+with its cause). That `Text()` is `virtual` (§12, the owner, 2026-11-12, issue 457, comment
+6833680029, "Yes, virtual"), and a `data` type of a file may derive from `HttpError`, and from every
+`data` type of `std/` with a body, `RegexError` among them, as from one of the file (D6, D16) (§12,
+the same comment, "Every one"): its text is that of its own `Text()`, an `override` of `HttpError`'s,
+or else its detail, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
+*(assumed, §12: that no call of `std/` takes an `HttpError` from a program, so that no derived
+value reaches `std/`)*
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
@@ -207,6 +212,23 @@ Case: [http/http-error-text-call.kz](../corpus/http/http-error-text-call.kz)
 ```kurz
 e = HttpError(HttpKind.Protocol, "malformed response: no status line")
 print(e.Text())
+```
+
+Case: [http/http-error-derived.kz](../corpus/http/http-error-derived.kz)
+```kurz
+data Coded(int Code) : HttpError {
+    pub override string Text() => "{Code} {Detail}"
+}
+
+data Plain(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e)
+print(e.Text())
+print(e.Detail)
+print(e == HttpError(HttpKind.Status, "teapot"))
+print(e with { Detail = "gone" })
+print(Plain(HttpKind.Protocol, "short", 1))
 ```
 
 ### W3 (decided, §12) A server's request sent to another actor moves with its body

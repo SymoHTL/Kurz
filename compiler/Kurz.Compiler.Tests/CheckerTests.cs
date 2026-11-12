@@ -2650,18 +2650,21 @@ public sealed class CheckerTests
     }
 
     [Fact]
-    public void A_data_type_of_the_file_that_derives_from_a_data_type_of_std_with_a_body_is_not_supported_at_its_base()
+    public void A_data_type_of_the_file_may_derive_from_a_data_type_of_std_with_a_body()
     {
-        // D16 with D6: the checker of std/ sees no type of the file that derives from `HttpError`, so it reads that type's body as the body
-        // of a type from which none derives; one error, at the base, and a type that derives from the refused one carries none (E1)
-        var program = "data Mine(int Code) : HttpError\ndata Deeper(int More) : Mine\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n";
-        var refused = Assert.Single(CheckSeeingStd(program).Diagnostics.Items);
-        Assert.Equal((true, 1), (refused.IsNotSupported, refused.Line));
+        // D6 with D16: a data type of the file derives from every data type of std/ with a body, `HttpError` and `RegexError` among
+        // them, as from one of its own (the owner, 2026-11-12, issue 457, comment 6833680029, "Every one"), and overrides the `Text()`
+        // of `HttpError`, which std/ declares `virtual` ("Yes, virtual")
+        Assert.Empty(CheckSeeingStd("data Mine(int Code) : HttpError {\n    pub override string Text() => \"{Code} {Detail}\"\n}\ndata Deeper(int More) : Mine\ndata Bad(string Pattern) : RegexError\n\nprint(Deeper(HttpKind.Status, \"bad\", 3, 4))\nprint(Bad(RegexKind.Syntax, 1, \"(\"))\n").Diagnostics.Items);
 
-        // the positive controls: the same type over an `HttpError` of std/ without its body, and over a data type of the file
-        var bodiless = ListTests.Edited(("std/std.kz", "pub data HttpError(HttpKind Kind, string Detail) {\n    pub string Text() => Detail\n}\n", "pub data HttpError(HttpKind Kind, string Detail)\n"));
-        Assert.Empty(CheckSeeingStd(program, bodiless).Diagnostics.Items);
-        Assert.Empty(CheckSeeingStd("data Base(HttpKind Kind, string Detail)\ndata Mine(int Code) : Base\n\nprint(Mine(HttpKind.Status, \"bad\", 3))\n").Diagnostics.Items);
+        // the checker reads the body of std/'s base as a base's: the `Text()` of `RegexError` is not `virtual`, so an override of it is
+        // `override-without-virtual`, and a `Text()` of a type derived from `HttpError` without `override` is `hides-member` (K7)
+        Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], CheckSeeingStd("data Bad : RegexError {\n    pub override string Text() => \"bad\"\n}\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+        Assert.Equal([(ErrorIds.HidesMember, 2)], CheckSeeingStd("data Mine : HttpError {\n    pub string Text() => \"mine\"\n}\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
+
+        // and a field of the derived type's primary constructor named like a field of `HttpError` is `redeclared`, as below a base of the
+        // file (V9, D16); the first program, whose fields take names of their own, is its positive control
+        Assert.Equal([(ErrorIds.Redeclared, 1)], CheckSeeingStd("data Mine(string Kind) : HttpError\n\nprint(Mine(HttpKind.Status, \"a\", \"b\"))\n").Diagnostics.Items.Select(d => (d.Id, d.Line)));
     }
 
     // ---- files (chapter 13) --------------------------------------------------------------------------------

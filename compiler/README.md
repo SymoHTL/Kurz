@@ -2118,7 +2118,7 @@ and the tests that guard an intrinsic, as N3 reads a test that narrows) and 13 (
 among them, are a package's, and the checker reads a program), 14 (hashes: H1 to H7, the lint of H5 among them), 15 (strings and lists: X1 to X11), 16 (HTTP: W1 for the
 types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, `HttpHeaders`, `HttpRate`, `HttpLimits`, `HttpRequest`,
 `HttpBody`, `HttpResponse`, `HttpWriter`, `HttpServer`, `Uri`, `UriError`, `UriKind`, `Url`, `HttpDate`, `HttpQuery`, `HttpClientOptions`, `HttpResponseMessage` and `HttpClient`, which a program checked with `std/`'s checker, as every build checks it, sees as `std/` declares them, W2, the text of an
-`HttpError` by the body `std/` declares, W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
+`HttpError` by the body `std/` declares, its `Text()` `virtual`, and a `data` type of the file derived from it or from `RegexError`, as from a `data` type of the file (D6, D16), W4, W5 to W7, the reader of a request and its body in `std/`, W8, the writer of a response in `std/`, W9, the server's loop in `std/`, W10, its bounds of time, W12, a `Uri`'s parse, W13 to W16, the client, its pool, its reader of a response, its redirects and the call's time, W17, the escapes `Url` reads and writes, W18, the dates `HttpDate` writes and reads, and W19, the parameters of a query `HttpQuery` holds; the other names of W1 are no types of `std/`, and a
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 16 (regular expressions: G1, the names `Regex`, `Match`,
 `RegexError` and `RegexKind` among those `Checker.Prelude` names, G2's linear engine, G3, whose check of a literal pattern is
 `RegexPattern`, a copy of the standard library's parse and count that `RegexTests` holds to it, G4 and G5), 17 (logging: P1 and P2, a call site's record
@@ -2246,8 +2246,7 @@ unread (R12, R16; K7, M6), the value of a C function that takes `...`, which the
 function does not write, the type of a C function with a type that cannot cross to C, and a data
 type in C's layout (R16, R17); the text of a raw pointer, of a C function value and of a value
 that holds one, which no rule gives, where A4 gives every other value a text derived from its
-type (A4, R10, R17); a `data` type of the file whose base is a `data` type of `std/` with a body,
-`HttpError` among them, whose body `std/`'s checker reads with no type of the file deriving from it (D16, D6, W2); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
+type (A4, R10, R17); of R18, a class of C#'s whose intrinsics the compiler does not build, `X86.Avx2`
 among them, while `Arm.AdvSimd`'s `Add`, which the checker's table holds, is read on every target and
 compiled on none (its test is `false` on x86-64, and on a 64-bit Arm machine a test of it is
 `not supported`, as an intrinsic of a class under `X86` is there), a function of a built class and a lane operation it does not build, an immediate that is

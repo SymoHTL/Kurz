@@ -1,0 +1,10 @@
+// expect: output
+// | syntax at 1
+// | (
+// rules: G3
+
+data Located(string Pattern) : RegexError
+
+r = Located(RegexKind.Syntax, 1, "(")
+print(r)
+print(r.Pattern)
