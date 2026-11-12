@@ -2532,12 +2532,15 @@ close a piped `Stdin` before they wait; and a pipe's `File` has the program as i
 2026-11-11, "All three as built"). `WaitWithOutput()` whose read of a pipe fails gives that `IoError`, with
 the program as its path, at once and waits for no child, so that a later `Wait()` or `Kill()` still reaches
 it (§12, the owner, 2026-11-11, "Error, no wait"). A `WaitWithOutput()` that gives an `IoError`, the failed read's or
-`TimedOut`, takes none of the bytes its `File` read ahead, which stay with the `File`. *(assumed, §12:
+`TimedOut`, gives every byte it read of a pipe back to that pipe's `File`, before the rest of the pipe, so that a later read sees the
+output whole (§12, the owner, 2026-11-12, issue 174, (a)), the bytes the `File` read ahead before those the call read, and a later `WaitWithOutput()` reads the pipe
+whose read failed again, from where the program stopped, since the failed call left it open. *(assumed, §12:
 the results of `Wait()`, `WaitWithOutput()` and `Kill()`, the signal, the later waits, `Kill()` after the
 end, the child let go of, `Id`'s type, a pipe's `File` after the child, `Id` after the wait, `Kill()`'s
 error, no text and no `==`, the wait after a bound, `Status()` writing the input under `poll`, an empty input closed
 at once, a NUL byte in an input, the bound over the writing, a write that fails, a write that gets `EPIPE`, the input held as a `string`
-and its buffer, the bytes read ahead after a `WaitWithOutput()` that gives an `IoError`, and a piped `Stderr` under `Status()` closed as a piped `Stdout` is)*
+and its buffer, the order of the bytes a failed `WaitWithOutput()` gives back, the later read of a pipe whose read failed, the path and
+the number of the `InvalidInput` of an `Input` beside `Spawn()` or a `Stdin`, and a piped `Stderr` under `Status()` closed as a piped `Stdout` is)*
 
 Case: [system/spawn-pipes.kz](../corpus/system/spawn-pipes.kz)
 ```kurz
