@@ -2813,5 +2813,6 @@ round can ask about it by the rule's id.
   by the function fields' programs of `ListTests`.
 - R10 and R13 with K2: an instance is a counted reference, so a pointer to a class, or to a value that
   holds one, is `counted-pointee` and state outside a function of such a type `static-state`.
-- A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print` and interpolation of
-  the instance, and of a list or a `data` value that holds one, inside the class and outside it.
+- A9 with A7 and A15: a `Text()` without `pub` makes `not-visible` every `print`, interpolation and
+  `string.Join` (X6) of the instance, and of a list or a `data` value that holds one, inside the class and
+  outside it.

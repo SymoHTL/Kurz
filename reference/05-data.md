@@ -1057,8 +1057,12 @@ print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
 ### D16 (assumed, §4) The body of a `data` type
 
 A `data` type takes its methods between braces after its constructor, in the form of a class body
-(K7), but for a property, `virtual` and `override`, and the body of a `data` type that derives from
-another or that another derives from, which §14 leaves open. A method without `mut` changes nothing of
+(K7), but for a property, which §14 leaves open. A `data` type that derives from another, or that
+another derives from, takes `virtual` and `override` in its body as a class does (K7) (§4, the owner,
+2026-11-11, "A class's rules"); a field declared in the body is a field as one of the primary
+constructor is, in `==`, the hash, the text and `with` (§4, the owner, 2026-11-11, "Every field
+counts"); and a `static` method of the body is read as one of a class body is (K7, K18, K19) (§4, the
+owner, 2026-11-11, option (a) of the question of comment 6788371936). A method without `mut` changes nothing of
 the value it was called on: an assignment of a field in it, or of a field on a path of fields from it,
 is `assign-immutable`, and a call of a `mut` method on its value or on such a path, a call of a `mut`
 method of its type by its name alone and a field passed as `mut` are `mut-required`. A `mut` method is
@@ -1067,7 +1071,7 @@ called on a `mut` variable, on a path of `data` fields from one and on a `mut` f
 takes as `mut` (M7), so a read of that value that the call's arguments still hold is
 `changed-while-held`. A method takes no name of a field of its type, and inside a method a parameter or
 a variable takes no name of a member of its type (`redeclared`, V9), and a `Text()` without `pub`
-gives no text to `print` or an interpolation, inside its type too (`not-visible`, A9)
+gives no text to `print`, an interpolation or `string.Join` (X6), inside its type too (`not-visible`, A9)
 *(assumed, §4: those readings)*.
 
 Case: [values/mut-method.kz](../corpus/values/mut-method.kz)
