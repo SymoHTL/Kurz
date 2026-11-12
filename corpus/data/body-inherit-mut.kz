@@ -1,0 +1,29 @@
+// expect: output
+// | Twice { N = 3, K = 7 }
+// | 6
+// | Counter { N = 1 }
+// | 10
+// rules: D16
+
+data Counter(int N) {
+    pub virtual mut void Bump() {
+        N = N + 1
+    }
+
+    pub int Doubled() => N * 2
+}
+
+data Twice(int K) : Counter {
+    pub override mut void Bump() {
+        N = N + 2
+    }
+}
+
+mut Counter c = Twice(1, 7)
+c.Bump()
+print(c)
+print(c.Doubled())
+mut d = Counter(0)
+d.Bump()
+print(d)
+print(Twice(5, 1).Doubled())

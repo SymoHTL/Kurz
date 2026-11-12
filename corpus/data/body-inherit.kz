@@ -1,0 +1,38 @@
+// expect: output
+// | Box { W = 2, H = 3, Area = 6, D = 4, Volume = 24 }
+// | 6
+// | 24
+// | box 6
+// | shape 5
+// | Box { W = 5, H = 3, Area = 15, D = 4, Volume = 60 }
+// | true
+// | 6 by 3
+// rules: D16
+
+data Shape(int W, int H) {
+    pub int Area = W * H
+
+    pub virtual string Kind() => "shape"
+
+    pub string Size() => "{W} by {H}"
+}
+
+data Box(int D) : Shape {
+    pub int Volume = W * H * D
+
+    pub override string Kind() => "box"
+}
+
+string Describe(Shape s) => "{s.Kind()} {s.Area}"
+
+b = Box(2, 3, 4)
+print(b)
+print(b.Area)
+print(b.Volume)
+print(Describe(b))
+print(Describe(Shape(1, 5)))
+Shape wide = b
+t = wide with { W = 5 }
+print(t)
+print(t == Box(5, 3, 4))
+print(Box(6, 3, 1).Size())

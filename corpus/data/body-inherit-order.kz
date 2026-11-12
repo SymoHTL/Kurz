@@ -1,0 +1,20 @@
+// expect: output
+// | own 2
+// | base 1
+// | B { X = 1, P = 1, Y = 2, Q = 2 }
+// rules: D16
+
+int Note(string s, int v) {
+    print("{s} {v}")
+    return v
+}
+
+data A(int X) {
+    pub int P = Note("base", X)
+}
+
+data B(int Y) : A {
+    pub int Q = Note("own", Y)
+}
+
+print(B(1, 2))

@@ -806,6 +806,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   one parameter is the value being made, borrowed, whose fields above it are set, at each construction, `T.Make`
   among them, and again at each `with`, whose copy lets go of the values a block's slots of the body held
   (D16), one without `pub` read inside its type alone (F9), and one without `mut` assigned by nothing else;
+  a body in a relation of inheritance (D16, section 4): the value of a derived type holds each type's fields
+  of the primary constructor and of the body together, the base's first, and a construction computes the
+  derived type's fields of the body first and each base's after, in a class's order; a `virtual` method
+  called on a block of a type from which a type that overrides it derives is a helper that branches on the
+  number of the type the block holds to the nearest override, as Rust matches an enum, and the block's text
+  and a `with` on it branch the same way, the `with`'s copy keeping the type the block holds and computing
+  that type's fields of the body again;
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
@@ -1885,8 +1892,8 @@ ask about it.
   run their content as a search of its own; a lookbehind reads its content from its position back, from right to left, as
   .NET's `RegexOptions.RightToLeft` reads it: the parse builds that content with a sequence's items last first, states that
   read a character, a class or a backreference's text backward and a group's end set at its left, and a lookahead inside it
-  forward again and an atomic group in the direction it stands in (`RegexParser.Emit`), so that `(?<=(a+))b` over `aaab` gives group 1 `aaa`; a
-  positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
+  forward again and an atomic group in the direction it stands in (`RegexParser.Emit`), so that `(?<=(a+))b` over `aaab` gives group 1 `aaa`,
+  and the match follows that reading too, `(?<=(?>a+)a)b` matching `aaab`; a positive lookaround keeps its groups and nothing backtracks into an atomic group. A group's positions are set when it
   closes, so that a backreference inside its own group reads the group's last text, as .NET's does, and under `(?i)` a
   backreference compares by the simple case folding, the flag in force at the backreference deciding. (the constructs, counted
   and bounded as the linear engine's, a lookbehind of any length and the case folding of a backreference: the owner, 2026-11-12, issue 176,
@@ -2090,7 +2097,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
-a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), its `Text()` and its fields, with their initializers), 6 (values: M1 to M7,
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), its `Text()` and its fields, with their initializers, under inheritance too, `virtual` and `override` among its methods), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
@@ -2263,10 +2270,10 @@ generic, whose fields of a type parameter it does not read, and such a base as a
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); of the body of a `data`
 type (D16), a property, which section 14 leaves open, a field of a type without a primary constructor, a `static` field, a field without
-a written type and one with a modifier but `pub` and `mut`, a constructor, a `static`, `virtual` or
-`override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
-type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
-or that another names as its base, a member the body declares after the type's name, where a name it does
+a written type and one with a modifier but `pub` and `mut`, a constructor, a `static` method, a `virtual` or
+`override` method of a type that derives from none and from which none derives, and, as in a class (K7),
+one marked both or `virtual` without `pub`, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
+type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type, a member the body declares after the type's name, where a name it does
 not declare is `unknown-name` as after a type without a body (V10), and a method named without a
 call, and `equal by` (K8); among the bases of a `data` type a class or an interface
 (chapter 7, K10), the explicit form of inheritance (K17) and a

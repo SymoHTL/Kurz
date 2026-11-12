@@ -176,8 +176,62 @@ public sealed partial class Emitter
             cConvention: false,
             owned: false);
         arguments.Insert(0, receiver);
-        var call = $"call {Ir(f.ReturnType)} {Instance(f, NoMap)}({string.Join(", ", arguments)})";
+        var call = $"call {Ir(f.ReturnType)} {DataMethodTarget(method, TypeOf(target))}({string.Join(", ", arguments)})";
         return Types.IsVoid(f.ReturnType) ? Emitted(call) : fn.Value(call);
+    }
+
+    /// <summary>
+    /// D16, K7: the function a call of a method of a data type runs: the method's own, or, for a <c>virtual</c> or <c>override</c> method
+    /// called on a block of a type that a type overriding it derives from, a helper that branches on the number the block holds to the
+    /// override nearest that type, as a class's call goes through its table (§4, the owner, 2026-11-11, "A class's rules"). The helper
+    /// takes the method's parameters as they are, a <c>mut</c> receiver as the place that holds the block.
+    /// </summary>
+    private string DataMethodTarget(FunctionSymbol method, KurzType receiver)
+    {
+        var real = method.Real!;
+        if (!method.IsVirtual || receiver is not DataType type || !layout.IsBlock(type) || layout.Derived(type.Symbol).All(d => ReferenceEquals(NearestOverride(d, method), method)))
+        {
+            return Instance(real, NoMap);
+        }
+
+        var own = Instance(real, NoMap);
+        var parameters = real.Parameters.Select(p => p.Mut ? "ptr" : Ir(p.Type)).ToList();
+        var result = Ir(real.ReturnType);
+        return Helper($"virtual.{Lower.Mangle(type)}.{own.Trim('@', '"')}", result, parameters, () =>
+        {
+            var block = real.Parameters[0].Mut ? fn.Value("load ptr, ptr %a0") : "%a0";
+            ByNumber(block, type.Symbol, held =>
+            {
+                var call = $"call {result} {Instance(NearestOverride(held, method).Real!, NoMap)}({string.Join(", ", parameters.Select((p, i) => $"{p} %a{i}"))})";
+                if (Types.IsVoid(real.ReturnType))
+                {
+                    fn.Emit(call);
+                    fn.Return(null);
+                }
+                else
+                {
+                    fn.Return($"{result} {fn.Value(call)}");
+                }
+            });
+        });
+    }
+
+    /// <summary>K7, D16: the method a value of <paramref name="held"/> runs for <paramref name="method"/>: the nearest up its chain that is the method or overrides it.</summary>
+    private static FunctionSymbol NearestOverride(DataSymbol held, FunctionSymbol method) =>
+        held.Chain.SelectMany(s => s.Methods.TryGetValue(method.Name, out var list) ? list : []).First(m => Overrides(m, method));
+
+    /// <summary>K7: whether <paramref name="m"/> is <paramref name="method"/> or an override of it, through the overrides between.</summary>
+    private static bool Overrides(FunctionSymbol m, FunctionSymbol method)
+    {
+        for (var x = m; x is not null; x = x.Overridden)
+        {
+            if (ReferenceEquals(x, method))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>R16: a call of a declaration of a block of C functions, by its own name, the library it comes from added to the link; an argument in the place of <c>...</c> is passed as C passes it, an integer narrower than an <c>int</c> widened to one.</summary>

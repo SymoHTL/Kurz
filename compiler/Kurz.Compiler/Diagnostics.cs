@@ -164,6 +164,7 @@ public static class ErrorIds
     public const string InterfaceMethodPrivate = "interface-method-private";
     public const string UnreachableArm = "unreachable-arm";
     public const string OverrideReturnType = "override-return-type";
+    public const string OverrideMut = "override-mut";
     public const string DefaultNotConstant = "default-not-constant";
     public const string BaseCycle = "base-cycle";
     public const string KindNotRead = "kind-not-read";

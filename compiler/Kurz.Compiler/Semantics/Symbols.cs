@@ -179,9 +179,30 @@ public sealed class DataSymbol(string name, TypeDeclaration declaration)
     /// <summary>D16: the methods its body declares, by name, each the symbol a call picks (<see cref="FunctionSymbol.Real"/>).</summary>
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = [];
 
-    /// <summary>A5, D16: the <c>Text()</c> its body declares, a method of no parameters with a <c>string</c> result, which gives a value its text in place of A3's; null where it declares none.</summary>
+    /// <summary>
+    /// A5, D16: the <c>Text()</c> its body declares, a method of no parameters with a <c>string</c> result, which gives a value its text in
+    /// place of A3's, or else the nearest one a base's body declares, which a derived type reaches as a class reaches its base's (K7); null
+    /// where none of them declares one.
+    /// </summary>
     public FunctionSymbol? TextMethod =>
-        Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String } && (f.Declaration!.Modifiers & Modifiers.Mut) == 0) : null;
+        Chain.Select(s => s.Methods.TryGetValue("Text", out var list) ? list.FirstOrDefault(f => f.Parameters.Count == 0 && f.TypeParameters.Count == 0 && f.ReturnType is PrimitiveType { Kind: Primitive.String } && (f.Declaration!.Modifiers & Modifiers.Mut) == 0) : null)
+            .FirstOrDefault(f => f is not null);
+
+    /// <summary>D6, D16: the type of the chain whose body declares the field, or the type itself for a field of a primary constructor.</summary>
+    public DataSymbol Declaring(FieldSymbol field) =>
+        field.Body is null ? this : Chain.FirstOrDefault(s => (s.Declaration.Members ?? []).Any(m => ReferenceEquals(m, field.Body))) ?? this;
+
+    /// <summary>D6: the type, then its base, then the base's base, up to the type without a base; a cycle of bases sets no base (D6), so the walk ends.</summary>
+    public IEnumerable<DataSymbol> Chain
+    {
+        get
+        {
+            for (var s = this; s is not null; s = s.Base)
+            {
+                yield return s;
+            }
+        }
+    }
 }
 
 /// <summary>

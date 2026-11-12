@@ -20,7 +20,7 @@ method of every file sees `settings`, where the top-level statements alone see `
 (B9) (§12, the owner, 2026-11-12, the reading said back, and B9). A second type with the modifier in
 one program is `redeclared` at the second, as a second declaration of a name is (V9). The modifier
 stands on a `data` type alone, and on another type or on a generic `data` type is a compile error
-(§12, the owner, 2026-11-12, details 1 and 9), whose id §14 leaves open. The type's constraints check the value the layers
+(§12, the owner, 2026-11-12, details 1 and 9), its refusal decided and its id open, §14 naming no option for it yet. The type's constraints check the value the layers
 give (B2), and a program with a settings type is `not supported` in a build for Windows, as one that
 reads a file is (§12, the owner, 2026-10-30, "Not supported, as files"). *(assumed, §12: the name
 stands in a program that declares a settings type, where a declaration of the program's own named
@@ -90,7 +90,7 @@ new key arriving in upper case, and two keys of one file that differ in case alo
 capital that follows a small letter or a digit, and before the last capital of a run that a small
 letter follows, `HTTPPort` as `HTTP_PORT` and `http-port` (B5), as the crate `heck` splits a name, and
 two fields of one type whose names meet in one name are a compile error (§12, the owner, 2026-11-12,
-detail 8), whose id §14 leaves open. An empty value is an empty `string`, and a value that any other type's `Parse` refuses,
+detail 8), its refusal decided and its id open, §14 naming no option for it yet. An empty value is an empty `string`, and a value that any other type's `Parse` refuses,
 and no variable sets `null`, at the cost that no variable clears a nullable field (§12, the owner,
 2026-11-12, detail 5). A list's item is a variable of its own, `NAME__0`, `NAME__1`. *(assumed, §12:
 the defaults of the round of 2026-11-11)*
@@ -100,17 +100,14 @@ No case: as B1's.
 ### B5 (decided, §12) The command line
 
 An option names a setting by each name of its path in kebab case, `.` between the parts, its value
-the next argument or after `=`: `--access-key AK`, `--access-key=AK`, `--logging.orders warning`
+the next argument or after `=`, a `bool` field's only after `=` (below): `--access-key AK`, `--access-key=AK`, `--logging.orders warning`
 (§12, the owner, 2026-11-11, Q4 (b)). `args` keeps every argument (S13), a `secret` field's value given
 there among them, as a plain `string`, as ASP.NET keeps `args` whole, and an argument that names no
 setting is left to the program, as ASP.NET leaves it (§12, the owner, 2026-11-12, the reading said
 back, and detail 13). An option with no value, `--verbose`, sets a `bool` field to `true`, as `clap`'s
 flag, and another option with no value, last or followed by an argument that starts with `--`,
 refuses the start; an empty value is read as a variable's is (B4); and a map's key from an option is
-matched as one from a variable (§12, the owner, 2026-11-12, details 5, 11 and 12). So a `bool`
-option followed by an argument that does not start with `--` takes that argument as its value, as
-any option does: `--verbose input.txt` gives `input.txt` to `Parse`, which refuses the start (B7),
-where `clap`'s flag takes no value, and `--verbose=false` sets the field to `false`. A list's item is an
+matched as one from a variable (§12, the owner, 2026-11-12, details 5, 11 and 12). An option of a `bool` field takes a value only after `=`, as `clap`'s flag takes none from the next argument: `--verbose input.txt` sets the field to `true` and leaves `input.txt` to the program, and `--verbose=false` sets it to `false` (§12, the owner, 2026-11-12, comment 6821891640, S4, "As clap: value only after =", against the next argument taken as its value, as every other option takes it, at the cost of a flag that cannot stand before an argument of the program; the cost is that `--verbose false` sets the field to `true` and leaves `false` to the program, unlike every other option). A list's item is an
 option repeated, `--hosts a --hosts b`. *(assumed, §12: the defaults of the round of 2026-11-11)*
 
 No case: as B1's.
@@ -123,7 +120,7 @@ a nested `data` type; a nullable of one of these; a `List` of one of these, from
 file, the variables of B4 and the options of B5; or a `Map` with `string` keys. *(assumed, §12: the
 defaults of the round of 2026-11-11)* An `enum`'s member is read without case in every layer, as
 `Enum.Parse` with `ignoreCase` and `clap`'s value enums read it; a field of another type is a compile
-error, whose id §14 leaves open; and a `Map`'s values are of the types above, written in a file as a map literal (§12, the
+error, its refusal decided and its id open, §14 naming no option for it yet; and a `Map`'s values are of the types above, written in a file as a map literal (§12, the
 owner, 2026-11-12, details 12 and 14).
 
 No case: as B1's.
@@ -155,11 +152,11 @@ No case: as B1's.
 
 ### B9 (decided, §12) What code sees after a reload
 
-A reload builds a new value from every layer and source, checks it as the start does, and publishes
+A reload builds a new value from every layer and source *(assumed, §12: from the pairs the source that called `Changed()` gave, or the watched file read again, and the pairs every other source gave last, as ASP.NET's providers keep the data each loaded, so that no other source's `Load` runs outside its `Watch`; and one reload at a time, in the order the reloads reach the runtime, each merging the newest pairs of every source, so that two reloads at once publish one value after the other and the last holds every source's newest pairs)*, checks it as the start does, and publishes
 it by one atomic swap of a pointer to the new value, which is never changed, as Rust's `arc-swap`
 swaps an `Arc`, so that a reader sees the old value or the new one, whole. An actor reads the value
 once for each message, as it stood when the message began (§12, the owner, 2026-11-12, B9 (b)), and
-B16 gives the code that handles no message. *(assumed, §12: the value carries a count, as the `Arc` a snapshot of section 11 is published in does, which a message and a handler call take at their start and give back at their end, so that an old value lives while a call that began on it runs and is freed when the last such call ends, its memory held beside the new value's until then, and the count costs two atomic changes of it for each message and each handler call, beside the load of the pointer)*
+B16 gives the code that handles no message. A message and a handler call hold the value they began on as Rust's `arc-swap` holds an `Arc` it loaded, by a slot of the scheduler's thread: the load writes the value's address into a free slot of its thread and changes no count; a reload, before it gives up the old value, walks every thread's slots and takes a count of the old value for each slot that holds it; the call at its end clears its slot, or gives back the count a reload took for it; a thread whose slots are all taken takes a count at the load; and the old value is freed when the last count ends, its memory held beside the new value's until then (§12, the owner, 2026-11-12, comment 6821891640, S2, "Per-thread slots, arc-swap", against one count of the value that each message and each handler call changes twice, at the cost of a line of memory that every core writes under load; the cost is a few slots for each scheduler thread, a walk of every thread's slots at each reload, and that code in the runtime) *(assumed, §12: that a read of the newest value outside a message holds it so for the statement it stands in; and that a part of the value kept past the call, a `string` or a `List` it holds, is a counted value of its own, so that keeping it holds that part and not the old value)*
 
 No case: as B1's.
 
@@ -190,7 +187,7 @@ called it and hands the pairs it gave to the runtime, which merges, checks and p
 at the start the source's first `Load` runs before `Watch` begins (B19), so that the two never
 overlap and a source is reached from one actor at a time, as ASP.NET's reload token calls its
 provider's `Load` on the thread that fires it, at the cost of a `Watch` held while `Load` runs (§12,
-the owner, 2026-11-12, comment 6820218118, "Changed() calls Load").
+the owner, 2026-11-12, comment 6820218118, "Changed() calls Load"). `Changed()` gives nothing and returns once the runtime published the new value or kept the last good one (B10), a failed `Load` or check written as B7 writes it, as ASP.NET's reload token runs its provider's `Load` and the callbacks on the thread that fires it (§12, the owner, 2026-11-12, comment 6821891640, S1, "Waits, returns nothing", against a `bool` that says whether the value was published, at the cost of a result every source handles and a signature of the library to keep, and against a call that returns at once, the merge, the check and the publish running later, at the cost of a source that never learns when its value is seen or that it failed; the cost is a `Watch` held while the merge and the check run, and a source that cannot answer a failure) *(assumed, §12: that the runtime moves each source into the actor of its `Watch` once its first `Load` answered, handed over as a value sent with `move` is (section 6) and not shared, so that the function of B15 gives each source as a value no other code keeps, which that check holds; that the handle stays in that actor, since `Watch`'s parameter has no `move` and a function sends a value only through a parameter marked so (section 6); and that a service with a state is an actor, reached by its messages (section 11), so that no state of a source is reached from two actors)*
 
 No case: as B1's.
 
@@ -245,8 +242,7 @@ No case: as B1's, and as P4's.
 A read of `settings` in a field's default or in a constraint of the settings type, as C# refuses a
 field initializer that reads `this` (CS0236), and one that the checker finds reachable from the
 function of B15 or from a source's `Load`, is a compile error (§12, the owner, 2026-11-12, detail 2
-and B18), whose id §14 leaves open. *(assumed, §12: a read the checker cannot see, through a method of an interface or a
-message to an actor, refuses the start at run time as B7 does)*
+and B18), its refusal decided and its id open, §14 naming no option for it yet. *(assumed, §12: a read the checker cannot see, through a method of an interface or a message to an actor, refuses the start at run time as B7 does)* Such a read in a `Load` at a reload fails the reload as B10 says (§12, the owner, 2026-11-12, comment 6821891640, S3, "The reload fails", against the value published before the reload, read with no check, at the cost of pairs that depend on the value they replace, so that the result depends on the order of the reloads, the cost detail 2 set aside at the start; the cost is a flag of the thread, a `Load` running, read at each read of `settings`) *(assumed, §12: that the flag sees a read on the thread of the `Load`, through a method of an interface, while a read in another actor that a message of the `Load` reaches reads the value as that actor's message does, which the flag does not see)*
 
 No case: as B1's.
 
@@ -259,7 +255,6 @@ runtime calls `Watch` once after the first load, in an actor of its own, so that
 on its source and calls the handle of B12, whose `Changed()` runs `Load` in that actor (§12, the
 owner, 2026-11-12, comment 6820218118, "Changed() calls Load"); a source whose source never changes
 returns from `Watch` at once (§12, the owner, 2026-11-12, B19). *(assumed, §12: the runtime calls `Watch` after the start
-published the value, so that `Watch` may read `settings`, and `Watch` has a body that returns at once,
-which such a source keeps)*
+published the value, so that `Watch` may read `settings`, and `Watch` has a body that returns at once, which such a source keeps; and that `Watch` reads the newest value at each read, as code in no message does, each read held as a read outside a message is)*
 
 No case: as B1's.
