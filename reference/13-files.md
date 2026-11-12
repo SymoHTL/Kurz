@@ -2676,7 +2676,7 @@ call's error; a `WaitWithOutput()` whose read fails waits for no child (S19) and
 before it. Where the system refuses
 `pidfd_open`, through which a call whose command has a bound waits for the child's end, the call kills the
 child, waits for its end and gives the system's error at once, with the program as its path (S1 gives its
-kind and number). *(assumed, §12: the bound under `Spawn()`, the bound after a failed
+kind and number), but for a wait on a spawned child, which opens it under a bound and, for a `WaitWithOutput()` with a pipe's `File`, without one too (S19), giving that error at once and leaving the child to a later `Wait()` or `Kill()`, as a read that failed leaves it. *(assumed, §12: the bound under `Spawn()`, the bound after a failed
 read or write, no kill at the bound after a `WaitWithOutput()` whose read failed, and a refused `pidfd_open`)*
 
 Case: [system/command-timeout.kz](../corpus/system/command-timeout.kz)

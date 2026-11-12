@@ -547,6 +547,32 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         }
     }
 
+    [Fact]
+    public void A_wait_with_output_without_a_bound_where_the_system_refuses_pidfd_open_gives_the_refusal_and_leaves_the_child()
+    {
+        // S19, S20 (assumed, §12): a `WaitWithOutput()` with a pipe's `File` polls the child's end through the descriptor
+        // `pidfd_open` gives, without a bound too, so that a lock another holder holds is given up at that end; where the system
+        // refuses it (a kernel before 5.3, or a filter), the wait gives the system's error, here `ENOSYS` (38), `Unsupported`, at
+        // once, and leaves the child, which `Kill()` then ends; a wait that went on without the descriptor would wait for the child's
+        // end, as the positive control, under this machine's runtime, does
+        var text = Program("""
+                start = instant.Now
+                child = Command.New("sleep").Arg("3").Stdout(Stdio.Piped).Spawn()
+                print(Gathered(child))
+                child.Kill()
+                print(Joined(child))
+                print(start.Elapsed < 2s)
+            """) + Children;
+        if (Ran(text, "child-wait-no-pidfd", runtime: ListTests.Edited(("runtime/linux/linux.kz", "process = int(syscall(434, long(state[0]), long(0)))", "process = int(syscall(-1, long(state[0]), long(0)))"))) is { } ran)
+        {
+            Assert.Equal((0, ""), (ran.Code, ran.Error));
+            Assert.Equal(["Unsupported [sleep] 38", "signal 9: sleep", "true"], ran.Output);
+            var control = Ran(text, "child-wait-pidfd-control")!.Value;
+            Assert.Equal((0, ""), (control.Code, control.Error));
+            Assert.Equal(["0 0", "ended", "false"], control.Output);
+        }
+    }
+
     /// <summary>A line of a program that fills <c>big</c>, a <c>mut</c> variable of <c>Bytes</c>, with a MiB of <c>x</c>, more than a pipe holds.</summary>
     private const string Big = """
                 mut big = Bytes()

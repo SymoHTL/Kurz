@@ -1249,8 +1249,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   bounds the whole call and a read through the `File` on another thread waits for the call only while the call holds its lock
   (S19, the owner's "Try the lock inside the poll"). Once the child ended, a lock another holder holds is tried once more at the
   wake that follows and then no more, its pipe left to that holder, so that the call gives the child's status with a bound and
-  without one; the child's end is polled through a descriptor of its process (`pidfd_open`) wherever a pipe's `File` is given
-  (S19, the owner's "Child's end decides"). The call is in flight on each pipe's `File` (S5) from before the runtime's call
+  without one; the child's end is polled through a descriptor of its process (`pidfd_open`) wherever a pipe's `File` is given,
+  and where the system refuses it the wait gives the system's error at once and leaves the child to a later `Wait()` or
+  `Kill()`, as under a bound (S19, the owner's "Child's end decides"; S20). The call is in flight on each pipe's `File` (S5) from before the runtime's call
   until it let go of the lock, so that a `Close` through another holder meanwhile leaves the descriptor open to it. The wake
   within 4 ms, each lock held until the bytes are taken or given back, the bytes ahead read under the lock, the output's lock
   tried before the error's, the last try after the child's end, the call in flight on each `File` and the order of the bytes
