@@ -34,8 +34,13 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         ("a{2,1}", "syntax at 1"), ("a{,2}", "syntax at 2"), ("{1}", "syntax at 0"), ("*a", "syntax at 0"), ("a**", "ok"),
         ("a|*", "syntax at 2"), ("(?", "syntax at 0"), ("(?:", "syntax at 0"), ("(?i", "syntax at 3"), ("(?i)", "ok"),
         ("(?i-i)", "syntax at 4"), ("(?ii)", "syntax at 3"), ("(?-)", "syntax at 2"), ("(?z)", "syntax at 2"),
-        ("(?R)", "unsupported at 2"), // G4: a flag Rust's syntax has that the build does not hold
-        ("(?u)", "unsupported at 2"),
+        ("(?R)", "ok"), ("(?u)", "ok"), ("(?R)(?m)^$", "ok"), ("(?u-u)", "syntax at 4"),
+        // under `(?-u)` Rust's translator, after the parse and the levels, refuses a construct that would match a byte of no character
+        ("(?-u).", "syntax at 5"), ("(?-u).(", "syntax at 6"), ("(?-u:.)(?u:.)", "syntax at 5"), ("(?-u)a{2}.", "syntax at 9"),
+        ("(?-u)\\xFF", "syntax at 5"), ("(?-u)\\D", "syntax at 5"), ("(?-u)[^a]", "syntax at 5"), ("(?-u)[\\Da]", "syntax at 6"),
+        ("(?-u)[[:^alpha:]]", "syntax at 6"), ("(?-u)[^[:alpha:]]", "syntax at 5"), ("(?-u)[[a][^b]]", "syntax at 9"),
+        ("(?-u)[a&&[^b]]", "syntax at 9"), ("(?-u)[a-é]", "syntax at 8"), ("(?-u)[^é]", "syntax at 7"),
+        ("(?-u)é", "ok"), ("(?-u)\\x{e9}", "ok"), ("(?-u)\\B", "ok"), ("(?-u)\\w\\d\\s\\b\\b{start}", "ok"),
         ("(?U)a*", "ok"), ("(?x) a b # c", "ok"), ("(?s).", "ok"), ("(?m)^a$", "ok"), ("\\", "syntax at 0"), ("\\q", "syntax at 0"),
         ("\\d\\D\\w\\W\\s\\S", "ok"), ("\\x41", "ok"), ("\\x{1F600}", "ok"), ("\\x{110000}", "syntax at 3"), ("\\x4", "syntax at 3"),
         ("\\u0041", "ok"),
@@ -73,7 +78,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         (")", "syntax at 0"),
         ("\\pL)", "unsupported at 0"), // the first error of the pattern decides, as the parse reads it
         ("a)\\pL", "syntax at 1"),
-        ("(?R)a)", "unsupported at 2"),
+        ("(?R)a)", "syntax at 5"),
         ("a)(?R)", "syntax at 1"),
         // the levels of Rust's `NestLimiter`, at most 250, each counted after the whole pattern was read, at the start of the node past it
         (Repeat("(", 250) + "a" + Repeat(")", 250), "ok"), (Repeat("(", 251) + "a" + Repeat(")", 251), "syntax at 250"),
@@ -450,7 +455,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <c>--</c> and <c>~~</c> folded under <c>(?i)</c> before the operation, as Rust's translator folds them; an ASCII class folded
     /// under <c>(?i)</c> before it is negated, so that <c>[:^lower:]</c> takes no letter of either case; a range with white space
     /// around its <c>-</c> under <c>(?x)</c>; a counted repetition with white space inside its braces; and a repetition of what matches
-    /// no character, taken at most once.
+    /// no character, taken at most once; under <c>(?mR)</c> a line's start and end at <c>\r</c>, <c>\n</c> and <c>\r\n</c>, and
+    /// under <c>(?R)</c> a <c>.</c> that takes neither; under <c>(?-u)</c> ASCII's <c>\w</c>, <c>\d</c>, <c>\s</c>, word
+    /// boundaries and folding, and a character above ASCII matched as its UTF-8.
     /// </summary>
     [Fact]
     public void The_constructs_net_reads_otherwise_match_as_rust_matches_them()
@@ -481,6 +488,22 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             ("a{ 2 }", "aaa", "0-2"),
             ("(?:){5}", "ab", "0-0 1-1 2-2"),
             (@"\b{3}a", "a ba", "0-1"),
+            ("(?mR)^b", "a\r\nb", "3-4"),
+            ("(?mR)a$", "a\r\nb", "0-1"),
+            ("(?mR)^$", "\r\n", "0-0 2-2"),
+            ("(?mR)^", "a\rb\r\n\nc", "0-0 2-2 5-5 6-6"),
+            ("(?mR)$", "a\rb\r\n\nc", "1-1 3-3 5-5 7-7"),
+            ("(?R).", "x\r\n", "0-1"),
+            ("(?R)(?s).", "\r", "0-1"),
+            (@"(?-u)\w+", "éa_1", "2-5"),
+            (@"(?-u)\s+", "a\u00a0 \tb", "3-5"),
+            (@"(?-u)\d+", "\u066312", "2-4"),
+            ("(?i-u)k", "K\u212ak", "0-1 4-5"),
+            ("(?i-u)é", "É", ""),
+            (@"(?-u:(?:\b))a", "éa", "2-3"),
+            (@"(?-u)\b", "éa é", "2-2 3-3"),
+            (@"(?-u)\B", "é", "0-0 2-2"),
+            (@"(?-u)\b{start}\w", "éab", "2-3"),
         ];
         var program = new StringBuilder();
         for (var i = 0; i < rows.Length; i++)
@@ -542,7 +565,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     /// <summary>A pattern or a text written into a Kurz string literal: its backslash, its quote, its opening braces and its line ends escaped (L20).</summary>
     private static string Escaped(string s) => s.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("{", "\\{", StringComparison.Ordinal)
-        .Replace("\n", "\\n", StringComparison.Ordinal);
+        .Replace("\n", "\\n", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal);
 
     /// <summary>
     /// G1 to G4: a use of a name of regular expressions that the build refuses, where it stands: a pattern written as a literal that
@@ -561,8 +584,8 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [InlineData("print(Regex.New(r\"(?:a{1000}){1000}\").IsMatch(\"a\"))\n", "regex-invalid", 1)]
     [InlineData("print(Regex.New(r\"\\p{L}\").IsMatch(\"a\"))\n", "", 1)] // G4: Rust's syntax that the build does not hold
     [InlineData("print(Regex.New(r\"a\\P{L}\").IsMatch(\"a\"))\n", "", 1)]
-    [InlineData("print(Regex.New(\"(?u)a\").IsMatch(\"a\"))\n", "", 1)]
-    [InlineData("print(Regex.New(\"(?R)a\").IsMatch(\"a\"))\n", "", 1)]
+    [InlineData("print(Regex.New(\"(?-u).\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // refused by Rust's translator (G4)
+    [InlineData("print(Regex.New(\"(?R)(?-u:a)\").IsMatch(\"a\"))\n", "", 0)] // the flags `R` and `u` (G4)
     [InlineData("print(Regex.New(r\"a)\\p{L}\").IsMatch(\"a\"))\n", "regex-invalid", 1)] // the first error of the pattern decides
     [InlineData("print(Regex.New(r\"(a)\\1\", backtracking: true).IsMatch(\"aa\"))\n", "", 0)] // G2: the backtracking engine takes it
     [InlineData("print(Regex.New(r\"(a)\\1\", true).IsMatch(\"aa\"))\n", "", 0)] // the flag by its place, the second argument

@@ -1828,6 +1828,13 @@ ask about it.
   character of the categories Nd, Nl and No, as Rust's `is_capture_char`; and a class with its `-`s first and its `]` first
   as characters, each side of `&&`, `--` and `~~` folded under `(?i)` before the operation, a class of `[:name:]` folded
   before it is negated, and under `(?x)` the white space around a range's `-` passed over, as Rust's translator reads them.
+  The flag `R`: under `(?m)` its `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, never between `\r` and `\n`, and
+  its `.` takes neither, as Rust's `StartCRLF`, `EndCRLF` and `AnyCharExceptCRLF`. The flag `u`, in force from the start:
+  without it `\d`, `\w`, `\s`, the word boundaries and the folding of `(?i)` are ASCII's, a character above ASCII outside a
+  class is matched as its UTF-8, and a construct that would match a byte of no character, `.`, `\D`, `\W`, `\S`, `\xNN`
+  above 7F, a class that holds more than ASCII after its negation and a class's character above ASCII, is `Syntax` at its
+  start once the parse and the levels found no error, the first in the order Rust's translator visits them, a class's
+  items before the class.
   A `Match` copies its `Value` out of the text when it is
   made, so that a chain of `?.` reads it as a field (N5): a copy per match, read or not. The ranges of `\d`, `\w` and `\s`,
   the folding of `(?i)` and the characters of a group's name are one global of a program that makes a `Regex`, written once
@@ -2197,7 +2204,7 @@ bound, its outer call makes no further copy, and the copies made before it stay 
 the same outer call that a chain asks for after the bound is not made, and its errors show only in a build where the chain is
 ended; another outer call still makes its copies, and each one whose chain reaches the bound reports its own `not supported`
 (T33, assumed); of regular expressions, in a literal pattern a construct of Rust's syntax that the standard library's
-parse does not build, `\p` and `\P` and the flags `R` and `u`, where it is the pattern's first
+parse does not build, `\p` and `\P`, where it is the pattern's first
 error, which a pattern that is no literal gets as the `RegexError` `Unsupported` when the program runs (G4); a type parameter that holds a constant, of a `data` type, which leaves the type unread and a use of it
 with no error of its own, and overloads that hold a type and a constant, or constants of two
 types, at the place of a type argument a call writes,

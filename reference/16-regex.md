@@ -163,7 +163,13 @@ with `(?<name>...)` and `(?P<name>...)` both and the flags `(?i)`, `(?m)`, `(?s)
 `Regex` has members alone, with no static `Regex.IsMatch(input, pattern)`. *(assumed, §12: the
 whole rule, the defaults of the product pass, which the owner's answers of 2026-11-01 took as they
 stand, and the spelling `Group`, the group 0 and the group the pattern does not have, not put to the
-owner)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+owner)* The flags `U`, `R` and `u` read as Rust's crate reads them: `U` swaps greedy and lazy; under
+`(?mR)` `^` and `$` take `\r`, `\n` and `\r\n` as a line's end, and under `(?R)` a `.` takes neither;
+and `u` is in force from the start, without it `\d`, `\w`, `\s`, the word boundaries and the folding
+of `(?i)` are ASCII's, and a construct that would match a byte of no character, `.`, a negated class,
+`\D`, `\W`, `\S`, `\xNN` above 7F and a class's character above ASCII, is `Syntax` at its start (G3).
+*(assumed, §12: proposed with this record and not put to the owner, as item 2 of the round of pull
+request 484 asked, issue 39, comment 6810616304)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 
