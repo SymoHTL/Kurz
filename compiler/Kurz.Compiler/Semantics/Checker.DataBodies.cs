@@ -28,6 +28,22 @@ public sealed partial class Checker
     /// <summary>D16: the data type whose method is being checked, inside its lambdas too; null anywhere else.</summary>
     private DataSymbol? CurrentData() => checking?.DataOwner;
 
+    /// <summary>
+    /// D16, F9: a field of a data type read or assigned where the checker stands: one of the primary constructor wherever the type is,
+    /// one of the body without <c>pub</c> inside its type alone, its methods and the initializers of its fields, as a class's (K1);
+    /// else <c>not-visible</c>, reported, and false.
+    /// </summary>
+    private bool DataFieldVisible(FieldSymbol field, DataSymbol owner, int line)
+    {
+        if (field.IsPub || ReferenceEquals(CurrentData(), owner))
+        {
+            return true;
+        }
+
+        Report(ErrorIds.NotVisible, line, $"`{field.Name}` of `{owner.Name}` is private to its type: a field of the body is visible outside it with `pub` (F9, D16)");
+        return false;
+    }
+
     /// <summary>D16: the names a data type's body declares, a member the checker refused among them.</summary>
     private static IEnumerable<string> BodyNames(DataSymbol symbol) => (symbol.Declaration.Members ?? []).Select(m => m switch
     {
@@ -57,7 +73,13 @@ public sealed partial class Checker
                 continue;
             }
 
-            foreach (var member in members)
+            // D16: the fields first, so that a method named like a field below it is `redeclared` as one named like a field above it (V9)
+            foreach (var field in members.OfType<FieldDeclaration>())
+            {
+                DeclareDataField(symbol, field);
+            }
+
+            foreach (var member in members.Where(m => m is not FieldDeclaration))
             {
                 if (member is FunctionDeclaration f && UnreadDataMethod(f) is not { } construct)
                 {
@@ -67,13 +89,73 @@ public sealed partial class Checker
                 {
                     NotSupported(member.Line, member is FunctionDeclaration refused ? UnreadDataMethod(refused)! : member switch
                     {
-                        FieldDeclaration => "a field declared in the body of a data type (D16, F9)",
                         ConstructorDeclaration => "a constructor in the body of a data type (D16, K14)",
-                        _ => "a member of the body of a data type other than a method (D16)",
+                        _ => "a member of the body of a data type other than a method or a field (D16)",
                     });
                 }
             }
         }
+    }
+
+    /// <summary>The part of a field of a data body that the checker does not read, or null where it reads all of it.</summary>
+    private static string? UnreadDataField(DataSymbol symbol, FieldDeclaration f) => f switch
+    {
+        _ when symbol.Declaration.PrimaryConstructor is null => "a field in the body of a data type without a primary constructor (D8, D16)",
+        _ when (f.Modifiers & Modifiers.Static) != 0 => "a `static` field of a data type (D16, K18)",
+        _ when (f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut)) != 0 => $"the modifier `{(f.Modifiers & ~(Modifiers.Pub | Modifiers.Mut)).ToString().ToLowerInvariant()}` of a field of a data type (D16, F9)",
+        { Type: null } => "a field of a data body without a written type (D16, V2)",
+        _ => null,
+    };
+
+    /// <summary>
+    /// D16: a field declared in a data body, after the fields of the primary constructor in the order of the declarations, given by its
+    /// initializer alone, which no construction and no <c>with</c> gives (§4, the owner, 2026-11-12, and comment 6821275386): one without
+    /// <c>=</c> is <c>field-unassigned</c>, as a field of a class body that no constructor assigns is (K7, K14), and one named like a field
+    /// above it is <c>redeclared</c> (V9). Its initializer is checked as a function of the file, named <c>Type.Field</c>, which no name a
+    /// program writes can call, whose one parameter is the value being made, <c>this</c>: in its copy of the initializer a field of the
+    /// primary constructor or of the body above it, named alone, reads <c>this</c>'s field, as a default of a class reads its primary
+    /// fields and the fields above it (K7); a field below it, a method of the type and <c>this</c> are no names there (V10, as K7).
+    /// </summary>
+    private void DeclareDataField(DataSymbol symbol, FieldDeclaration f)
+    {
+        if (UnreadDataField(symbol, f) is { } construct)
+        {
+            NotSupported(f.Line, construct);
+            return;
+        }
+
+        var type = Resolve(f.Type!);
+        if (Types.IsVoid(type))
+        {
+            Report(ErrorIds.Syntax, f.Line, "`void` is no type of a field (F4)");
+            type = Types.Error;
+        }
+
+        if (symbol.Field(f.Name) is not null)
+        {
+            Report(ErrorIds.Redeclared, f.Line, $"the field `{f.Name}` is declared already (V9)");
+            return;
+        }
+
+        var above = symbol.Fields.Select(field => field.Name).ToHashSet();
+        var field = new FieldSymbol(f.Name, type, f.Value is not null, (f.Modifiers & Modifiers.Mut) != 0, f.Line, f);
+        symbol.Fields.Add(field);
+        if (f.Value is null)
+        {
+            Report(ErrorIds.FieldUnassigned, f.Line, $"the field `{f.Name}` takes no value: it has no `=`, and no construction of `{symbol.Name}` gives a field of its body (D16)");
+            return;
+        }
+
+        var self = new Parameter(f.Line, false, new NamedType(f.Line, symbol.Name, []), "this", null);
+        var value = SyntaxCopy.Copy(
+            f.Value,
+            (e, _) => e is NameExpression n && above.Contains(n.Name) ? new MemberAccess(n.Line, new NameExpression(n.Line, "this"), n.Name, false) : null);
+        var real = new FunctionDeclaration(f.Line, Modifiers.None, f.Type!, $"{symbol.Name}.{f.Name}", [], [self], value, null);
+        DeclareFunction(real);
+        var function = model.FunctionOf(real);
+        function.DataOwner = symbol;
+        function.DataField = field;
+        symbol.Initializers[f.Name] = function;
     }
 
     /// <summary>The part of a method of a data body that the checker does not read, or null where it reads all of it.</summary>

@@ -1010,10 +1010,10 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // S19 (the owner, 2026-11-12, issue 174, (a)): a `WaitWithOutput()` that gives an `IoError`, here `TimedOut`, gives what it
         // read of each pipe back to that pipe's `File`, before the rest of the pipe, so that a later read sees the output whole, the bytes
         // the `File` read ahead first (S19's assumed order). The program takes one byte of `abc` through the buffer of S24; the wait
-        // closes the input first (Q6), so that the child writes `def` and `ghi` on its error, which the wait reads, and sleeps past the
-        // bound, where the wait kills it (S20), so that the rest of the pipe is its end, which a later read gives after the bytes given
-        // back. A wait that dropped what it read would leave `bc` and nothing, as the build before the answer did; one that gave nothing
-        // back would leave the same, `bc` read ahead
+        // closes the input first (Q6), so that the child writes `def` on its output and `ghi` on its error, which the wait reads, and
+        // sleeps past the bound, where the wait kills it (S20), so that the rest of the pipe is its end, which a later read gives after
+        // the bytes given back. A wait that dropped what it read would leave `bc` and nothing, as the build before the answer did; one
+        // that gave nothing back would leave the same, `bc` read ahead
         var text = Program("""
                 child = Command.New("sh").Args(["-c", "printf abc; read x; printf def; printf ghi >&2; exec sleep 30"]).Stdin(Stdio.Piped).Stdout(Stdio.Piped).Stderr(Stdio.Piped).Timeout(3s).Spawn()
                 match child.Stdout {
@@ -1053,6 +1053,39 @@ public sealed class ChildTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Equal((0, ""), (ran.Code, ran.Error));
             Assert.Equal(["3", "TimedOut [sh] 0", "5", "bcdef", "0", "", "3", "ghi"], ran.Output);
         }
+    }
+
+    [Fact]
+    public void A_wait_with_output_holds_each_pipes_reader_locked_from_its_read_ahead_until_its_bytes_are_taken_or_given_back()
+    {
+        // S19, S16 (item 3 of the round of pull request 498): `WaitWithOutput()` reads the bytes each pipe's `File` read ahead, hands
+        // them to the runtime's wait and moves the reader's position past them, or gives them back, under the reader's lock, so that a
+        // read through the `File` on another thread waits for the call, as a fill holds the lock across its read, and neither takes
+        // the bytes the call takes nor replaces the buffer the runtime copies them from. The function that waits takes each piped
+        // pipe's lock before the runtime's call and lets go of it after; the give-back takes it no second time, which a lock its
+        // holder cannot take again would wait on for ever (the test of a wait that times out runs that path). A build that read the
+        // bytes without the lock, and took it only to give them back, has no lock before the call
+        var text = Program("""
+                child = Command.New("true").Stdout(Stdio.Piped).Stderr(Stdio.Piped).Spawn()
+                print(Gathered(child))
+            """) + Children;
+        var compilation = Compile(text, toolchain.Runtime);
+        if (Builder.HostTarget == Target.Windows)
+        {
+            Assert.Null(compilation.Program);
+            return;
+        }
+
+        Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
+        static bool Waits(string line) => line.Contains("call ", StringComparison.Ordinal) && line.Contains("ChildWaitWithOutput", StringComparison.Ordinal);
+        var lines = Assert.Single(compilation.Program.Ir.Split("\ndefine "), f => f.Split('\n').Any(Waits)).Split('\n');
+        int[] At(Func<string, bool> found) => [.. lines.Select((line, i) => (line, i)).Where(p => found(p.line)).Select(p => p.i)];
+        var call = Assert.Single(At(Waits));
+        var locks = At(line => line.Contains("call void @\"lock.reader\"", StringComparison.Ordinal));
+        var unlocks = At(line => line.Contains("call void @\"unlock.reader\"", StringComparison.Ordinal));
+        Assert.Equal((2, 2), (locks.Length, unlocks.Length));
+        Assert.All(locks, at => Assert.True(at < call, "a pipe's reader locked after the wait"));
+        Assert.All(unlocks, at => Assert.True(at > call, "a pipe's reader let go of before the wait"));
     }
 
     [Fact]

@@ -1,0 +1,14 @@
+// expect: error assign-immutable at 8
+// rules: D16
+
+data Counter(int Start) {
+    pub int Count = Start
+
+    pub mut void Increment() {
+        Count = Count + 1
+    }
+}
+
+mut c = Counter(5)
+c.Increment()
+print(c)

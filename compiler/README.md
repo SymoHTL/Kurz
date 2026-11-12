@@ -801,7 +801,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   of that instance, whose count holds the block to the end of the statement (K2), so that a method that
   replaces the field holding the instance writes into a block still alive; a new value as the receiver, a
   construction or the result of a call, is a temporary of its statement (K7); a `mut` method on a value of a
-  map meets the map's nullable read first, which is `nullable-unchecked` (N2);
+  map meets the map's nullable read first, which is `nullable-unchecked` (N2); the fields of a body, after
+  the primary constructor's in the value, each computed by its initializer, a function of the module whose
+  one parameter is the value being made, borrowed, whose fields above it are set, at each construction, `T.Make`
+  among them, and again at each `with`, whose copy lets go of the values a block's slots of the body held
+  (D16), one without `pub` read inside its type alone (F9), and one without `mut` assigned by nothing else;
 - classes (chapter 7): an instance is the address of its block, as Rust's `Rc<T>` is the address of its
   `RcBox` (section 3): the count of the references that hold it, the count of the weak ones, one for all
   the strong ones together, then the fields in their order (K1); construction with defaults and
@@ -1230,7 +1234,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   bytes a `File` read ahead (S24) first, and a read that fails ends it at once with that `IoError`, under a bound as without
   one, the pipes left open and no child waited for or killed; a wait that gives an `IoError`, that read's or `TimedOut`, gives
   what it gathered of each pipe, the bytes its `File` read ahead first, back to that `File`'s buffer, which is made again with
-  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe (S19; the order of
+  more room than its 8 KiB where they need it, so that a later read takes them before the rest of the pipe, the reader's lock
+  held from the read of the bytes read ahead until they are taken or given back, so that a read through the `File` on another
+  thread waits for the call (S19; the order of
   the bytes given back is among S19's assumed readings). A later wait after one that waited for the child gives the first one's
   status, or `TimedOut` again, and one after a `WaitWithOutput()` whose read failed waits for the child, which that call left to
   a later `Wait()` or `Kill()` (S19, the owner's "Error, no wait"), and `Kill()` sends
@@ -2080,7 +2086,7 @@ chapters 1 (source), 2 (variables), 3 (types and operators; of T19 the type para
 type arguments a use names or leaves to be inferred, without the limit of a type parameter and a
 generic data type as a base), 4 (null: N1 to N8, N10 and N11, and N9 for a path through a `mut` field of a
 class instance or through a `weak` reference, with the two more ends of such a path and, for a path through
-a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), and its `Text()`), 6 (values: M1 to M7,
+a `weak` reference, the end at a write into a list or a map that a variable holds), 5 (data types: D1 to D20, of D16 the methods of a body, each with a body as a method of a class has one, `syntax` without (K7, F2), its `Text()` and its fields, with their initializers), 6 (values: M1 to M7,
 M9 for lists and maps, and M11), 7 (classes: K1 to K20, for a class with its primary constructor or none and the constructors of its body,
 its base class in both forms, its interfaces, its fields, of the primary constructor and of its body with their defaults, its methods, its `static` fields and methods, `virtual`, `override` and `prot` among them, `this`, `==` and `equal by`,
 and an interface with the signatures of its methods, a value of one and a call through it), 8 (functions, without F9 and F10 across the files of a program: it reads one file, but for the runtime's `use sys`, whose `pub` functions it checks), 9 (outcomes), 10 (control
@@ -2252,7 +2258,8 @@ generic, whose fields of a type parameter it does not read, and such a base as a
 `data` type in a relation of inheritance is itself not read (D3, M9, D6, T19); a map whose values are pointers or of `void`, which have no nullable type the checker reads (N1, R10); an assignment into a map or a list
 reached through an item or a call, or into a path that goes on after the key or the item (M9, M4), a `mut` method
 on an element of a list and an element of a list passed as `mut` (M7, M9); of the body of a `data`
-type (D16), a property, which section 14 leaves open, a field, a constructor, a `static`, `virtual` or
+type (D16), a property, which section 14 leaves open, a field of a type without a primary constructor, a `static` field, a field without
+a written type and one with a modifier but `pub` and `mut`, a constructor, a `static`, `virtual` or
 `override` method, `prot`, `internal` or another modifier of a method but `pub` and `mut`, a method with
 type parameters of its own, one named `Equals` or `GetHashCode`, which section 14 leaves open, a `mut` one named `Text`, the body of a generic `data` type and of one with a base
 or that another names as its base, a member the body declares after the type's name, where a name it does

@@ -1,0 +1,10 @@
+// expect: error assign-immutable at 9
+// rules: D16
+
+data Order(int Price, int Count) {
+    pub int Total = Price * Count
+}
+
+o = Order(3, 2)
+p = o with { Total = 5 }
+print(p)

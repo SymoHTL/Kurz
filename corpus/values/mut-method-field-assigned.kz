@@ -1,0 +1,23 @@
+// expect: output
+// | 8
+// | set1+
+// rules: D16, F12
+
+data D(int N, string S) {
+    pub mut void Add(int k) {
+        N = N + k
+        S = "{S}+"
+    }
+}
+
+class Inner(mut D V)
+
+int SetV(Inner i) {
+    i.V = D(7, "set{1}")
+    return 1
+}
+
+box = Inner(D(1, "old{1}"))
+box.V.Add(SetV(box))
+print(box.V.N)
+print(box.V.S)

@@ -1,7 +1,9 @@
 // expect: output
 // | 5
 // | new2
-// rules: D16
+// | 2
+// | old1+
+// rules: D16, F12
 
 data D(int N, string S) {
     pub mut void Add(int k) {
@@ -19,6 +21,9 @@ int Replace(H h) {
 }
 
 top = H(Inner(D(1, "old{1}")))
+old = top.In
 top.In.V.Add(Replace(top))
 print(top.In.V.N)
 print(top.In.V.S)
+print(old.V.N)
+print(old.V.S)
