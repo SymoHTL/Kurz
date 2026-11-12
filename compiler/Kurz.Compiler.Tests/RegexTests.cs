@@ -531,8 +531,9 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// around its <c>-</c> under <c>(?x)</c>; a counted repetition with white space inside its braces; and a repetition of what matches
     /// no character, taken at most once; under <c>(?mR)</c> a line's start and end at <c>\r</c>, <c>\n</c> and <c>\r\n</c>, and
     /// under <c>(?R)</c> a <c>.</c> that takes neither; under <c>(?-u)</c> ASCII's <c>\w</c>, <c>\d</c>, <c>\s</c>, word
-    /// boundaries and folding, and a character above ASCII matched as its UTF-8; and the classes of <c>\p</c> and <c>\P</c>, on both
-    /// engines.
+    /// boundaries and folding, and a character above ASCII matched as its UTF-8; and the classes of <c>\p</c> and <c>\P</c>, folded
+    /// under <c>(?i)</c> before <c>\P</c> or <c>!=</c> negates one, so that <c>(?i)\P{Lu}</c> takes no letter of either case where
+    /// <c>\P{Lu}</c> takes the lower one, on both engines.
     /// </summary>
     [Fact]
     public void The_constructs_net_reads_otherwise_match_as_rust_matches_them()
@@ -598,6 +599,7 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
             (@"\p{wb=Numeric}+", "a12", "1-3"),
             ("(?i)[\\p{Ll}]", "Kk\u212A", "0-1 1-2 2-5"),
             (@"\p{Lt}", "ǅ", "0-2"),
+            (@"(?i)\P{Lu}", "aB1", "2-3"), (@"(?i)\p{gc!=Lu}", "aB1", "2-3"), (@"\P{Lu}", "aB1", "0-1 2-3"),
         ];
         // the rows of the classes of \p once more on the backtracking engine, which reads the same classes (issue 176, comment
         // 6812529825, Q4, the default taken)
@@ -630,10 +632,11 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <c>[ab]*a[ab]{15}c</c> over random <c>a</c>s and <c>b</c>s makes a new DFA state at almost every character, one for each way
     /// the last 16 characters can read, each of 4 bytes for every column (a class for <c>a</c>, <c>b</c>, <c>c</c> and every other
     /// character, and the end of the text) and every member, and 32 of its own, so that the cache holds some 24,000 of them, which
-    /// some 30,000 characters fill. A copy of the standard library that printed each emptying, run on these texts on 2026-11-12,
-    /// emptied it twice over the 60,000 characters of the shorter two, the DFA then giving its answer from the states made after
-    /// the second emptying, and three times over the 200,000 of the longer three, where at the fourth the searches had read fewer
-    /// than 10 bytes for each state and the DFA gave the search up to the Pike VM. A text of each length ends in <c>c</c>, with an
+    /// some 30,000 characters fill. The program runs again with a standard library that writes each emptying and each move to the
+    /// Pike VM to the error stream, which holds the path of each search: each of its three searches of the shorter two texts, of
+    /// 60,000 characters, empties the cache twice, the DFA then giving its answer from the states made after the second emptying,
+    /// and each of the longer three, of 200,000, three times, where at the fourth the searches had read fewer than 10 bytes for
+    /// each state and the DFA gave the search up to the Pike VM. A text of each length ends in <c>c</c>, with an
     /// <c>a</c> 16 characters before it in one and a <c>b</c> in the other, so that one has the one match and the other none;
     /// <c>IsMatch</c>, <c>Match</c> and <c>Matches</c> are held to the answer of .NET's non-backtracking engine for each, which its
     /// backtracking one would take time quadratic in the text's length to give.
@@ -674,6 +677,18 @@ public sealed class RegexTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var (code, output, error) = Toolchain.Run(toolchain.Build(compilation.Program, "regex-dfa-cache"));
         Assert.Equal((0, ""), (code, error));
         Assert.Equal(expected, output);
+        var told = ListTests.Edited(
+            ("std/std.kz", "            off = true\n            return false\n", "            eprint(\"off\")\n            off = true\n            return false\n"),
+            ("std/std.kz", "        clears = clears + 1\n", "        clears = clears + 1\n        eprint(\"emptied\")\n"));
+        var watched = Builder.Compile(SourceText.FromString("program.kz", program.ToString()), [], told, testBuild: true);
+        Assert.True(watched.Program is not null, string.Join("; ", watched.Diagnostics.Sorted));
+        var (toldCode, toldOutput, toldError) = Toolchain.Run(toolchain.Build(watched.Program, "regex-dfa-cache-told"));
+        Assert.Equal(0, toldCode);
+        Assert.Equal(expected, toldOutput);
+        // `Match`, `IsMatch` and `Matches` for each text, each with a cache of its own (Q1)
+        string[] given = ["emptied", "emptied", "emptied", "off"], answered = ["emptied", "emptied"];
+        var path = texts.SelectMany(t => Enumerable.Repeat(t.Length > 100000 ? given : answered, 3).SelectMany(x => x));
+        Assert.Equal(path, toldError.Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>The line the program prints for a pattern and a text: .NET's matches walked as Rust's <c>find_iter</c>, then <c>IsMatch</c> and the first match's position.</summary>

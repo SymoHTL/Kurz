@@ -218,7 +218,7 @@ dropped and its capitals made small, but `isc` stays `isc`; a name alone is a bi
 that version, read so, hold no class, and every `\p` and `\P` under `(?-u)`, is `Syntax` at its `\` (G3), after any
 error of the parse and of the levels, the first of several first; a class the pattern's end cuts off is `Syntax` at the
 end, and a `\` where its letter stands is `Syntax` at that `\`. *(assumed, §12: the defaults of
-the questions put to the owner on 2026-11-12, issue 176, comment 6812529825)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
+the questions put to the owner on 2026-11-12, issue 176, comment 6812529825, and the readings of the crate asked of it that day)* A `Regex` and a `Match` hold no `mut` field, so `==` compares two of them by their content
 (K4): two `Regex`es of one pattern on one engine are equal, and one pattern made with and without the flag
 `backtracking` gives two that are not. *(assumed, §12: the default of the question put to the owner on 2026-11-11, issue 176, comment 6808653712; the engine's part, stated in the product pass of comment 6811727642 and not put to the owner as a question)*
 

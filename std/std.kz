@@ -9924,8 +9924,9 @@ pub class Regex {
         backtracking = parsed.backtracking
         fold = parsed.RefFold()
         looks = parsed.Looks()
-        bounds = parsed.Bounds(looks)
-        classes = parsed.Classes(bounds, looks)
+        tested = parsed.Tests(looks)
+        bounds = parsed.Bounds(tested, looks)
+        classes = parsed.Classes(bounds, tested, looks)
         ascii = RegexAscii(bounds, classes)
         firsts = RegexFirsts(bounds, classes)
     }
@@ -11349,7 +11350,6 @@ class RegexParser {
         }
     }
 
-    // The simple case folding a backreference under `(?i)` compares by, empty where none does.
     // Whether the automaton has an assertion.
     internal bool Looks() {
         for op in ops {
@@ -11361,39 +11361,93 @@ class RegexParser {
         return false
     }
 
+    // What the operations of the automaton test a character by, each once, and `\w` for the word boundaries where `looks`: a
+    // character as -1 - its code point, a class as the first of its ranges * 2^32 + their count, a class whose ranges are those of
+    // one already taken left out, so that the pieces and the classes of the lazy DFA read each set of ranges once; empty for the
+    // backtracking engine, which runs no DFA.
+    internal List<long> Tests(bool looks) {
+        mut tests = List<long>()
+        if backtracking {
+            return tests
+        }
+
+        for pc in 0..<ops.Count {
+            if ops[pc] == 1 {
+                tests.Add(-1L - long(xs[pc]))
+            } else if ops[pc] == 2 {
+                Tested(mut tests, xs[pc], ys[pc])
+            }
+        }
+
+        if looks {
+            Tested(mut tests, wordAt, wordCount)
+        }
+
+        tests.Sort()
+        mut unique = List<long>()
+        for t in tests {
+            if unique.Count == 0 || t != unique[unique.Count - 1] {
+                unique.Add(t)
+            }
+        }
+
+        return unique
+    }
+
+    // The class of the `count` ranges from `start` added to `tests`, but where a class of `tests` has the same ranges.
+    internal void Tested(mut List<long> tests, int start, int count) {
+        if count == 0 {
+            return
+        }
+
+        for t in tests {
+            if t >= 0L && int(t % 4294967296L) == count {
+                other = int(t / 4294967296L)
+                mut same = true
+                for m in 0..<2 * count {
+                    if ranges[other + m] != ranges[start + m] {
+                        same = false
+                        break
+                    }
+                }
+
+                if same {
+                    return
+                }
+            }
+        }
+
+        tests.Add(long(start) * 4294967296L + long(count))
+    }
+
     // The pieces of the code points for the lazy DFA, the first code point of each, ascending from 0: the code points split where
-    // an operation that reads one, or an assertion, can tell two apart, as Rust's `ByteClasses` split the bytes, but over code
+    // a test of `tests` (`Tests`), or an assertion, can tell two apart, as Rust's `ByteClasses` split the bytes, but over code
     // points, which the automaton reads; empty for the backtracking engine, which runs no DFA.
-    internal List<int> Bounds(bool looks) {
+    internal List<int> Bounds(List<long> tests, bool looks) {
         mut bounds = List<int>()
         if backtracking {
             return bounds
         }
 
         mut points = [0]
-        for pc in 0..<ops.Count {
-            op = ops[pc]
-            if op == 1 {
-                points.Add(xs[pc])
-                points.Add(xs[pc] + 1)
-            } else if op == 2 {
-                for m in 0..<ys[pc] {
-                    points.Add(ranges[xs[pc] + 2 * m])
-                    points.Add(ranges[xs[pc] + 2 * m + 1] + 1)
+        for t in tests {
+            if t < 0L {
+                points.Add(int(-1L - t))
+                points.Add(int(-1L - t) + 1)
+            } else {
+                start = int(t / 4294967296L)
+                for m in 0..<int(t % 4294967296L) {
+                    points.Add(ranges[start + 2 * m])
+                    points.Add(ranges[start + 2 * m + 1] + 1)
                 }
             }
         }
 
         if looks {
-            // `\n` and `\r` for the lines, ASCII's word characters and those of `\w` for the words
+            // `\n` and `\r` for the lines, and ASCII's word characters for the words
             marks = [10, 11, 13, 14, 48, 58, 65, 91, 95, 96, 97, 123]
             for mark in marks {
                 points.Add(mark)
-            }
-
-            for m in 0..<wordCount {
-                points.Add(ranges[wordAt + 2 * m])
-                points.Add(ranges[wordAt + 2 * m + 1] + 1)
             }
         }
 
@@ -11407,101 +11461,97 @@ class RegexParser {
         return bounds
     }
 
-    // The class of each piece that starts at `bounds`: the pieces that every operation that reads a character and every
-    // assertion read alike are one class, numbered in the order of their first piece, so that a row of the DFA has a column for
-    // each way the automaton can read a character rather than for each piece (`Regex.Step`).
-    internal List<int> Classes(List<int> bounds, bool looks) {
+    // The class of each piece that starts at `bounds`: the pieces that every test of `tests` and every assertion read alike are one
+    // class, numbered in the order of their first piece, so that a row of the DFA has a column for each way the automaton can read
+    // a character rather than for each piece (`Regex.Step`). Each test moves the pieces it takes out of their class into one beside
+    // it, as a partition is refined, so that a test costs the pieces it takes and not every piece.
+    internal List<int> Classes(List<int> bounds, List<long> tests, bool looks) {
         mut classes = List<int>()
-        mut taken = List<bool>()
         for i in 0..<bounds.Count {
             classes.Add(0)
-            taken.Add(false)
         }
 
         if bounds.Count == 0 {
             return classes
         }
 
-        // each test once: a character as -1 - its code point, a class as its first range * 2^32 + its count of ranges
-        mut tests = List<long>()
-        for pc in 0..<ops.Count {
-            if ops[pc] == 1 {
-                tests.Add(-1L - long(xs[pc]))
-            } else if ops[pc] == 2 {
-                tests.Add(long(xs[pc]) * 4294967296L + long(ys[pc]))
-            }
-        }
-
-        tests.Sort()
+        // for each class, the class this test's pieces of it went to, -1 where none did yet, and the classes this test split
         mut count = 1
-        mut ids = List<int>()
-        for i in 0..<tests.Count + 4 {
+        mut moved = [-1]
+        mut touched = List<int>()
+        // the ASCII marks of the assertions: `\n`, `\r` and ASCII's word characters
+        marks = [10, 10, 13, 13, 48, 57, 65, 90, 95, 95, 97, 122]
+        for i in 0..<tests.Count + 3 {
+            // the test's ranges, ascending: `pairs` pairs of a first and a last code point from `start` of `source`
+            mut source = marks
+            mut start = 0
+            mut pairs = 1
             if i < tests.Count {
                 probe = tests[i]
-                if i > 0 && probe == tests[i - 1] {
-                    continue
-                }
-
                 if probe < 0L {
-                    taken[RegexPiece(bounds, int(-1L - probe))] = true
+                    source = [int(-1L - probe), int(-1L - probe)]
                 } else {
-                    at = int(probe / 4294967296L)
-                    for m in 0..<int(probe % 4294967296L) {
-                        Take(bounds, mut taken, ranges[at + 2 * m], ranges[at + 2 * m + 1])
-                    }
+                    source = ranges
+                    start = int(probe / 4294967296L)
+                    pairs = int(probe % 4294967296L)
                 }
             } else if !looks {
                 break
-            } else if i == tests.Count {
-                Take(bounds, mut taken, 10, 10)
             } else if i == tests.Count + 1 {
-                Take(bounds, mut taken, 13, 13)
+                start = 2
             } else if i == tests.Count + 2 {
-                Take(bounds, mut taken, 48, 57)
-                Take(bounds, mut taken, 65, 90)
-                Take(bounds, mut taken, 95, 95)
-                Take(bounds, mut taken, 97, 122)
-            } else {
-                for m in 0..<wordCount {
-                    Take(bounds, mut taken, ranges[wordAt + 2 * m], ranges[wordAt + 2 * m + 1])
+                start = 4
+                pairs = 4
+            }
+
+            // each range starts a piece and ends before one, so that one walk from the first range's piece reaches them all
+            mut k = RegexPiece(bounds, source[start])
+            for m in 0..<pairs {
+                while bounds[k] < source[start + 2 * m] {
+                    k = k + 1
+                }
+
+                while k < bounds.Count && bounds[k] <= source[start + 2 * m + 1] {
+                    old = classes[k]
+                    if moved[old] < 0 {
+                        moved[old] = count
+                        moved.Add(-1)
+                        touched.Add(old)
+                        count = count + 1
+                    }
+
+                    classes[k] = moved[old]
+                    k = k + 1
                 }
             }
 
-            // each class split in two by the test, the classes numbered again in the order of their first piece
-            ids.Clear()
-            for j in 0..<2 * count {
-                ids.Add(-1)
+            for split in touched {
+                moved[split] = -1
             }
 
-            mut made = 0
-            for k in 0..<bounds.Count {
-                mut key = 2 * classes[k]
-                if taken[k] {
-                    key = key + 1
-                }
+            touched.Clear()
+        }
 
-                if ids[key] < 0 {
-                    ids[key] = made
-                    made = made + 1
-                }
+        // the classes numbered in the order of their first piece; a class every piece of which moved has none left
+        mut order = List<int>()
+        for j in 0..<count {
+            order.Add(-1)
+        }
 
-                classes[k] = ids[key]
-                taken[k] = false
+        mut made = 0
+        for k in 0..<bounds.Count {
+            if order[classes[k]] < 0 {
+                order[classes[k]] = made
+                made = made + 1
             }
 
-            count = made
+            classes[k] = order[classes[k]]
         }
 
         return classes
     }
 
-    // Marks the pieces of the code points `a` to `b` in `taken`; `a` and `b` + 1 start pieces.
-    internal void Take(List<int> bounds, mut List<bool> taken, int a, int b) {
-        for k in RegexPiece(bounds, a)..RegexPiece(bounds, b) {
-            taken[k] = true
-        }
-    }
-
+    // The simple case folding a backreference under `(?i)` compares by, empty where none does.
     internal List<int> RefFold() {
         if foldRefs {
             return Table(3)

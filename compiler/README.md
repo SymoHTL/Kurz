@@ -1820,7 +1820,8 @@ ask about it.
   (`RegexDfa`): its states are sets of the automaton's states with what the character before is to the assertions, made
   on the first character of a class that needs them, over classes of code points where Rust's are of bytes, since the
   automaton reads code points, the code points that every operation and assertion read alike being one class, which
-  `Regex.New` makes once (`RegexParser.Classes`); `IsMatch` takes its answer, and the other searches run the Pike VM only where it finds a
+  `Regex.New` makes once (`RegexParser.Tests` and `RegexParser.Classes`), each set of ranges read once and the pieces a test
+  takes moved out of their class, as a partition is refined; `IsMatch` takes its answer, and the other searches run the Pike VM only where it finds a
   match, from the last position before that match's end at which its state held no thread of an earlier start; its cache, made for each call and bounded at 2 MiB, is emptied when it fills, and after three emptyings that read
   fewer than 10 bytes a state, or where it cannot hold two states, the search goes to the Pike VM. *(assumed: the
   defaults of issue 176, comment 6813110851)* The parse is
