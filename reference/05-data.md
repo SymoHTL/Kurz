@@ -1059,7 +1059,7 @@ print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
 A `data` type takes its methods between braces after its constructor, in the form of a class body
 (K7), but for a property, which §14 leaves open. A `data` type that derives from another, or that
 another derives from, takes `virtual` and `override` in its body as a class does (K7) (§4, the owner,
-2026-11-11, "A class's rules"); a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
+2026-11-11, "A class's rules"); an `override` is `mut` exactly when the method it overrides is, else `override-mut` (§4, the owner, 2026-11-12, comment 6819137865, H1); a type derived from one with a body holds each type's fields of the primary constructor and of the body together, the base's first, in `==`, the hash and the text (H2); a `with` on a value of a base that holds a value of a derived type gives a value of the derived type, every field of its body computed again (H3) *(assumed, §4: the rest as a class's, H4 of that product pass, which the owner left at its default: an override takes `pub` as written (the owner, 2026-11-02); a method of a derived type with the name and the parameter types of a base's `pub` method and no `override` is `hides-member`, an `override` of a method neither `virtual` nor `override` `override-without-virtual`, and one with another return type `override-return-type`; a member of a derived type's body named like a field or a method of a base's body, and a field of its primary constructor named like a field of a base's body, are `redeclared` (V9); the initializers of a derived type's body run before its base's, in a class's order (the owner, 2026-11-03, #39, comment 6600033456), so that an initializer of a derived type reads the fields of every primary constructor, which the construction gives first, and the fields of its own body above it, and a field of a base's body is no name there (V10); a private member of a base's body is visible to the base alone (F9); and the text of a value is that of the type it holds when the program runs, its own `Text()` or the nearest one a base's body declares, else A3's; the cost is a branch on the number of the type a value holds at each call of a `virtual` method that a type derived from the receiver's overrides, and at each `with` and each text of a value of a type another derives from)*; a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
 text (§4, the owner, 2026-11-11, "Every field counts"), and in `with` what B4 and comment 6821275386
 make it, computed again and never named; and a `static` method of the body is read as one of a class body is (K7, K18, K19) (§4, the
 owner, 2026-11-11, option (a) of the question of comment 6788371936). A field of the body is written
@@ -1071,12 +1071,11 @@ below it, a method of the type and `this` are `unknown-name` there, as in the de
 field (K7) *(assumed, §4)*. `with` computes the fields of the body again from the copy's fields (B4),
 and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The
 text writes them after the fields of the primary constructor, in the order of their declaration (B5), one
-without `pub` among them (B6), which code outside the type reads nowhere else: a read or an assignment of it there is `not-visible` (F9),
-where it has no `mut` either, since its access is read before the assignment, as C# reports a
-private field's access before its `readonly` *(assumed, §4: that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a
-field of the value it holds, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a
-`mut` method (B7), and through a `mut` variable as D4 lets a field of the primary constructor be
-*(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
+without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is `not-visible` (F9), and an assignment of it there
+is `not-visible` too, where it has no `mut` either, since its access is read before the assignment, as C# reports a
+private field's access before its `readonly` *(assumed, §4: the assignment and that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a field of the value it holds,
+inside its type, or outside it where it is `pub`, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a `mut` method (B7), and through a `mut` variable as D4 lets a field of the primary
+constructor be, inside its type, or outside it where it is `pub` too *(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
 constructor may (B9), and one named like a field above it, a method or a parameter is `redeclared` (V9)
 (B10). A method without `mut` changes nothing of
 the value it was called on: an assignment of a field in it, or of a field on a path of fields from it,
@@ -1197,6 +1196,16 @@ mut o = Order(3, 2)
 o.Total = 1
 ```
 
+Case: [data/body-field-private-immutable-assigned.kz](../corpus/data/body-field-private-immutable-assigned.kz)
+```kurz
+data Order(int Price, int Count) {
+    int Total = Price * Count
+}
+
+mut o = Order(3, 2)
+o.Total = 1
+```
+
 Case: [data/body-field-later.kz](../corpus/data/body-field-later.kz)
 ```kurz
 data Order(int Price, int Count) {
@@ -1283,6 +1292,98 @@ box = Inner(D(1, "old{1}"))
 box.V.Add(SetV(box))
 print(box.V.N)
 print(box.V.S)
+```
+
+Case: [data/body-inherit.kz](../corpus/data/body-inherit.kz)
+```kurz
+data Shape(int W, int H) {
+    pub int Area = W * H
+
+    pub virtual string Kind() => "shape"
+
+    pub string Size() => "{W} by {H}"
+}
+
+data Box(int D) : Shape {
+    pub int Volume = W * H * D
+
+    pub override string Kind() => "box"
+}
+
+string Describe(Shape s) => "{s.Kind()} {s.Area}"
+
+b = Box(2, 3, 4)
+print(b)
+print(b.Area)
+print(b.Volume)
+print(Describe(b))
+print(Describe(Shape(1, 5)))
+Shape wide = b
+t = wide with { W = 5 }
+print(t)
+print(t == Box(5, 3, 4))
+print(Box(6, 3, 1).Size())
+```
+
+Case: [data/body-inherit-order.kz](../corpus/data/body-inherit-order.kz)
+```kurz
+int Note(string s, int v) {
+    print("{s} {v}")
+    return v
+}
+
+data A(int X) {
+    pub int P = Note("base", X)
+}
+
+data B(int Y) : A {
+    pub int Q = Note("own", Y)
+}
+
+print(B(1, 2))
+```
+
+Case: [data/body-inherit-mut.kz](../corpus/data/body-inherit-mut.kz)
+```kurz
+data Counter(int N) {
+    pub virtual mut void Bump() {
+        N = N + 1
+    }
+
+    pub int Doubled() => N * 2
+}
+
+data Twice(int K) : Counter {
+    pub override mut void Bump() {
+        N = N + 2
+    }
+}
+
+mut Counter c = Twice(1, 7)
+c.Bump()
+print(c)
+print(c.Doubled())
+mut d = Counter(0)
+d.Bump()
+print(d)
+print(Twice(5, 1).Doubled())
+```
+
+Case: [data/body-override-mut.kz](../corpus/data/body-override-mut.kz)
+```kurz
+data Counter(int N) {
+    pub virtual mut void Bump() {
+        N = N + 1
+    }
+}
+
+data Fixed(int K) : Counter {
+    pub override void Bump() {
+        print(K)
+    }
+}
+
+print(Fixed(1, 2))
 ```
 
 Case: [values/mut-method-body-assigned.kz](../corpus/values/mut-method-body-assigned.kz)

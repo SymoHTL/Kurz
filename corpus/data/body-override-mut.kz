@@ -1,0 +1,16 @@
+// expect: error override-mut at 11
+// rules: D16
+
+data Counter(int N) {
+    pub virtual mut void Bump() {
+        N = N + 1
+    }
+}
+
+data Fixed(int K) : Counter {
+    pub override void Bump() {
+        print(K)
+    }
+}
+
+print(Fixed(1, 2))
