@@ -327,6 +327,24 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void On_an_arm_machine_an_asm_and_a_naked_function_are_not_supported_at_their_lines()
+    {
+        // R11, R12: the checker reads an `asm` for x86-64, the target a program is read for where nothing names one, so a build for a
+        // 64-bit Arm machine gets one `not supported` at the construct's line and no assembly of x86-64 in a module of Arm; the same
+        // programs build for x86-64 (the control)
+        const string asm = "mut long n = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) n)\n}\nprint(n)\n";
+        const string naked = "long Two() => 2\n\nnaked long Seven() {\n    asm(\"mov eax, 7\", \"ret\")\n}\n\nprint(Seven())\n";
+        foreach (var (text, line) in new[] { (asm, 3), (naked, 3) })
+        {
+            var arm = Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, testBuild: true, cpu: () => Cpu.ArmBaseline);
+            Assert.Null(arm.Program);
+            var d = Assert.Single(arm.Diagnostics.Items);
+            Assert.Equal((DiagnosticKind.NotSupported, line), (d.Kind, d.Line));
+            Assert.NotNull(Compile(text, toolchain.Runtime, testBuild: true, "raw").Program);
+        }
+    }
+
+    [Fact]
     public void The_runtime_of_every_target_is_emitted_with_its_own_calls_of_the_system()
     {
         foreach (var (target, call) in new[] { (Target.Linux, "@write("), (Target.Windows, "@WriteFile(") })

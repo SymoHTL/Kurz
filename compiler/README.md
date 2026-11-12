@@ -1398,7 +1398,9 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
-  `const` as its digits and a `sym` as its symbol; an output is stored into its place after the call;
+  `const` as its digits and a `sym` as its symbol; an output is stored into its place after the call. The
+  checker reads the template's operands and not its instructions, so an instruction the assembler refuses
+  is refused when clang builds the program, as the command's failure `clang did not build the program`;
 - a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly
   under the function's symbol in `.text`, typed a function on ELF and by its `.def` on COFF, aligned to
   16 bytes, beside a declaration of the symbol in the C types of its signature; a function or state a
@@ -1726,7 +1728,7 @@ derived from it (D6, T19) or that holds a value of its own type (D1, T19), `Size
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
-built (R18), and a construct of the other chapters the checker does not read. The line
+built (R18), and an `asm` and a `naked` function, whose operands the checker reads for x86-64 (R11, R12), and a construct of the other chapters the checker does not read. The line
 is the one where code first needs the construct or the type, in the words of the part the emitter
 does not lay out, so a declaration no code reaches builds (the owner, 2026-10-23, "At first use"); a call on a socket or a file that a
 function of `std/` makes is refused at the line of the program's statement whose call reached that function, which the queue of

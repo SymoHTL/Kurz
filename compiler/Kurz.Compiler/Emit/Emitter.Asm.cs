@@ -43,6 +43,11 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitAsm(AsmStatement a)
     {
+        if (!cpu.X86)
+        {
+            throw Unsupported(a.Line, "an `asm`, which the compiler builds for x86-64 alone (R11)"); // the checker reads its operands for x86-64
+        }
+
         var options = new HashSet<string>(StringComparer.Ordinal);
         var abis = new List<string>();
         foreach (var o in a.Operands.Where(o => o.Word is "options" or "clobber_abi"))
@@ -449,6 +454,11 @@ public sealed partial class Emitter
     /// </summary>
     private void EmitNaked(FunctionSymbol f, FunctionDeclaration d, string name)
     {
+        if (!cpu.X86)
+        {
+            throw Unsupported(d.Line, "a `naked` function, whose assembly the compiler builds for x86-64 alone (R12)");
+        }
+
         var body = d.BlockBody?.Statements is [AsmStatement asm] ? asm : throw new InvalidOperationException($"a `naked` function whose body is no one `asm` at line {d.Line}");
         var symbol = Symbol(name);
         var text = AsmTemplate(body, raw: false, inline: false, placeholder: (o, _) =>
