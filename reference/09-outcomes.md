@@ -1311,8 +1311,12 @@ process exits with the exit code 1 (O6); on WebAssembly an exhausted stack ends 
 engine's trap does (§2, the owner, 2026-10-21), a trap that the stack's place before the static data
 makes certain (§2, an assumption there), with no error line of the program's, since no code of it runs
 after a trap (§2, from the WebAssembly specification it checks), and with the exit code each engine
-gives of its own, which that specification does not define; on the ESP32 models a watchpoint the runtime sets at each switch catches an overflow at
-the first write past the stack's end, and on AVR nothing checks the stack, so that an overflow there
+gives of its own, which that specification does not define, while on the WebAssembly target that
+takes the host's switch an actor's stack in linear memory, 64 KiB by default, is checked at each
+function that moves its pointer, so that its overflow is that actor's `stack-overflow`, as on Linux and
+on Windows (§2, the owner, 2026-11-13, #519, comment 6851105334, "64 KiB + check, actor crash
+(Recommended)"); on the ESP32 models a watchpoint the runtime sets once, on the end of the one stack every actor
+runs on there (§6, comment 6850539879), catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
