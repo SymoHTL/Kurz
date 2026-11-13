@@ -20,9 +20,10 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
 and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
-of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a read, a write
-or an `Accept` that the poller's timer ends, which gives 11 (S9; §12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
-(Recommended)", and comment 6855469829, "11, as a read"). A call that
+of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a socket's own read, write
+or `Accept` whose bound (S9) the poller's timer ends, which gives 11 (§12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
+(Recommended)", and comment 6855469829, "11, as a read (Recommended)"), while the end of the HTTP client's call time gives 0, a
+read inside the call that it ends among it (W16; §12, the owner, 2026-11-05, T2, "always 0"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
 list, the words, the number 0, the text without a path and the first path)*
 
@@ -1732,8 +1733,8 @@ implementer, or the function the function value holds, whose file comes first in
 paths (§4) and, in one file, whose line and then whose column come first)* A `send` to an actor puts the
 sender's package on the path (§13, the owner, 2026-11-13, #519, comment 6847932993, Q23, "Yes
 (Recommended)"): it counts as a call of the receiving actor's method on the sender's path, read when the
-program is built, so that a refusal stays the compile error `files-not-allowed` or `network-not-allowed`
-and no message carries anything at run time (§13, the owner, 2026-11-13, #519, comment 6853074601,
+program is built, so that a refusal stays the compile error of its grant, `files-not-allowed`, `network-not-allowed`,
+`env-not-allowed` or `run-not-allowed`, and no message carries anything at run time (§13, the owner, 2026-11-13, #519, comment 6853074601,
 "Build time, as Rust").
 
 No case: a case is a program and no package, and the program needs no grant.

@@ -1321,11 +1321,13 @@ on Windows (§2, the owner, 2026-11-13, #519, comment 6851105334, "64 KiB + chec
 the exit code 1 (O6) *(assumed, §2: the root actor's stack, its size and its check)*, and the error line of
 such a crash names the line of the call that did not fit and its trace is walked along the chain of frames
 the compiler keeps in the linear stack, as for any crash on that target (§2, the owner, 2026-11-13, #519, comment 6855469829, "Line +
-trace, as any crash", against the line of the function whose check failed, with no trace); on the ESP32 models a watchpoint the runtime
-sets once on the stack of each scheduler thread, at its end, every actor running on the stack of the thread
-that runs it (§6, the owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)")
-*(assumed, §6: the place of the watchpoint under that answer, set once on the stack of each thread, one for
-each core)*, catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
+trace, as any crash", against the line of the function whose check failed, with no trace); on the ESP32 models, where no actor has a stack
+of its own (§6, the owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)"), a
+watchpoint that FreeRTOS sets at each switch of its tasks at the end of the stack of the task it switches to,
+every actor running on the stack of the scheduler thread that runs it, a task of FreeRTOS *(assumed, §6: every
+actor on the stack of the thread that runs it, one thread for each core, and the place of the watchpoint under
+that answer, which FreeRTOS's end-of-stack watchpoint, turned on in the build, sets at each switch, at the cost
+of a write at each switch, the debugger's last watchpoint and up to 60 bytes of each task's stack)*, catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
