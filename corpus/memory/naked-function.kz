@@ -1,0 +1,24 @@
+// expect: output
+// | 7
+// | 42
+// | 9
+// allow: raw
+// rules: R12
+
+long Nine() => 9
+
+naked long Seven() {
+    asm("mov eax, 7", "ret")
+}
+
+naked long Answer() {
+    asm("mov eax, {k}", "ret", k = const 40 + 2)
+}
+
+naked long Forward() {
+    asm("jmp {f}", f = sym Nine)
+}
+
+print(Seven())
+print(Answer())
+print(Forward())

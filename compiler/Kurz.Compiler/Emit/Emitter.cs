@@ -257,6 +257,7 @@ public sealed partial class Emitter
         }
 
         EmitRegexTable(); // G4: the one global of the tables, once every pattern is emitted
+        EmitAsmUsed(); // R12: once every `naked` body is emitted
         return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86));
     }
 
@@ -481,7 +482,8 @@ public sealed partial class Emitter
     {
         if ((d.Modifiers & Modifiers.Naked) != 0)
         {
-            throw Unsupported(d.Line, "a `naked` function (R12)");
+            EmitNaked(f, d, name);
+            return;
         }
 
         var result = Types.Substitute(f.ReturnType, instanceMap);
@@ -756,16 +758,15 @@ public sealed partial class Emitter
                 break; // declared at the top level and emitted when called, a data type laid out where a value of it is made; a `use` brings in a folder for the checker alone
             case ConstAssertStatement:
                 break; // T37: checked while the program compiles, and nothing of it runs
+            case AsmStatement asm:
+                EmitAsm(asm);
+                break;
             default:
                 throw Unsupported(statement.Line, StatementName(statement));
         }
     }
 
-    private static string StatementName(Statement statement) => statement switch
-    {
-        AsmStatement => "inline assembly (R11)",
-        _ => $"the statement `{statement.GetType().Name}`",
-    };
+    private static string StatementName(Statement statement) => $"the statement `{statement.GetType().Name}`";
 
     /// <summary>An expression that stands as a statement: a call, an <c>else</c> or a <c>match</c>, run for what it does.</summary>
     private void EmitEffect(Expression expression, int line)
