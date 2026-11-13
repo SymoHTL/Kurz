@@ -722,7 +722,8 @@ build assembles the program's `asm`s together in the order of their lines, each 
 that the assembler took, and each one whose addition the assembler refuses is `asm-refused`, once, in
 the order of the lines: one it refuses alone, and of two that define one label the second, as LLVM
 refuses the label in the second's text and Rust's compiler names that `asm!` *(assumed: the order of the lines,
-Rust's within one function, which no answer named, as §3 marks it)*. A
+Rust's within one function, and of two that define one label the second, which no answer named, as §3
+marks them)*. A
 register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
 header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
