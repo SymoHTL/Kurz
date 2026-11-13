@@ -1,0 +1,21 @@
+// expect: output
+// | 5
+// | Point { X = 7, Y = 20 }
+// allow: raw
+// rules: R11
+
+data Base(long X)
+data Point(long Y) : Base
+
+long Bump(mut Point point) {
+    point = Point(10, 20)
+    return 5
+}
+
+mut Point p = Point(0, 0)
+mut long n = 0
+raw {
+    asm("mov {x}, 7", "mov {n}, {k}", x = out(reg) p.X, n = out(reg) n, k = in(reg) Bump(mut p))
+}
+print(n)
+print(p)

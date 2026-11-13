@@ -383,7 +383,10 @@ Gate: review rule "rules for sessions".
   whose walk missed an assignment in an arm reached it with pull request 64, and two in an
   interpolation, a string's hole and one hole that was the string itself, with pull request 78, and a
   key of `SortBy` that changed the list it sorted through an instance, which the methods of pull
-  request 181 made possible (the line `sortby-change-fenced` holds it)
+  request 181 made possible (the line `sortby-change-fenced` holds it), and the place of an `asm`
+  output into a path of fields of a block, found where its operand stood and held across the place of
+  another output and across a later operand whose call gave the variable another block, with pull
+  request 520 (the program `AsmPlaces` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`

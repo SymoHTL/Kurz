@@ -19,7 +19,7 @@ public sealed partial class Emitter
     /// <summary>The functions and the state a <c>naked</c> body names by <c>sym</c>, which only the module's assembly reaches, kept in <c>llvm.compiler.used</c>.</summary>
     private readonly SortedSet<string> asmUsed = new(StringComparer.Ordinal);
 
-    /// <summary>R11, R12: each <c>asm</c> of the program's file, alone in a module of its own (<see cref="EmittedProgram.Asms"/>).</summary>
+    /// <summary>R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program (<see cref="EmittedProgram.Asms"/>).</summary>
     private readonly List<AsmAlone> asmsAlone = [];
 
     /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes.</summary>
@@ -44,7 +44,7 @@ public sealed partial class Emitter
     /// <summary>
     /// R11: an <c>asm</c> statement. Every operand's value is read, and every place an output writes through a pointer found, in the order
     /// the operands are written, as Rust evaluates them; the call then writes each output into its place, the place of a variable or of a
-    /// path of fields found as the output is stored, so that no place is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
+    /// path of fields found as the output is stored, so that no copy of a block a path goes through is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
     /// <c>sideeffect</c> under <c>pure</c>, no <c>alignstack</c> under <c>nostack</c>, AT&amp;T's dialect under <c>att_syntax</c> and Intel's
     /// otherwise, no clobber of the flags under <c>preserves_flags</c>, no clobber of memory under <c>nomem</c>, the call's attributes
     /// <c>willreturn</c> and <c>memory(none)</c> under <c>pure</c> and <c>nomem</c>, or <c>memory(read)</c> under <c>pure</c> and <c>readonly</c>,
@@ -164,12 +164,7 @@ public sealed partial class Emitter
             1 => outputs[0].Type,
             _ => "{ " + string.Join(", ", outputs.Select(x => x.Type)) + " }",
         };
-        var words = new StringBuilder("asm");
-        if (!options.Contains("pure"))
-        {
-            words.Append(" sideeffect");
-        }
-
+        var words = new StringBuilder(); // the words after `asm` and its `sideeffect`
         if (!options.Contains("nostack"))
         {
             words.Append(" alignstack");
@@ -185,14 +180,20 @@ public sealed partial class Emitter
         var attributes = options.Contains("pure")
             ? options.Contains("nomem") ? " nounwind willreturn memory(none)" : options.Contains("readonly") ? " nounwind willreturn memory(read)" : " nounwind willreturn"
             : options.Contains("nomem") ? " nounwind memory(inaccessiblemem: readwrite)" : " nounwind";
-        var call = $"call {resultType} {words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Typed))}){attributes}";
+        var call = $"call {resultType} asm{(options.Contains("pure") ? "" : " sideeffect")}{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Typed))}){attributes}";
         if (!unit.Runtime)
         {
-            // the program's `asm` alone, which the build assembles where clang refuses inline assembly (EmittedProgram.Asms): the same
-            // call, with a poison value of its type for each register's input and each symbol a `sym` names declared
-            var declared = string.Concat(symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()\n"));
-            var alone = $"call {resultType} {words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}){attributes}";
-            asmsAlone.Add(new AsmAlone(a.Line, $"{declared}define void @kz.asm() {{\n  {(outputs.Count == 0 ? "" : "%r = ")}{alone}\n  ret void\n}}\n"));
+            // the program's `asm` without the rest of the program, which the build assembles where clang refuses inline assembly
+            // (EmittedProgram.Asms): the same template and constraints in a function of its own, with a poison value of its type for each
+            // register's input and each symbol a `sym` names declared; the call has an effect and no attribute but `nounwind`, whatever the
+            // options, which changes nothing clang assembles: LLVM drops a call of no effect whose value nothing uses, at -O0 too, a `pure`
+            // one of `memory(none)` or `memory(read)` with `sideeffect` or without (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
+            var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
+            asmsAlone.Add(new AsmAlone(
+                a.Line,
+                "R11",
+                [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")],
+                $"define void @kz.asm{asmsAlone.Count.ToString(CultureInfo.InvariantCulture)}() {{\n  {(outputs.Count == 0 ? "" : "%r = ")}{alone}\n  ret void\n}}\n"));
         }
 
         if (outputs.Count == 0)
@@ -541,7 +542,7 @@ public sealed partial class Emitter
 
         if (!unit.Runtime)
         {
-            asmsAlone.Add(new AsmAlone(body.Line, string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n")))); // the body alone (EmittedProgram.Asms)
+            asmsAlone.Add(new AsmAlone(body.Line, "R12", [], string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n")))); // the body without the program (EmittedProgram.Asms)
         }
 
         var parameters = f.Parameters.Select(p => ParameterType(f, p.Type));

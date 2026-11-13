@@ -1,0 +1,9 @@
+// expect: error asm-refused at 8
+// allow: raw
+// rules: R11
+
+raw {
+    asm("twice:", "nop")
+    asm("nop")
+    asm("twice:", "nop")
+}

@@ -1402,15 +1402,19 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
   `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes
   through a pointer (`*p`, `p[i]`) found once, in the order the operands are written; an output is stored
-  into its place after the call, the place of a variable or of a path of fields found as it is stored, so
+  into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so
   that no copy of a block a path goes through is held across another operand, and a variable a later
   operand's call changed is written as the call left it. The
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
   is refused when clang builds the program. Clang 23 given IR names no line of the program for it, not
-  the `!srcloc` either, so where clang refuses inline assembly the build assembles each `asm` of the
-  program alone, a module of its own, and each one clang refuses is the compile error `asm-refused` at
-  the line of the `asm`, a `naked` function's among them (R11, R12); a refusal no `asm` meets alone, a
-  label two of them define, stays clang's failure. The command grants a program no `raw` (R7), so no program it
+  the `!srcloc` either, so where clang refuses inline assembly the build assembles the program's `asm`s
+  together without the rest of the program, each as the emitter wrote it in IR of its own, a call with an
+  effect whatever its options, since LLVM drops a call of no effect whose value nothing uses at `-O0` too,
+  in the order of their lines, each beside those before it that clang took, and each one whose addition
+  clang refuses is the compile error `asm-refused` at the line of the `asm`, under R11, or R12 for a `naked`
+  function's, once, in the order of the lines: one clang refuses alone, and of two that define one label
+  the second (R11, R12). Where none is refused so, the failure stays clang's. The command writes each as
+  it writes a compile error. It grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
   whose refusal its failure `clang did not build the program` names as the compiler's defect;
 - a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly

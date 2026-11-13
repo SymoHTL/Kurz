@@ -116,7 +116,10 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, but for
         the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
-        passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
+        passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case that expects an id
+        the build raises (CorpusTests.BuildIds, now asm-refused), which the corpus theory holds to no error of the
+        checker and the runner builds, counted in no floor, whose build ends other than with that id alone at the
+        header's line, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
         cases run than RunFloor in RunTests names for Linux and for Windows, each the count measured on its system with no margin, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start
@@ -388,7 +391,7 @@ flowchart TD
   `compiler/Kurz.Compiler/Emit/CaseTables.cs` does, or how `tools/gates.py` runs the tool: G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
-  lists change: G10 and X2.
+  lists change, `CorpusTests.BuildIds` among them: G10 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.

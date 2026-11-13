@@ -178,13 +178,7 @@ public static class Command
         var work = Directory.CreateTempSubdirectory("kurz-build-");
         try
         {
-            Builder.Build(program, clang, work.FullName, outputPath);
-            return 0;
-        }
-        catch (ToolchainException e)
-        {
-            error.Write(ClangFailed(e));
-            return 1;
+            return Built(program, clang, work.FullName, outputPath, source.Name, error) ? 0 : 1;
         }
         finally
         {
@@ -308,17 +302,35 @@ public static class Command
         using (place)
         {
             var executable = Path.Combine(place.Directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
-            try
+            return Built(emitted, clang, place.Directory, executable, source.Name, error) ? RunProgram(executable, program, root, error) : 1;
+        }
+    }
+
+    /// <summary>
+    /// Has clang build the program (<see cref="Builder.Build"/>); false with the failure written where it does not: each <c>asm</c> the
+    /// assembler refuses as the command writes a compile error, <c>asm-refused</c> at its line of the source named
+    /// <paramref name="sourceName"/> (R11, R12), and any other failure as clang's.
+    /// </summary>
+    internal static bool Built(EmittedProgram program, Clang clang, string workingDirectory, string outputPath, string sourceName, TextWriter error)
+    {
+        try
+        {
+            Builder.Build(program, clang, workingDirectory, outputPath);
+            return true;
+        }
+        catch (AsmRefusedException e)
+        {
+            foreach (var d in e.Refused)
             {
-                Builder.Build(emitted, clang, place.Directory, executable);
-            }
-            catch (ToolchainException e)
-            {
-                error.Write(ClangFailed(e));
-                return 1;
+                error.Write(d.At(sourceName) + "\n");
             }
 
-            return RunProgram(executable, program, root, error);
+            return false;
+        }
+        catch (ToolchainException e)
+        {
+            error.Write(ClangFailed(e));
+            return false;
         }
     }
 
