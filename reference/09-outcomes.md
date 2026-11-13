@@ -1336,8 +1336,8 @@ holds the address and its mask), the debugger's last watchpoint and up to 60 byt
 catches an overflow at a write into those 32 bytes, inside the stack and before its end, a write there
 counting as an overflow even from a frame that still fits, so that a task's usable stack is its size less
 those 32 bytes, and up to 28 bytes more where the stack's start is not a multiple of 32, up to 60 bytes in
-all, while an overflow whose frame jumps over the watched 32 bytes goes uncaught (§6, assumed with the place
-of the watchpoint, from `vPortSetStackWatchpoint` of ESP-IDF v6.1's Xtensa and RISC-V ports, which it checks),
+all, while an overflow whose frame jumps over the watched 32 bytes goes uncaught *(assumed, §6: with the place
+of the watchpoint, from `vPortSetStackWatchpoint` of ESP-IDF v6.1's Xtensa and RISC-V ports, which it checks)*,
 and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
