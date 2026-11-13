@@ -160,8 +160,8 @@ test build has where `--lines` says so (the owner, 2026-10-29, "build, run and e
 executable beside the source, named
 after it, `hello.exe` on Windows, or where `-o` says (design record, section 2). It writes over an
 executable that is there, writes nothing on standard output, and exits with 0. A program the
-compiler refuses gets its lines on standard error, one per diagnostic, an `asm-refused` line in the
-order LLVM meets its `asm` (R11), and no executable, and the command exits with 1:
+compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines, but an
+`asm-refused` line in the order LLVM meets its `asm` (R11), and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
     hello.kz:2: not supported: `s.Chars` as a list (T15)
@@ -1399,9 +1399,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `k7` of AVX-512, the x87 and MMX registers and `tmm0` to `tmm7` of AMX; the call is
   `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
-  `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
-  `const` as its digits and a `sym` as its symbol. An operand's value is read, but an `inout`'s input, which is loaded just before the call, and the place an output writes
-  through a pointer (`*p`, `p[i]`) found once, in the order the operands are written; an output is stored
+  `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`; the call of an
+  `asm` of the program carries its line as its mark, `!srcloc`, as rustc puts one on each call. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
+  `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes through a pointer (`*p`,
+  `p[i]`) found once, in the order the operands are written, but the input of an `inout` without `=>`, which is loaded just before the call; an output is stored
   into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so
   that no copy of a block a path goes through is held across another operand, and a variable a later
   operand's call changed is written as the call left it. The
@@ -1413,16 +1414,20 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   since LLVM drops a call of no effect whose value nothing uses at `-O0` too, in the copies' `main`, which
   every program defines, in place of its label, so that the copies define no symbol the program does not,
   and a `naked` function's its module-level assembly, in the order LLVM meets them, the order the compiler
-  writes them, in one file as across files: the `naked` functions' assembly first, in the order of their
-  first calls, then the `asm` statements, in the order of the functions that hold them, a guarded block's
-  before the function it stands in, and of the statements in each; each beside those before it that clang
+  writes them, in one file as across files: the `naked` functions' assembly first, in the order the compiler
+  writes the functions, the top-level code's first and every other at its first use, those the top-level code
+  reaches before those their own text reaches, then the `asm` statements, in the order of the functions that hold them, a guarded block's
+  before the function it stands in, and of the statements in each, in a release build a statement's copy
+  once for each call the module clang optimises (`-S -emit-llvm` at the release build's options) still holds,
+  found by its mark and in that module's order, so that a call the optimiser dropped is named by none and
+  the second copy of one it copied is named (R11; the owner, 2026-11-13, #532, comment 6860019854, "Copies
+  from optimised IR"); each beside those before it that clang
   took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
   `asm`, under R11, or R12 for a `naked` function's, once, in that order: one clang refuses alone, a
   `naked` function's whose label is a symbol of the program among them, which LLVM refuses where it writes
   that symbol's definition, with no line of the template, and of two `naked` functions that define one
   label the one LLVM meets second, the earlier line's where the two are called out of the order of their
-  lines (R11, R12). Where none is refused so, as where the optimiser of a release build copies an `asm`
-  whose text the assembler takes once and refuses twice, the failure stays clang's. The command writes each as
+  lines (R11, R12). Where none is refused so, the failure stays clang's. The command writes each as
   it writes a compile error. It grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
   whose refusal its failure `clang did not build the program` names as the compiler's defect;

@@ -39,8 +39,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes. The input is
-    /// read where the first pass reads the operand, but an <c>inout</c>'s, which <c>Input</c> loads when it is called, just before
-    /// the call.
+    /// read where the first pass reads the operand, but that of an <c>inout</c> without <c>=&gt;</c>, which <c>Input</c> loads when it is
+    /// called, just before the call.
     /// </summary>
     private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, Func<string>? Input, KurzType? InputType, AsmOutput? Output);
 
@@ -61,8 +61,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// R11: an <c>asm</c> statement. Every operand's value is read, but an <c>inout</c>'s, which is loaded just before the call, and every
-    /// place an output writes through a pointer found, in the order the operands are written, as Rust evaluates them;
+    /// R11: an <c>asm</c> statement. Every operand's value is read, and every place an output writes through a pointer found, in the order
+    /// the operands are written, as Rust evaluates them, but the input of an <c>inout</c> without <c>=&gt;</c>, which is loaded just before
+    /// the call;
     /// the call then writes each output into its place, the place of a variable or of a
     /// path of fields found as the output is stored, so that no copy of a block a path goes through is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
     /// <c>sideeffect</c> under <c>pure</c>, no <c>alignstack</c> under <c>nostack</c>, AT&amp;T's dialect under <c>att_syntax</c> and Intel's
@@ -71,7 +72,7 @@ public sealed partial class Emitter
     /// <c>memory(inaccessiblemem: readwrite)</c> under <c>nomem</c> alone, and the end of the block after the call under <c>noreturn</c>.
     /// <c>clobber_abi</c> adds, as Rust does, an output that is let go of for each register the ABI does not keep across a call and no
     /// output names, and a clobber for each one no operand of Kurz can name (<see cref="OnlyClobbered"/>). A <c>label</c> operand is not
-    /// laid out.
+    /// laid out. The call of an <c>asm</c> of the program carries its line as its mark, <c>!srcloc</c> (<see cref="Builder.Build"/>).
     /// </summary>
     private void EmitAsm(AsmStatement a)
     {
@@ -211,6 +212,10 @@ public sealed partial class Emitter
             // (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
             var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
             asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
+
+            // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly, which a copy LLVM inlines
+            // keeps: by it the build reads which calls the optimised module of a release build holds (Builder.Build)
+            call += $", !srcloc !{{i64 {a.Line.ToString(CultureInfo.InvariantCulture)}}}";
         }
 
         if (outputs.Count == 0)
