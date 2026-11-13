@@ -1317,17 +1317,24 @@ gives of its own, which that specification does not define, while on the WebAsse
 takes the host's switch an actor's stack in linear memory, 64 KiB by default, is checked at each
 function that moves its pointer, so that its overflow is that actor's `stack-overflow`, as on Linux and
 on Windows (§2, the owner, 2026-11-13, #519, comment 6851105334, "64 KiB + check, actor crash
-(Recommended)"), the root actor's stack there, 1 MiB, checked too, so that its overflow ends the process with
-the exit code 1 (O6) *(assumed, §2: the root actor's stack, its size and its check)*, and the error line of
+(Recommended)"), the root actor's stack there, 1 MiB (§2, the owner, 2026-11-13, #533, comment 6862222648,
+"1 MiB, as Rust (Recommended)", against 64 KiB for the root actor too, as the answer of comment 6851105334
+gives each waiting actor, at the cost of top-level code held to 64 KiB of linear stack with no clause to raise
+it; the cost is 1 MiB of linear memory in every program on that target, once), checked too, so that its
+overflow ends the process with the exit code 1 (O6) *(assumed, §2: the root actor's check)*, and the error line of
 such a crash names the line of the call that did not fit and its trace is walked along the chain of frames
 the compiler keeps in the linear stack, as for any crash on that target (§2, the owner, 2026-11-13, #519, comment 6855469829, "Line +
-trace, as any crash", against the line of the function whose check failed, with no trace); on the ESP32 models, where no actor has a stack
-of its own (§6, the owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)"), a
-watchpoint that FreeRTOS sets at each switch of its tasks at the end of the stack of the task it switches to,
-every actor running on the stack of the scheduler thread that runs it, a task of FreeRTOS *(assumed, §6: every
-actor on the stack of the thread that runs it, one thread for each core, and the place of the watchpoint under
-that answer, which FreeRTOS's end-of-stack watchpoint, turned on in the build, sets at each switch, at the cost
-of a write at each switch, the debugger's last watchpoint and up to 60 bytes of each task's stack)*, catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
+trace, as any crash (Recommended)", against the line of the function whose check failed, with no trace); on the ESP32 models, where no
+actor has a stack of its own, every actor running on the stack of the scheduler thread that runs it (§6, the
+owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)"), a watchpoint that FreeRTOS
+sets at each switch of its tasks on the last 32 bytes of the stack of the task it switches to, each scheduler
+thread a task of FreeRTOS *(assumed, §6: one thread for each core, and the place of the watchpoint under that
+answer, which FreeRTOS's end-of-stack watchpoint, turned on in the build, sets at each switch, at the cost of
+the call that sets it at each switch, which writes the watched address and its mask into two of the chip's
+debug registers on the Xtensa models and four on the RISC-V models, the debugger's last watchpoint and up to 60
+bytes of each task's stack)*, catches an overflow at a write into those 32 bytes, inside the stack and before
+its end, while an overflow whose frame jumps over them goes uncaught (§6, from `vPortSetStackWatchpoint` of
+ESP-IDF v6.1's Xtensa and RISC-V ports, which it checks), and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the

@@ -23,9 +23,12 @@ and `Other` for a number none of them has, which Rust gives `Uncategorized`. A p
 of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a socket's own read, write
 or `Accept` whose bound (S9) the poller's timer ends, which gives 11 (§12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
 (Recommended)", and comment 6855469829, "11, as a read (Recommended)"), while the end of the HTTP client's call time gives 0, a
-read inside the call that it ends among it (W16; §12, the owner, 2026-11-05, #110, comment 6657251329, T2, "always 0"). A call that
+read inside the call that it ends among it, and a read inside the call gives that 0 whichever bound ends it,
+its own (S9) or the call's, as the client maps a socket's run-out to the end of its call time (W16; §12, the
+owner, 2026-11-05, #110, comment 6657251329, T2, "always 0", "a socket's run-out is mapped to it"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
-list, the words, the number 0, the text without a path and the first path)*
+list, the words, the number 0 of an error that is not the system's, a NUL in a path and `WriteZero`, the text
+without a path and the first path)*
 
 Case: [system/open-missing.kz](../corpus/system/open-missing.kz)
 ```kurz
@@ -1362,7 +1365,7 @@ one, each timer an entry put into the process's one timer wheel and taken out, w
 its own *(assumed, §12: the timer's resolution, as Tokio's timer keeps it, and its cost)*. An `Accept` whose
 bound the poller's timer ends gives `TimedOut` with 11, which the runtime gives as it gives a read's, as
 Linux's `accept` under `SO_RCVTIMEO` gives `EAGAIN`, which Rust's standard library passes on (§12, the owner,
-2026-11-13, #519, comment 6855469829, "11, as a read", against 0, as `Connect`'s own bound gives).
+2026-11-13, #519, comment 6855469829, "11, as a read (Recommended)", against 0, as `Connect`'s own bound gives).
 
 `s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
 `TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
@@ -1734,8 +1737,9 @@ paths (§4) and, in one file, whose line and then whose column come first)* A `s
 sender's package on the path (§13, the owner, 2026-11-13, #519, comment 6847932993, Q23, "Yes
 (Recommended)"): it counts as a call of the receiving actor's method on the sender's path, read when the
 program is built, so that a refusal stays the compile error of its grant, `files-not-allowed`, `network-not-allowed`,
-`env-not-allowed` or `run-not-allowed`, and no message carries anything at run time (§13, the owner, 2026-11-13, #519, comment 6853074601,
-"Build time, as Rust").
+`env-not-allowed` or `run-not-allowed`, the last two by their grants (§13, the owner, 2026-10-30, "`allow env`, as
+Deno", and 2026-11-01, "allow run"), and no message carries anything at run time (§13, the owner,
+2026-11-13, #519, comment 6853074601, "Build time, as Rust (Recommended)").
 
 No case: a case is a program and no package, and the program needs no grant.
 
