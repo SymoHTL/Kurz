@@ -319,7 +319,8 @@ comment 6724695653, with the bound held as the moved body's reads are, a reading
 ends, a write of 25 bytes being able to take more than one call, so that the wait has no bound of
 its own, and none where the reading actor ends during its write, whose end then sets the flag (§6, the owner,
 2026-11-13, #519, comment 6851105334, "Actor's end sets failed (Recommended)") *(assumed, §6: the reading of the
-round of pull request 415)*. The wait is the server's read of the flag, each read again a switch point at which the
+round of pull request 415, issue 39, comment 6735602401, that the write bound holds each call of the system and the
+server's wait only where the write ends, so that the wait has no bound of its own)*. The wait is the server's read of the flag, each read again a switch point at which the
 other actors of its thread run, the reading actor among them where it shares that thread, at the
 cost of the server held from its next connection for the write's time (§6, the owner, 2026-11-09,
 pull request 415, comment 6735589705, "Re-read yields", against a wait that blocks the thread,
