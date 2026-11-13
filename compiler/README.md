@@ -1401,7 +1401,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`; the call of an
   `asm` of the program carries its line as its mark, `!srcloc`, in a test build as in a release build, as rustc puts one on each call
-  where the build asks for neither LTO nor bitcode. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
+  where the build uses no LTO, the thin-local LTO of its default optimised build of several codegen units included, and needs no bitcode. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
   `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes through a pointer (`*p`,
   `p[i]`) found once, in the order the operands are written, but the input of an `inout` without `=>`, which is loaded just before the call; an output is stored
   into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so
@@ -1424,12 +1424,14 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   before the function it stands in, and of the statements in each, in a release build a statement's copy
   once for each call the code generator holds once it placed the blocks, in its text of machine IR
   (`-S -mllvm -stop-after=block-placement` at the release build's options), found by its mark and in that
-  order, so that a call the optimiser dropped is named by none and every copy after the first of one the
-  optimiser or the code generator copied is named (R11; the owner, 2026-11-13, pull request 532, comment
-  6860019854, "Copies from optimised IR"); each beside those before it that clang
+  order (R11, the reading by the mark assumed there as the build's mechanism), so that a call the
+  optimiser dropped is named by none and every copy after the first of one the optimiser or the code
+  generator copied is assembled, and refused where its text defines a symbol, and the line named is the
+  one LLVM refuses (R11; the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from
+  optimised IR"); each beside those before it that clang
   took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
-  `asm`, under R11, or R12 for a `naked` function's, a line named once however many of its copies clang
-  refuses, in that order: one clang refuses alone, a
+  `asm`, under R11, or R12 for a `naked` function's, a line named once for each text clang refuses its
+  copies with (R11, assumed there as Rust's), in that order: one clang refuses alone, a
   `naked` function's whose label is a symbol the program defines among them, which LLVM refuses where it writes
   that symbol's definition, with no line of the template, and of two `naked` functions that define one
   label the one LLVM meets second, the earlier line's where the two are first used out of the order of their

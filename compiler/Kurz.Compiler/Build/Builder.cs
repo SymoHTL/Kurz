@@ -88,15 +88,19 @@ public static partial class Builder
     /// IR), so the program's <c>asm</c>s are assembled together without the rest of the program, beside a label for each symbol its IR
     /// defines (<see cref="Definitions"/>), in the order LLVM meets them, the order of the code its code generator writes, in one file as
     /// across files: in a test build as the compiler writes them (<see cref="EmittedProgram.Asms"/>), in a release build an <c>asm</c>
-    /// statement's copy once for each call the code generator holds once it placed the blocks, in its order (<see cref="Held"/>); each with
+    /// statement's copy once for each call the code generator holds once it placed the blocks, in its order, read by the mark on each
+    /// call, the build's mechanism, which R11 marks assumed (<see cref="Held"/>); each with
     /// those before it that clang took, and each one whose addition clang refuses is the compile error <c>asm-refused</c> at its line, a
-    /// line named once however many of its copies clang refuses, an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
+    /// line named once for each text clang refuses its copies with, as Rust's compiler reports identical diagnostics once (R11, assumed
+    /// there), an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
     /// owner, 2026-11-13, "Rust's srcloc", for the error at the line of the <c>asm</c>, pull request 530, comment 6855725580, "LLVM's
-    /// order everywhere", for the order, and pull request 532, comment 6860019854, "Copies from optimised IR", for a release build): one
+    /// order everywhere", for the order, and pull request 532, comment 6860019854, "Copies from optimised IR", for the line named in a
+    /// release build, the one LLVM refuses): one
     /// clang refuses alone, a <c>naked</c> function's whose label is a symbol of the program among them, of two <c>naked</c> functions that
     /// define one label the second LLVM meets, whose label clang refuses beside the first's, where Rust's compiler, which gives a naked
     /// function's assembly no <c>!srcloc</c>, names neither, and in a release build every copy after the first of a call the optimiser or
-    /// the code generator copied, whose text clang takes once and refuses again. Where none is refused so, the failure stays clang's.
+    /// the code generator copied whose text defines a symbol, which clang takes once and refuses again. Where none is refused so, the
+    /// failure stays clang's.
     /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
@@ -140,19 +144,21 @@ public static partial class Builder
                 throw;
             }
 
-            throw new AsmRefusedException([.. refused.DistinctBy(d => d.Line)]); // an `asm` of a function emitted or copied twice, once (E1)
+            throw new AsmRefusedException([.. refused.DistinctBy(d => (d.Line, d.Message))]); // an `asm` of a function emitted or copied twice, once for each text (E1)
         }
     }
 
     /// <summary>
-    /// R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the copies a release build assembles,
+    /// R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR", for the line named, the one LLVM
+    /// refuses; the reading by the mark the build's mechanism, which R11 marks assumed): the copies a release build assembles,
     /// whose optimiser drops a call of no effect whose value nothing reads and copies a call where it inlines a function into two callers,
     /// and whose code generator copies a call where it duplicates the block that holds it into the blocks before it: the <c>naked</c>
     /// functions' module-level assembly, which neither changes, then a copy for each call of an <c>asm</c> statement the code generator holds
     /// once it placed the blocks (<see cref="Clang.Generate"/>), in the order it holds them, the order LLVM meets them, each the
     /// <see cref="AsmAlone"/> of the line the call's mark names, the <c>!srcloc</c> the emitter puts on it, which every copy LLVM makes keeps,
-    /// whose template the call has, since two <c>asm</c>s can stand at one line; the machine code keeps no constraints, so of two at one line
-    /// with one template, which name one line, the first. A call without a mark is the runtime's. Null where clang does not write the code.
+    /// whose template the call has, since two <c>asm</c>s can stand at one line; the machine IR keeps no constraint string, only a flag word
+    /// for each operand, so of two at one line with one template, which name one line, the build takes the first, by choice. A call without
+    /// a mark is the runtime's. Null where clang does not write the code.
     /// </summary>
     private static List<AsmAlone>? Held(EmittedProgram program, Clang clang, string irPath, string workingDirectory)
     {

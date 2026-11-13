@@ -1,6 +1,6 @@
 ---
 name: clang-names-no-line-of-the-program-for-a-refused-asm
-description: clang 23 given a module of LLVM IR names no line of the program for an instruction of inline assembly it refuses, with Rust's `!srcloc` on the call or without (2026-11-13), while its C front end, which writes the `!srcloc` and reads it back, names the line of the `asm` statement, of two that define one label the second; and at -O0 it drops a call of no effect whose value nothing uses before anything is assembled, a `pure` asm of `memory(none)` or `memory(read)`, with `sideeffect` or without, and it refuses a label of module-level assembly that is a symbol the module defines where it writes that definition, with no `<inline asm>` line, so the build reads the line itself by assembling the program's `asm`s together in the order LLVM meets them, the order the compiler writes them, in one file as across files, beside a label for each symbol the program defines, an `asm` statement's copy a call with an effect in the copies' `main`, and in a release build a copy for each call its code generator holds once it placed the blocks, read from its machine IR by the `!srcloc` the emitter puts on it, which clang keeps on every copy, one its optimiser inlines and one its tail duplication makes (2026-11-13).
+description: clang 23 given a module of LLVM IR names no line of the program for an instruction of inline assembly it refuses, with Rust's `!srcloc` on the call or without (2026-11-13), while its C front end, which writes the `!srcloc` and reads it back, names the line of the `asm` statement, of two that define one label the second; and at -O0 it drops a call of no effect whose value nothing uses before anything is assembled, a `pure` asm of `memory(none)` or `memory(read)`, with `sideeffect` or without, and it refuses a label of module-level assembly that is a symbol the module defines where it writes that definition, with no `<inline asm>` line, so the build reads the line itself by assembling the program's `asm`s together in the order LLVM meets them, the order of the code its code generator writes, in a test build as the compiler writes them and in a release build as the code generator holds them, in one file as across files, beside a label for each symbol the program defines, an `asm` statement's copy a call with an effect in the copies' `main`, and in a release build a copy for each call its code generator holds once it placed the blocks, read from its machine IR by the `!srcloc` the emitter puts on it, which clang keeps on every copy, one its optimiser inlines and one its tail duplication makes (2026-11-13).
 metadata:
   type: reference
 ---
@@ -61,15 +61,25 @@ drops a `pure` call whose outputs nothing reads before anything is assembled, so
 of it, where a test build of the same program is `asm-refused` (R11, the owner, 2026-11-13, pull
 request 530, comment 6854386584, "As Rust, builds differ").
 
-Where clang refuses a release build, the copies of the `asm` statements are made from the code its code
-generator holds (R11; the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised
-IR"): the emitter puts the line of each `asm` of the program on its call, `!srcloc !{i64 <line>}`, as
-Rust's compiler puts a `!srcloc` on each call where the build asks for neither LTO nor bitcode
-(`allow_raw_span_inline_asm_srcloc` in `rustc_codegen_llvm/src/asm.rs` of Rust 1.100.0, read on
-2026-11-13), `Clang.Generate` has clang write, at the release build's options, the machine IR its code
+Where clang refuses a release build, the line named is the one LLVM refuses (R11; the owner, 2026-11-13,
+pull request 532, comment 6860019854, "Copies from optimised IR"), and the copies of the `asm` statements
+are made from the code its code generator holds, by the mark on each call, the build's mechanism, which
+R11 marks assumed: the emitter puts the line of each `asm` of the program on its call,
+`!srcloc !{i64 <line>}`, as Rust's compiler puts a `!srcloc` on each call where the build uses no LTO,
+not even the thin-local LTO that `Session::lto` gives its default optimised build of several codegen
+units, and needs no bitcode (`allow_raw_span_inline_asm_srcloc` in `rustc_codegen_llvm/src/asm.rs` and
+`Session::lto` in `rustc_session/src/session.rs` of Rust 1.100.0, read on 2026-11-13),
+`Clang.Generate` has clang write, at the release build's options, the machine IR its code
 generator holds once it placed the blocks (`-S -mllvm -stop-after=block-placement`), and `Builder.Held`
 takes a copy for each `INLINEASM` there with a mark, in its order, the `asm` of the mark's line whose
-template the call has. A call the optimiser dropped gets no copy, and one LLVM copied gets one for each
+template the call has. The machine IR writes the mark as the call's one metadata operand, `, !0`, and its
+node, `!0 = !{i64 4}`, indented in the module it holds; it writes the template bare where LLVM writes it as
+a plain name, `INLINEASM &nop`, and in quotes otherwise, a `$` among the characters that take them
+(`printLLVMNameWithoutPrefix` in `llvm/lib/IR/AsmWriter.cpp` of LLVM 23.1.4; `INLINEASM &"frob$$nicate"`
+from `clang-23 -O2 -S -mllvm -stop-after=block-placement`, 2026-11-13), so a bare template is compared
+with the quotes the IR's call has. It keeps no constraint string, only a flag word for each operand, so of
+two `asm`s at one line with one template the build takes the first's, by choice, and both name that one
+line. A call the optimiser dropped gets no copy, and one LLVM copied gets one for each
 copy, every one after the first refused where its text defines a symbol. Seen on 2026-11-13 with clang
 23.1.4: `clang-23 -O2 -S -emit-llvm` on a module whose function `bump`, with the call of `.equiv k, 1`
 marked `!srcloc !{i64 4}`, is called from two functions wrote the call into both, each with `!srcloc !0`
@@ -78,8 +88,9 @@ and `!0 = !{i64 4}`; `clang-23 -O2 -c` on it wrote `<inline asm>:2:12: error: re
 `asm` stands in the block after an inner `if`, the module `-O2 -S -emit-llvm` wrote held one call,
 `-O2 -c` wrote the same `redefinition of 'k'`, and `-O2 -S -mllvm -stop-after=block-placement` wrote two
 `INLINEASM`, each with the call's `!0`, as LLVM's tail duplication copied the block into the two before
-it (`llvm/lib/CodeGen/TailDuplicator.cpp` of LLVM 23.1.4, whose `shouldTailDuplicate` keeps no call of
-inline assembly from a copy but an `asm goto`, `INLINEASM_BR`); the same for `x86_64-pc-windows-msvc`,
+it (`llvm/lib/CodeGen/TailDuplicator.cpp` of LLVM 23.1.4, whose `shouldTailDuplicate` refuses a block for an
+instruction that is not duplicable, a convergent one, an `asm goto`, `INLINEASM_BR`, or before register
+allocation a return or a call, and an `INLINEASM` the emitter writes is none of these); the same for `x86_64-pc-windows-msvc`,
 and for a module of IR of that shape for `aarch64-linux-gnu`. Clang given IR prints LLVM's diagnostic and
 `cannot compile inline asm` without the call's cookie (`clang/lib/CodeGen/CodeGenAction.cpp` of LLVM
 23.1.4), so the copies are read from the code generator's own text. A C function the IR declares,

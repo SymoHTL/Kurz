@@ -158,9 +158,11 @@ public sealed partial class Clang
     /// as <see cref="Build"/> does it, in LLVM's text of machine IR as the code generator holds it once it placed the blocks
     /// (<c>-stop-after=block-placement</c>), into <paramref name="outputPath"/>, for the CPU of the build, where <see cref="Builder.Build"/>
     /// reads which calls of inline assembly the optimiser left and which the code generator copied: its tail duplication, which block
-    /// placement runs too, copies a block that holds such a call into the blocks before it, as it copies any instruction but one that
-    /// cannot be duplicated, a convergent one or an <c>asm goto</c> (<c>INLINEASM_BR</c>, <c>llvm/lib/CodeGen/TailDuplicator.cpp</c>, LLVM
-    /// 23.1.4), and no pass after it copies a block (clang 23); null, or what clang wrote where it does not exit with 0.
+    /// placement runs too, copies a block that holds such a call into the blocks before it, as its <c>shouldTailDuplicate</c> refuses a
+    /// block, of the instructions it holds, for one that cannot be duplicated, a convergent one, an <c>asm goto</c> (<c>INLINEASM_BR</c>),
+    /// or before register allocation a return or a call, and an <c>INLINEASM</c> the emitter writes is none of these
+    /// (<c>llvm/lib/CodeGen/TailDuplicator.cpp</c>, LLVM 23.1.4), and no pass after it copies a block (clang 23); null, or what clang wrote
+    /// where it does not exit with 0.
     /// </summary>
     internal string? Generate(string irPath, string outputPath, string? cpuFlag)
     {
