@@ -391,7 +391,7 @@ flowchart TD
   `compiler/Kurz.Compiler/Emit/CaseTables.cs` does, or how `tools/gates.py` runs the tool: G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
 - `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
-  lists change: G10 and X2.
+  lists change, `CorpusTests.BuildIds` among them: G10 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.
 - `.github/workflows/review.yml`, `tools/review/review.py` or `.review/review-rules.yaml`
   changes: the subgraph R.
