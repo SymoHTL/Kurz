@@ -765,7 +765,9 @@ come (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). A label
 defines by name, `again:`, is the compile error `named-asm-label` at the line of the label, in a `"""` block
 the label's own line, and local labels, `2:` with `2b` or `2f`, take its place, since LLVM may copy an
 `asm`, as where a function is inlined into two callers, and the copy defines the label a second time; on
-x86 and x86-64 a label of only the digits 0 and 1, `1:` among them, is the compile error `binary-asm-label`,
+x86 and x86-64 *(assumed: the answer's "On x86" read as the family, x86-64 among it, as Rust's
+`binary_asm_labels` takes both, which the answer did not name)* a label of only the digits 0 and 1, `1:`
+among them, is the compile error `binary-asm-label`,
 since the assembler reads its use, `1b`, as a binary number; R12 states which labels the `asm` of a
 `naked` function may define; each as Rust's lints `named_asm_labels` and `binary_asm_labels` refuse them (§3, the owner,
 2026-11-13). A template is read for its labels as Rust's lint pass reads it: it splits into statements at
