@@ -13,7 +13,14 @@ namespace Kurz.Compiler.Emit;
 /// build, which the backend optimises, whether it carries line tables, as a test build and a release build with <c>--lines</c> do, and
 /// clang's option for the CPU the build names, null for the target's baseline (section 2).
 /// </summary>
-public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines, string? CpuFlag = null);
+public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines, string? CpuFlag = null)
+{
+    /// <summary>R11, R12: each <c>asm</c> of the program's file the module holds, alone in a module of its own, which a build assembles where clang refuses inline assembly.</summary>
+    public IReadOnlyList<AsmAlone> Asms { get; init; } = [];
+}
+
+/// <summary>R11, R12: an <c>asm</c> of the program, at its line, as a module of IR that holds it alone.</summary>
+public sealed record AsmAlone(int Line, string Ir);
 
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error and without <c>not supported</c>, from
@@ -258,7 +265,7 @@ public sealed partial class Emitter
 
         EmitRegexTable(); // G4: the one global of the tables, once every pattern is emitted
         EmitAsmUsed(); // R12: once every `naked` body is emitted
-        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86));
+        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86)) { Asms = asmsAlone };
     }
 
     /// <summary>The functions, the C declarations, the data types and the state outside a function of a file (R13, R16), each by its symbol.</summary>

@@ -691,6 +691,21 @@ void Show(long nanoseconds) {
 Show(0)
 ```
 
+Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
+```kurz
+long Index() {
+    print("index")
+    return 0
+}
+
+mut long n = 10
+raw {
+    long* p = &n
+    asm("add {r}, 1", r = inout(reg) p[Index()])
+}
+print(n)
+```
+
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
@@ -705,7 +720,14 @@ template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the
 those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
-marks them)*. A register class is read against the table of the target the build compiles for, so
+marks them)*. An output into a variable, or into a path of fields from one, is stored after the call,
+into the place the variable has then, so a variable a later operand's call changed is written as that
+call left it, as Rust writes an `out` operand's place and as an assignment into a path is written (M4)
+(§3, the owner, 2026-11-13). An instruction of an `asm`
+that the assembler refuses is the compile error `asm-refused` at the line of the `asm`, which the build
+raises once clang refuses the program (§3, the owner, 2026-11-13), and so is one of a `naked`
+function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. A
+register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
 header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
 no case names one. An `asm` outside a `raw` block and outside the body of a
@@ -776,9 +798,34 @@ raw {
     print(x)
     asm("mov {v}, 9", v = out(reg) *p)
     print(n)
+    // writes rcx and r8, which no output names, and the program goes on; the registers `clobber_abi` lets go of are
+    // pinned by the compiler's test of the options, since `kept` sits in memory in a build that is not optimised
     asm("mov ecx, 3", "mov r8d, 4", clobber_abi("C"))
     print(kept)
 }
+```
+
+Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
+
+Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
+```kurz
+long Nine() => 9
+
+naked long Seven() {
+    asm("mov eax, 7", "ret")
+}
+
+naked long Answer() {
+    asm("mov eax, {k}", "ret", k = const 40 + 2)
+}
+
+naked long Forward() {
+    asm("jmp {f}", f = sym Nine)
+}
+
+print(Seven())
+print(Answer())
+print(Forward())
 ```
 
 Case: [memory/asm-register-twice.kz](../corpus/memory/asm-register-twice.kz)
@@ -796,6 +843,16 @@ raw {
 }
 print(n)
 // `vreg` is a register class of AArch64 and not of x86-64; the case names no target, so it is read for x86-64 (R11)
+```
+
+Case: [memory/asm-refused.kz](../corpus/memory/asm-refused.kz)
+```kurz
+mut long n = 1
+raw {
+    asm("add {r}, 1", r = inout(reg) n)
+    asm("add {r}, 1", "frobnicate {r}", r = inout(reg) n)
+}
+print(n)
 ```
 
 ### R12 (decided, §3) A function with no frame
@@ -818,6 +875,8 @@ alone, R16's grant going with the word `extern "C"` written and not with the C c
 which a `naked` function takes in any case, so that in a package with neither grant a
 `naked extern "C"` function is `naked-not-allowed` and `native-not-allowed` at its declaration, two
 errors at one line, which no case shows, a case expecting one error *(assumed: as §3 marks it)*. `naked` is a core word (L18).
+An instruction of its `asm` that the assembler refuses is `asm-refused` at the line of that `asm` (R11)
+*(assumed: as §3 marks it)*.
 
 Case: [memory/naked-not-allowed.kz](../corpus/memory/naked-not-allowed.kz)
 ```kurz
@@ -844,24 +903,14 @@ class Switcher {
 ```
 
 Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
+
+Case: [memory/naked-refused.kz](../corpus/memory/naked-refused.kz)
 ```kurz
-long Nine() => 9
-
 naked long Seven() {
-    asm("mov eax, 7", "ret")
-}
-
-naked long Answer() {
-    asm("mov eax, {k}", "ret", k = const 40 + 2)
-}
-
-naked long Forward() {
-    asm("jmp {f}", f = sym Nine)
+    asm("mov eax, 7", "frobnicate eax", "ret")
 }
 
 print(Seven())
-print(Answer())
-print(Forward())
 ```
 
 ### R13 (decided, §3) State outside a function

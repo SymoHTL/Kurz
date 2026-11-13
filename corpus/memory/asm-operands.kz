@@ -36,6 +36,8 @@ raw {
     print(x)
     asm("mov {v}, 9", v = out(reg) *p)
     print(n)
+    // writes rcx and r8, which no output names, and the program goes on; the registers `clobber_abi` lets go of are
+    // pinned by the compiler's test of the options, since `kept` sits in memory in a build that is not optimised
     asm("mov ecx, 3", "mov r8d, 4", clobber_abi("C"))
     print(kept)
 }

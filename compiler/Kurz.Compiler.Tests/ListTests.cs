@@ -2625,6 +2625,42 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "<s1=7>", // the instance the argument put in place of the one whose field the call took, which the method's writes did not reach (D16)
     ];
 
+    // R11: the outputs of an `asm` into the fields of a value of a derived `data` type, a block whose path of fields is found by copying
+    // it: two outputs into two fields of one variable, whose second copy lets go of the first, and while a copy made before holds the
+    // block; and an output into a field next to an input whose call takes the variable as `mut` and gives it another block (R11, the
+    // owner's answer: the store goes into the variable as the call left it). Each place is found as its output is stored, after the call
+    private const string AsmPlaces = """
+        data Base(long X)
+        data Point(long Y) : Base
+
+        long Bump(mut Point point) {
+            point = Point(10, 20)
+            return 5
+        }
+
+        mut Point p = Point(0, 0)
+        Point q = p
+        mut long n = 0
+        raw {
+            asm("mov {x}, 1", "mov {y}, 2", x = out(reg) p.X, y = out(reg) p.Y)
+        }
+        print(p)
+        print(q)
+        raw {
+            asm("mov {x}, 7", "mov {n}, {k}", x = out(reg) p.X, n = out(reg) n, k = in(reg) Bump(mut p))
+        }
+        print(n)
+        print(p.X)
+        """;
+
+    private static readonly string[] AsmPlacesPrint =
+    [
+        "Point { X = 1, Y = 2 }",
+        "Point { X = 0, Y = 0 }", // the copy made before keeps its own (M3)
+        "5",
+        "7",
+    ];
+
     // the fields of a `data` body (D16): strings and lists each initializer makes, from the primary fields and the fields above it, a
     // `mut` one a method replaces, which lets go of the string it held while a copy made before keeps its own, a `with` that computes
     // them again, in a plain value and in a block (a type that holds a value of its own type), whose copy lets go of the values its slots
@@ -4506,6 +4542,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(Classes, fenced, "classes-fenced"), 0, ClassesPrint, "");
         Ran(BuildAndRun(DataBodies, fenced, "data-bodies-fenced"), 0, DataBodiesPrint, "");
         Ran(BuildAndRun(DataBodyFields, fenced, "data-body-fields-fenced"), 0, DataBodyFieldsPrint, "");
+        Ran(BuildAndRun(AsmPlaces, fenced, "asm-places-fenced", "raw"), 0, AsmPlacesPrint, "");
         // a key of `SortBy` that changes the list it sorts through the instance whose field holds it, by a replacement, by an `Add` and
         // from inside a method, and of strings, whose items the replaced block lets go of: the list read is held across the keys and the
         // change stands (X8, section 12, the owner, 2026-11-01, "Change stands, as C#"); a key that frees the instance whose field holds

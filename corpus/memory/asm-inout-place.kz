@@ -1,0 +1,17 @@
+// expect: output
+// | index
+// | 11
+// allow: raw
+// rules: R11, R10
+
+long Index() {
+    print("index")
+    return 0
+}
+
+mut long n = 10
+raw {
+    long* p = &n
+    asm("add {r}, 1", r = inout(reg) p[Index()])
+}
+print(n)
