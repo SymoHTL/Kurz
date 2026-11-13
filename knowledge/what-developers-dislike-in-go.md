@@ -113,7 +113,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 16. Network timeouts default to none
 
 - Evidence: net/http source (https://github.com/golang/go/blob/master/src/net/http/client.go): "A Timeout of zero means no timeout." gosec, third party (https://github.com/securego/gosec): "G112 — Detect `ReadHeaderTimeout` not configured as a potential risk" and "G114 — Use of `net/http` serve function that has no support for setting timeouts".
-- Kurz: answered: "5 s default, settable" for a read, a write and `Connect`, "Second form, as Rust" for another bound of `Connect`, and "Accept waits, as Rust", section 12 of the record; how the bound holds for an actor's socket, which runs without blocking under `epoll`, stands open (section 14). REPEATED in part for the lookup of a name in `Connect`, which waits without a bound of its own, as Rust's `connect` leaves it, the bound of `Connect` starting after it ("one bound of 5 s after the lookup", 2026-11-02, section 12). Before the answers: REPEATED.
+- Kurz: answered: "5 s default, settable" for a read, a write and `Connect`, "Second form, as Rust" for another bound of `Connect`, and "Accept waits, as Rust", section 12 of the record; a timer in the poller's wait measures every such bound on a socket under `epoll` ("Poller timer" and "Same bounds, poller timer", section 12, 2026-11-13). REPEATED in part for the lookup of a name in `Connect`, which waits without a bound of its own, as Rust's `connect` leaves it, the bound of `Connect` starting after it ("one bound of 5 s after the lookup", 2026-11-02, section 12). Before the answers: REPEATED.
 
 ## 17. Errors lose where they came from
 

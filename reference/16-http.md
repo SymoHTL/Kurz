@@ -256,8 +256,9 @@ The server calls the handler with the word at the argument, `handler(move r)`, a
 parameter written `move` does. An argument of such a parameter without the word is section 6's
 `move-at-call` (§6, the owner, 2026-11-05, issue 156, comment 6657251688, Q3), and so is `move` at a
 call in front of an argument whose parameter is not written `move`, as `mut-at-call` is for `mut`
-(§6) *(assumed, §6: the name `move-at-call`, and the reading said back for the word in front of a
-parameter not written `move`)*. At a send to an actor, `move` at an argument is the send's word, however
+(§6) *(assumed, §6: the reading said back for the word in front of a parameter not written
+`move`)*, the name `move-at-call` decided there (§6, the owner, 2026-11-13, #519, comment 6847932993,
+Q8). At a send to an actor, `move` at an argument is the send's word, however
 the method's parameter is written, while `client.Send`, the client's method, is a call and no send
 (§12), and a `move` at a call that is both in front of a parameter not
 written `move` and of a value held as its caller's is `move-at-call`, the call's word checked
@@ -311,22 +312,21 @@ unread by every actor, and gets Q10's close at the return (below), and where it 
 moved, that close does not hold, a failed `100 Continue` closing the connection with no head (above)
 (§6, §12) *(assumed, §6, §12: those moves)*. The
 socket's write bound, 5 seconds for each call of the system by default, bounds the reading actor's
-write, a write on the connection's socket, held in that actor as the moved body's reads are, which
-stands open in §14 (§6, §12) *(assumed, §6, §12: that reading, which the owner's answer of
-2026-11-08 took, issue 39, comment 6724695653, but for the bound's open dependency, a reading not
-put to the owner)*; it holds each call of the system, and the server's wait only where the write
+write, a write on the connection's socket, held in that actor as the moved body's reads are, by a
+timer in the poller's wait (§12, the owner, 2026-11-13, #519, comment 6847932993, "Poller timer (Recommended)")
+(§6) *(assumed, §6, §12: that reading, which the owner's answer of 2026-11-08 took, issue 39,
+comment 6724695653, a reading not put to the owner)*; it holds each call of the system, and the server's wait only where the write
 ends, a write of 25 bytes being able to take more than one call, so that the wait has no bound of
 its own, and none where the reading actor ends during its write (below) (§6) *(assumed, §6: that
 reading)*. The wait is the server's read of the flag, each read again a switch point at which the
 other actors of its thread run, the reading actor among them where it shares that thread, at the
 cost of the server held from its next connection for the write's time (§6, the owner, 2026-11-09,
 pull request 415, comment 6735589705, "Re-read yields", against a wait that blocks the thread,
-which never ends where both actors share one thread). What sets the flag where the reading
-actor ends during its write, as a stop at its supervisor's end without finishing its message or at
-its bound would end it, stands open with that stop in §14, among the flag left under way, so that
-the server's wait has no end, the runtime's end of the actor setting it to failed, and the server
-reading an ended reader as failed *(assumed, §6: failed in those two, the state the owner chose for
-a write cut by its failure, and not for an ended actor)*. The exception covers the pair's state
+which never ends where both actors share one thread). No stop at its supervisor's end ends
+the reading actor during its write, since an actor whose supervisor ends without a crash stops after
+its current message (§6, the owner, 2026-11-13, #519, comment 6847932993, "After current message
+(Recommended)"), so that its write ends and sets the flag to written or failed *(assumed, §6: that
+reading of the answer)*. The exception covers the pair's state
 as a whole, the flag, the
 time of the body's last read and the server's end of the body, each part atomic and shared only
 between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249);
@@ -416,17 +416,16 @@ the longest time since the body's last read too; a body that the handler reads i
 the time a read waits, since Q8 was asked of a moved body, and a body the handler reads and then
 moves is a moved body, whose last read is the handler's until another actor reads it (§12)
 *(assumed, §12: those readings)*. That a moved body's read under the rate closes the connection is decided, as is
-its error, while that it ends the body is a reading (above), and the timing of a read's wait is open: how it is
-timed on the socket of the actor that got the body stands open in §14, a timer in the poller's
-wait or a deadline the scheduler reads at each switch, while the time between reads is timed by
+its error, while that it ends the body is a reading (above), and a read's wait is timed on the socket of the
+actor that got the body by a timer in the poller's wait (§12, the owner, 2026-11-13, #519, comment 6847932993, "Poller timer (Recommended)"), while the time between reads is timed by
 the server once the handler's call has returned, as the server times the grace, and checked by
 each read itself, during the call and after it (above) (§12) *(assumed, §12: that check, the
 reading above)*.
 
 A send of an `HttpRequest` with `copy` is the compile error `copy-server-request`, which names
 `move`, and a send of it with no word is section 6's `send-needs-word` (§12, the owner, 2026-11-03,
-issue 156, comment 6603205575) *(assumed, §12: the error's name, `copy-server-request`; §6: the name
-`send-needs-word`)*. A send with `copy` of any value whose type can hold an `HttpRequest` or an
+issue 156, comment 6603205575) *(assumed, §12: the error's name, `copy-server-request`)*, the name
+`send-needs-word` decided in §6 (the owner, 2026-11-13, #519, comment 6847932993, Q8). A send with `copy` of any value whose type can hold an `HttpRequest` or an
 `HttpBody`, a class instance, a list, a map, a union, a nullable `HttpRequest?` or a `data` type
 among them, is refused with the same error, `r.Body` and an `HttpBody` made for an upload among
 them, while `r.Headers` copies, and a send of such a value with no word is `send-needs-word`, as a
@@ -2398,8 +2397,10 @@ grace, and under it the connection closes, since its status has gone out (§12, 
 `TimedOut` (§12, assumed); and an idle connection closes without an answer at `KeepAliveTimeout`
 (§12, the owner, 2026-10-31, "Persistent, 100 req, 5 s", and 2026-11-03), `ServeConnection` giving
 `void` (§12, assumed; W9). The server measures these
-bounds by `instant` and holds them by the socket's own times, `SO_RCVTIMEO` set before each refill to
-what remains of the bound that read is under (§12, the owner, 2026-11-04, the monotonic clock, Q9 (a));
+bounds by `instant` and holds them to what remains of the bound each read is under before each refill
+(§12, the owner, 2026-11-04, the monotonic clock, Q9 (a)), the poller's timer measuring that remainder
+in place of `SO_RCVTIMEO`, which bounds no call under `epoll` (§12, the owner, 2026-11-13, #519, comment 6848732694,
+"Same bounds, poller timer (Recommended)");
 a read of a head waits what remains of the head's time alone, with no 5 seconds of a read on a socket
 inside the server (Q10 (b)); before each refill of a body the read may wait until the body would fall
 under its rate, the longer of the grace and the bytes read so far at the rate, less the time its reads
@@ -4609,9 +4610,10 @@ body after its call returned, where .NET's `ResponseHeadersRead` ends the send a
 2026-11-07: the documentation of Go's `http.Client` and of .NET's `HttpClient.SendAsync`); a request whose
 time ran out not sent once more
 on a new connection, and its connection not given back to the pool, closed when the program lets go of
-the response or, where the time ran out before a response, at once; the bound held by the socket's own
-times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, set before each read and each write that calls the system, as the
-server holds its bounds (W10), how it holds on an actor's socket standing open (§14); and the time read from `instant.Now`
+the response or, where the time ran out before a response, at once; the bound measured by a timer in the
+poller's wait before each read and each write that calls the system, as the server holds its bounds
+(W10), in place of the socket's own times, `SO_RCVTIMEO` and `SO_SNDTIMEO`, which bound no call under
+`epoll` (S10; §12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)"); and the time read from `instant.Now`
 (S25)
 as the time passed against the bound, never as the sum of the start and the bound, which can overflow
 (T36))*
