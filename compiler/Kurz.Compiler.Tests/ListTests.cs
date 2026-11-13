@@ -2627,8 +2627,8 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // R11: the outputs of an `asm` into the fields of a value of a derived `data` type, a block whose path of fields is found by copying
     // it: two outputs into two fields of one variable, whose second copy lets go of the first, and while a copy made before holds the
-    // block; and an output into a field next to an input whose call takes the variable as `mut` and gives it another block (R11, assumed:
-    // the store goes into the variable as the call left it). Each place is found as its output is stored, after the call
+    // block; and an output into a field next to an input whose call takes the variable as `mut` and gives it another block (R11, the
+    // owner's answer: the store goes into the variable as the call left it). Each place is found as its output is stored, after the call
     private const string AsmPlaces = """
         data Base(long X)
         data Point(long Y) : Base

@@ -101,7 +101,9 @@ public sealed class Toolchain : IDisposable
 /// <c>output</c> case then exits with 0 and writes nothing on standard error; a <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
-/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10).
+/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10). A case that expects an error the
+/// build raises once clang refuses the program (<see cref="CorpusTests.BuildIds"/>) is built, and its build ends with that error alone, at the
+/// header's line; it is no case run.
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
 /// case it lays out whose expectation needs what the build does not hold is in <see cref="NotRun"/>, with why, and is built and not run.
@@ -202,7 +204,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var data = new TheoryData<string>();
         foreach (var file in CorpusTests.CaseFiles())
         {
-            if (Header(file).Expectation != Expectation.Error)
+            if (Header(file) is var header && (header.Expectation != Expectation.Error || CorpusTests.BuildIds.Contains(header.ErrorId!)))
             {
                 data.Add(file);
             }
@@ -265,7 +267,15 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return;
         }
 
-        var executable = toolchain.Build(program, relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix);
+        var name = relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix;
+        if (header.Expectation == Expectation.Error)
+        {
+            var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(program, name)); // the build's error (CorpusTests.BuildIds)
+            Assert.Equal([(header.ErrorId!, header.ErrorLine)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+            return;
+        }
+
+        var executable = toolchain.Build(program, name);
         if (buildOnly || NotRun.ContainsKey(relativePath))
         {
             return;

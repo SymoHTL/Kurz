@@ -19,6 +19,9 @@ public sealed partial class Emitter
     /// <summary>The functions and the state a <c>naked</c> body names by <c>sym</c>, which only the module's assembly reaches, kept in <c>llvm.compiler.used</c>.</summary>
     private readonly SortedSet<string> asmUsed = new(StringComparer.Ordinal);
 
+    /// <summary>R11, R12: each <c>asm</c> of the program's file, alone in a module of its own (<see cref="EmittedProgram.Asms"/>).</summary>
+    private readonly List<AsmAlone> asmsAlone = [];
+
     /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes.</summary>
     private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, string? Input, KurzType? InputType, AsmOutput? Output);
 
@@ -122,19 +125,19 @@ public sealed partial class Emitter
             }
         }
 
-        var inputs = new List<(string Constraint, string Typed)>();
+        var inputs = new List<(string Constraint, string Typed, string Alone)>(); // Alone: the input in the module that holds the `asm` alone
         var inputIndex = new Dictionary<AsmOperand, int>(ReferenceEqualityComparer.Instance);
         foreach (var o in a.Operands)
         {
             if (registers.TryGetValue(o, out var r) && r.Input is not null)
             {
                 inputIndex[o] = outputs.Count + inputs.Count;
-                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input}"));
+                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input}", $"{r.OperandType} poison"));
             }
             else if (symbols.TryGetValue(o, out var symbol))
             {
                 inputIndex[o] = outputs.Count + inputs.Count;
-                inputs.Add(("s", $"ptr {symbol}"));
+                inputs.Add(("s", $"ptr {symbol}", $"ptr {symbol}"));
             }
         }
 
@@ -183,6 +186,15 @@ public sealed partial class Emitter
             ? options.Contains("nomem") ? " nounwind willreturn memory(none)" : options.Contains("readonly") ? " nounwind willreturn memory(read)" : " nounwind willreturn"
             : options.Contains("nomem") ? " nounwind memory(inaccessiblemem: readwrite)" : " nounwind";
         var call = $"call {resultType} {words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Typed))}){attributes}";
+        if (!unit.Runtime)
+        {
+            // the program's `asm` alone, which the build assembles where clang refuses inline assembly (EmittedProgram.Asms): the same
+            // call, with a poison value of its type for each register's input and each symbol a `sym` names declared
+            var declared = string.Concat(symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()\n"));
+            var alone = $"call {resultType} {words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}){attributes}";
+            asmsAlone.Add(new AsmAlone(a.Line, $"{declared}define void @kz.asm() {{\n  {(outputs.Count == 0 ? "" : "%r = ")}{alone}\n  ret void\n}}\n"));
+        }
+
         if (outputs.Count == 0)
         {
             fn.Emit(call);
@@ -525,6 +537,11 @@ public sealed partial class Emitter
         foreach (var line in lines)
         {
             module.Global($"module asm {IrModule.Quote(line)}");
+        }
+
+        if (!unit.Runtime)
+        {
+            asmsAlone.Add(new AsmAlone(body.Line, string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n")))); // the body alone (EmittedProgram.Asms)
         }
 
         var parameters = f.Parameters.Select(p => ParameterType(f, p.Type));

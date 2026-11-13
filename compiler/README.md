@@ -1406,7 +1406,11 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   that no copy of a block a path goes through is held across another operand, and a variable a later
   operand's call changed is written as the call left it. The
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
-  is refused when clang builds the program. The command grants a program no `raw` (R7), so no program it
+  is refused when clang builds the program. Clang 23 given IR names no line of the program for it, not
+  the `!srcloc` either, so where clang refuses inline assembly the build assembles each `asm` of the
+  program alone, a module of its own, and each one clang refuses is the compile error `asm-refused` at
+  the line of the `asm`, a `naked` function's among them (R11, R12); a refusal no `asm` meets alone, a
+  label two of them define, stays clang's failure. The command grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
   whose refusal its failure `clang did not build the program` names as the compiler's defect;
 - a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly

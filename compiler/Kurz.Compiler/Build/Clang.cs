@@ -144,6 +144,16 @@ public sealed partial class Clang
     }
 
     /// <summary>
+    /// R11, R12: compiles the IR at <paramref name="irPath"/> into an object at <paramref name="objectPath"/>, for the CPU of the build, as
+    /// <see cref="Builder.Build"/> assembles an <c>asm</c> of the program alone; null, or what clang wrote where it does not exit with 0.
+    /// </summary>
+    internal string? Assemble(string irPath, string objectPath, string? cpuFlag)
+    {
+        var (code, _, error) = Processes.Capture(Path, ["-O0", "-c", irPath, "-o", objectPath, .. cpuFlag is null ? Array.Empty<string>() : [cpuFlag]], null, TimeSpan.FromMinutes(2));
+        return code == 0 ? null : error;
+    }
+
+    /// <summary>
     /// The arguments <see cref="Build"/> gives this clang, the one list on every target. A release build aligns every function at
     /// 64 bytes, LLVM's <c>-align-all-functions=6</c>, where LLVM aligns a function at 16 bytes unless it is tiny, as rustc leaves
     /// it: the owner's choice of 2026-11-02 (issue 156, comment 6580739215), an exception to "no row slower beyond noise" taken

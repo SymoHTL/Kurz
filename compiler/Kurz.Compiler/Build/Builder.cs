@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Kurz.Compiler.Emit;
 using Kurz.Compiler.Semantics;
 using Kurz.Compiler.Syntax;
@@ -18,7 +20,7 @@ public sealed record Compilation(DiagnosticBag Diagnostics, EmittedProgram? Prog
 /// target emitted into the same module, then the pinned clang on the IR, which links the program with the C library as the platform
 /// links it (design record, section 2). The target is the machine that builds (section 2).
 /// </summary>
-public static class Builder
+public static partial class Builder
 {
     /// <summary>The name of the IR file in a build's working directory.</summary>
     public const string IrFile = "program.ll";
@@ -80,7 +82,13 @@ public static class Builder
             : new Compilation(diagnostics, null);
     }
 
-    /// <summary>Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>.</summary>
+    /// <summary>
+    /// Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>. Where clang refuses
+    /// inline assembly, its text names no line of the program, not even the <c>!srcloc</c> Rust's compiler puts on the call (clang 23 on
+    /// IR), so each <c>asm</c> of the program is assembled alone, and each one clang refuses so is the compile error <c>asm-refused</c> at
+    /// its line, an <see cref="AsmRefusedException"/> (R11, R12; the owner, 2026-11-13, "Rust's srcloc"); a refusal that no <c>asm</c> of
+    /// the program meets alone stays clang's failure.
+    /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
         ArgumentNullException.ThrowIfNull(program);
@@ -88,8 +96,38 @@ public static class Builder
         Directory.CreateDirectory(workingDirectory);
         var irPath = Path.Combine(workingDirectory, IrFile);
         File.WriteAllText(irPath, program.Ir);
-        clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines, program.CpuFlag);
+        try
+        {
+            clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines, program.CpuFlag);
+        }
+        catch (ToolchainException e) when (program.Asms.Count > 0 && e.Message.Contains(InlineAsm, StringComparison.Ordinal))
+        {
+            var refused = new List<Diagnostic>();
+            foreach (var (asm, i) in program.Asms.Distinct().Select((asm, i) => (asm, i)))
+            {
+                var path = Path.Combine(workingDirectory, $"asm{i.ToString(CultureInfo.InvariantCulture)}.ll");
+                File.WriteAllText(path, asm.Ir);
+                if (clang.Assemble(path, Path.ChangeExtension(path, ".o"), program.CpuFlag) is { } refusal && refusal.Contains(InlineAsm, StringComparison.Ordinal))
+                {
+                    var said = AssemblerError().Match(refusal) is { Success: true } m ? m.Groups[1].Value : "the instruction is not one it reads";
+                    refused.Add(Diagnostic.Error(ErrorIds.AsmRefused, asm.Line, $"the assembler refuses an instruction of the `asm`: {said} (R11)"));
+                }
+            }
+
+            if (refused.Count == 0)
+            {
+                throw;
+            }
+
+            throw new AsmRefusedException([.. refused.DistinctBy(d => d.Line).OrderBy(d => d.Line)]); // an `asm` of a function emitted twice, once (E1)
+        }
     }
+
+    /// <summary>The file clang names an error of inline assembly in, LLVM's buffer of the <c>asm</c>'s text.</summary>
+    private const string InlineAsm = "<inline asm>";
+
+    [GeneratedRegex(@"<inline asm>:\d+:\d+: error: ([^\r\n]*)")]
+    private static partial Regex AssemblerError();
 
     /// <summary>The name of the executable a build of this source writes beside it: the source's name without its extension, with <c>.exe</c> on Windows.</summary>
     public static string ExecutableBeside(string sourcePath)
@@ -97,4 +135,10 @@ public static class Builder
         var stem = Path.Combine(Path.GetDirectoryName(sourcePath) ?? string.Empty, Path.GetFileNameWithoutExtension(sourcePath));
         return OperatingSystem.IsWindows() ? stem + ".exe" : stem;
     }
+}
+
+/// <summary>R11, R12: the <c>asm</c>s of a program the assembler refuses, each the compile error <c>asm-refused</c> at its line, in the order of the lines (<see cref="Builder.Build"/>).</summary>
+public sealed class AsmRefusedException(IReadOnlyList<Diagnostic> refused) : Exception(string.Join("\n", refused))
+{
+    public IReadOnlyList<Diagnostic> Refused { get; } = refused;
 }

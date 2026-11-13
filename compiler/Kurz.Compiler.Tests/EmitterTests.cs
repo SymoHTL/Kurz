@@ -352,6 +352,34 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void An_instruction_the_assembler_refuses_is_asm_refused_at_the_line_of_its_asm()
+    {
+        // R11, R12 (the owner, 2026-11-13, "Rust's srcloc"): clang's text for IR names no line of the program, so where it refuses inline
+        // assembly the build assembles each `asm` of the program alone, and each one refused is `asm-refused` at its line, an inline one
+        // and a `naked` function's, in the order of the lines; one that assembles is named by none, and the program without the refused
+        // instructions builds (the controls). A refusal no `asm` meets alone, a label two of them define, stays clang's failure
+        const string program = """
+            mut long n = 1
+            raw {
+                asm("add {r}, 1", r = inout(reg) n)
+                asm("frobnicate {r}", r = inout(reg) n)
+            }
+
+            naked long Seven() {
+                asm("mov eax, 7", "frobnicate eax", "ret")
+            }
+
+            print(n)
+            print(Seven())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-refused"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 8)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-assembled")));
+        const string twice = "raw {\n    asm(\"twice:\", \"nop\")\n    asm(\"twice:\", \"nop\")\n}\n";
+        Assert.Throws<ToolchainException>(() => toolchain.Build(Compile(twice, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-twice"));
+    }
+
+    [Fact]
     public void The_runtime_of_every_target_is_emitted_with_its_own_calls_of_the_system()
     {
         foreach (var (target, call) in new[] { (Target.Linux, "@write("), (Target.Windows, "@WriteFile(") })
