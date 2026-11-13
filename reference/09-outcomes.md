@@ -1330,10 +1330,13 @@ owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)"
 sets at each switch of its tasks on the last 32 bytes of the stack of the task it switches to, each scheduler
 thread a task of FreeRTOS *(assumed, §6: one thread for each core, and the place of the watchpoint under that
 answer, which FreeRTOS's end-of-stack watchpoint, turned on in the build, sets at each switch, at the cost of
-the call that sets it at each switch, which writes the watched address and its mask into two of the chip's
-debug registers on the Xtensa models and four on the RISC-V models, the debugger's last watchpoint and up to 60
+the call that sets it at each switch, which writes the chip's debug registers, two on the Xtensa models,
+the watched address into one and its mask into the other, and four on the RISC-V models, one of which
+holds the address and its mask, the debugger's last watchpoint and up to 60
 bytes of each task's stack)*, catches an overflow at a write into those 32 bytes, inside the stack and before
-its end, while an overflow whose frame jumps over them goes uncaught (§6, from `vPortSetStackWatchpoint` of
+its end, a write there counting as an overflow even from a frame that still fits, so that a task's usable
+stack is its size less those 32 bytes, and up to 28 bytes more where the stack's start is not a multiple
+of 32, up to 60 bytes in all, while an overflow whose frame jumps over them goes uncaught (§6, from `vPortSetStackWatchpoint` of
 ESP-IDF v6.1's Xtensa and RISC-V ports, which it checks), and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
