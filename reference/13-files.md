@@ -21,9 +21,9 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
 and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
 of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a socket's own read, write
-or `Accept` outside the HTTP client's call whose bound (S9) the poller's timer ends, which gives 11 (§12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
+or `Accept` whose bound (S9) the poller's timer ends, outside the HTTP client's call, which gives 11 (§12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
 (Recommended)", and comment 6855469829, "11, as a read (Recommended)"), while the end of the HTTP client's call time gives 0, and a
-read inside the call gives that 0 whichever bound ends it,
+read or a write inside the call gives that 0 whichever bound ends it,
 its own (S9) or the call's, as the client maps a socket's run-out to the end of its call time (W16; §12, the
 owner, 2026-11-05, #110, comment 6657251329, T2, "always 0", "a socket's run-out is mapped to it"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
