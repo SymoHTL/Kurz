@@ -127,7 +127,8 @@ and the trace, ends the process with the exit code 1, the one line
 `error: <id> (no line: raised in the crash path)` and no trace (§6, decided there); that the walk of
 an actor's abandoned frames, the read of the map of counted pointers and the frees that follow it
 count as the crash path too, a check that fires inside the allocator or the scheduler during those
-frees staying open (§14), that the thread's flag of its crash path is set from the raise or the fault
+frees ending the process, as every such check in a test build does (§6, the owner, 2026-11-13, #519,
+comment 6847932993, "End the process (Recommended)"), that the thread's flag of its crash path is set from the raise or the fault
 to the moment the actor's frames are freed and again while the error line and the trace are written, that
 the line is written on a line of its own, after a line break where the stream stands
 inside a line already written, and that a check that fires while that line is written ends the
