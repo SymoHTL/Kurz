@@ -20,9 +20,9 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
 and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
-of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a read or a write
-that the poller's timer ends, which gives 11 (S9; §12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
-(Recommended)"). A call that
+of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a read, a write
+or an `Accept` that the poller's timer ends, which gives 11 (S9; §12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
+(Recommended)", and comment 6855469829, "11, as a read"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
 list, the words, the number 0, the text without a path and the first path)*
 
@@ -1359,9 +1359,9 @@ poller's timer measures that bound (§12, the owner, 2026-11-13, #519, comment 6
 as it measures every bound of this rule, in whole milliseconds, the end of a bound rounded up to a whole
 one, each timer an entry put into the process's one timer wheel and taken out, with no call of the system of
 its own *(assumed, §12: the timer's resolution, as Tokio's timer keeps it, and its cost)*. An `Accept` whose
-bound the poller's timer ends gives `TimedOut` with 11, which the runtime gives as it gives a read's
-*(proposed: the record gives the runtime's 11 to a read and a write alone (§12, the owner, 2026-11-13, #519,
-comment 6851105334, "Keep 11 (Recommended)"), and a case stands on it)*.
+bound the poller's timer ends gives `TimedOut` with 11, which the runtime gives as it gives a read's, as
+Linux's `accept` under `SO_RCVTIMEO` gives `EAGAIN`, which Rust's standard library passes on (§12, the owner,
+2026-11-13, #519, comment 6855469829, "11, as a read", against 0, as `Connect`'s own bound gives).
 
 `s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
 `TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
@@ -1555,8 +1555,8 @@ Full() else {
 
 Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
 ```kurz
-// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives as it gives a read's (S9, proposed
-// there), after its time, which the poller's timer counts in whole milliseconds; the listener stays open, and the next `Accept` takes the
+// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives as it gives a read's (S9),
+// after its time, which the poller's timer counts in whole milliseconds; the listener stays open, and the next `Accept` takes the
 // connection that came. The time it took lies between the poller's timer's floor, the 50 ms it was given, which it waits at least,
 // and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
 // default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the

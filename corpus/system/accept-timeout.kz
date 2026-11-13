@@ -4,8 +4,8 @@
 // | 1
 // rules: S9
 
-// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives as it gives a read's (S9, proposed
-// there), after its time, which the poller's timer counts in whole milliseconds; the listener stays open, and the next `Accept` takes the
+// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives as it gives a read's (S9),
+// after its time, which the poller's timer counts in whole milliseconds; the listener stays open, and the next `Accept` takes the
 // connection that came. The time it took lies between the poller's timer's floor, the 50 ms it was given, which it waits at least,
 // and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
 // default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the

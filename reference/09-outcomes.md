@@ -1320,8 +1320,8 @@ on Windows (§2, the owner, 2026-11-13, #519, comment 6851105334, "64 KiB + chec
 (Recommended)"), the root actor's stack there, 1 MiB, checked too, so that its overflow ends the process with
 the exit code 1 (O6) *(assumed, §2: the root actor's stack, its size and its check)*, and the error line of
 such a crash names the line of the call that did not fit and its trace is walked along the chain of frames
-the compiler keeps in the linear stack, as for any crash on that target (§2) *(proposed: the line and the
-trace of that crash, which the record does not name for it)*; on the ESP32 models a watchpoint the runtime
+the compiler keeps in the linear stack, as for any crash on that target (§2, the owner, 2026-11-13, #519, comment 6855469829, "Line +
+trace, as any crash", against the line of the function whose check failed, with no trace); on the ESP32 models a watchpoint the runtime
 sets once on the stack of each scheduler thread, at its end, every actor running on the stack of the thread
 that runs it (§6, the owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)")
 *(assumed, §6: the place of the watchpoint under that answer, set once on the stack of each thread, one for
