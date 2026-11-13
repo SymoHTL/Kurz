@@ -20,7 +20,9 @@ abbreviation written out: `NotFound`, `PermissionDenied`, `AlreadyExists`, `NotA
 `NetworkUnreachable`, `HostUnreachable`, `ConnectionRefused`, `ConnectionReset`,
 `ConnectionAborted` and `NotConnected`; beside them `WriteZero` and `InvalidData`, which no number gives,
 and `Other` for a number none of them has, which Rust gives `Uncategorized`. A path that holds a NUL byte is `InvalidInput` and a write
-of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has. A call that
+of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a read, a write
+or an `Accept` that the poller's timer ends, which gives 11 (S9; §12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
+(Recommended)", and comment 6855469829, "11, as a read"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
 list, the words, the number 0, the text without a path and the first path)*
 
@@ -1355,7 +1357,11 @@ they do *(assumed, §12: following
 from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and the
 poller's timer measures that bound (§12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)"),
 as it measures every bound of this rule, in whole milliseconds, the end of a bound rounded up to a whole
-one *(assumed, §12: the timer's resolution, as Tokio's timer keeps it)*.
+one, each timer an entry put into the process's one timer wheel and taken out, with no call of the system of
+its own *(assumed, §12: the timer's resolution, as Tokio's timer keeps it, and its cost)*. An `Accept` whose
+bound the poller's timer ends gives `TimedOut` with 11, which the runtime gives as it gives a read's, as
+Linux's `accept` under `SO_RCVTIMEO` gives `EAGAIN`, which Rust's standard library passes on (§12, the owner,
+2026-11-13, #519, comment 6855469829, "11, as a read", against 0, as `Connect`'s own bound gives).
 
 `s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
 `TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
@@ -1450,8 +1456,8 @@ match TcpStream.Connect("127.0.0.1:65536") {
 Case: [system/read-timeout.kz](../corpus/system/read-timeout.kz)
 ```kurz
 // a read whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time, which the
-// poller's timer counts in whole milliseconds; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
-// floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
+// poller's timer counts in whole milliseconds; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the
+// poller's timer's floor, the 50 ms it was given, which it waits at least, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
 // nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
@@ -1549,8 +1555,9 @@ Full() else {
 
 Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
 ```kurz
-// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time; the listener stays open,
-// and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
+// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives as it gives a read's (S9),
+// after its time, which the poller's timer counts in whole milliseconds; the listener stays open, and the next `Accept` takes the
+// connection that came. The time it took lies between the poller's timer's floor, the 50 ms it was given, which it waits at least,
 // and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
 // default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the
 // default, `FileTests` reads back by `getsockopt`
@@ -1723,8 +1730,11 @@ the function; of two paths of one length, the one that stands first where the tw
 written first in that function, or, at one call through an interface or a function value, the
 implementer, or the function the function value holds, whose file comes first in the order of the file
 paths (§4) and, in one file, whose line and then whose column come first)* A `send` to an actor puts the
-sender's package on the path, a message carrying the packages of its path (§13, the owner,
-2026-11-13, #519, comment 6847932993, Q23, "Yes (Recommended)").
+sender's package on the path (§13, the owner, 2026-11-13, #519, comment 6847932993, Q23, "Yes
+(Recommended)"): it counts as a call of the receiving actor's method on the sender's path, read when the
+program is built, so that a refusal stays the compile error `files-not-allowed` or `network-not-allowed`
+and no message carries anything at run time (§13, the owner, 2026-11-13, #519, comment 6853074601,
+"Build time, as Rust").
 
 No case: a case is a program and no package, and the program needs no grant.
 

@@ -5,8 +5,8 @@
 // rules: S9
 
 // a read whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time, which the
-// poller's timer counts in whole milliseconds; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
-// floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
+// poller's timer counts in whole milliseconds; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the
+// poller's timer's floor, the 50 ms it was given, which it waits at least, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
 // nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
 void | IoError Wait() {
     listener = TcpListener.Bind("127.0.0.1:0")
