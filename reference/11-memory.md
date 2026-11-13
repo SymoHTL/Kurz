@@ -733,7 +733,9 @@ compiler writes them, in the order of the functions that hold them, a guarded bl
 function it stands in, and of the statements in each, and in a release build as its code generator
 holds them (§3, the owner, 2026-11-13, pull request 532, comment 6860019854); each beside those before
 it that the assembler took, and each one whose addition the assembler refuses is `asm-refused` at the
-line of its `asm`, a line named once however many of its copies the assembler refuses, in that order,
+line of its `asm`, a line named once however many of its copies the assembler refuses
+*(assumed: Rust's, whose compiler reports identical diagnostics once, `deduplicate_diagnostics` in
+`rustc_errors/src/lib.rs` of Rust 1.100.0, read on 2026-11-13, which no answer named)*, in that order,
 so that the line named is the one LLVM refuses: one it refuses alone, and of two `naked` functions that
 define one label the one LLVM meets second, whose label the assembler refuses beside the first's, the
 earlier line's where the two are first used out of the order of their lines, where Rust's compiler,
