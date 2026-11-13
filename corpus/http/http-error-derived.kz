@@ -5,7 +5,7 @@
 // | short
 // | 409 clash
 // | 409 clash
-// rules: W2
+// rules: W2, D16
 
 data Coded(int Code) : HttpError {
     pub override string Text() => "{Code} {Detail}"
