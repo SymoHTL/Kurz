@@ -315,7 +315,7 @@ socket's write bound, 5 seconds for each call of the system by default, bounds t
 write, a write on the connection's socket, held in that actor as the moved body's reads are, by a
 timer in the poller's wait (§12, the owner, 2026-11-13, #519, comment 6847932993, "Poller timer (Recommended)")
 (§6) *(assumed, §6, §12: that reading, which the owner's answer of 2026-11-08 took, issue 39,
-comment 6724695653, with the bound held as the moved body's reads are, a reading not put to the owner)*; it holds each call of the system, and the server's wait only where the write
+comment 6724695653, with the bound held as the hand-over's reads are, a reading not put to the owner)*; it holds each call of the system, and the server's wait only where the write
 ends, a write of 25 bytes being able to take more than one call, so that the wait has no bound of
 its own, and none where the reading actor ends during its write, whose end then sets the flag (§6, 2026-11-13,
 comment 6851105334) *(assumed, §6: that
