@@ -85,9 +85,11 @@ public static partial class Builder
     /// <summary>
     /// Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>. Where clang refuses
     /// inline assembly, its text names no line of the program, not even the <c>!srcloc</c> Rust's compiler puts on the call (clang 23 on
-    /// IR), so each <c>asm</c> of the program is assembled alone, and each one clang refuses so is the compile error <c>asm-refused</c> at
-    /// its line, an <see cref="AsmRefusedException"/> (R11, R12; the owner, 2026-11-13, "Rust's srcloc"); a refusal that no <c>asm</c> of
-    /// the program meets alone stays clang's failure.
+    /// IR), so the program's <c>asm</c>s are assembled together without the rest of the program, in the order of their lines, each with
+    /// those before it that clang took, and each one whose addition clang refuses is the compile error <c>asm-refused</c> at its line, an
+    /// <see cref="AsmRefusedException"/> that names them in the order of the lines (R11, R12; the owner, 2026-11-13, "Rust's srcloc"): one
+    /// clang refuses alone, and the second of two that define one label, which LLVM refuses in the second's text, as Rust's compiler names
+    /// it through the second's <c>!srcloc</c>. Where none is refused so, the failure stays clang's.
     /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
@@ -102,15 +104,20 @@ public static partial class Builder
         }
         catch (ToolchainException e) when (program.Asms.Count > 0 && e.Message.Contains(InlineAsm, StringComparison.Ordinal))
         {
+            var taken = new List<AsmAlone>();
             var refused = new List<Diagnostic>();
-            foreach (var (asm, i) in program.Asms.Distinct().Select((asm, i) => (asm, i)))
+            foreach (var (asm, i) in program.Asms.OrderBy(a => a.Line).Select((asm, i) => (asm, i))) // stable: the `asm`s of one line in the order emitted
             {
                 var path = Path.Combine(workingDirectory, $"asm{i.ToString(CultureInfo.InvariantCulture)}.ll");
-                File.WriteAllText(path, asm.Ir);
+                File.WriteAllText(path, Together([.. taken, asm]));
                 if (clang.Assemble(path, Path.ChangeExtension(path, ".o"), program.CpuFlag) is { } refusal && refusal.Contains(InlineAsm, StringComparison.Ordinal))
                 {
                     var said = AssemblerError().Match(refusal) is { Success: true } m ? m.Groups[1].Value : "the instruction is not one it reads";
-                    refused.Add(Diagnostic.Error(ErrorIds.AsmRefused, asm.Line, $"the assembler refuses an instruction of the `asm`: {said} (R11)"));
+                    refused.Add(Diagnostic.Error(ErrorIds.AsmRefused, asm.Line, $"the assembler refuses an instruction of the `asm`: {said} ({asm.Rule})"));
+                }
+                else
+                {
+                    taken.Add(asm);
                 }
             }
 
@@ -119,9 +126,13 @@ public static partial class Builder
                 throw;
             }
 
-            throw new AsmRefusedException([.. refused.DistinctBy(d => d.Line).OrderBy(d => d.Line)]); // an `asm` of a function emitted twice, once (E1)
+            throw new AsmRefusedException([.. refused.DistinctBy(d => d.Line)]); // an `asm` of a function emitted twice, once (E1)
         }
     }
+
+    /// <summary>R11, R12: one module of IR that holds the <c>asm</c>s given, each symbol their <c>sym</c>s name declared once.</summary>
+    private static string Together(IReadOnlyList<AsmAlone> asms) =>
+        string.Concat(asms.SelectMany(a => a.Declarations).Distinct(StringComparer.Ordinal).Select(d => d + "\n")) + string.Concat(asms.Select(a => a.Ir));
 
     /// <summary>The file clang names an error of inline assembly in, LLVM's buffer of the <c>asm</c>'s text.</summary>
     private const string InlineAsm = "<inline asm>";

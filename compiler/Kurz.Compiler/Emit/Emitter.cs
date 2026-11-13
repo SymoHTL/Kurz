@@ -15,12 +15,16 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines, string? CpuFlag = null)
 {
-    /// <summary>R11, R12: each <c>asm</c> of the program's file the module holds, alone in a module of its own, which a build assembles where clang refuses inline assembly.</summary>
+    /// <summary>R11, R12: each <c>asm</c> of the program's file the module holds, as IR without the rest of the program, which a build assembles where clang refuses inline assembly.</summary>
     public IReadOnlyList<AsmAlone> Asms { get; init; } = [];
 }
 
-/// <summary>R11, R12: an <c>asm</c> of the program, at its line, as a module of IR that holds it alone.</summary>
-public sealed record AsmAlone(int Line, string Ir);
+/// <summary>
+/// R11, R12: an <c>asm</c> of the program, at its line, with the rule that states it, R11 for an <c>asm</c> statement and R12 for a
+/// <c>naked</c> function's, as IR without the rest of the program: the declarations of the symbols its <c>sym</c>s name, and its call in a
+/// function of its own or the function's module-level assembly.
+/// </summary>
+public sealed record AsmAlone(int Line, string Rule, IReadOnlyList<string> Declarations, string Ir);
 
 /// <summary>
 /// The code generator: LLVM IR, as text, for a program the checker read without an error and without <c>not supported</c>, from

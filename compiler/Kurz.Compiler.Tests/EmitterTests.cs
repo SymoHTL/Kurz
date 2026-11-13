@@ -355,9 +355,11 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_instruction_the_assembler_refuses_is_asm_refused_at_the_line_of_its_asm()
     {
         // R11, R12 (the owner, 2026-11-13, "Rust's srcloc"): clang's text for IR names no line of the program, so where it refuses inline
-        // assembly the build assembles each `asm` of the program alone, and each one refused is `asm-refused` at its line, an inline one
-        // and a `naked` function's, in the order of the lines; one that assembles is named by none, and the program without the refused
-        // instructions builds (the controls). A refusal no `asm` meets alone, a label two of them define, stays clang's failure
+        // assembly the build assembles the program's `asm`s together in the order of their lines, each with those before it that clang
+        // took, and each one whose addition clang refuses is `asm-refused` at its line, an inline one and a `naked` function's, in the
+        // order of the lines, each under its rule; one that assembles is named by none, and the program without the refused instructions
+        // builds (the controls). Of two `asm`s that define one label, the second is named, as LLVM refuses it in the second's text, and
+        // an `asm` between them that assembles is named by none
         const string program = """
             mut long n = 1
             raw {
@@ -372,11 +374,65 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(n)
             print(Seven())
             """;
-        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-refused"));
+        var compiled = Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!;
+        Assert.Equal([(3, "R11"), (4, "R11"), (8, "R12")], compiled.Asms.Select(a => (a.Line, a.Rule)).OrderBy(a => a.Line).ToList());
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled, "asm-refused"));
         Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 8)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-assembled")));
-        const string twice = "raw {\n    asm(\"twice:\", \"nop\")\n    asm(\"twice:\", \"nop\")\n}\n";
-        Assert.Throws<ToolchainException>(() => toolchain.Build(Compile(twice, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-twice"));
+        const string twice = "raw {\n    asm(\"twice:\", \"nop\")\n    asm(\"nop\")\n    asm(\"twice:\", \"nop\")\n}\n";
+        refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(twice, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-twice"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+    }
+
+    [Fact]
+    public void A_pure_asm_the_assembler_refuses_is_asm_refused_at_its_line_in_a_test_build_and_a_release_build()
+    {
+        // R11: the call of a `pure` `asm` has no effect, and LLVM drops a call of no effect whose value nothing uses, at -O0 too, so the
+        // copy the build assembles to find a refused `asm` has an effect whatever its options; the program's own call has its value used
+        const string program = """
+            mut long n = 1
+            mut long m = 2
+            raw {
+                asm("frobnicate {r}", r = inout(reg) n, options(pure, nomem))
+                asm("frobnicate {r}", r = inout(reg) m, options(pure, readonly))
+            }
+            print(n)
+            print(m)
+            """;
+        foreach (var testBuild in new[] { true, false })
+        {
+            var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild, "raw").Program!, testBuild ? "asm-pure-test" : "asm-pure-release"));
+            Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 5)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        }
+    }
+
+    [Fact]
+    public void The_command_writes_each_asm_the_assembler_refuses_as_a_compile_error_at_its_line()
+    {
+        // R11, R12: a build the assembler refuses reaches the command's error stream as its other compile errors do,
+        // `<file>:<line>: <id>: <text>`, one line for each refused `asm` in the order of the lines, and not as clang's failure; a program
+        // clang builds writes nothing (the control)
+        const string program = """
+            mut long n = 1
+            raw {
+                asm("add {r}, 1", r = inout(reg) n)
+                asm("frobnicate {r}", r = inout(reg) n)
+            }
+
+            naked long Seven() {
+                asm("mov eax, 7", "frobnicate eax", "ret")
+            }
+
+            print(n)
+            print(Seven())
+            """;
+        var directory = Path.Combine(toolchain.Directory, "asm-command");
+        using var error = new StringWriter();
+        Assert.False(Command.Built(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, toolchain.Clang, directory, Path.Combine(directory, OperatingSystem.IsWindows() ? "refused.exe" : "refused"), "program.kz", error));
+        Assert.Matches(@"^program\.kz:4: asm-refused: [^\n]*\nprogram\.kz:8: asm-refused: [^\n]*\n$", error.ToString());
+        using var none = new StringWriter();
+        Assert.True(Command.Built(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, toolchain.Clang, directory, Path.Combine(directory, OperatingSystem.IsWindows() ? "built.exe" : "built"), "program.kz", none));
+        Assert.Equal("", none.ToString());
     }
 
     [Fact]
