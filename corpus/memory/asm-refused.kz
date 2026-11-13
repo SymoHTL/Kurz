@@ -1,0 +1,10 @@
+// expect: error asm-refused at 8
+// allow: raw
+// rules: R11
+
+mut long n = 1
+raw {
+    asm("add {r}, 1", r = inout(reg) n)
+    asm("add {r}, 1", "frobnicate {r}", r = inout(reg) n)
+}
+print(n)

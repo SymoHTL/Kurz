@@ -44,6 +44,12 @@ public sealed class CorpusTests
     ];
 
     /// <summary>
+    /// The ids the build raises once the checker and the emitter accepted the program, when clang refuses it: <c>asm-refused</c> (R11,
+    /// R12). The checker's theory holds a case that expects one to no error, and the runner builds it and holds the build's error to it.
+    /// </summary>
+    internal static readonly HashSet<string> BuildIds = [ErrorIds.AsmRefused];
+
+    /// <summary>
     /// The rules the checker does not read: the null chapter's paths through class instances (N9), the
     /// memory chapter's counted references and <c>weak</c> (R1 to R6, R8, R9),
     /// folders (F9, F10), the limit of a type parameter and a member of one (T19), collections between actors (M8), the texts of class instances (A5, A7, A9,
@@ -185,7 +191,7 @@ public sealed class CorpusTests
             return;
         }
 
-        if (header.Expectation == Expectation.Error)
+        if (header.Expectation == Expectation.Error && !BuildIds.Contains(header.ErrorId!))
         {
             Assert.Equal([(header.ErrorId!, header.ErrorLine)], errors);
         }
@@ -231,7 +237,7 @@ public sealed class CorpusTests
             }
 
             inFull++;
-            if (header.Expectation == Expectation.Error)
+            if (header.Expectation == Expectation.Error && !BuildIds.Contains(header.ErrorId!))
             {
                 withError++;
             }
