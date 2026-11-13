@@ -1577,7 +1577,7 @@ public sealed partial class Checker
             return CallMethod(classType, m, c, null); // K7
         }
 
-        if (target.Type is DataType dataType && dataType.Symbol.Field(m.Member) is null && BodyDeclares(dataType.Symbol, m.Member))
+        if (target.Type is DataType dataType && (dataType.Symbol.Field(m.Member) is null || MethodOverPrivateField(dataType.Symbol, m.Member)) && BodyDeclares(dataType.Symbol, m.Member))
         {
             return CallDataMethod(dataType, m, c, null); // D16
         }
