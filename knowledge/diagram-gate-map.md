@@ -116,7 +116,10 @@ flowchart TD
         pinned clang and runs it, and again under an allocator that makes every freed block inaccessible, but for
         the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
-        passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case
+        passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case that expects an id
+        the build raises (CorpusTests.BuildIds, now asm-refused), which the corpus theory holds to no error of the
+        checker and the runner builds, counted in no floor, whose build ends other than with that id alone at the
+        header's line, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer
         cases run than RunFloor in RunTests names for Linux and for Windows, each the count measured on its system with no margin, and on Linux on a crash whose trace is empty, holds a line that
         is not a frame, does not end at main or at the cut after a hundred frames, or, in a test build, does not start

@@ -691,21 +691,6 @@ void Show(long nanoseconds) {
 Show(0)
 ```
 
-Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
-```kurz
-long Index() {
-    print("index")
-    return 0
-}
-
-mut long n = 10
-raw {
-    long* p = &n
-    asm("add {r}, 1", r = inout(reg) p[Index()])
-}
-print(n)
-```
-
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
@@ -720,13 +705,24 @@ template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the
 those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
-marks them)*. An output into a variable, or into a path of fields from one, is stored after the call,
+marks them)*. The operands' values are read, and the places outputs write through a pointer (`*p`,
+`p[i]`) found, in the order the operands are written, and an `inout` loads from and stores into the
+one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler lowers the operands of
+`asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3 marks them)*. An
+output into a variable, or into a path of fields from one, is stored after the call,
 into the place the variable has then, so a variable a later operand's call changed is written as that
 call left it, as Rust writes an `out` operand's place and as an assignment into a path is written (M4)
-(§3, the owner, 2026-11-13). An instruction of an `asm`
+(§3, the owner, 2026-11-13). The outputs are stored in the order the operands are written, so of two
+outputs into one variable the later one stays, as Rust's compiler stores them *(assumed: Rust's
+order, which no answer named, as §3 marks it)*. An instruction of an `asm`
 that the assembler refuses is the compile error `asm-refused` at the line of the `asm`, which the build
 raises once clang refuses the program (§3, the owner, 2026-11-13), and so is one of a `naked`
-function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. A
+function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. The
+build assembles the program's `asm`s together in the order of their lines, each beside those before it
+that the assembler took, and each one whose addition the assembler refuses is `asm-refused`, once, in
+the order of the lines: one it refuses alone, and of two that define one label the second, as LLVM
+refuses the label in the second's text and Rust's compiler names that `asm!` *(assumed: the order of the lines,
+Rust's within one function, which no answer named, as §3 marks it)*. A
 register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
 header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
@@ -806,6 +802,56 @@ raw {
 ```
 
 Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
+```kurz
+long Index() {
+    print("index")
+    return 0
+}
+
+mut long n = 10
+raw {
+    long* p = &n
+    asm("add {r}, 1", r = inout(reg) p[Index()])
+}
+print(n)
+```
+
+Case: [memory/asm-operand-order.kz](../corpus/memory/asm-operand-order.kz)
+```kurz
+long Show(long v) {
+    print(v)
+    return v
+}
+
+mut long m = 0
+mut long n = 0
+raw {
+    long* p = &m
+    asm("mov {a}, {x}", a = out(reg) p[Show(0)], x = in(reg) Show(1))
+    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
+}
+print(m)
+print(n)
+```
+
+Case: [memory/asm-out-after-call.kz](../corpus/memory/asm-out-after-call.kz)
+```kurz
+data Base(long X)
+data Point(long Y) : Base
+
+long Bump(mut Point point) {
+    point = Point(10, 20)
+    return 5
+}
+
+mut Point p = Point(0, 0)
+mut long n = 0
+raw {
+    asm("mov {x}, 7", "mov {n}, {k}", x = out(reg) p.X, n = out(reg) n, k = in(reg) Bump(mut p))
+}
+print(n)
+print(p)
+```
 
 Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
 ```kurz
@@ -853,6 +899,15 @@ raw {
     asm("add {r}, 1", "frobnicate {r}", r = inout(reg) n)
 }
 print(n)
+```
+
+Case: [memory/asm-label-twice.kz](../corpus/memory/asm-label-twice.kz)
+```kurz
+raw {
+    asm("twice:", "nop")
+    asm("nop")
+    asm("twice:", "nop")
+}
 ```
 
 ### R12 (decided, §3) A function with no frame

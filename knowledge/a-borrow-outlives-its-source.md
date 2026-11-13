@@ -1,6 +1,6 @@
 ---
 name: a-borrow-outlives-its-source
-description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; the key of a list's SortBy (2026-11-01) changed the list it sorted through an instance, past the promise of F11 that rested on a lambda changing nothing it captures, and the sort holds the list it read with a count of its own since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
+description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; the key of a list's SortBy (2026-11-01) changed the list it sorted through an instance, past the promise of F11 that rested on a lambda changing nothing it captures, and the sort holds the list it read with a count of its own since; the lowering of inline assembly (pull request 520) found the place of an output into a path of fields of a block where its operand stood and held it across the place of another output and across a later operand whose call gave the variable another block (2026-11-13), and finds it after the call since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
 metadata:
   type: feedback
 ---
@@ -8,7 +8,7 @@ metadata:
 The emitter of pull request 63 counts the holders of a list's block, and a value read from a
 variable, a field or an item is borrowed: no count is raised for the read, since the place still
 holds one (`compiler/README.md`, the counting paragraph). A borrow is sound only while nothing can
-change the place it came from. Six shapes in which something could reached `main`:
+change the place it came from. Seven shapes in which something could reached `main`:
 
 - **Inside one expression.** `G(xs, F(mut xs))`: `G`'s first argument is read as a borrowed
   pointer, then `F` runs and gives `xs` a new block, and `G` receives a freed one. The emitter held
@@ -55,6 +55,18 @@ change the place it came from. Six shapes in which something could reached `main
   stands (X8; the owner, 2026-11-01, "Change stands, as C#"). The other `mut` members of a list, a
   map and a hasher make their arguments before they take the place (M4); `SortBy` is the one member
   that runs a program's code while it holds a place.
+- **Through the place of an `asm` output.** Pull request 520 lowered inline assembly (R11) and found
+  each output's place where its operand stood. A data type in a relation of inheritance, or a
+  recursive one, is a block the variable points to, and the place of a path of its fields is found
+  by copying the block, which lets go of the one the variable held; so two outputs into two fields of
+  one such value, and an output into such a path beside a later operand whose call gave the variable
+  another block, stored into freed memory. The review of pull request 520 found it (its high, on
+  issue 39), and the fenced program `AsmPlaces` of `ListTests`, which holds both, ended with the
+  system's signal on `main` before pull request 527. Since pull request 527 the place of a variable or of a path is found
+  when the output is stored, after the call, and a variable a later operand's call changed is written
+  as the call left it (R11; the owner, 2026-11-13, "Store after call, as Rust (Recommended)"); a place
+  through a pointer, `*p` or `p[i]`, is still found where its operand stands, since no copy is made
+  to find it.
 
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
@@ -64,7 +76,8 @@ defect; one whose freed blocks are given out again shows it as wrong output, not
 call or a statement names what keeps the place unchanged: the checker's refusal within one
 expression (M7, `Semantics/Checker.Reads.cs`), an interpolation's holes among them, no state outside a function that holds a
 list or a string (R13),
-the count a loop holds of its collection (C6), the count the name an arm binds holds, the count
+the count a loop holds of its collection (C6), the place of an `asm` output into a variable or a
+path of fields found after the call, when the output is stored (R11), the count the name an arm binds holds, the count
 `Add` takes of its item before its list grows (`rows.Add(rows[0])`, which the owner allowed on
 2026-10-25), the count a lambda's environment takes of each value the lambda reads (F15), the count
 the read of a field of a class instance takes, held to the statement's end (`InstanceField` in

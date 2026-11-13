@@ -2,7 +2,7 @@
 // | index
 // | 11
 // allow: raw
-// rules: R11, R10
+// rules: R11
 
 long Index() {
     print("index")
