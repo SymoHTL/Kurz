@@ -404,6 +404,19 @@ string Say(Stray | Gone v) => match v {
 print(Say(Gone))
 ```
 
+Case: [data/body-inherit-http-error-with.kz](../corpus/data/body-inherit-http-error-with.kz)
+```kurz
+data Coded(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+c = e with { Detail = "gone" }
+print(c.Detail)
+match c {
+    Coded k => print(k.Code)
+    HttpError => print("no code")
+}
+```
+
 ### D7 (decided, §4) How `data` inheritance is written
 
 `data Admin(int Level) : User` declares a `data` type that inherits from `User`. Its constructor
@@ -1054,12 +1067,20 @@ print(Same(Admin(1, "Ann", 3), Admin(1, "Ann", 3)))
 print(Same(Admin(1, "Ann", 3), User(1, "Ann")))
 ```
 
+Case: [data/body-inherit-http-error-equal.kz](../corpus/data/body-inherit-http-error-equal.kz)
+```kurz
+data Coded(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e == HttpError(HttpKind.Status, "teapot"))
+```
+
 ### D16 (assumed, §4) The body of a `data` type
 
 A `data` type takes its methods between braces after its constructor, in the form of a class body
 (K7), but for a property, which §14 leaves open. A `data` type that derives from another, or that
 another derives from, takes `virtual` and `override` in its body as a class does (K7) (§4, the owner,
-2026-11-11, "A class's rules"); an `override` is `mut` exactly when the method it overrides is, else `override-mut` (§4, the owner, 2026-11-12, comment 6819137865, H1); a type derived from one with a body holds each type's fields of the primary constructor and of the body together, the base's first, in `==`, the hash and the text (H2); a `with` on a value of a base that holds a value of a derived type gives a value of the derived type, every field of its body computed again (H3), and of the body of every type of its chain, in the order of a construction, the derived type's first, the result's static type the receiver's *(assumed, §4: that order and that type)* *(assumed, §4: the rest as a class's, H4 of that product pass, which the owner left at its default: an override takes `pub` as written (the owner, 2026-11-02); a method of a derived type with the name and the parameter types of a base's `pub` method and no `override` is `hides-member`, an `override` of a method neither `virtual` nor `override` `override-without-virtual`, as is an `override` in a type without a base from which another derives, which overrides nothing, and one with another return type `override-return-type`; a field of a derived type's body named like a field of a base, a private one among them, or a `pub` method of a base's body, a method of it named like a field of a base, and a field of its primary constructor named like a field of a base's body or a `pub` method of a base's body, are `redeclared` (V9), a clash of two fields since the text of a value writes every field of its chain by its name, a private one among them (B6), so that the fields of a chain take one name each, a clash of a field and a method as one within a single body is (B10), and a method of it named like a method of a base's body is read by the rules of an override, `hides-member` and its kin (K7); the initializers of a derived type's body run before its base's, in a class's order (the owner, 2026-11-03, #39, comment 6600033456), so that an initializer of a derived type reads the fields of every primary constructor, which the construction gives first, and the fields of its own body above it, and a field of a base's body is no name there (V10); a private member of a base's body is visible to the base alone (F9), and a member of a derived type's body, and a field of its primary constructor, may take the name of a private method of a base's body, which it does not see, as a member of a derived class may (K7); and the text of a value is that of the type it holds when the program runs, its own `Text()` or the nearest one a base's body declares, else A3's; the cost is a branch on the number of the type a value holds at each call of a `virtual` method that a type derived from the receiver's overrides, and at each `with` and each text of a value of a type another derives from)*; a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
+2026-11-11, "A class's rules"); an `override` is `mut` exactly when the method it overrides is, else `override-mut` (§4, the owner, 2026-11-12, comment 6819137865, H1); a type derived from one with a body holds each type's fields of the primary constructor and of the body together, the base's first, in `==`, the hash and the text (H2); a `with` on a value of a base that holds a value of a derived type gives a value of the derived type, every field of its body computed again (H3), and of the body of every type of its chain, in the order of a construction, the derived type's first, the result's static type the receiver's *(assumed, §4: that order and that type)* *(assumed, §4: the rest as a class's, H4 of that product pass, which the owner left at its default: an override takes `pub` as written (the owner, 2026-11-02); a method of a derived type with the name and the parameter types of a base's `pub` method and no `override` is `hides-member`, an `override` of a method neither `virtual` nor `override` `override-without-virtual`, as is an `override` in a type without a base from which another derives, which overrides nothing, and one with another return type `override-return-type`; a field of a derived type's body named like a field of a base, a private one among them, or a `pub` method of a base's body, a method of it named like a field of a base, a private one among them, and a field of its primary constructor named like a field of a base's body or a `pub` method of a base's body, are `redeclared` (V9), a clash of two fields since the text of a value writes every field of its chain by its name, a private one among them (B6), so that the fields of a chain take one name each, and a clash of a field and a method, a method named like a base's private field among them, since a value of the derived type holds every field of its chain, a private one among them, as a class holds its base's fields (K7), so that a field of a base is a member the derived type's value holds, which takes a name in the chain, and a field and a method of one type clash as within a single body (B10), while a private method of a base's body is no member that the derived type holds, that clash assumed in its own right and not read from a class's rules, since §14 leaves open whether a member of a derived class named like a member of its base is `redeclared` or hides it, and K7 refuses, of the members named like a field of a base, a property alone; and a method of it named like a method of a base's body is read by the rules of an override, `hides-member` and its kin (K7); the initializers of a derived type's body run before its base's, in a class's order (the owner, 2026-11-03, #39, comment 6600033456), so that an initializer of a derived type reads the fields of every primary constructor, which the construction gives first, and the fields of its own body above it, and a field of a base's body is no name there (V10); a private member of a base's body is visible to the base alone (F9), and a member of a derived type's body, and a field of its primary constructor, may take the name of a private method of a base's body, which it does not see, assumed in its own right, since §14 leaves open whether a member of a derived class named like a member of its base is `redeclared`, K7 holding only that a method of a base the class cannot see is hidden by nothing; and the text of a value is that of the type it holds when the program runs, its own `Text()` or the nearest one a base's body declares, else A3's; the cost is a branch on the number of the type a value holds at each call of a `virtual` method that a type derived from the receiver's overrides, and at each `with` and each text of a value of a type another derives from, and that a private field added to a base's body, or renamed there, which the base alone sees (F9), can break a type derived from it in another package, which `kurz release` does not count as breaking, since it compares the `pub` surface with the last release and a private field is no part of it (an assumed reading of §13), so that a release it passes as not breaking can stop such a type from compiling, where C#, which class bodies follow, lets a method of a derived class take the name of a base's private field, with no warning (the C# compiler of the .NET SDK 10.0.402, checked on 2026-11-13); whether the clash stays is open (§14))*; a field declared in the body is a field as one of the primary constructor is, in `==`, the hash and the
 text (§4, the owner, 2026-11-11, "Every field counts"), and in `with` what B4 and comment 6821275386
 make it, computed again and never named; and a `static` method of the body is read as one of a class body is (K7, K18, K19) (§4, the
 owner, 2026-11-11, option (a) of the question of comment 6788371936). A `data` type that derives from none and from which none derives takes `virtual` and `override` as a class without a base and from which none derives does: a `virtual` method there is a method of the type that nothing overrides, and an `override` there overrides nothing, `override-without-virtual` (K7) *(assumed, §4: a reading of "A class's rules" for a type outside any relation of inheritance)*. A field of the body is written
@@ -1069,9 +1090,9 @@ comment 6819137865, B1). The initializer reads the fields of the primary constru
 body above it (B2), and runs once, when the value is made, by a construction or `T.Make` (B3); a field
 below it, a method of the type and `this` are `unknown-name` there, as in the default of a class's
 field (K7) *(assumed, §4)*. `with` computes the fields of the body again from the copy's fields (B4),
-and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The text of one type writes them after the fields of its primary constructor, in the order of their declaration (B5) *(assumed, §4: within one type, a reading of B5 beside H2)*, and the text of a derived type each type's fields together, the base's first (H2, the owner, 2026-11-12, issue 455, comment 6819137865), one
+and a `with` that names one is `assign-immutable` (§4, the owner, 2026-11-12, comment 6821275386). The text of one type writes them after the fields of its primary constructor, in the order of their declaration (B5) *(assumed, §4: within one type, a reading of B5 beside H2)*, one
 without `pub` among them (B6), which code outside the type reads nowhere else: a read of it there is `not-visible` (F9), and an assignment of it there is `not-visible` too, with `mut` or without; where it has no `mut`, this is the error and not `assign-immutable`, since its access is read before the assignment, as C# reports a
-private field's access before its `readonly` *(assumed, §4: the assignment and that order)*. One without `mut` is given by its initializer alone, so an assignment of it, or of a field of the value it holds,
+private field's access before its `readonly` *(assumed, §4: the assignment and that order)*. The text of a derived type writes each type's fields together, the base's first (H2, the owner, 2026-11-12, issue 455, comment 6819137865). A field of the body without `mut` is given by its initializer alone, so an assignment of it, or of a field of the value it holds,
 inside its type, or outside it where it is `pub`, is `assign-immutable`, in a `mut` method too; one with `mut` is assigned by a `mut` method (B7), and through a `mut` variable as D4 lets a field of the primary
 constructor be, inside its type, or outside it where it is `pub` too *(assumed, §4)*. A field of the body that holds an instance of a class takes what a field of the primary
 constructor may (B9), and one named like a field above it, a method or a parameter is `redeclared` (V9)
@@ -1472,6 +1493,60 @@ data A(int X) {
 a = A(3)
 print(a.Get())
 print(a.Twice())
+```
+
+Case: [data/body-inherit-http-error-equal.kz](../corpus/data/body-inherit-http-error-equal.kz)
+
+Case: [data/body-inherit-http-error-with.kz](../corpus/data/body-inherit-http-error-with.kz)
+
+Case: [data/body-inherit-private-field-method.kz](../corpus/data/body-inherit-private-field-method.kz)
+```kurz
+data A(int X) {
+    int Hidden = X + 1
+}
+
+data B(int Y) : A {
+    pub int Hidden() => Y
+}
+
+print(B(1, 2))
+```
+
+Case: [data/body-inherit-private-method-method.kz](../corpus/data/body-inherit-private-method-method.kz)
+```kurz
+data A(int X) {
+    int Hidden() => X + 1
+
+    pub int Shown() => Hidden()
+}
+
+data B(int Y) : A {
+    pub int Hidden() => Y
+}
+
+b = B(1, 5)
+print(b.Hidden())
+print(b.Shown())
+```
+
+Case: [http/http-error-derived.kz](../corpus/http/http-error-derived.kz)
+```kurz
+data Coded(int Code) : HttpError {
+    pub override string Text() => "{Code} {Detail}"
+}
+
+data Plain(int Code) : HttpError
+
+data Tagged(string Tag) : Coded
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e)
+print(e.Text())
+print(e.Detail)
+print(Plain(HttpKind.Protocol, "short", 1))
+HttpError t = Tagged(HttpKind.Status, "clash", 409, "twice")
+print(t)
+print(t.Text())
 ```
 
 ### D17 (decided, §4) How sets of flags are combined

@@ -273,6 +273,19 @@ Show(Admin("Bea", 2))
 Show(User("Cy"))
 ```
 
+Case: [data/body-inherit-http-error-with.kz](../corpus/data/body-inherit-http-error-with.kz)
+```kurz
+data Coded(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+c = e with { Detail = "gone" }
+print(c.Detail)
+match c {
+    Coded k => print(k.Code)
+    HttpError => print("no code")
+}
+```
+
 Case: [control/match-implementing-arm.kz](../corpus/control/match-implementing-arm.kz)
 ```kurz
 interface Shape {

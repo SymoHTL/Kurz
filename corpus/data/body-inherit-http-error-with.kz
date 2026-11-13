@@ -1,0 +1,14 @@
+// expect: output
+// | gone
+// | 418
+// rules: D6, D16, C4
+
+data Coded(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+c = e with { Detail = "gone" }
+print(c.Detail)
+match c {
+    Coded k => print(k.Code)
+    HttpError => print("no code")
+}

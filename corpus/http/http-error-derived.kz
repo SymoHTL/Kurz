@@ -2,10 +2,10 @@
 // | 418 teapot
 // | 418 teapot
 // | teapot
-// | false
-// | 418 gone
 // | short
-// rules: W2
+// | 409 clash
+// | 409 clash
+// rules: W2, D16
 
 data Coded(int Code) : HttpError {
     pub override string Text() => "{Code} {Detail}"
@@ -13,10 +13,13 @@ data Coded(int Code) : HttpError {
 
 data Plain(int Code) : HttpError
 
+data Tagged(string Tag) : Coded
+
 HttpError e = Coded(HttpKind.Status, "teapot", 418)
 print(e)
 print(e.Text())
 print(e.Detail)
-print(e == HttpError(HttpKind.Status, "teapot"))
-print(e with { Detail = "gone" })
 print(Plain(HttpKind.Protocol, "short", 1))
+HttpError t = Tagged(HttpKind.Status, "clash", 409, "twice")
+print(t)
+print(t.Text())

@@ -226,7 +226,6 @@ data Located(string Pattern) : RegexError
 
 r = Located(RegexKind.Syntax, 1, "(")
 print(r)
-print(r.Pattern)
 ```
 
 ### G4 (assumed, §12) Matching

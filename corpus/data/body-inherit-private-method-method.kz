@@ -1,0 +1,18 @@
+// expect: output
+// | 5
+// | 2
+// rules: D16
+
+data A(int X) {
+    int Hidden() => X + 1
+
+    pub int Shown() => Hidden()
+}
+
+data B(int Y) : A {
+    pub int Hidden() => Y
+}
+
+b = B(1, 5)
+print(b.Hidden())
+print(b.Shown())

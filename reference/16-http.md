@@ -196,10 +196,17 @@ the owner chose on 2026-11-02 and 2026-11-03, while the compiler read no body of
 with its cause). That `Text()` is `virtual` (§12, the owner, 2026-11-12, issue 457, comment
 6833680029, "Yes, virtual"), and a `data` type of a file may derive from `HttpError`, and from every
 `data` type of `std/` with a body, `RegexError` among them, as from one of the file (D6, D16) (§12,
-the same comment, "Every one"): its text is that of its own `Text()`, an `override` of `HttpError`'s,
-or else its detail, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
-*(assumed, §12: that no call of `std/` takes an `HttpError` from a program, so that no derived
-value reaches `std/`)*
+the same comment, "Every one"): its text is that of the nearest `override` of `Text()` along its
+chain of bases, its own among them, and `HttpError`'s, its `Detail`, where no type of the chain
+overrides it, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
+*(assumed, §12: the nearest `override` along the chain, as D16 gives the text of a value of a chain;
+that `std/` acts on the type of an `HttpError` it is given only where §4 does for a value of any
+chain, in its text, its `==` and its hash (D15, D16): `print`, a hole of an interpolated string (L6)
+and `string.Join` (X6) take its text through its `virtual` `Text()`, a `List`'s `IndexOf` (X9)
+compares it by `==`, and a `Map` compares and hashes it as a key (M9), each reading the number of
+the type the value holds; that no other call of `std/` acts on its type, and none but a generic
+container's gives one the program made back to it, a `List` or a `Map` giving a derived value back
+as it took it)*
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
@@ -222,13 +229,16 @@ data Coded(int Code) : HttpError {
 
 data Plain(int Code) : HttpError
 
+data Tagged(string Tag) : Coded
+
 HttpError e = Coded(HttpKind.Status, "teapot", 418)
 print(e)
 print(e.Text())
 print(e.Detail)
-print(e == HttpError(HttpKind.Status, "teapot"))
-print(e with { Detail = "gone" })
 print(Plain(HttpKind.Protocol, "short", 1))
+HttpError t = Tagged(HttpKind.Status, "clash", 409, "twice")
+print(t)
+print(t.Text())
 ```
 
 ### W3 (decided, §12) A server's request sent to another actor moves with its body

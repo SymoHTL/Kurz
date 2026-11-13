@@ -1,0 +1,8 @@
+// expect: output
+// | false
+// rules: D15, D16
+
+data Coded(int Code) : HttpError
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e == HttpError(HttpKind.Status, "teapot"))
