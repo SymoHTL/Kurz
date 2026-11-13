@@ -60,6 +60,23 @@ public sealed partial class Checker
         b.Chain.Any(s => (s.Declaration.Members ?? []).OfType<FunctionDeclaration>().Any(m => m.Name == name && (m.Modifiers & Modifiers.Pub) != 0));
 
     /// <summary>
+    /// D16, F9: whether a field of the chain of <paramref name="symbol"/> is a private one of a base's body, which only that base sees, so
+    /// that a method of the type's body may take its name, as C# lets a method of a derived class take the name of a base's private field
+    /// (§4, the owner, 2026-11-13, pull request 521, comment 6847934004, "Allow, as C#"); a field of that name stays <c>redeclared</c> (V9).
+    /// </summary>
+    private static bool BasePrivateField(DataSymbol symbol, FieldSymbol field) =>
+        field.Body is not null && !field.IsPub && !ReferenceEquals(symbol.Declaring(field), symbol);
+
+    /// <summary>
+    /// D16, F9: whether a member of the name on a value of the type is the method a type of its chain declares in the name of a base's
+    /// private field (<see cref="BasePrivateField"/>): outside the body of the base that declares the field, which alone sees it, the name
+    /// is the method of a type derived from that base; inside that body it is the field.
+    /// </summary>
+    private bool MethodOverPrivateField(DataSymbol symbol, string name) =>
+        symbol.Field(name) is { } field && BasePrivateField(symbol, field) && symbol.Declaring(field) is var owner && !ReferenceEquals(CurrentData(), owner)
+        && symbol.Chain.TakeWhile(s => !ReferenceEquals(s, owner)).Any(s => (s.Declaration.Members ?? []).OfType<FunctionDeclaration>().Any(m => m.Name == name));
+
+    /// <summary>
     /// D16, K7: the methods of a name a call on a value of the data type picks from (F13): its own, and those of each base up the chain
     /// that no method nearer the type has the parameter types of, so that an override stands for what it overrides; null where none has one.
     /// </summary>
@@ -237,11 +254,12 @@ public sealed partial class Checker
 
     /// <summary>
     /// D16: a method of a data body, declared as a function of the file named <c>Type.Method</c>, which no name a program writes can
-    /// call, with the value first; a method named like a field is <c>redeclared</c> (V9, as C# refuses a member named like another).
+    /// call, with the value first; a method named like a field is <c>redeclared</c> (V9, as C# refuses a member named like another), but
+    /// for a private field of a base's body, which the type does not see (<see cref="BasePrivateField"/>).
     /// </summary>
     private void DeclareDataMethod(DataSymbol symbol, FunctionDeclaration f)
     {
-        if (symbol.Field(f.Name) is not null)
+        if (symbol.Field(f.Name) is { } field && !BasePrivateField(symbol, field))
         {
             Report(ErrorIds.Redeclared, f.Line, $"`{f.Name}` is a field of `{symbol.Name}` already (V9, D16)");
             return;

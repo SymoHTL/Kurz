@@ -364,6 +364,27 @@ print(c.count)
 print(Counter.Twice(5))
 ```
 
+Case: [data/body-inherit-private-field-method.kz](../corpus/data/body-inherit-private-field-method.kz)
+```kurz
+data A(int X) {
+    int Hidden = X + 1
+
+    pub int Shown() => Hidden
+}
+
+data B(int Y) : A {
+    pub int Hidden() => Y
+
+    pub int Twice() => Hidden() * 2
+}
+
+b = B(1, 5)
+print(b)
+print(b.Hidden())
+print(b.Shown())
+print(b.Twice())
+```
+
 No case shows the folder part, a member without `pub` or one marked `internal` used from another
 folder: it takes several folders, and a case of the corpus is a single file.
 

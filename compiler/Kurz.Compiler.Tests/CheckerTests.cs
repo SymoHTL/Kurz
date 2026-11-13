@@ -5469,11 +5469,14 @@ public sealed class CheckerTests
         // the parameter types of a base's `pub` one and no `override` is `hides-member`, an `override` of a method neither `virtual` nor
         // `override` is `override-without-virtual`, as is an `override` in a type without a base, with a type derived from it or without
         // one, another return type `override-return-type`; a private member of a base's body is visible to the base alone (F9), and a
-        // member of the derived type's body may take the name of a private method of a base's body, which it does not see; an initializer
+        // member of the derived type's body may take the name of a private method of a base's body, which it does not see, and a method of
+        // it the name of a private field of a base's body, whose receiver a call holds as any method's (§4, the owner, 2026-11-13, pull
+        // request 521, comment 6847934004, "Allow, as C#"); an initializer
         // of a derived type's body reads the fields of every primary constructor and its own body's above it, and a base's field of the
         // body, computed after it in a class's order, is no name there (V10); a field of the derived type's body named like a field of a
-        // base or a `pub` method of a base's body, a method of it named like a field of a base, and a field of its primary constructor named
-        // like a base's field of the body or a `pub` method of a base's body, are `redeclared` (V9). The base and the control derive and
+        // base or a `pub` method of a base's body, a method of it named like a field of a base that it sees, and a field of its primary
+        // constructor named like a base's field of the body, a private one among them, or a `pub` method of a base's body, are
+        // `redeclared` (V9). The base and the control derive and
         // override as the rules let them, with no error.
         const string a = "data A(int X) {\n    pub int P = X * 2\n    int Hidden = 1\n\n    pub virtual mut void Bump() {\n        X = X + 1\n    }\n\n    pub virtual int Get() => X\n\n    pub int Plain() => X\n\n    pub int Shown() => Own() + Hidden\n\n    int Own() => 1\n}\n\n";
         const string tail = "}\n\nprint(B(1, 2))\n";
@@ -5493,6 +5496,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Plain = Y\n" + tail));
         Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int Plain) : A\n\nprint(B(1, 2))\n"));
         Assert.Empty(Errors(a + "data B(int Own) : A\n\nprint(B(1, 2))\n"));
+        Assert.Empty(Errors(a + "data B(int Y) : A {\n    pub int Hidden() => Y\n\n    pub int Twice() => Hidden() * 2\n}\n\nb = B(1, 2)\nprint(b.Hidden() + b.Twice() + b.Shown())\n"));
+        Assert.Equal([(ErrorIds.Redeclared, 19)], Errors(a + "data B(int Y) : A {\n    pub int Hidden = Y\n" + tail));
+        Assert.Equal([(ErrorIds.Redeclared, 18)], Errors(a + "data B(int Hidden) : A\n\nprint(B(1, 2))\n"));
+        const string held = "data B(List<int> L) : A {\n    pub int NAME(int n) => L.Count + n\n}\n\nint Reset(mut B q) {\n    q = B(1, List<int>())\n    return 0\n}\n\nmut b = B(1, List<int>())\nprint(b.NAME(Reset(mut b)))\n";
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 28)], Errors(a + held.Replace("NAME", "Peek")));
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 28)], Errors(a + held.Replace("NAME", "Hidden")));
+
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\ndata S(int Y) : R\n\nprint(S(1, 2).Get())\n"));
         Assert.Equal([(ErrorIds.OverrideWithoutVirtual, 2)], Errors("data R(int X) {\n    pub override int Get() => X\n}\n\nprint(R(1).Get())\n"));
         Assert.Empty(Errors("data R(int X) {\n    pub virtual int Get() => X\n}\n\ndata S(int Y) : R {\n    pub override int Get() => Y\n}\n\nprint(S(1, 2).Get())\n"));
