@@ -1,0 +1,9 @@
+// expect: error asm-refused at 6
+// allow: raw
+// rules: R12
+
+naked long Seven() {
+    asm("mov eax, 7", "frobnicate eax", "ret")
+}
+
+print(Seven())

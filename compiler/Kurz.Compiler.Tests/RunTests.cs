@@ -96,11 +96,14 @@ public sealed class Toolchain : IDisposable
 
 /// <summary>
 /// Every corpus case that expects a run (<c>output</c> or <c>throws</c>), built by the emitter and the pinned clang and run on this
-/// machine. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
+/// machine, an x86-64 one, as the gates image and the Windows job are: on a 64-bit Arm machine the emitter says <c>not supported</c> to
+/// an <c>asm</c> and a <c>naked</c> function (R11, R12), whose cases this runs. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
 /// <c>output</c> case then exits with 0 and writes nothing on standard error; a <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
-/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10).
+/// for <c>not-char-boundary</c> that line ending in a colon with the position of the cut below it (X10). A case that expects an error the
+/// build raises once clang refuses the program (<see cref="CorpusTests.BuildIds"/>) is built, and its build ends with that error alone, at the
+/// header's line; it is no case run.
 /// A case the checker says <c>not supported</c> to is held by the checker's theory in <see cref="CorpusTests"/> and is not built here; a
 /// case the checker reads and the emitter does not lay out is in <see cref="NotEmitted"/>, with the construct the emitter names; and a
 /// case it lays out whose expectation needs what the build does not hold is in <see cref="NotRun"/>, with why, and is built and not run.
@@ -113,7 +116,7 @@ public sealed class Toolchain : IDisposable
 public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
     /// <summary>The cases built and run: fewer means the emitter refuses what it built before; Windows does not run the stack overflow's, nor build the calls on files and sockets, the reads of the command line, the environment and the clock, the calls on processes, the log calls, the reads of standard input and running a program. The number for Linux is the count measured in the gates image, with no margin, so that one case that stops being built there turns it red, and a change that adds a case to the run raises it (#156). The number for Windows is measured by one run of the Windows job with the number set to 999, which fails and prints the count; between such runs it is a bound, the last count plus the cases a change since adds that run there (knowledge/the-run-floor-is-measured-not-merged.md), so a case that stops being built there may leave it green until the next count: it is a weaker gate than the Linux number.</summary>
-    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 506 : 632;
+    private static readonly int RunFloor = OperatingSystem.IsWindows() ? 507 : 633;
 
     /// <summary>The cases of the calls on files and sockets that expect a run, which a build for Windows says <c>not supported</c> to (S11).</summary>
     private static readonly string[] FileCases =
@@ -201,7 +204,7 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var data = new TheoryData<string>();
         foreach (var file in CorpusTests.CaseFiles())
         {
-            if (Header(file).Expectation != Expectation.Error)
+            if (Header(file) is var header && (header.Expectation != Expectation.Error || CorpusTests.BuildIds.Contains(header.ErrorId!)))
             {
                 data.Add(file);
             }
@@ -264,7 +267,15 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return;
         }
 
-        var executable = toolchain.Build(program, relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix);
+        var name = relativePath.Replace('/', '_').Replace(".kz", "", StringComparison.Ordinal) + suffix;
+        if (header.Expectation == Expectation.Error)
+        {
+            var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(program, name)); // the build's error (CorpusTests.BuildIds)
+            Assert.Equal([(header.ErrorId!, header.ErrorLine)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+            return;
+        }
+
+        var executable = toolchain.Build(program, name);
         if (buildOnly || NotRun.ContainsKey(relativePath))
         {
             return;

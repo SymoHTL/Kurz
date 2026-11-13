@@ -3,7 +3,7 @@
 // | 42
 // | 9
 // allow: raw
-// rules: R12
+// rules: R12, R11
 
 long Nine() => 9
 
