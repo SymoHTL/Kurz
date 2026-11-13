@@ -119,6 +119,9 @@ public sealed record StringLiteralValue(IReadOnlyList<StringPart> Parts)
     /// <summary>A template of an <c>asm</c> (R11), read with no hole: its <c>{name}</c> names an operand and is no interpolation (L6), so its one part is its text with its braces.</summary>
     public bool IsTemplate { get; init; }
 
+    /// <summary>For a template in a <c>"""</c> block (L13), the offset in its text at which each line of the block starts, the first on the line after the opening quotes; null for a literal of one line.</summary>
+    public IReadOnlyList<int>? LineStarts { get; init; }
+
     /// <summary>The text of a literal without holes, or null when it has one.</summary>
     public string? PlainText => Parts.All(p => p is TextPart) ? string.Concat(Parts.Cast<TextPart>().Select(p => p.Text)) : null;
 }

@@ -761,7 +761,7 @@ public sealed class Parser
         {
             if (Current.Kind == TokenKind.StringLiteral && Current.Value is StringLiteralValue { IsTemplate: true } template)
             {
-                templates.Add(new AsmTemplate(Advance().Line, template.PlainText!));
+                templates.Add(new AsmTemplate(Advance().Line, template.PlainText!, template.LineStarts));
             }
             else if (templates.Count == 0)
             {

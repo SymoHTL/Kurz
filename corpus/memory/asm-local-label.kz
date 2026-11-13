@@ -1,0 +1,18 @@
+// expect: output
+// | 3
+// | 0
+// | 7
+// allow: raw
+// rules: R11
+
+mut long n = 3
+mut long steps = 0
+mut long kept = 7
+raw {
+    asm("2:", "inc {s}", "dec {n}", "jnz 2b", n = inout(reg) n, s = inout(reg) steps)
+    asm("jmp 1f", "mov $9, {k}", "1:", k = inout(reg) kept, options(att_syntax))
+}
+print(steps)
+print(n)
+print(kept)
+// a label of only the digits 0 and 1 is binary-asm-label in Intel's syntax alone, so `1:` stands under `att_syntax` (R11)

@@ -1,0 +1,11 @@
+// expect: output
+// | 7
+// allow: raw
+// rules: R12, R11
+
+naked long Seven() {
+    asm("jmp done", "mov eax, 1", "ret", "done:", "mov eax, 7", "ret")
+}
+
+print(Seven())
+// the compiler emits a `naked` function with no type parameters once, so its `asm` may define a label by name (R12)

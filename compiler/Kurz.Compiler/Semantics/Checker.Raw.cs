@@ -995,6 +995,8 @@ public sealed partial class Checker
     /// <c>options</c> among them, is <c>naked-body</c>. An operand of a class Rust takes only as a clobber, or of one Rust gives a target with
     /// a feature, in a class or an explicit register, is not read: the first needs <c>out</c> with <c>_</c> alone, and no rule names the
     /// features of a build; nor is a name on an operand in an explicit register, which Rust's Reference allows and Rust's compiler refuses.
+    /// The labels its templates define are read (<see cref="CheckLabels"/>), but in a <c>naked</c> function, which may define any: the checker
+    /// reads a <c>naked</c> function with no type parameters alone (<see cref="CheckCSignature"/>), and Rust's lint exempts that one too.
     /// </summary>
     private void CheckAsm(AsmStatement a, bool naked)
     {
@@ -1100,6 +1102,14 @@ public sealed partial class Checker
         foreach (var template in a.Templates)
         {
             CheckTemplate(template, positional, named, ref implicitIndex);
+        }
+
+        if (!naked)
+        {
+            foreach (var template in a.Templates)
+            {
+                CheckLabels(template, options.ContainsKey("raw"), options.ContainsKey("att_syntax"));
+            }
         }
 
         foreach (var slot in positional.Concat(named.Values).Where(s => !s.Used))
@@ -1579,6 +1589,120 @@ public sealed partial class Checker
                 Report(ErrorIds.AsmOperand, template.Line, $"a modifier stands after a register operand, not after `{slot.Operand.Word}` (R11)");
             }
         }
+    }
+
+    /// <summary>What a text before a <c>:</c> of a template's statement defines, as Rust's lint pass <c>AsmLabels</c> reads it.</summary>
+    private enum AsmLabel
+    {
+        Named,
+        Placeholder,
+        Binary,
+    }
+
+    /// <summary>
+    /// R11 with R12 (the owner, 2026-11-13, "Refuse as Rust"): a label a template defines by name is <c>named-asm-label</c> at its line, as
+    /// LLVM may copy an <c>asm</c> and the copy define it again, and a label of only the digits 0 and 1 is <c>binary-asm-label</c> in Intel's
+    /// syntax, whose assembler reads its use as a binary number; the template read as Rust's lint pass <c>AsmLabels</c> reads it
+    /// (<c>rustc_lint/src/builtin.rs</c>): split into statements at each line break and <c>;</c>, a statement's text from <c>//</c> on set
+    /// aside, and each text before a <c>:</c> of the statement, trimmed, from its start or from the label before it, read by
+    /// <see cref="LabelKind"/>, the first that is no label ending the statement's labels. <c>options(att_syntax)</c> takes a binary label, as
+    /// Rust's lint does; the checker reads every <c>asm</c> for x86-64, as it reads its operands.
+    /// </summary>
+    private void CheckLabels(AsmTemplate template, bool raw, bool attSyntax)
+    {
+        var text = template.Text;
+        for (var start = 0; start <= text.Length;)
+        {
+            var end = text.IndexOfAny(['\n', ';'], start);
+            end = end < 0 ? text.Length : end;
+            var comment = text.IndexOf("//", start, end - start, StringComparison.Ordinal);
+            var statementEnd = comment < 0 ? end : comment;
+            var labelStart = start;
+            for (var colon = text.IndexOf(':', start, statementEnd - start); colon >= 0; colon = text.IndexOf(':', colon + 1, statementEnd - colon - 1))
+            {
+                var written = text[labelStart..colon];
+                var label = written.Trim();
+                if (LabelKind(label, raw) is not { } kind)
+                {
+                    break;
+                }
+
+                var line = template.LineAt(labelStart + written.Length - written.TrimStart().Length);
+                if (kind == AsmLabel.Binary)
+                {
+                    if (!attSyntax)
+                    {
+                        Report(ErrorIds.BinaryAsmLabel, line, $"`{label}:` is a label of only the digits 0 and 1, whose use the assembler reads as a binary number in Intel's syntax: number a local label from 2 (R11)");
+                    }
+                }
+                else
+                {
+                    Report(ErrorIds.NamedAsmLabel, line, $"`{label}:` defines a label {(kind == AsmLabel.Placeholder ? "named through a placeholder" : "by name")}, which LLVM may define again where it copies the `asm`: a local label, `2:` with `2b` or `2f`, takes its place (R11)");
+                }
+
+                labelStart = colon + 1;
+            }
+
+            start = end + 1;
+        }
+    }
+
+    /// <summary>
+    /// R11: the label a trimmed text before a <c>:</c> defines, as Rust's lint pass reads it, or null where it is none: a name, which starts
+    /// with an ASCII letter, <c>.</c> or <c>_</c> and goes on with ASCII letters, digits, <c>_</c> and <c>$</c>; a name through a placeholder,
+    /// a <c>{...}</c> outside <c>options(raw)</c> in the text, which may stand for any name, and no <c>{</c> inside it; and a binary label,
+    /// the digits 0 and 1 alone.
+    /// </summary>
+    private static AsmLabel? LabelKind(string label, bool raw)
+    {
+        if (label.Length == 0)
+        {
+            return null;
+        }
+
+        var inBraces = false;
+        AsmLabel kind;
+        if (!raw && label[0] == '{')
+        {
+            inBraces = true;
+            kind = AsmLabel.Placeholder;
+        }
+        else if (label[0] is '0' or '1')
+        {
+            kind = AsmLabel.Binary;
+        }
+        else if (char.IsAsciiLetter(label[0]) || label[0] is '.' or '_')
+        {
+            kind = AsmLabel.Named;
+        }
+        else
+        {
+            return null;
+        }
+
+        foreach (var c in label.AsSpan(1))
+        {
+            if (!raw && inBraces)
+            {
+                if (c == '{')
+                {
+                    return null;
+                }
+
+                inBraces = c != '}';
+            }
+            else if (!raw && c == '{')
+            {
+                inBraces = true;
+                kind = AsmLabel.Placeholder;
+            }
+            else if (kind == AsmLabel.Binary ? c is not ('0' or '1') : !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '$'))
+            {
+                return null;
+            }
+        }
+
+        return kind;
     }
 
     /// <summary>R11: a template whose braces or placeholders cannot be read is one <c>asm-operand</c>, and what it would name of the operands is not known, so each counts as used (E1).</summary>

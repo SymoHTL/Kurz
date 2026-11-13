@@ -1,0 +1,29 @@
+// expect: output
+// | Point { X = 11, Y = 20 }
+// | 11
+// allow: raw
+// rules: R11
+
+data Point(long X, long Y)
+
+long Bump(mut Point point) {
+    point = Point(10, 20)
+    return 1
+}
+
+long Ten(long* slot) {
+    raw {
+        *slot = 10
+    }
+    return 1
+}
+
+mut Point p = Point(0, 0)
+mut long n = 0
+raw {
+    long* q = &n
+    asm("add {r}, {k}", r = inout(reg) p.X, k = in(reg) Bump(mut p))
+    asm("add {r}, {k}", r = inout(reg) *q, k = in(reg) Ten(q))
+}
+print(p)
+print(n)

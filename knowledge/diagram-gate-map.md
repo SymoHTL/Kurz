@@ -117,7 +117,7 @@ flowchart TD
         the cases its list `NotFenced` names, each with why, which that run builds and does not run, red on
         output, an exit code or an error line other than the header's (a warning builds the case and passes, as it
         passes the corpus theory where it is md5-insecure on a line that calls Md5), on a case that expects an id
-        the build raises (CorpusTests.BuildIds, now asm-refused), which the corpus theory holds to no error of the
+        the build raises (CorpusTests.BuildIds, which names asm-refused), which the corpus theory holds to no error of the
         checker and the runner builds, counted in no floor, whose build ends other than with that id alone at the
         header's line, on a case
         the emitter refuses that its list does not name with the emitter's words, on a stale entry, or on fewer

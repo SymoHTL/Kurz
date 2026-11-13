@@ -354,12 +354,15 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void An_instruction_the_assembler_refuses_is_asm_refused_at_the_line_of_its_asm()
     {
-        // R11, R12 (the owner, 2026-11-13, "Rust's srcloc"): clang's text for IR names no line of the program, so where it refuses inline
-        // assembly the build assembles the program's `asm`s together in the order of their lines, each with those before it that clang
-        // took, and each one whose addition clang refuses is `asm-refused` at its line, an inline one and a `naked` function's, in the
-        // order of the lines, each under its rule; one that assembles is named by none, and the program without the refused instructions
-        // builds (the controls). Of two `asm`s that define one label, the second is named, as LLVM refuses it in the second's text, and
-        // an `asm` between them that assembles is named by none
+        // R11, R12 (the owner, 2026-11-13, "Rust's srcloc", for the error at the line of the `asm`, and pull request 530, comment
+        // 6855725580, "LLVM's order everywhere", for the order): clang's text for IR names no line of the program, so where it refuses
+        // inline assembly the build assembles the program's `asm`s together in the order LLVM meets them, a `naked` function's
+        // module-level assembly before every function, each with those before it that clang took, and each one whose addition clang
+        // refuses is `asm-refused` at its line, an inline one and a `naked` function's, in that order, each under its rule; one that
+        // assembles is named by none, and the program without the refused instructions builds (the controls). Of two `naked` functions
+        // that define one label and are called in the order of their lines, the second is named, whose label clang refuses beside the
+        // first's, and an `asm` between them that assembles is named by none; an inline `asm` defines no named label (R11, the owner,
+        // 2026-11-13, "Refuse as Rust")
         const string program = """
             mut long n = 1
             raw {
@@ -375,13 +378,149 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(Seven())
             """;
         var compiled = Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!;
-        Assert.Equal([(3, "R11"), (4, "R11"), (8, "R12")], compiled.Asms.Select(a => (a.Line, a.Rule)).OrderBy(a => a.Line).ToList());
+        Assert.Equal([(8, "R12"), (3, "R11"), (4, "R11")], compiled.Asms.Select(a => (a.Line, a.Rule)).ToList());
         var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled, "asm-refused"));
-        Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 8)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.Equal([(ErrorIds.AsmRefused, 8), (ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-assembled")));
-        const string twice = "raw {\n    asm(\"twice:\", \"nop\")\n    asm(\"nop\")\n    asm(\"twice:\", \"nop\")\n}\n";
+        const string twice = "naked long One() {\n    asm(\"twice:\", \"mov eax, 1\", \"ret\")\n}\n\nnaked long Two() {\n    asm(\"mov eax, 2\", \"ret\")\n}\n\n"
+            + "naked long Three() {\n    asm(\"twice:\", \"mov eax, 3\", \"ret\")\n}\n\nprint(One() + Two() + Three())\n";
         refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(twice, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-twice"));
-        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.Equal([(ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+    }
+
+    [Fact]
+    public void Of_two_naked_functions_that_define_one_label_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_calls()
+    {
+        // R12 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes a function at
+        // its first call, and LLVM writes the `naked` functions' module-level assembly in that order, so of two that define one label and
+        // are called out of the order of their lines, LLVM refuses the label of the earlier line, the one it meets second, and the build
+        // names that line
+        const string program = """
+            naked long One() {
+                asm("twice:", "mov eax, 1", "ret")
+            }
+
+            naked long Two() {
+                asm("mov eax, 2", "ret")
+            }
+
+            naked long Three() {
+                asm("twice:", "mov eax, 3", "ret")
+            }
+
+            print(Three() + Two() + One())
+            """;
+        var compiled = Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!;
+        Assert.Equal([10, 6, 2], compiled.Asms.Select(a => a.Line).ToList());
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled, "asm-twice-out-of-order"));
+        Assert.Equal([(ErrorIds.AsmRefused, 2)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+    }
+
+    [Fact]
+    public void Of_two_asm_statements_that_define_one_symbol_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_functions()
+    {
+        // R11, R18 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes a guarded
+        // block's function before the function the block stands in, so LLVM meets the `asm` of the block before the function's own `asm`
+        // of an earlier line and refuses the symbol of the earlier line, and the build names that line; `.equiv` defines a symbol that
+        // is no label (named-asm-label), and the program with one of the two builds (the control)
+        const string program = """
+            mut long n = 1
+            raw {
+                asm(".equiv twice, 1", "add {r}, 1", r = inout(reg) n)
+            }
+            if X86.Sse41.IsSupported {
+                raw {
+                    asm(".equiv twice, 2", "add {r}, 2", r = inout(reg) n)
+                }
+            }
+            print(n)
+            """;
+        var compiled = Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!;
+        Assert.Equal([7, 3], compiled.Asms.Select(a => a.Line).ToList());
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled, "asm-symbol-twice"));
+        Assert.Equal([(ErrorIds.AsmRefused, 3)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program.Replace(".equiv twice, 2", ".equiv once, 2", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-symbol-once")));
+    }
+
+    [Fact]
+    public void The_copies_the_build_assembles_define_no_symbol_the_program_does_not()
+    {
+        // R11, R12: the build writes the calls of the `asm` statements in the copies' `main`, which every program defines, in place of its
+        // label, so no symbol of the program, a `naked` function's label or a symbol an `asm` statement's directive defines, meets a
+        // function only the copies define: the build names the one `asm` the assembler refuses and no other, the copy it took before it,
+        // the second, assembles whole, as no symbol is defined twice, and the program without the refused one builds (the control)
+        const string program = """
+            naked long Seven() {
+                asm("kz.asm1:", "mov eax, 7", "ret")
+            }
+
+            mut long n = 1
+            raw {
+                asm(".equiv kz.asm0, 1", "add {r}, 1", r = inout(reg) n)
+                asm("frobnicate {r}", r = inout(reg) n)
+            }
+            print(n)
+            print(Seven())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-copies-names"));
+        Assert.Equal([(ErrorIds.AsmRefused, 8)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(Path.Combine(toolchain.Directory, "asm-copies-names", "asm1.o")));
+        Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-copies-names-built")));
+    }
+
+    [Fact]
+    public void A_label_of_a_naked_function_that_is_a_symbol_of_the_program_is_asm_refused_at_the_line_of_its_asm()
+    {
+        // R12, R11: LLVM writes a `naked` function's module-level assembly before the program's own definitions, and refuses a label of it
+        // that is a symbol the program defines where it writes that definition, with no line of the template, so the build assembles the
+        // copies beside a label for each symbol the program's IR defines: `main`, which the C library's start calls, `kz.main`, the
+        // program's top-level code, and the string constant `.str.0`, private, `.L.str.0` in the assembly; each is refused in its
+        // function's text and named at its line, and a label that is no symbol of the program is named by none (the control)
+        const string program = """
+            naked long One() {
+                asm("main:", "mov eax, 1", "ret")
+            }
+
+            naked long Two() {
+                asm("kz.main:", "mov eax, 2", "ret")
+            }
+
+            naked long Three() {
+                asm(".L.str.0:", "mov eax, 3", "ret")
+            }
+
+            naked long Four() {
+                asm("done:", "mov eax, 4", "ret")
+            }
+
+            print(One() + Two() + Three() + Four())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-symbol"));
+        Assert.Equal([(ErrorIds.AsmRefused, 2), (ErrorIds.AsmRefused, 6), (ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+    }
+
+    [Fact]
+    public void A_pure_asm_whose_output_nothing_reads_is_asm_refused_in_a_test_build_and_builds_in_a_release_build()
+    {
+        // R11 (the owner, 2026-11-13, "As Rust, builds differ"): an `asm` the optimiser drops before the assembler reads it raises
+        // nothing, so a `pure` one whose output nothing reads, in a function, is `asm-refused` at its line in a test build, whose store into
+        // the variable keeps the call, and builds in a release build, whose optimiser drops the store and the call, as Rust's dev and
+        // release profiles hand LLVM the same call; the variable is read before the `asm` alone, as V5 refuses one never read
+        const string program = """
+            long Zero() {
+                mut long n = 0
+                long kept = n
+                raw {
+                    asm("frobnicate {r}", r = out(reg) n, options(pure, nomem))
+                }
+                return kept
+            }
+
+            print(Zero())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-dropped-test"));
+        Assert.Equal([(ErrorIds.AsmRefused, 5)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-dropped-release")));
     }
 
     [Fact]
@@ -410,7 +549,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void The_command_writes_each_asm_the_assembler_refuses_as_a_compile_error_at_its_line()
     {
         // R11, R12: a build the assembler refuses reaches the command's error stream as its other compile errors do,
-        // `<file>:<line>: <id>: <text>`, one line for each refused `asm` in the order of the lines, and not as clang's failure; a program
+        // `<file>:<line>: <id>: <text>`, one line for each refused `asm` in the order LLVM meets them, and not as clang's failure; a program
         // clang builds writes nothing (the control)
         const string program = """
             mut long n = 1
@@ -429,7 +568,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var directory = Path.Combine(toolchain.Directory, "asm-command");
         using var error = new StringWriter();
         Assert.False(Command.Built(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, toolchain.Clang, directory, Path.Combine(directory, OperatingSystem.IsWindows() ? "refused.exe" : "refused"), "program.kz", error));
-        Assert.Matches(@"^program\.kz:4: asm-refused: [^\n]*\nprogram\.kz:8: asm-refused: [^\n]*\n$", error.ToString());
+        Assert.Matches(@"^program\.kz:8: asm-refused: [^\n]*\nprogram\.kz:4: asm-refused: [^\n]*\n$", error.ToString());
         using var none = new StringWriter();
         Assert.True(Command.Built(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, toolchain.Clang, directory, Path.Combine(directory, OperatingSystem.IsWindows() ? "built.exe" : "built"), "program.kz", none));
         Assert.Equal("", none.ToString());

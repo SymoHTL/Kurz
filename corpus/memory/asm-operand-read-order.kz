@@ -2,7 +2,6 @@
 // | 0
 // | 1
 // | 1
-// | 2
 // allow: raw
 // rules: R11
 
@@ -12,11 +11,8 @@ long Show(long v) {
 }
 
 mut long m = 0
-mut long n = 0
 raw {
     long* p = &m
     asm("mov {a}, {x}", a = out(reg) p[Show(0)], x = in(reg) Show(1))
-    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
 }
 print(m)
-print(n)

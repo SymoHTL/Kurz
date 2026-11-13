@@ -1018,8 +1018,10 @@ public sealed class Lexer
 
         var parts = new List<StringPart>();
         var buffer = new StringBuilder();
+        var lineStarts = template ? new List<int>() : null; // a template takes no hole, so its text is the buffer alone (R11)
         for (var i = 0; i < lines.Count; i++)
         {
+            lineStarts?.Add(buffer.Length);
             var (offset, line) = lines[i];
             var content = line.TrimEnd('\r');
             if (content.Trim(' ', '\t').Length == 0)
@@ -1121,7 +1123,7 @@ public sealed class Lexer
 
         // the position is right after the closing quotes; the rest of their line is read as code
         FlushText(parts, buffer);
-        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts) { IsTemplate = template });
+        Add(TokenKind.StringLiteral, start, position - start, new StringLiteralValue(parts) { IsTemplate = template, LineStarts = lineStarts });
     }
 
     /// <summary>

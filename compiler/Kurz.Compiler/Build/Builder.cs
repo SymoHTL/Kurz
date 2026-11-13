@@ -85,11 +85,16 @@ public static partial class Builder
     /// <summary>
     /// Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>. Where clang refuses
     /// inline assembly, its text names no line of the program, not even the <c>!srcloc</c> Rust's compiler puts on the call (clang 23 on
-    /// IR), so the program's <c>asm</c>s are assembled together without the rest of the program, in the order of their lines, each with
-    /// those before it that clang took, and each one whose addition clang refuses is the compile error <c>asm-refused</c> at its line, an
-    /// <see cref="AsmRefusedException"/> that names them in the order of the lines (R11, R12; the owner, 2026-11-13, "Rust's srcloc"): one
-    /// clang refuses alone, and the second of two that define one label, which LLVM refuses in the second's text, as Rust's compiler names
-    /// it through the second's <c>!srcloc</c>. Where none is refused so, the failure stays clang's.
+    /// IR), so the program's <c>asm</c>s are assembled together without the rest of the program, beside a label for each symbol its IR
+    /// defines (<see cref="Definitions"/>), in the order LLVM meets them, the order the compiler writes them, in one file as across files
+    /// (<see cref="EmittedProgram.Asms"/>), each with those before it that clang took, and each one whose addition clang refuses is the
+    /// compile error <c>asm-refused</c> at its line, an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
+    /// owner, 2026-11-13, "Rust's srcloc", for the error at the line of the <c>asm</c>, and pull request 530, comment 6855725580, "LLVM's
+    /// order everywhere", for the order): one clang refuses alone, a <c>naked</c> function's whose label is a symbol of the program among
+    /// them, and of two <c>naked</c> functions that define one label the second LLVM meets, whose label clang refuses beside the first's,
+    /// where Rust's compiler, which gives a naked function's assembly no <c>!srcloc</c>, names neither. Where none is refused so, as where
+    /// the optimiser of a release build copies an <c>asm</c> whose text the assembler takes once and refuses twice, the failure stays
+    /// clang's.
     /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
@@ -102,14 +107,15 @@ public static partial class Builder
         {
             clang.Build(irPath, outputPath, program.Libraries, program.Release, program.Lines, program.CpuFlag);
         }
-        catch (ToolchainException e) when (program.Asms.Count > 0 && e.Message.Contains(InlineAsm, StringComparison.Ordinal))
+        catch (ToolchainException e) when (program.Asms.Count > 0 && (e.Message.Contains(InlineAsm, StringComparison.Ordinal) || e.Message.Contains(InlineAsmFailed, StringComparison.Ordinal)))
         {
+            var defined = Definitions(program.Ir);
             var taken = new List<AsmAlone>();
             var refused = new List<Diagnostic>();
-            foreach (var (asm, i) in program.Asms.OrderBy(a => a.Line).Select((asm, i) => (asm, i))) // stable: the `asm`s of one line in the order emitted
+            foreach (var (asm, i) in program.Asms.Select((asm, i) => (asm, i))) // in the order LLVM meets them (EmittedProgram.Asms)
             {
                 var path = Path.Combine(workingDirectory, $"asm{i.ToString(CultureInfo.InvariantCulture)}.ll");
-                File.WriteAllText(path, Together([.. taken, asm]));
+                File.WriteAllText(path, Together(defined, [.. taken, asm]));
                 if (clang.Assemble(path, Path.ChangeExtension(path, ".o"), program.CpuFlag) is { } refusal && refusal.Contains(InlineAsm, StringComparison.Ordinal))
                 {
                     var said = AssemblerError().Match(refusal) is { Success: true } m ? m.Groups[1].Value : "the instruction is not one it reads";
@@ -130,12 +136,51 @@ public static partial class Builder
         }
     }
 
-    /// <summary>R11, R12: one module of IR that holds the <c>asm</c>s given, each symbol their <c>sym</c>s name declared once.</summary>
-    private static string Together(IReadOnlyList<AsmAlone> asms) =>
-        string.Concat(asms.SelectMany(a => a.Declarations).Distinct(StringComparer.Ordinal).Select(d => d + "\n")) + string.Concat(asms.Select(a => a.Ir));
+    /// <summary>
+    /// R11, R12: one module of IR that holds the <c>asm</c>s given after the labels of <paramref name="defined"/>, the symbols the
+    /// program's IR defines, each symbol their <c>sym</c>s name declared once: a <c>naked</c> function's module-level assembly, and the
+    /// calls of the <c>asm</c> statements, in the order given, in the function <see cref="Main"/>, in place of its label, so that the copies
+    /// define no symbol the program does not, and none twice.
+    /// </summary>
+    private static string Together(IReadOnlyList<(string Name, string Label)> defined, IReadOnlyList<AsmAlone> asms)
+    {
+        var statements = asms.Where(a => a.Rule == "R11").ToList();
+        return string.Concat(asms.SelectMany(a => a.Declarations).Distinct(StringComparer.Ordinal).Select(d => d + "\n"))
+            + string.Concat(defined.Where(d => statements.Count == 0 || d.Name != Main).Select(d => d.Label))
+            + string.Concat(asms.Where(a => a.Rule != "R11").Select(a => a.Ir))
+            + (statements.Count == 0 ? "" : $"define void @{Main}() {{\n{string.Concat(statements.Select(a => a.Ir))}  ret void\n}}\n");
+    }
+
+    /// <summary>R11: the function the C library's start calls, which every program's IR defines and no <c>sym</c> names.</summary>
+    private const string Main = "main";
+
+    /// <summary>
+    /// R12: each symbol the program's IR defines, a function or a global, with module-level assembly that defines a label for it under the
+    /// name LLVM gives it in the assembly, a private one's after <c>.L</c> on ELF and on COFF, so that a <c>naked</c> function's label that
+    /// is one of them is refused in that function's text. LLVM writes a <c>naked</c> function's module-level assembly before the program's own
+    /// definitions and refuses such a label where it writes the definition, with no line of the template (clang 23); a <c>naked</c>
+    /// function's own symbol, which the IR declares, is none of them.
+    /// </summary>
+    private static List<(string Name, string Label)> Definitions(string ir) =>
+    [
+        .. DefinedSymbol().Matches(ir)
+            .Select(m => (Name: (m.Groups[2].Success ? m.Groups[2] : m.Groups[3]).Value.Trim('"'), Words: (m.Groups[1].Success ? m.Groups[1] : m.Groups[4]).Value))
+            .Where(s => !s.Name.StartsWith("llvm.", StringComparison.Ordinal))
+            .Select(s => (s.Name, "module asm " + IrModule.Quote("\"" + (s.Words.Split(' ').Contains("private") ? ".L" : "") + s.Name + "\":") + "\n")),
+    ];
 
     /// <summary>The file clang names an error of inline assembly in, LLVM's buffer of the <c>asm</c>'s text.</summary>
     private const string InlineAsm = "<inline asm>";
+
+    /// <summary>
+    /// The line clang ends a refusal of inline assembly with, which a label of a <c>naked</c> function that is a symbol the program
+    /// defines draws with no <see cref="InlineAsm"/> line (clang 23).
+    /// </summary>
+    private const string InlineAsmFailed = "cannot compile inline asm";
+
+    /// <summary>A definition of the program's IR: a function's words before its name and its name, or a global's name and the words after <c>=</c>.</summary>
+    [GeneratedRegex("""^(?:define ([^@\r\n]*)@("[^"\r\n]*"|[-a-zA-Z$._0-9]+)|@("[^"\r\n]*"|[-a-zA-Z$._0-9]+) = ([a-z_ ]*))""", RegexOptions.Multiline)]
+    private static partial Regex DefinedSymbol();
 
     [GeneratedRegex(@"<inline asm>:\d+:\d+: error: ([^\r\n]*)")]
     private static partial Regex AssemblerError();
@@ -148,7 +193,7 @@ public static partial class Builder
     }
 }
 
-/// <summary>R11, R12: the <c>asm</c>s of a program the assembler refuses, each the compile error <c>asm-refused</c> at its line, in the order of the lines (<see cref="Builder.Build"/>).</summary>
+/// <summary>R11, R12: the <c>asm</c>s of a program the assembler refuses, each the compile error <c>asm-refused</c> at its line, in the order LLVM meets them (<see cref="Builder.Build"/>).</summary>
 public sealed class AsmRefusedException(IReadOnlyList<Diagnostic> refused) : Exception(string.Join("\n", refused))
 {
     public IReadOnlyList<Diagnostic> Refused { get; } = refused;
