@@ -4,7 +4,7 @@
 // | 1
 // rules: S9
 
-// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time; the listener stays open,
+// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time; the listener stays open,
 // and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
 // and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
 // default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the

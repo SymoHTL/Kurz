@@ -1316,7 +1316,11 @@ the Linux man-pages))* A read or a write whose time runs out gives `TimedOut` wi
 `EAGAIN`, 11, and a `Connect` whose bound runs out `TimedOut` with the number 0, as an error that is
 not the system's, while a connect the kernel times out keeps `ETIMEDOUT`, 110 (§12, the owner,
 2026-11-02, "11 (EAGAIN) for a read or a write, 0 for Connect's own bound", against 110 for both and
-against 0 for a read and a write too). The bound of a read and a write holds for each call of the
+against 0 for a read and a write too). Where the poller's timer ends a read or a write, the system gives no
+number and the runtime gives that 11 itself (§12, the owner, 2026-11-13, #519, comment 6851105334,
+"Keep 11 (Recommended)", against 0, the number of an error that is not the system's), and the telling
+of that case by `EAGAIN` describes the language as it stood without actors *(assumed, §12: that
+reading)*. The bound of a read and a write holds for each call of the
 system, so that a `Write` of many bytes to a peer that takes them slowly can take longer than the
 bound in all, as Rust's `write_all` does, and a peer that stops reading gives `TimedOut` after the
 bound (§12, the owner, 2026-11-02, "per system call", against one deadline for the whole `Write`, as
@@ -1349,7 +1353,9 @@ listener", against the default of 5 seconds on `Accept` too). A listener's bound
 refusing a time of zero or below as `InvalidInput` and cutting a time down to whole microseconds as
 they do *(assumed, §12: following
 from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and the
-poller's timer measures that bound (§12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)").
+poller's timer measures that bound (§12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)"),
+as it measures every bound of this rule, in whole milliseconds, the end of a bound rounded up to a whole
+one *(assumed, §12: the timer's resolution, as Tokio's timer keeps it)*.
 
 `s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
 `TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
@@ -1443,8 +1449,8 @@ match TcpStream.Connect("127.0.0.1:65536") {
 
 Case: [system/read-timeout.kz](../corpus/system/read-timeout.kz)
 ```kurz
-// a read whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time, which the system counts in
-// its own ticks; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
+// a read whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time, which the
+// poller's timer counts in whole milliseconds; the stream stays open, and the next read takes what the peer wrote. The time it took lies between the kernel's
 // floor, the 50 ms it was given, and 4 s, a margin no rule fixes, set below the 5 s of the default, so that a setter that set
 // nothing, whose read would run out at the default with the same `TimedOut 11`, prints `false`
 void | IoError Wait() {
@@ -1543,7 +1549,7 @@ Full() else {
 
 Case: [system/accept-timeout.kz](../corpus/system/accept-timeout.kz)
 ```kurz
-// an `Accept` whose time runs out is `TimedOut`, with the number the system gave, `EAGAIN`, after its time; the listener stays open,
+// an `Accept` whose time runs out is `TimedOut`, with the number of `EAGAIN`, 11, which the runtime gives, after its time; the listener stays open,
 // and the next `Accept` takes the connection that came. The time it took lies between the kernel's floor, the 50 ms it was given,
 // and 4 s, a margin no rule fixes, set below the 5 s a stream's call waits by default, so that a setter that gave the listener that
 // default in place of its time prints `false`; that `Accept` waits without a bound by default, and that the stream it gives gets the
