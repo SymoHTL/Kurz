@@ -241,16 +241,6 @@ print(t)
 print(t.Text())
 ```
 
-Case: [data/body-inherit-http-error-with.kz](../corpus/data/body-inherit-http-error-with.kz)
-```kurz
-data Coded(int Code) : HttpError {
-    pub override string Text() => "{Code} {Detail}"
-}
-
-HttpError e = Coded(HttpKind.Status, "teapot", 418)
-print(e with { Detail = "gone" })
-```
-
 ### W3 (decided, §12) A server's request sent to another actor moves with its body
 
 A server's `HttpRequest` sent to another actor moves there with its body, `r.Body`, a stream on the
