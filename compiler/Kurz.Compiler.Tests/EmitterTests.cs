@@ -391,8 +391,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Of_two_naked_functions_that_define_one_label_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_calls()
     {
-        // R12 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes a function at
-        // its first call, and LLVM writes the `naked` functions' module-level assembly in that order, so of two that define one label and
+        // R12 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes the functions
+        // in the order their first uses are reached (R11), and LLVM writes the `naked` functions' module-level assembly in that order, so of two that define one label and
         // are called out of the order of their lines, LLVM refuses the label of the earlier line, the one it meets second, and the build
         // names that line
         const string program = """
