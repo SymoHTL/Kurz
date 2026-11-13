@@ -160,8 +160,8 @@ test build has where `--lines` says so (the owner, 2026-10-29, "build, run and e
 executable beside the source, named
 after it, `hello.exe` on Windows, or where `-o` says (design record, section 2). It writes over an
 executable that is there, writes nothing on standard output, and exits with 0. A program the
-compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines,
-and no executable, and the command exits with 1:
+compiler refuses gets its lines on standard error, one per diagnostic, an `asm-refused` line in the
+order LLVM meets its `asm` (R11), and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
     hello.kz:2: not supported: `s.Chars` as a list (T15)
