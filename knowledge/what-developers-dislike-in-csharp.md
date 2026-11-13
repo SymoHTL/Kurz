@@ -36,12 +36,12 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 3. A blocking call starves the thread pool
 
 - Evidence: "Debug ThreadPool Starvation - .NET" (https://learn.microsoft.com/en-us/dotnet/core/diagnostics/debug-threadpool-starvation): "ThreadPool starvation occurs when the pool has no available threads to process new work items and it often causes applications to respond slowly." and "This is the sync-over-async code pattern, which is known to block threads and is the most common cause of ThreadPool starvation."
-- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record. Before the answers: OPEN.
+- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record; a form that runs work in parallel holds no thread idle while its splits remain: the caller's thread runs splits while it waits at the read, as rayon's `join` does ("Scheduler + 10ms yield", section 6, 2026-11-13). Before the answers: OPEN.
 
 ## 4. Exceptions carry normal failures, and no signature shows them
 
 - Evidence: "Why doesn't C# have checked exceptions?" (archived C# FAQ, https://learn.microsoft.com/en-us/archive/blogs/csharpfaq/why-doesnt-c-have-checked-exceptions): "Checked exceptions are a very hotly debated topic in some circles, particularly for experienced Java developers moving to, or additionally learning, C#." and "Note that without the CLR itself supporting checked exceptions, it would be effectively impossible for C# to do so alone." "Best practices for exceptions - .NET" (https://learn.microsoft.com/en-us/dotnet/standard/exceptions/best-practices-for-exceptions): "For conditions that are likely to occur but might trigger an exception, consider handling them in a way that avoids the exception."
-- Kurz: AVOIDED. §5: "The language enforces the C# `OneOf<>` pattern: every method declares every outcome that can happen under normal use." O3 (decided, §5), honest signatures: "a propagated case must be listed in the calling method's own signature. Otherwise it is a compile error." What a signature does not show is a crash, which no code catches: "There is no `catch`. An exception kills the actor it happens in" (§5).
+- Kurz: AVOIDED. §5: "The language enforces the C# `OneOf<>` pattern: every method declares every outcome that can happen under normal use." O3 (decided, §5), honest signatures: "a propagated case must be listed in the calling method's own signature. Otherwise it is a compile error." What a signature does not show is a crash, which no code catches: "There is no `catch`. An exception kills the actor it happens in" (§5). Work run in parallel keeps both: a body's error case leaves the read as one call's would, the earliest item's ("Unwrap, earliest item"), and a body's crash crashes the caller's actor ("Caller's actor crashes"), with no `AggregateException` (§6, 2026-11-13).
 
 ## 5. No discriminated unions, no exhaustive match
 

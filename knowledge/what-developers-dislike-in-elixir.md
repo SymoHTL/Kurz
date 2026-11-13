@@ -141,7 +141,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Processes, Erlang efficiency guide: "All data in messages sent between Erlang processes is copied, except for refc binaries and literals on the same Erlang node." Erlang garbage collector (https://www.erlang.org/doc/apps/erts/garbagecollection.html): "the garbage collection algorithm used is proportional to the amount of live data on the heap."
 - Since: BEAM collects by generation, so most collections skip the old heap (same page); the anti-pattern "Sending unnecessary data" (process anti-patterns page) warns against large messages.
-- Kurz: answered: "After a threshold", section 13 of the record; a message is not copied whole: "a small value is copied into the receiver's heap, a big one is shared by pointer" (section 6). Before the answers: OPEN.
+- Kurz: answered: "After a threshold", section 13 of the record; a message is not copied whole: "a small value is copied into the receiver's heap, a big one is shared by pointer" (section 6); a body run in parallel reads what it captured in place and hands its results to the caller's heap with no copy ("Borrow + heap handover", section 6, 2026-11-13), where Elixir copies into each task's process. Before the answers: OPEN.
 
 ## 22. Off-heap binaries kept alive by processes that rarely collect
 
