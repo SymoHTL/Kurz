@@ -996,7 +996,9 @@ public sealed partial class Checker
     /// a feature, in a class or an explicit register, is not read: the first needs <c>out</c> with <c>_</c> alone, and no rule names the
     /// features of a build; nor is a name on an operand in an explicit register, which Rust's Reference allows and Rust's compiler refuses.
     /// The labels its templates define are read (<see cref="CheckLabels"/>), but in a <c>naked</c> function, which may define any: the checker
-    /// reads a <c>naked</c> function with no type parameters alone (<see cref="CheckCSignature"/>), and Rust's lint exempts that one too.
+    /// reads a <c>naked</c> function with no type parameters alone (<see cref="CheckCSignature"/>), and Rust's lint exempts that one too. Nor
+    /// are they read in an <c>asm</c> one of whose templates cannot be read (<see cref="CheckTemplate"/>), so that its <c>asm-operand</c>
+    /// stands with no label's error beside it.
     /// </summary>
     private void CheckAsm(AsmStatement a, bool naked)
     {
@@ -1099,12 +1101,13 @@ public sealed partial class Checker
         }
 
         var implicitIndex = 0;
+        var read = true;
         foreach (var template in a.Templates)
         {
-            CheckTemplate(template, positional, named, ref implicitIndex);
+            read &= CheckTemplate(template, positional, named, ref implicitIndex);
         }
 
-        if (!naked)
+        if (!naked && read) // one template that cannot be read leaves the `asm` no labels, as Rust's whole `asm!` is then no expression
         {
             foreach (var template in a.Templates)
             {
@@ -1501,9 +1504,11 @@ public sealed partial class Checker
     /// <summary>
     /// R11: the placeholders of a template, as Rust reads them: <c>{{</c> and <c>}}</c> write a brace, <c>{}</c> takes the operands without
     /// a name in their order, <c>{0}</c> one by its position, <c>{name}</c> one by its name, and a modifier after a colon, <c>{r:e}</c>, gives the form of a
-    /// register operand's register, from the modifiers of its class.
+    /// register operand's register, from the modifiers of its class. Whether the template was read: false where its braces or its
+    /// placeholders cannot be read (<see cref="Unreadable"/>), as Rust's compiler reads no more of an <c>asm!</c> after "invalid asm template
+    /// string" (<c>rustc_builtin_macros/src/asm.rs</c>).
     /// </summary>
-    private void CheckTemplate(AsmTemplate template, List<AsmSlot> positional, Dictionary<string, AsmSlot> named, ref int implicitIndex)
+    private bool CheckTemplate(AsmTemplate template, List<AsmSlot> positional, Dictionary<string, AsmSlot> named, ref int implicitIndex)
     {
         var text = template.Text;
         for (var i = 0; i < text.Length; i++)
@@ -1517,7 +1522,7 @@ public sealed partial class Checker
                 }
 
                 Unreadable(template, "a `}` in the template closes a `{`, and a brace is written `{{` or `}}` (R11)", positional, named);
-                return;
+                return false;
             }
 
             if (text[i] != '{')
@@ -1535,7 +1540,7 @@ public sealed partial class Checker
             if (end < 0)
             {
                 Unreadable(template, "a `{` in the template is closed by a `}`, and a brace is written `{{` or `}}` (R11)", positional, named);
-                return;
+                return false;
             }
 
             var inside = text[(i + 1)..end];
@@ -1560,7 +1565,7 @@ public sealed partial class Checker
             else
             {
                 Unreadable(template, $"`{{{inside}}}` names an operand by its position or its name (R11)", positional, named);
-                return;
+                return false;
             }
 
             if (slot is null)
@@ -1589,6 +1594,8 @@ public sealed partial class Checker
                 Report(ErrorIds.AsmOperand, template.Line, $"a modifier stands after a register operand, not after `{slot.Operand.Word}` (R11)");
             }
         }
+
+        return true;
     }
 
     /// <summary>What a text before a <c>:</c> of a template's statement defines, as Rust's lint pass <c>AsmLabels</c> reads it.</summary>

@@ -20,7 +20,8 @@ public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, 
     /// where clang refuses inline assembly, in the order LLVM meets them: the <c>naked</c> functions' module-level assembly, which LLVM
     /// writes before every function, in the order the compiler writes the functions, at their first call, then the <c>asm</c> statements,
     /// in the order of the functions that hold them in the module and of the statements in each (the owner, 2026-11-13, pull request 530,
-    /// comment 6855725580, "LLVM's order everywhere").
+    /// comment 6855725580, "LLVM's order everywhere"). A release build assembles a statement's copy once for each call the optimised module
+    /// holds, in that module's order (<see cref="Builder.Build"/>).
     /// </summary>
     public IReadOnlyList<AsmAlone> Asms { get; init; } = [];
 }

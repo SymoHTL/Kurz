@@ -154,6 +154,20 @@ public sealed partial class Clang
     }
 
     /// <summary>
+    /// R11: writes the module a release build hands the code generator, the IR at <paramref name="irPath"/> optimised as <see cref="Build"/>
+    /// optimises it, into <paramref name="outputPath"/>, for the CPU of the build, where <see cref="Builder.Build"/> reads which calls of
+    /// inline assembly the optimiser left; null, or what clang wrote where it does not exit with 0.
+    /// </summary>
+    internal string? Optimise(string irPath, string outputPath, string? cpuFlag)
+    {
+        var (code, _, error) = Processes.Capture(Path, [.. Release, "-S", "-emit-llvm", irPath, "-o", outputPath, .. cpuFlag is null ? Array.Empty<string>() : [cpuFlag]], null, TimeSpan.FromMinutes(2));
+        return code == 0 ? null : error;
+    }
+
+    /// <summary>The options of a release build's optimiser and code generator (<see cref="Arguments"/>).</summary>
+    private static readonly string[] Release = ["-O2", "-mllvm", "-align-all-functions=6"];
+
+    /// <summary>
     /// The arguments <see cref="Build"/> gives this clang, the one list on every target. A release build aligns every function at
     /// 64 bytes, LLVM's <c>-align-all-functions=6</c>, where LLVM aligns a function at 16 bytes unless it is tiny, as rustc leaves
     /// it: the owner's choice of 2026-11-02 (issue 156, comment 6580739215), an exception to "no row slower beyond noise" taken
@@ -166,7 +180,7 @@ public sealed partial class Clang
     internal List<string> Arguments(string irPath, string outputPath, IReadOnlyList<string> libraries, bool release, bool lines, string? cpuFlag = null)
     {
         ArgumentNullException.ThrowIfNull(libraries);
-        var arguments = release ? new List<string> { "-O2", "-mllvm", "-align-all-functions=6" } : new List<string> { "-O0" };
+        var arguments = release ? new List<string>(Release) : new List<string> { "-O0" };
         arguments.AddRange([irPath, "-o", outputPath]);
         if (cpuFlag is not null)
         {

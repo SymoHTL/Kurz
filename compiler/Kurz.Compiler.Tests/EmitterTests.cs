@@ -292,7 +292,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var program = Compile(text, Builder.CheckRuntime(Target.Linux), testBuild: true, "raw").Program;
         Assert.True(program is not null, "no program");
         var calls = program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => l.Contains(" asm ", StringComparison.Ordinal) && l.Contains("call ", StringComparison.Ordinal) && !l.Contains("\"\", \"r,~{memory}\"", StringComparison.Ordinal))
-            .Select(l => Regex.Replace(l, @", !dbg !\d+$", string.Empty)).ToList(); // the line's location set aside
+            .Select(l => Regex.Replace(l, @", !srcloc !\{i64 \d+\}, !dbg !\d+$", string.Empty)).ToList(); // the call's mark and the line's location set aside
         var shown = string.Join("\n", calls);
         Assert.True(calls.Count == 6, shown);
         Assert.Contains("asm sideeffect alignstack inteldialect \"add ${0:q}, 1\", \"=&r,0,~{dirflag},~{fpsr},~{flags},~{memory}\"(", calls[0], StringComparison.Ordinal);
@@ -543,6 +543,110 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild, "raw").Program!, testBuild ? "asm-pure-test" : "asm-pure-release"));
             Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 5)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         }
+    }
+
+    [Fact]
+    public void An_asm_the_optimiser_of_a_release_build_copies_is_asm_refused_at_its_line_where_the_assembler_refuses_a_copy()
+    {
+        // R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the optimiser of a release build
+        // inlines `Bump` into its two callers, so the module defines the symbol of `.equiv k, 1` twice and clang refuses it; the build reads
+        // the calls the optimised module holds by the mark on each, its line, and assembles a copy of each, so the second is refused and
+        // named at the line of the `asm`, once; a test build, which keeps one call, builds the program (the control)
+        const string program = """
+            long Bump(long x) {
+                mut long n = x
+                raw {
+                    asm(".equiv k, 1", "add {r}, 1", r = inout(reg) n)
+                }
+                return n
+            }
+
+            long One() => Bump(1)
+
+            long Two() => Bump(2)
+
+            print(One() + Two())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-copied-release"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-copied-test")));
+    }
+
+    [Fact]
+    public void A_release_build_names_no_asm_its_optimiser_dropped_beside_one_the_assembler_refuses()
+    {
+        // R11 (the owner, 2026-11-13, pull request 530, comment 6854386584, "As Rust, builds differ", and pull request 532, comment
+        // 6860019854, "Copies from optimised IR"): where clang refuses a release build, the build assembles copies of the calls the
+        // optimised module holds alone, so the `pure` `asm` whose output nothing reads, which the optimiser dropped, raises nothing beside
+        // the `asm` of the top-level code the assembler refuses; a test build, which keeps both calls, names both, in the order LLVM meets
+        // them, the top-level code's function first (the control)
+        const string program = """
+            long Zero() {
+                mut long n = 0
+                long kept = n
+                raw {
+                    asm("frobnicate {r}", r = out(reg) n, options(pure, nomem))
+                }
+                return kept
+            }
+
+            raw {
+                asm("frobnicate")
+            }
+            print(Zero())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-held-release"));
+        Assert.Equal([(ErrorIds.AsmRefused, 11)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-held-test"));
+        Assert.Equal([(ErrorIds.AsmRefused, 11), (ErrorIds.AsmRefused, 5)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+    }
+
+    [Fact]
+    public void Of_two_asm_statements_at_one_line_a_release_build_copies_each_call_as_its_own_asm()
+    {
+        // R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the mark of a call is its line,
+        // and two `asm`s can stand at one line, so the build copies each call the optimised module holds as the `asm` of that line whose
+        // template and constraints the call has: the one the assembler refuses is named, and the one beside it that it takes is no copy
+        // of it (the control: the program without the refused instruction builds)
+        const string program = """
+            long Pick(bool c) {
+                if c { raw { asm("nop") } } else { raw { asm("frobnicate") } }
+                return 1
+            }
+
+            print(Pick(true) + Pick(false))
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-one-line-release"));
+        Assert.Equal([(ErrorIds.AsmRefused, 2)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "pause", StringComparison.Ordinal), toolchain.Runtime, testBuild: false, "raw").Program!, "asm-one-line-built")));
+    }
+
+    [Fact]
+    public void A_global_the_IR_declares_and_does_not_define_takes_no_label_beside_the_copies()
+    {
+        // R12: the copies hold a label for each symbol the program's IR defines, and a global the IR declares, `external` or `extern_weak`,
+        // defines none, so where clang refuses another `asm` the label of a `naked` function of that name is named by none; the program
+        // whose `asm` the assembler takes builds beside the same declarations (the control: clang takes both labels)
+        const string program = """
+            naked long Seven() {
+                asm("declared:", "mov eax, 7", "ret")
+            }
+
+            naked long Eight() {
+                asm("weakly:", "mov eax, 8", "ret")
+            }
+
+            raw {
+                asm("frobnicate")
+            }
+            print(Seven() + Eight())
+            """;
+        const string declarations = "@declared = external global i64\n@weakly = extern_weak global i64\n";
+        var compiled = Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled with { Ir = compiled.Ir + declarations }, "asm-declared"));
+        Assert.Equal([(ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        var built = Compile(program.Replace("frobnicate", "nop", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!;
+        Assert.True(File.Exists(toolchain.Build(built with { Ir = built.Ir + declarations }, "asm-declared-built")));
     }
 
     [Fact]
