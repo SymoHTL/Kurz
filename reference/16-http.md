@@ -315,9 +315,10 @@ socket's write bound, 5 seconds for each call of the system by default, bounds t
 write, a write on the connection's socket, held in that actor as the moved body's reads are, by a
 timer in the poller's wait (§12, the owner, 2026-11-13, #519, comment 6847932993, "Poller timer (Recommended)")
 (§6) *(assumed, §6, §12: that reading, which the owner's answer of 2026-11-08 took, issue 39,
-comment 6724695653, a reading not put to the owner)*; it holds each call of the system, and the server's wait only where the write
+comment 6724695653, with the bound held as the moved body's reads are, a reading not put to the owner)*; it holds each call of the system, and the server's wait only where the write
 ends, a write of 25 bytes being able to take more than one call, so that the wait has no bound of
-its own, and none where the reading actor ends during its write (below) (§6) *(assumed, §6: that
+its own, and none where the reading actor ends during its write, whose end then sets the flag (§6, 2026-11-13,
+comment 6851105334) *(assumed, §6: that
 reading)*. The wait is the server's read of the flag, each read again a switch point at which the
 other actors of its thread run, the reading actor among them where it shares that thread, at the
 cost of the server held from its next connection for the write's time (§6, the owner, 2026-11-09,
@@ -326,7 +327,10 @@ which never ends where both actors share one thread). No stop at its supervisor'
 the reading actor during its write, since an actor whose supervisor ends without a crash stops after
 its current message (§6, the owner, 2026-11-13, #519, comment 6847932993, "After current message
 (Recommended)"), so that its write ends and sets the flag to written or failed *(assumed, §6: that
-reading of the answer)*. The exception covers the pair's state
+reading of the answer)*. A crash of the reading actor during its write leaves the flag at failed,
+which the runtime's end of the crashed actor sets (§6, the owner, 2026-11-13, #519, comment 6851105334,
+"Actor's end sets failed (Recommended)", against the server reading an ended reader as failed and
+against the case kept open). The exception covers the pair's state
 as a whole, the flag, the
 time of the body's last read and the server's end of the body, each part atomic and shared only
 between the two halves of one connection (§6, the owner, 2026-11-07, issue 39, comment 6706852249);
@@ -4576,7 +4580,7 @@ time, set before it, and a socket's 5 seconds do not apply inside the client (§
 "Reads use the 100 s budget"). The member `Timeout` of `HttpClientOptions`, a `duration`, sets the call's
 time, 100 seconds by default; a time of zero or below makes each call that passes the call's refusals `TimedOut` at once, before any
 lookup or connect, and no value turns the bound off; every end of the call's time is `IoError(TimedOut,
-0, "")`, as the bound of `Connect` gives it, a read that the system ended with its 11 among them, and a
+0, "")`, as the bound of `Connect` gives it, a read that the poller's timer ended, which a socket's call gives as 11 (§12, 2026-11-13, "Keep 11"), among them, and a
 write so ended under the bound of the writes assumed below; and one time bounds the whole call, its redirects (W15), the drains of their bodies and a request
 sent once more on a new connection (W13) among it, as .NET's `Timeout` covers the whole of a send (§12,
 the owner, 2026-11-05, issue 110, comment 6657251329, T1 to T3). A call whose scheme is neither `http` nor `https`, or whose host and port are at `MaxConnectionsPerServer`, is
