@@ -1259,8 +1259,8 @@ how many of its bytes went out before the shutdown; the costs, issue 110, commen
 socket that another holder closes is woken at the close with that error, as Go's `net.Conn.Close`
 wakes the reads and writes that wait (§12, the owner, 2026-11-02, against leaving it waiting until its
 bound and against a kind of its own, as Go's `net.ErrClosed`; the cost is one wake-up for each caller
-that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, and a call
-of a program without actors blocks its thread (S10) and waits in no poller, the shutdown waking it.
+that waits); the poller is the one under `epoll` that §12 decides for an actor's socket, every
+program's socket among them (S10).
 A listener's socket reuses
 its address and passes `listen` a backlog of 128. The line between the errors of a name is drawn by
 what `getaddrinfo` returns, asked for stream sockets of any family, as Rust's `LookupHost` asks: an
@@ -1326,8 +1326,11 @@ waits for the handle's lock behind another holder's fill (S3, S24) waits with no
 comment 6643376941, Q1 of issue 156, comment 6621376360, against a bound counted from the call's
 start with the wait included, and against a second call in flight refused; the cost is that a holder
 whose fill waits with no bound keeps every other holder waiting as long). The socket options `SO_RCVTIMEO` and
-`SO_SNDTIMEO`, which Rust's setters set, bound a call on a blocking socket outside an actor alone, and how
-the bound holds for an actor's socket, which runs without blocking, stands open (§14). The bound of
+`SO_SNDTIMEO`, which Rust's setters set, bound no call on a socket under `epoll`, as every program's
+socket is (S10): a call on it is bounded by a timer in the poller's wait that wakes the actor at the
+bound, as Tokio's `timeout` wraps a read (§12, the owner, 2026-11-13, #519, comment 6847932993, "Poller
+timer (Recommended)"), and every bound of this rule keeps its value and its meaning, the poller's timer
+measuring it in place of the options (§12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)"). The bound of
 `TcpStream.Connect` starts once the lookup of the name has given its addresses, the lookup waiting
 without a bound of its own, as Rust's `connect` leaves `getaddrinfo`, and is one bound shared by its
 attempts to connect to the addresses it tries in turn, not given to each (§12, the owner, 2026-11-02,
@@ -1345,8 +1348,8 @@ listener", against the default of 5 seconds on `Accept` too). A listener's bound
 `l.SetAcceptTimeout(d)`, taking a `duration?` as the stream's setters do, and giving `void | IoError`,
 refusing a time of zero or below as `InvalidInput` and cutting a time down to whole microseconds as
 they do *(assumed, §12: following
-from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and how
-the bound holds for an actor's socket stands open (§14).
+from Q8 (a), which set a property, as C#'s `Socket.ReceiveTimeout`, aside for a socket)*, and the
+poller's timer measures that bound (§12, the owner, 2026-11-13, #519, comment 6848732694, "Same bounds, poller timer (Recommended)").
 
 `s.ShutdownWrite()` ends a stream's writes and keeps its reads, as Rust's
 `TcpStream::shutdown(Shutdown::Write)` ends them: the peer's read then gives 0, the end of its stream
@@ -1359,7 +1362,7 @@ no `Shutdown(how)` (§12, the owner, 2026-11-02, a half-close on `TcpStream` for
 the HTTP server, and the answers to the product pass of the call).
 
 No case: a case runs one thread, and a call in flight beside a `Close` needs two; the runtime of
-Linux has no poller (S10); and whether a `Close` with no call in flight shuts the socket down no
+Linux, as built, has no poller; and whether a `Close` with no call in flight shuts the socket down no
 program can see, since the runtime shares no descriptor across processes.
 
 Case: [system/tcp-echo.kz](../corpus/system/tcp-echo.kz)
@@ -1660,10 +1663,16 @@ Case: [system/read-buffer-close-stream.kz](../corpus/system/read-buffer-close-st
 
 Case: [system/fill-timeout.kz](../corpus/system/fill-timeout.kz)
 
-### S10 (decided, §12) A call blocks its thread
+### S10 (assumed, §6, §12) A call parks its actor
 
-A call on a file or a socket is a system call that blocks the thread that makes it. A program
-without actors serves one connection at a time.
+A call on a file or a socket parks the actor that makes it, the root actor in a program that
+declares none, a socket waiting under `epoll` and a call on a file on a pool of threads for blocking
+calls (§12, the owner, 2026-10-30, "Readiness I/O, as Tokio"), since every program runs its
+top-level code as the root actor under the scheduler from its first line (§6, the owner,
+2026-11-13, #519, comment 6847932993, Q7, "both not") *(assumed, §6, §12: the reading of that answer
+said back on 2026-11-13, under which §12's "Block the thread" of 2026-10-29 describes the language as it stood
+without actors)*. A program without actors serves one connection at a time (§12, the owner,
+2026-10-30, "One at a time").
 
 No case: a case prints what its calls return, and the same output stands for a call that blocks
 and for one that switches; S9's cases `tcp-echo.kz` and `bind-name.kz` connect before they accept, which
@@ -1707,7 +1716,9 @@ shortest"). *(assumed, §13: `Directory` among the file functions; such a call c
 the function; of two paths of one length, the one that stands first where the two part, the call
 written first in that function, or, at one call through an interface or a function value, the
 implementer, or the function the function value holds, whose file comes first in the order of the file
-paths (§4) and, in one file, whose line and then whose column come first)* Whether a `send` to an actor puts the sender's package on the path stands open (§14).
+paths (§4) and, in one file, whose line and then whose column come first)* A `send` to an actor puts the
+sender's package on the path, a message carrying the packages of its path (§13, the owner,
+2026-11-13, #519, comment 6847932993, Q23, "Yes (Recommended)").
 
 No case: a case is a program and no package, and the program needs no grant.
 
@@ -2709,7 +2720,7 @@ runtime sets to ignored at its start (§6), and no descriptor but its three stre
 child's output and error and gives it an input at its end; `Status()` and `Spawn()` give it the
 program's three streams; a member `Stdin`, `Stdout` or `Stderr` changes that, and `Input` gives the
 child its input (S19); `Output()` gives empty `Bytes` for a stream set to `Stdio.Inherit` or `Stdio.Null`.
-A call that waits for a child blocks its thread in a program without actors, and in an actor parks it
+A call that waits for a child parks its actor, the root actor in a program that declares none (S10),
 while the wait runs on the pool of threads for blocking calls, as a call on a file does (S10). A start that fails is an
 `IoError` (S1) whose path is the program, or the directory where that is what does not exist, and never
 an argument, the input or the output. A NUL byte in the program, an argument, any directory `Dir` was given,

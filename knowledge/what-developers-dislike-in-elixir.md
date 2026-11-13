@@ -135,7 +135,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 20. Blocking native code stalls the threads that run processes
 
 - Evidence: erl_nif (https://www.erlang.org/doc/apps/erts/erl_nif.html): "It is difficult to give an exact maximum amount of time that a native function is allowed to work, but usually a well-behaving native function is to return to its caller within 1 millisecond." and "A native function doing lengthy work before returning degrades responsiveness of the VM, and can cause miscellaneous strange behaviors."
-- Kurz: OPEN: "Readiness I/O, as Tokio", section 12 of the record, covers the calls on files and sockets; a `raw` call of a C function that blocks holds its thread and the actors that thread runs, which stands open (section 14). Before the answers: OPEN.
+- Kurz: REPEATED in part: "Readiness I/O, as Tokio", section 12 of the record, covers the calls on files and sockets; a `raw` call of a C function that blocks holds its thread while it lasts, and the other threads steal the actors queued behind it ("Nothing + stealing", section 6, 2026-11-13), so the machine runs one thread short, and all threads blocked at once stall every actor. Before the answers: OPEN.
 
 ## 21. Large process state and message copies cost CPU
 
