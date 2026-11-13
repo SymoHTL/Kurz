@@ -19,8 +19,23 @@ public sealed partial class Emitter
     /// <summary>The functions and the state a <c>naked</c> body names by <c>sym</c>, which only the module's assembly reaches, kept in <c>llvm.compiler.used</c>.</summary>
     private readonly SortedSet<string> asmUsed = new(StringComparer.Ordinal);
 
-    /// <summary>R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program (<see cref="EmittedProgram.Asms"/>).</summary>
-    private readonly List<AsmAlone> asmsAlone = [];
+    /// <summary>
+    /// R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program, in the order emitted, with the function that
+    /// holds an <c>asm</c> statement (<see cref="EmittedProgram.Asms"/>).
+    /// </summary>
+    private readonly List<(AsmAlone Asm, IrFunction? Holder)> asmsAlone = [];
+
+    /// <summary>
+    /// R11, R12: the program's <c>asm</c>s in the order LLVM meets them (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's
+    /// order everywhere"): the <c>naked</c> functions' module-level assembly, which LLVM writes before every function, in the order emitted,
+    /// the order of their first calls, then each <c>asm</c> statement, in the order of the functions that hold them in the module, a guarded
+    /// block's before the function it stands in (R18), and of the statements in each.
+    /// </summary>
+    private List<AsmAlone> AsmsInLlvmOrder() =>
+    [
+        .. asmsAlone.Where(a => a.Holder is null).Select(a => a.Asm),
+        .. asmsAlone.Where(a => a.Holder is not null).OrderBy(a => emitted.IndexOf(a.Holder!)).Select(a => a.Asm),
+    ];
 
     /// <summary>
     /// One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes. The input is
@@ -189,16 +204,13 @@ public sealed partial class Emitter
         if (!unit.Runtime)
         {
             // the program's `asm` without the rest of the program, which the build assembles where clang refuses inline assembly
-            // (EmittedProgram.Asms): the same template and constraints in a function of its own, with a poison value of its type for each
-            // register's input and each symbol a `sym` names declared; the call has an effect and no attribute but `nounwind`, whatever the
-            // options, which changes nothing clang assembles: LLVM drops a call of no effect whose value nothing uses, at -O0 too, a `pure`
-            // one of `memory(none)` or `memory(read)` with `sideeffect` or without (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
+            // (EmittedProgram.Asms): the same template and constraints, a call the build writes in the copies' `main`, with a poison
+            // value of its type for each register's input and each symbol a `sym` names declared; the call has an effect and no attribute
+            // but `nounwind`, whatever the options, which changes nothing clang assembles: LLVM drops a call of no effect whose value
+            // nothing uses, at -O0 too, a `pure` one of `memory(none)` or `memory(read)` with `sideeffect` or without
+            // (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
             var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
-            asmsAlone.Add(new AsmAlone(
-                a.Line,
-                "R11",
-                [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")],
-                $"define void @kz.asm{asmsAlone.Count.ToString(CultureInfo.InvariantCulture)}() {{\n  {(outputs.Count == 0 ? "" : "%r = ")}{alone}\n  ret void\n}}\n"));
+            asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
         }
 
         if (outputs.Count == 0)
@@ -559,7 +571,7 @@ public sealed partial class Emitter
 
         if (!unit.Runtime)
         {
-            asmsAlone.Add(new AsmAlone(body.Line, "R12", [], string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n")))); // the body without the program (EmittedProgram.Asms)
+            asmsAlone.Add((new AsmAlone(body.Line, "R12", [], string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n"))), null)); // the body without the program (EmittedProgram.Asms)
         }
 
         var parameters = f.Parameters.Select(p => ParameterType(f, p.Type));

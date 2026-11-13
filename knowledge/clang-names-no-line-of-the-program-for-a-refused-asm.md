@@ -42,10 +42,17 @@ What `clang-23 -O0 -c` wrote on Linux x86-64, clang 23.1.4:
 So a build of IR finds the line of a refused `asm` itself. `Builder.Build` assembles the program's
 `asm`s together without the rest of the program, beside a label of module-level assembly for each
 symbol the program's IR defines, so that a `naked` function's label that is one of them is refused in
-its text, each as the emitter wrote it in IR of its own (`AsmAlone`), in the order of their lines,
-each beside those before it that clang took, and names each one whose addition clang refuses: one
-clang refuses alone, and of two `naked` functions that define one label the second. It does so on
-clang's `<inline asm>` line and on `cannot compile inline asm` alone. The copy of an `asm` statement
+its text, each as the emitter wrote it in IR of its own (`AsmAlone`), in the order LLVM meets them,
+the order the compiler writes them (R11, R12; the owner, 2026-11-13, pull request 530, comment
+6855725580, "LLVM's order everywhere"), each beside those before it that clang took, and names each
+one whose addition clang refuses: one clang refuses alone, and of two `naked` functions that define
+one label the one LLVM meets second, which LLVM's order makes the earlier line's where the two are
+called out of the order of their lines (clang 23 refused the label of the function called last).
+It does so on clang's `<inline asm>` line and on `cannot compile inline asm` alone. The copies'
+`asm` statements are calls in the function `main`, which every program defines, in place of its
+label: a function of the copies' own, `kz.asm0`, is a symbol a program's directive can define too,
+and `.equiv kz.asm0, 1` in the copy of that name drew `<inline asm>:2:18: error: redefinition of
+'kz.asm0'`, a refusal the program's own build does not have (clang 23). The copy of an `asm` statement
 is a call with `sideeffect` and no attribute but `nounwind`, whatever the `asm`'s options, and a
 `naked` function's copy is its module-level assembly: in a test build the program's own `pure` call
 is kept by the store of its value into its variable, and the copy's value has none. A release build
@@ -58,6 +65,10 @@ Gate: `compiler-tests`
 order and the label two `asm`s define,
 `EmitterTests.A_label_of_a_naked_function_that_is_a_symbol_of_the_program_is_asm_refused_at_the_line_of_its_asm`
 for the labels of the program's symbols,
+`EmitterTests.Of_two_naked_functions_that_define_one_label_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_calls`
+and `EmitterTests.Of_two_asm_statements_that_define_one_symbol_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_functions`
+for LLVM's order, `EmitterTests.The_copies_the_build_assembles_define_no_symbol_the_program_does_not`
+for the copies' `main`,
 `EmitterTests.A_pure_asm_the_assembler_refuses_is_asm_refused_at_its_line_in_a_test_build_and_a_release_build`
 for the copy's effect,
 `EmitterTests.A_pure_asm_whose_output_nothing_reads_is_asm_refused_in_a_test_build_and_builds_in_a_release_build`

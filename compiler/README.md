@@ -1410,13 +1410,18 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the `!srcloc` either, so where clang refuses inline assembly the build assembles the program's `asm`s
   together without the rest of the program, beside a label for each symbol the program's IR defines, each as
   the emitter wrote it in IR of its own, an `asm` statement's a call with an effect whatever its options,
-  since LLVM drops a call of no effect whose value nothing uses at `-O0` too, and a `naked` function's its
-  module-level assembly, in the order of their lines, each beside those before it that clang took, and each
-  one whose addition clang refuses is the compile error `asm-refused` at the line of the `asm`, under R11,
-  or R12 for a `naked` function's, once, in the order of the lines: one clang refuses alone, a `naked`
-  function's whose label is a symbol of the program among them, which LLVM refuses where it writes that
-  symbol's definition, with no line of the template, and of two `naked` functions that define one label
-  the second (R11, R12). Where none is refused so, as where the optimiser of a release build copies an `asm`
+  since LLVM drops a call of no effect whose value nothing uses at `-O0` too, in the copies' `main`, which
+  every program defines, in place of its label, so that the copies define no symbol the program does not,
+  and a `naked` function's its module-level assembly, in the order LLVM meets them, the order the compiler
+  writes them, in one file as across files: the `naked` functions' assembly first, in the order of their
+  first calls, then the `asm` statements, in the order of the functions that hold them, a guarded block's
+  before the function it stands in, and of the statements in each; each beside those before it that clang
+  took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
+  `asm`, under R11, or R12 for a `naked` function's, once, in that order: one clang refuses alone, a
+  `naked` function's whose label is a symbol of the program among them, which LLVM refuses where it writes
+  that symbol's definition, with no line of the template, and of two `naked` functions that define one
+  label the one LLVM meets second, the earlier line's where the two are called out of the order of their
+  lines (R11, R12). Where none is refused so, as where the optimiser of a release build copies an `asm`
   whose text the assembler takes once and refuses twice, the failure stays clang's. The command writes each as
   it writes a compile error. It grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,

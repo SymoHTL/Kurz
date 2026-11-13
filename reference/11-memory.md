@@ -726,13 +726,16 @@ function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as �
 `asm` the optimiser drops before the assembler reads it raises nothing, so a `pure` `asm` whose outputs
 nothing reads is `asm-refused` in a test build, which keeps its call, and builds in a release build,
 which drops it, as Rust's builds differ so (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). The
-build assembles the program's `asm`s together in the order of their lines, each beside those before it
-that the assembler took, and each one whose addition the assembler refuses is `asm-refused`, once, in
-the order of the lines: one it refuses alone, and of two `naked` functions that define one label the
-second, whose label the assembler refuses beside the first's, where Rust's compiler, which gives a
-naked function's assembly no `!srcloc`, names neither *(assumed: the order of the lines, Rust's within
-one function, and of two `naked` functions that define one label the second, the build's order, which
-no answer named, as §3 marks them)*. Two `asm`s that define one label are those of two `naked` functions (R12), since a label an
+build assembles the program's `asm`s together in the order LLVM meets them, the order the compiler
+writes them, in one file as across files: the `naked` functions' assembly first (R12), in the order the
+compiler writes the functions, at their first call, then the `asm` statements, in the order of the
+functions that hold them, a guarded block's (R18) before the function it stands in, and of the
+statements in each; each beside those before it that the assembler took, and each one whose addition
+the assembler refuses is `asm-refused`, once, in that order, so that the line named is the one LLVM
+refuses: one it refuses alone, and of two `naked` functions that define one label the one LLVM meets
+second, whose label the assembler refuses beside the first's, the earlier line's where the two are
+called out of the order of their lines, where Rust's compiler, which gives a naked function's assembly
+no `!srcloc`, names neither (§3, the owner, 2026-11-13, pull request 530, comment 6855725580). Two `asm`s that define one label are those of two `naked` functions (R12), since a label an
 inline `asm` defines by name is `named-asm-label` (§3, the owner, 2026-11-13). Across the files of a
 program the `asm`s are named in the order LLVM meets them, the order the compiler writes the
 functions, and no order of the source is stated, as Rust's compiler reports the errors of LLVM as they
