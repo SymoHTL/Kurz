@@ -22,8 +22,12 @@ public sealed partial class Emitter
     /// <summary>R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program (<see cref="EmittedProgram.Asms"/>).</summary>
     private readonly List<AsmAlone> asmsAlone = [];
 
-    /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes.</summary>
-    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, string? Input, KurzType? InputType, AsmOutput? Output);
+    /// <summary>
+    /// One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes. The input is
+    /// read where the first pass reads the operand, but an <c>inout</c>'s, which <c>Input</c> loads when it is called, just before
+    /// the call.
+    /// </summary>
+    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, Func<string>? Input, KurzType? InputType, AsmOutput? Output);
 
     /// <summary>
     /// R11: where an output goes: what a pointer points to, <c>*p</c> or <c>p[i]</c>, found where its operand stands; or a variable, or a
@@ -42,8 +46,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// R11: an <c>asm</c> statement. Every operand's value is read, and every place an output writes through a pointer found, in the order
-    /// the operands are written, as Rust evaluates them; the call then writes each output into its place, the place of a variable or of a
+    /// R11: an <c>asm</c> statement. Every operand's value is read, but an <c>inout</c>'s, which is loaded just before the call, and every
+    /// place an output writes through a pointer found, in the order the operands are written, as Rust evaluates them;
+    /// the call then writes each output into its place, the place of a variable or of a
     /// path of fields found as the output is stored, so that no copy of a block a path goes through is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
     /// <c>sideeffect</c> under <c>pure</c>, no <c>alignstack</c> under <c>nostack</c>, AT&amp;T's dialect under <c>att_syntax</c> and Intel's
     /// otherwise, no clobber of the flags under <c>preserves_flags</c>, no clobber of memory under <c>nomem</c>, the call's attributes
@@ -132,7 +137,7 @@ public sealed partial class Emitter
             if (registers.TryGetValue(o, out var r) && r.Input is not null)
             {
                 inputIndex[o] = outputs.Count + inputs.Count;
-                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input}", $"{r.OperandType} poison"));
+                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input()}", $"{r.OperandType} poison"));
             }
             else if (symbols.TryGetValue(o, out var symbol))
             {
@@ -232,12 +237,18 @@ public sealed partial class Emitter
         string? input = null;
         KurzType? inputType = null;
         AsmOutput? output = null;
+        Func<string>? load = null;
         if (o.Word is "inout" or "inlateout" && o.Output is null)
         {
-            // an `inout` without `=>` reads and writes one place: a place through a pointer is found once, and the input loaded from it
+            // an `inout` without `=>` reads and writes one place: a place through a pointer is found once, here, and the input is loaded
+            // when the `asm` runs, after every operand ran, as Rust's compiler gives an `inout` the copy of its place as its input
+            // (`in_value: Operand::Copy(place)`, rustc_mir_build's builder/expr/into.rs): through the pointer found, or from the place a
+            // variable, or a path of fields from one, has then (R11)
             output = AsmOutputOf(written!);
             inputType = output.Type;
-            input = output.Pointer is { } pointer ? fn.Value($"load {Ir(inputType)}, ptr {pointer}") : EmitExpression(o.Value!);
+            var pointer = output.Pointer;
+            var type = inputType;
+            load = () => pointer is not null ? fn.Value($"load {Ir(type)}, ptr {pointer}") : EmitExpression(o.Value!);
         }
         else
         {
@@ -254,7 +265,13 @@ public sealed partial class Emitter
         }
 
         var operandType = AsmOperandType(output?.Type ?? inputType, registerClass);
-        return new AsmRegister(o, registerClass, constraint, operandType, input is null ? null : ToAsmOperand(input, inputType!, operandType), inputType, output);
+        if (load is not null)
+        {
+            return new AsmRegister(o, registerClass, constraint, operandType, () => ToAsmOperand(load(), inputType!, operandType), inputType, output);
+        }
+
+        var read = input is null ? null : ToAsmOperand(input, inputType!, operandType);
+        return new AsmRegister(o, registerClass, constraint, operandType, read is null ? null : () => read, inputType, output);
     }
 
     /// <summary>

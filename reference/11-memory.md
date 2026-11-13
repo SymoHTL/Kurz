@@ -705,10 +705,15 @@ template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the
 those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
-marks them)*. The operands' values are read, and the places outputs write through a pointer (`*p`,
-`p[i]`) found, in the order the operands are written, and an `inout` loads from and stores into the
-one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler lowers the operands of
-`asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3 marks them)*. An
+marks them)*. The operands' values are read, but an `inout`'s input, and the places outputs write
+through a pointer (`*p`, `p[i]`) found, in the order the operands are written, and an `inout` loads
+from and stores into the one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler
+lowers the operands of `asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3
+marks them)*. An `inout` loads its input when the `asm` runs, after every operand ran, one into a
+variable, or into a path of fields from one, from the place the variable has then, and one through a
+pointer from the place found in the order the operands are written, so the `asm` reads what a later
+operand's call wrote there, as Rust's compiler reads the copy of an `inout`'s place at the `asm`
+*(assumed: Rust's `inout`, which no answer named, as §3 marks it)*. An
 output into a variable, or into a path of fields from one, is stored after the call,
 into the place the variable has then, so a variable a later operand's call changed is written as that
 call left it, as Rust writes an `out` operand's place and as an assignment into a path is written (M4)
@@ -717,14 +722,21 @@ outputs into one variable the later one stays, as Rust's compiler stores them *(
 order, which no answer named, as §3 marks it)*. An instruction of an `asm`
 that the assembler refuses is the compile error `asm-refused` at the line of the `asm`, which the build
 raises once clang refuses the program (§3, the owner, 2026-11-13), and so is one of a `naked`
-function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. The
+function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. An
+`asm` the optimiser drops before the assembler reads it raises nothing, so a `pure` `asm` whose outputs
+nothing reads is `asm-refused` in a test build, which keeps its call, and builds in a release build,
+which drops it, as Rust's builds differ so (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). The
 build assembles the program's `asm`s together in the order of their lines, each beside those before it
 that the assembler took, and each one whose addition the assembler refuses is `asm-refused`, once, in
-the order of the lines: one it refuses alone, and of two that define one label the second, as LLVM
-refuses the label in the second's text and Rust's compiler names that `asm!` *(assumed: the order of the lines,
-Rust's within one function, and of two that define one label the second, which no answer named, as §3
-marks them)*. Two `asm`s that define one label are those of two `naked` functions (R12), since a label an
-inline `asm` defines by name is `named-asm-label` (§3, the owner, 2026-11-13). A label an `asm`'s template
+the order of the lines: one it refuses alone, and of two `naked` functions that define one label the
+second, whose label the assembler refuses beside the first's, where Rust's compiler, which gives a
+naked function's assembly no `!srcloc`, names neither *(assumed: the order of the lines, Rust's within
+one function, and of two `naked` functions that define one label the second, the build's order, which
+no answer named, as §3 marks them)*. Two `asm`s that define one label are those of two `naked` functions (R12), since a label an
+inline `asm` defines by name is `named-asm-label` (§3, the owner, 2026-11-13). Across the files of a
+program the `asm`s are named in the order LLVM meets them, the order the compiler writes the
+functions, and no order of the source is stated, as Rust's compiler reports the errors of LLVM as they
+come (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). A label an `asm`'s template
 defines by name, `again:`, is the compile error `named-asm-label` at the line of the label, in a `"""` block
 the label's own line, and local labels, `2:` with `2b` or `2f`, take its place, since LLVM may copy an
 `asm`, as where a function is inlined into two callers, and the copy defines the label a second time; on
@@ -833,7 +845,34 @@ raw {
 print(n)
 ```
 
-Case: [memory/asm-operand-order.kz](../corpus/memory/asm-operand-order.kz)
+Case: [memory/asm-inout-after-call.kz](../corpus/memory/asm-inout-after-call.kz)
+```kurz
+data Point(long X, long Y)
+
+long Bump(mut Point point) {
+    point = Point(10, 20)
+    return 1
+}
+
+long Ten(long* slot) {
+    raw {
+        *slot = 10
+    }
+    return 1
+}
+
+mut Point p = Point(0, 0)
+mut long n = 0
+raw {
+    long* q = &n
+    asm("add {r}, {k}", r = inout(reg) p.X, k = in(reg) Bump(mut p))
+    asm("add {r}, {k}", r = inout(reg) *q, k = in(reg) Ten(q))
+}
+print(p)
+print(n)
+```
+
+Case: [memory/asm-operand-read-order.kz](../corpus/memory/asm-operand-read-order.kz)
 ```kurz
 long Show(long v) {
     print(v)
@@ -841,13 +880,19 @@ long Show(long v) {
 }
 
 mut long m = 0
-mut long n = 0
 raw {
     long* p = &m
     asm("mov {a}, {x}", a = out(reg) p[Show(0)], x = in(reg) Show(1))
-    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
 }
 print(m)
+```
+
+Case: [memory/asm-output-store-order.kz](../corpus/memory/asm-output-store-order.kz)
+```kurz
+mut long n = 0
+raw {
+    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
+}
 print(n)
 ```
 
