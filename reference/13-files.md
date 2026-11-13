@@ -23,7 +23,7 @@ and `Other` for a number none of them has, which Rust gives `Uncategorized`. A p
 of which the system takes no byte `WriteZero`, each with the number 0, which every error that is not the system's has, but for a socket's own read, write
 or `Accept` whose bound (S9) the poller's timer ends, which gives 11 (§12, the owner, 2026-11-13, #519, comment 6851105334, "Keep 11
 (Recommended)", and comment 6855469829, "11, as a read (Recommended)"), while the end of the HTTP client's call time gives 0, a
-read inside the call that it ends among it (W16; §12, the owner, 2026-11-05, T2, "always 0"). A call that
+read inside the call that it ends among it (W16; §12, the owner, 2026-11-05, #110, comment 6657251329, T2, "always 0"). A call that
 names two paths names the first in its error. *(assumed, §12: what raises in a call on a file or a socket, the
 list, the words, the number 0, the text without a path and the first path)*
 
