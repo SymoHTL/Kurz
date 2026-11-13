@@ -27,6 +27,7 @@ public sealed partial class Checker
             ? CheckMadeArgument(expression, made, () => CheckExpressionCore(expression, expected, keepCases, given)) // T33: in its field's pass
             : CheckExpressionCore(expression, expected, keepCases, given);
         expressionDepth--;
+        typed = ActorInsideValue(expression, typed); // U12
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
         if (expressionDepth == 0)
         {
@@ -68,6 +69,8 @@ public sealed partial class Checker
                 return Typed.Error;
             case NameExpression n:
                 return CheckName(n, expected);
+            case ThisExpression t when ActorThisAsValue(t):
+                return Typed.Error; // U10
             case ThisExpression t:
                 return CheckThis(t); // K7
             case MemberAccess m:
@@ -119,6 +122,8 @@ public sealed partial class Checker
                 return CheckElse(e, isStatement: false, expected);
             case ParenthesizedExpression p:
                 return CheckExpression(p.Inner, expected, keepCases, given);
+            case SpawnExpression s:
+                return CheckSpawn(s); // U2
             default:
                 throw new InvalidOperationException(expression.GetType().Name);
         }
@@ -383,6 +388,10 @@ public sealed partial class Checker
                 else if (HoldsVector(t.Type))
                 {
                     NotSupported(hole.Expression.Line, VectorText);
+                }
+                else if (t.Type is ActorType)
+                {
+                    NotSupported(hole.Expression.Line, ActorText); // U2
                 }
                 else if (!HasText(t.Type))
                 {
@@ -866,6 +875,8 @@ public sealed partial class Checker
 
             case ClassType c:
                 return ClassMember(c, member, line); // K1, F9
+            case ActorType actor:
+                return ActorMember(actor, member, line); // U8
             case InterfaceType face:
                 return InterfaceMember(face, member, line); // K6, K7
             case EnumType e when member == "Number":
@@ -1626,6 +1637,11 @@ public sealed partial class Checker
         else if (!equality && left.Type is PrimitiveType { Kind: Primitive.String } && right.Type is PrimitiveType { Kind: Primitive.String })
         {
             ok = true; // T32: two strings in the order of their code points
+        }
+        else if (equality && (left.Type is ActorType || right.Type is ActorType))
+        {
+            NotSupported(b.Line, $"`{op}` of an actor's reference, which issue 519 holds open, comment 6866132292, Q10 (U2)");
+            return new Typed(Types.Bool);
         }
         else if (equality && left.Type is FlagsType && Types.Same(left.Type, right.Type))
         {

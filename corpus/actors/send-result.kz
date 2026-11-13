@@ -1,0 +1,11 @@
+// expect: error send-result at 11
+// rules: U6
+
+actor Counter {
+    int count = 0
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+send c.Get()

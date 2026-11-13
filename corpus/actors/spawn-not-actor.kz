@@ -1,0 +1,7 @@
+// expect: error type-mismatch at 6
+// rules: U14
+
+class Box(int Size)
+
+b = spawn Box(1)
+print(b.Size)

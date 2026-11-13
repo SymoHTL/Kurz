@@ -524,6 +524,59 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     /// <summary>Every node of a tree, found through the properties of its records.</summary>
+    [Fact]
+    public void A_call_through_an_actors_reference_is_recorded_as_a_message()
+    {
+        // U2: `spawn` is the actor's reference, and its call the construction of the state; U4: a call through a reference waits, U6: one after
+        // `send` does not, U11: a `send` of its own method inside it is a message to itself, and U10: its own method called directly is a method
+        var (tree, model) = Clean("""
+            actor Counter {
+                mut int count = 0
+
+                pub void Add(int n) {
+                    count = count + n
+                    Note()
+                    send Note()
+                }
+
+                pub void Note() {
+                    print(count)
+                }
+
+                pub int Get() => count
+            }
+
+            c = spawn Counter()
+            send c.Add(1)
+            print(c.Get())
+            """);
+        var spawn = Find<SpawnExpression>(tree);
+        var actor = Assert.IsType<ActorType>(model.TypeOf(spawn).Type);
+        Assert.Equal("Counter", actor.Symbol.Name);
+        var made = model.CallOf(spawn.Call);
+        Assert.Equal(CallKind.ClassNew, made.Kind);
+        Assert.Same(actor.Symbol, Assert.IsType<ClassType>(made.Target).Symbol);
+
+        var add = model.CallOf(Find<CallExpression>(tree, c => c.Callee is MemberAccess { Member: "Add" }));
+        Assert.Equal((CallKind.ActorSend, "Add"), (add.Kind, add.Function!.Name));
+        Assert.Same(actor.Symbol, Assert.IsType<ActorType>(add.Target).Symbol);
+        var get = model.CallOf(Find<CallExpression>(tree, c => c.Callee is MemberAccess { Member: "Get" }));
+        Assert.Equal((CallKind.ActorCall, "Get", "int"), (get.Kind, get.Function!.Name, get.Result.Text));
+        Assert.Same(actor.Symbol, Assert.IsType<ActorType>(get.Target).Symbol);
+
+        var notes = new List<CallExpression>();
+        Nodes.Collect(tree, notes);
+        var direct = model.CallOf(Assert.Single(notes, c => c.Callee is NameExpression { Name: "Note" } && c.Line == 6));
+        Assert.Equal(CallKind.Method, direct.Kind);
+        var sent = model.CallOf(Assert.Single(notes, c => c.Callee is NameExpression { Name: "Note" } && c.Line == 7));
+        Assert.Equal(CallKind.ActorSend, sent.Kind);
+        Assert.Same(actor.Symbol, Assert.IsType<ActorType>(sent.Target).Symbol);
+
+        var walk = new Walk(model);
+        walk.Program(tree);
+        Assert.Empty(walk.Missing);
+    }
+
     private static class Nodes
     {
         public static void Collect<T>(object? node, List<T> found)
@@ -636,6 +689,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case ExpressionStatement e:
                     Expression(e.Expression);
                     break;
+                case SendStatement send:
+                    Expression(send.Call); // U6: the call, a message nobody waits for
+                    break;
                 case IfStatement i:
                     Expression(i.Condition);
                     Block(i.Then);
@@ -740,7 +796,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                     break; // D13, D19: its names are constant sets, which the expressions that name them carry
                 case TypeDeclaration { Kind: TypeDeclarationKind.Interface }:
                     break; // K6, K7: the signatures of its methods, which the calls through it and the classes that implement it carry
-                case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
+                case TypeDeclaration { Kind: TypeDeclarationKind.Class or TypeDeclarationKind.Actor } t: // U1: an actor's body is a class's
                     Need(Try(() => model.ClassOf(t)), t.Line, $"class `{t.Name}`");
                     Defaults(t.PrimaryConstructor ?? []);
                     foreach (var field in (t.Members ?? []).OfType<FieldDeclaration>().Where(f => (f.Modifiers & Modifiers.Static) == 0 && f.Value is not null))
@@ -959,6 +1015,9 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case ParenthesizedExpression p:
                     Expression(p.Inner);
                     break;
+                case SpawnExpression spawn:
+                    Expression(spawn.Call); // U2: the construction of the actor's state
+                    break;
                 case StringLiteral s:
                     foreach (var hole in s.Segments.OfType<HoleSegment>())
                     {
@@ -985,10 +1044,10 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
                 case CallKind.ListAdd or CallKind.ListWhere:
                     Expression(((MemberAccess)c.Callee).Target);
                     break;
-                case CallKind.Method when c.Callee is MemberAccess m:
-                    Expression(m.Target); // K7: the instance
+                case CallKind.Method or CallKind.ActorCall or CallKind.ActorSend when c.Callee is MemberAccess m:
+                    Expression(m.Target); // K7: the instance; U4, U6: the actor's reference, or `this` (U11)
                     break;
-                case CallKind.Method:
+                case CallKind.Method or CallKind.ActorSend:
                     Need(model.IsImplicitField(c.Callee, out _, out _), c.Line, "the `this` of a method called by its name"); // K7
                     break;
                 default:

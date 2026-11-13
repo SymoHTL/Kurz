@@ -619,10 +619,10 @@ public sealed class ParserTests
     [Fact]
     public void The_core_words_are_the_lists_of_l18_and_l19()
     {
-        // L18 and L19, word for word: the lists are closed, so the sets are pinned whole
+        // L18 and L19, word for word: the lists are closed, so the sets are pinned whole; `actor`, `spawn` and `send` by U1
         string[] words = ["if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw", "mut", "data",
             "class", "interface", "enum", "flags", "with", "equal", "by", "pub", "prot", "internal", "static", "this", "virtual",
-            "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf"];
+            "override", "weak", "raw", "use", "void", "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf", "actor", "spawn", "send"];
         string[] types = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "decimal",
             "bool", "string", "char", "duration", "timestamp", "longduration", "longtimestamp", "instant"];
         Assert.Equal(words.Order(), CoreWords.Syntax.Order());
@@ -1564,5 +1564,45 @@ public sealed class ParserTests
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: (A | B)>(T Item)"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: (int) => int>(T Item)"));
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors("data Box<T: (A?)>(T Item)"));
+    }
+
+    [Theory]
+    [InlineData("actor Counter {\n}", "(actor Counter {})")]
+    [InlineData("pub actor Account(int Start) {\n    pub int Get() => Start\n}", "(actor pub Account(int Start) {(function pub int Get() => Start)})")]
+    [InlineData("actor Parser stack 8mb per Id inbox drop {\n}", "(actor Parser [stack 1] [per 1] [inbox 1] {})")]
+    [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1] {})")]
+    [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
+    [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
+    [InlineData("print(spawn Counter().Get())", "(call print (call (. (spawn (call Counter)) Get)))")]
+    [InlineData("c = spawn Worker() on crash restart", "(assign-or-declare c (spawn (call Worker) [on crash 1]))")]
+    [InlineData("f(spawn Worker() on crash restart, 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
+    [InlineData("f(spawn Worker() on crash restart(3), 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
+    [InlineData("send c.Add(1)", "(send (call (. c Add) (int 1)))")]
+    [InlineData("send Add(1)", "(send (call Add (int 1)))")]
+    [InlineData("actor.Count = 1", "(assign (. actor Count) (int 1))")]
+    public void The_forms_of_actors_parse(string program, string tree)
+    {
+        // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line; U2: `spawn` before a
+        // name makes one and binds as C#'s `new`, an `on crash` after it kept by its line to the end of the expression; U6: `send` before a call
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Theory]
+    [InlineData("send c")] // U14: no call after `send`
+    [InlineData("send c.Count")]
+    [InlineData("print(send c.Add(1))")] // U6: `send` is a statement of its own
+    [InlineData("c = spawn Counter")] // U2: the arguments of the constructor
+    [InlineData("actor Counter = 1")] // U1: a clause or the body after the name
+    [InlineData("actor Counter(int Start) Start stack 8mb {\n}")] // U1: a clause starts with its word
+    public void A_form_of_actors_without_its_parts_is_syntax(string program)
+    {
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
+    }
+
+    [Fact]
+    public void An_actor_without_its_body_is_braces_required()
+    {
+        // U1: an actor has a body, as an interface has one
+        Assert.Equal([(ErrorIds.BracesRequired, 1)], Errors("actor Counter(int Start)"));
     }
 }

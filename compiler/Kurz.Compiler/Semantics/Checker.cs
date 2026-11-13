@@ -333,6 +333,8 @@ public sealed partial class Checker
             ResolveClass(symbol); // K1
         }
 
+        CheckActorFields(); // U12: once every field's type is known
+
         RefuseChainMembers(); // K6, K7, K18: once every base is known
 
         JudgePendingPointees();
@@ -379,6 +381,7 @@ public sealed partial class Checker
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
+        topLevelFrame = frame; // U4
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
         // top-level code, never `unused-variable` (V13) and no name a function cannot declare (the owner, 2026-10-30, "Top-level code only")
         var arguments = new VariableSymbol("args", new ListType(Types.String), false, VariableKind.Parameter, 0);
@@ -591,6 +594,12 @@ public sealed partial class Checker
             return;
         }
 
+        if (d.Kind == TypeDeclarationKind.Actor && !clash)
+        {
+            DeclareActor(d); // U1: chapter 19
+            return;
+        }
+
         if (d.Kind == TypeDeclarationKind.Interface && !clash)
         {
             DeclareInterface(d); // K6, K7
@@ -599,7 +608,7 @@ public sealed partial class Checker
 
         if (d.Kind != TypeDeclarationKind.Data)
         {
-            return; // a class or an interface whose name was reported as `redeclared` above
+            return; // a class, an actor or an interface whose name was reported as `redeclared` above
         }
 
         if ((d.Modifiers & Modifiers.Extern) != 0)
@@ -1154,7 +1163,7 @@ public sealed partial class Checker
         typeContext = null;
     }
 
-    private KurzType Resolve(TypeSyntax type)
+    private KurzType ResolveWritten(TypeSyntax type)
     {
         switch (type)
         {
@@ -1365,7 +1374,7 @@ public sealed partial class Checker
                 return Types.Error;
             }
 
-            return new ClassType(classSymbol); // K1
+            return classSymbol.IsActor ? new ActorType(classSymbol) : new ClassType(classSymbol); // U1, K1
         }
 
         if (interfaces.TryGetValue(n.Name, out var face))
@@ -2098,6 +2107,9 @@ public sealed partial class Checker
             case ExpressionStatement e:
                 CheckExpressionStatement(e);
                 return IsExit(e.Expression) ? Flow.Ends : Flow.Completes; // S23: no path goes on after `Environment.Exit`, as after a `throw`
+            case SendStatement s:
+                CheckSend(s); // U6
+                return Flow.Completes;
             case IfStatement i:
                 {
                     // N3: each branch with what the condition shows there; after the `if`, what every branch that completes keeps
@@ -2546,6 +2558,11 @@ public sealed partial class Checker
             Report(ErrorIds.Syntax, a.Line, "the left side of an assignment is a name or a path (V8, M4)");
             CheckExpression(a.Value, null);
             return;
+        }
+
+        if (AssignsThroughActor(a, members))
+        {
+            return; // U8
         }
 
         if (RunsThroughInstance(members) || root is ThisExpression || (root is NameExpression implicitRoot && Lookup(implicitRoot.Name).Variable is null && ImplicitField(implicitRoot.Name) is not null))

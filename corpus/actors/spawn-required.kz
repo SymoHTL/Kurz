@@ -1,0 +1,11 @@
+// expect: error spawn-required at 10
+// rules: U2
+
+actor Counter {
+    int count = 0
+
+    pub int Get() => count
+}
+
+c = Counter()
+print(c.Get())

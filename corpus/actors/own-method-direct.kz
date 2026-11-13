@@ -1,0 +1,20 @@
+// expect: output
+// | 6
+// rules: U10
+
+actor Doubler {
+    mut int total = 0
+
+    pub void Add(int n) {
+        total = total + Twice(n)
+    }
+
+    int Twice(int n) => n * 2
+
+    pub int Total() => this.total
+}
+
+d = spawn Doubler()
+send d.Add(1)
+send d.Add(2)
+print(d.Total())

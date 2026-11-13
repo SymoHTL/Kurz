@@ -7031,4 +7031,149 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("int Hint(int x) => x\nprint(Hint(1))"));
         Assert.Equal([(ErrorIds.Redeclared, 1)], Errors("Hint = 1\nprint(Hint)"));
     }
+
+    /// <summary>U1: an actor with a field, a `void` method, one with a result and a private one; a program after it starts at line 13.</summary>
+    private const string ActorCounter = "actor Counter {\n    mut int count = 0\n\n    pub void Add(int n) {\n        count = count + n\n    }\n\n    pub int Get() => count\n\n    int Hidden() => count\n}\n\n";
+
+    [Fact]
+    public void An_actor_is_spawned_called_and_sent_to_in_the_top_level_statements_and_inside_an_actor()
+    {
+        // U2, U4, U6: the top-level statements, in a block of theirs too, spawn, wait on a call and send; U2, U6: an actor's method spawns and
+        // sends (the relay); U10, U11: inside an actor its own method is called by name and through `this`, and sent to
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter()\nsend c.Add(1)\nprint(c.Get())\nif c.Get() > 0 {\n    c.Add(2)\n}\nfor i in 0..<2 {\n    send c.Add(i)\n}\n"));
+        Assert.Empty(Errors(ActorCounter + "actor Maker(Counter Target) {\n    pub void Make() {\n        c = spawn Counter()\n        send c.Add(1)\n        send Target.Add(1)\n    }\n}\n\nm = spawn Maker(spawn Counter())\nm.Make()\n"));
+        Assert.Empty(Errors("actor A {\n    mut int n = 0\n\n    pub void Go() {\n        Step()\n        this.Step()\n        send Step()\n        send this.Step()\n        n = this.n + 1\n    }\n\n    void Step() {\n        n = n + 1\n    }\n}\n\na = spawn A()\na.Go()\n"));
+    }
+
+    [Fact]
+    public void The_arguments_of_a_spawn_are_read_as_a_calls_are()
+    {
+        // U2, M7: the arguments of an actor's constructor are a call's, so that one changed while another holds it is changed-while-held
+        Assert.Equal([(ErrorIds.ChangedWhileHeld, 11)], Errors("actor Keeper(List<int> Items, int N) {\n    pub int Count() => Items.Count + N\n}\n\nint Grow(mut List<int> l) {\n    l.Add(1)\n    return 1\n}\n\nmut numbers = List<int>()\nk = spawn Keeper(numbers, Grow(mut numbers))\nprint(k.Count())\n"));
+    }
+
+    [Fact]
+    public void An_actors_name_called_without_spawn_is_spawn_required()
+    {
+        // U2: section 6, Q13
+        Assert.Equal([(ErrorIds.SpawnRequired, 13)], Errors(ActorCounter + "c = Counter()\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.SpawnRequired, 15)], Errors(ActorCounter + "actor Maker {\n    pub void Make() {\n        print(Counter().Get())\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void A_send_of_a_method_that_gives_a_result_is_send_result()
+    {
+        // U6: a result (section 6, Q12), through a reference and of its own method; U7: a `void` with cases beside it
+        Assert.Equal([(ErrorIds.SendResult, 14)], Errors(ActorCounter + "c = spawn Counter()\nsend c.Get()\n"));
+        Assert.Equal([(ErrorIds.SendResult, 4)], Errors("actor A {\n    pub int Get() => 1\n    pub void Go() {\n        send Get()\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.SendResult, 10)], Errors("data Full\n\nactor Store {\n    pub void | Full Add() {\n        return Full\n    }\n}\n\ns = spawn Store()\nsend s.Add()\n"));
+    }
+
+    [Fact]
+    public void A_field_or_a_private_method_of_an_actor_through_its_reference_is_not_visible()
+    {
+        // U8: nothing outside an actor reaches its fields, read, assigned or called; U9: a message calls a `pub` method, waiting or sent
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c.count)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nc.count = 1\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nc.count()\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c.Hidden())\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nsend c.Hidden()\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 15)], Errors(ActorCounter + "actor B(Counter Other) {\n    pub void Go() {\n        send Other.Hidden()\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void A_spawn_of_what_is_no_actor_is_type_mismatch_and_a_send_of_what_is_no_message_is_syntax()
+    {
+        // U14 (proposed: issue 519, comment 6866132292, Q3): `spawn` of a class, a data type or a function; a name nothing declares is
+        // `unknown-name` (V10); `send` before a call of a function or of a class's method
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("class Box(int Size)\n\nb = spawn Box(1)\nprint(b.Size)\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Box(int Size)\n\nb = spawn Box(1)\nprint(b.Size)\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("int Box(int n) => n\n\nb = spawn Box(1)\nprint(b)\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("b = spawn Box(1)\nprint(b)\n"));
+        Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Show(int n) {\n    print(n)\n}\n\nsend Show(1)\n"));
+        Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class Box {\n    pub void Show() {\n        print(1)\n    }\n}\n\nsend Box().Show()\n"));
+    }
+
+    [Theory]
+    [InlineData(1, "U1", "actor A per Id {\n}\n")]
+    [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
+    [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
+    [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
+    [InlineData(3, "U1", "class B(int X)\n\nactor A : B {\n}\n")]
+    [InlineData(1, "U2", "actor A(int X) equal by X {\n}\n")]
+    [InlineData(2, "U2", "actor A {\n    pub A() {\n    }\n}\n")]
+    [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
+    [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
+    [InlineData(2, "U8", "actor A {\n    pub int X => 1\n}\n")]
+    [InlineData(2, "U8", "actor A {\n    pub int x = 1\n}\n")]
+    [InlineData(2, "U9", "actor A {\n    prot void Go() {\n    }\n}\n")]
+    [InlineData(4, "U1", "actor A {\n}\n\nclass B : A\n")]
+    [InlineData(1, "U1", "static actor A {\n}\n")]
+    public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
+    {
+        // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), type parameters, bases and interfaces, `static`
+        // members, and an actor as a class's base; U2: `equal by`, whose `==` is open (Q10), and a constructor in the body; U8: a property and
+        // a `pub` field, open (Q4); U9: a modifier of a method but `pub`
+        NotSupportedAt(line, rule, program);
+    }
+
+    [Theory]
+    [InlineData(13, "U4", "int Read(Counter c) => c.Get()\n\nprint(Read(spawn Counter()))\n")]
+    [InlineData(14, "U4", "c = spawn Counter()\nf = () => c.Get()\nprint(f())\n")]
+    [InlineData(14, "U4", "actor B(Counter Other) {\n    pub int Read() => Other.Get()\n}\n")]
+    [InlineData(14, "U6", "void Go(Counter c) {\n    send c.Add(1)\n}\n\nGo(spawn Counter())\n")]
+    [InlineData(15, "U6", "class Box {\n    pub void Go(Counter c) {\n        send c.Add(1)\n    }\n}\n\nBox().Go(spawn Counter())\n")]
+    [InlineData(13, "U2", "Counter Make() => spawn Counter()\n\nprint(Make().Get())\n")]
+    [InlineData(13, "U2", "c = spawn Counter() on crash restart\nprint(c.Get())\n")]
+    [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
+    [InlineData(14, "U2", "actor B {\n    Counter c = spawn Counter()\n}\n")]
+    [InlineData(16, "U6", "actor B(Counter Other) {\n    pub void Go() {\n        f = () => {\n            send Other.Add(1)\n        }\n        f()\n    }\n}\n")]
+    public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
+    {
+        // U4: a call that waits, in the top-level statements alone; U2, U6: `spawn` and `send` there and in an actor's methods alone, never in a
+        // function, a lambda or a class's method; U2: `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
+        NotSupportedAt(line, rule, ActorCounter + program);
+    }
+
+    [Theory]
+    [InlineData(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Box b) {\n        print(b.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Box(1))\n")]
+    [InlineData(8, "U12", "class Box(int N)\n\nactor A {\n    pub Box Make() => Box(1)\n}\n\na = spawn A()\nprint(a.Make().N)\n")]
+    [InlineData(8, "U12", "actor A {\n    pub void Run((int) => int f) {\n        print(f(1))\n    }\n}\n\na = spawn A()\nsend a.Run(n => n)\n")]
+    [InlineData(12, "U12", "class Box(int N)\n\ndata Pair(Box B)\n\nactor A {\n    pub void Take(Pair p) {\n        print(p.B.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Pair(Box(1)))\n")]
+    [InlineData(3, "U12", "class Box(int N)\n\nactor A(Box B) {\n}\n")]
+    [InlineData(9, "U9", "actor A {\n    pub void Bump(mut int n) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\na.Bump(mut x)\nprint(x)\n")]
+    public void What_crosses_no_actor_in_a_message_is_not_supported(int line, string rule, string program)
+    {
+        // U12: a class instance, a function value and a data value that holds an instance, as an argument, a result or a constructor's
+        // argument (Q1 of issue 519, comment 6866132292); U9: a `mut` parameter of a method called through a reference, open (Q6)
+        NotSupportedAt(line, rule, program);
+    }
+
+    [Theory]
+    [InlineData(13, "U12", "List<Counter> xs = []\nprint(xs.Count)\n")]
+    [InlineData(13, "U12", "int Zero(List<Counter> xs) {\n    return 0\n}\n")]
+    [InlineData(13, "U12", "Counter? c = null\nprint(c == null)\n")]
+    [InlineData(14, "U12", "c = spawn Counter()\nxs = [c]\nprint(xs.Count)\n")]
+    [InlineData(14, "U12", "c = spawn Counter()\nf = (Counter d) => d\nprint(f(c).Get())\n")]
+    [InlineData(16, "U12", "T Same<T>(T x) => x\n\nc = spawn Counter()\nprint(Same(c).Get())\n")]
+    [InlineData(13, "U12", "data Holder(Counter C)\n")]
+    [InlineData(13, "U12", "class Holder(Counter C)\n")]
+    [InlineData(14, "U2", "c = spawn Counter()\nprint(c)\n")]
+    [InlineData(14, "U2", "c = spawn Counter()\nprint(\"{c}\")\n")]
+    [InlineData(14, "U2", "c = spawn Counter()\nprint(c == c)\n")]
+    public void An_actors_reference_inside_another_type_or_as_text_or_compared_is_not_supported(int line, string rule, string program)
+    {
+        // U12: a reference alone is a variable's, a parameter's or a result's type, and inside a list, a `?`, a function type, a type argument
+        // or a field of a class or a data type is what the build does not make; U2: its text and `==` are open (Q10)
+        NotSupportedAt(line, rule, ActorCounter + program);
+    }
+
+    [Theory]
+    [InlineData(4, "U10", "actor A {\n    int n = 1\n\n    pub int Me() => Same(this)\n}\n\nint Same(A a) => 1\n")]
+    [InlineData(3, "P8, U1", "actor A {\n    pub void Go() {\n        Log.Information(\"go\")\n    }\n}\n")]
+    public void This_as_a_value_and_a_log_call_inside_an_actor_are_not_supported(int line, string rule, string program)
+    {
+        // U10: `this` as a value inside an actor is open (Q7); P8: what a line written inside an actor holds is open
+        NotSupportedAt(line, rule, program);
+    }
 }

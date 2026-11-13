@@ -229,7 +229,7 @@ public sealed partial class Checker
 
                     if (classes.TryGetValue(n.Name, out var classSymbol))
                     {
-                        return CheckClassConstruction(classSymbol, c, expected); // K1
+                        return SpawnRequired(classSymbol, c) ? Typed.Error : CheckClassConstruction(classSymbol, c, expected); // U2, K1
                     }
 
                     if (interfaces.ContainsKey(n.Name))
@@ -450,6 +450,10 @@ public sealed partial class Checker
         else if (!t.IsError && HoldsVector(t.Type))
         {
             NotSupported(c.Line, VectorText);
+        }
+        else if (t.Type is ActorType)
+        {
+            NotSupported(c.Line, ActorText); // U2
         }
         else if (!t.IsError && !HasText(t.Type))
         {
@@ -1577,6 +1581,11 @@ public sealed partial class Checker
             return CallMethod(classType, m, c, null); // K7
         }
 
+        if (target.Type is ActorType actor)
+        {
+            return CallActor(actor, m, c, null); // U4, U6
+        }
+
         if (target.Type is DataType dataType && (dataType.Symbol.Field(m.Member) is null || MethodOverPrivateField(dataType.Symbol, m.Member)) && BodyDeclares(dataType.Symbol, m.Member))
         {
             return CallDataMethod(dataType, m, c, null); // D16
@@ -2492,6 +2501,12 @@ public sealed partial class Checker
     /// <summary>Records what a call that typed calls: the candidate picked, its type arguments, its binding and its whole result.</summary>
     private Typed Record(CallExpression c, CallKind kind, Typed typed, Candidate? picked, IReadOnlyList<int>? binding = null)
     {
+        if (picked is not null && !typed.IsError && picked.Map.Values.FirstOrDefault(IsOrHoldsActor) is { } actor)
+        {
+            NotSupported(c.Line, $"an actor's reference in the type argument `{actor}` of a call (U12)");
+            return Typed.Error;
+        }
+
         if (picked is not null && !typed.IsError)
         {
             var map = picked.Map.Count == 0 ? NoMap : picked.Map;
