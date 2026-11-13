@@ -1392,19 +1392,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - inline assembly (R11), lowered as rustc lowers `asm!`: one LLVM `asm` call whose constraints are the
   outputs (`=&` for `out` and `inout`, `=` for `lateout` and `inlateout`), then the inputs, an `inout`'s tied
   to its output, then the clobbers: `~{dirflag},~{fpsr},~{flags}` unless `preserves_flags`, `~{memory}`
-  unless `nomem`, and for `clobber_abi` every register the convention lets a callee change, a late output
-  where no operand names it (System V: `rax`, `rcx`, `rdx`, `rsi`, `rdi`, `r8` to `r11`, `xmm0` to `xmm15`;
-  Windows x64: `rax`, `rcx`, `rdx`, `r8` to `r11`, `xmm0` to `xmm5`), and the x87 and MMX registers; the call is
+  unless `nomem`, and for `clobber_abi` every register the convention lets a callee change, as Rust 1.91
+  lists them: a late output where no output names it (System V: `rax`, `rcx`, `rdx`, `rsi`, `rdi`, `r8` to
+  `r11`, `xmm0` to `xmm15`; Windows x64: `rax`, `rcx`, `rdx`, `r8` to `r11`, `xmm0` to `xmm15`, whose upper
+  halves no callee keeps), and a clobber of each register no operand can name: `xmm16` to `xmm31` and `k0` to
+  `k7` of AVX-512, the x87 and MMX registers and `tmm0` to `tmm7` of AMX; the call is
   `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
-  `const` as its digits and a `sym` as its symbol; an output is stored into its place after the call. The
+  `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes
+  through a pointer (`*p`, `p[i]`) found once, in the order the operands are written; an output is stored
+  into its place after the call, the place of a variable or of a path of fields found as it is stored, so
+  that no copy of a block a path goes through is held across another operand, and a variable a later
+  operand's call changed is written as the call left it. The
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
   is refused when clang builds the program. The command grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
   whose refusal its failure `clang did not build the program` names as the compiler's defect;
 - a `naked` function (R12), lowered as rustc lowers `#[naked]`: its one `asm` is module-level assembly
-  under the function's symbol in `.text`, typed a function on ELF and by its `.def` on COFF, aligned to
+  under the function's symbol in `.text`, pushed and popped around it, typed a function on ELF and by its `.def` on COFF, aligned to
   16 bytes, beside a declaration of the symbol in the C types of its signature; a function or state a
   `sym` names there is kept by `llvm.compiler.used`.
 

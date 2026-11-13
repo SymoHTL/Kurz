@@ -691,6 +691,21 @@ void Show(long nanoseconds) {
 Show(0)
 ```
 
+Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
+```kurz
+long Index() {
+    print("index")
+    return 0
+}
+
+mut long n = 10
+raw {
+    long* p = &n
+    asm("add {r}, 1", r = inout(reg) p[Index()])
+}
+print(n)
+```
+
 ### R11 (decided, §3) Inline assembly
 
 Inline assembly is a statement inside a `raw` block, written as Rust writes `asm!`:
@@ -776,9 +791,34 @@ raw {
     print(x)
     asm("mov {v}, 9", v = out(reg) *p)
     print(n)
+    // writes rcx and r8, which no output names, and the program goes on; the registers `clobber_abi` lets go of are
+    // pinned by the compiler's test of the options, since `kept` sits in memory in a build that is not optimised
     asm("mov ecx, 3", "mov r8d, 4", clobber_abi("C"))
     print(kept)
 }
+```
+
+Case: [memory/asm-inout-place.kz](../corpus/memory/asm-inout-place.kz)
+
+Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
+```kurz
+long Nine() => 9
+
+naked long Seven() {
+    asm("mov eax, 7", "ret")
+}
+
+naked long Answer() {
+    asm("mov eax, {k}", "ret", k = const 40 + 2)
+}
+
+naked long Forward() {
+    asm("jmp {f}", f = sym Nine)
+}
+
+print(Seven())
+print(Answer())
+print(Forward())
 ```
 
 Case: [memory/asm-register-twice.kz](../corpus/memory/asm-register-twice.kz)
@@ -844,25 +884,6 @@ class Switcher {
 ```
 
 Case: [memory/naked-function.kz](../corpus/memory/naked-function.kz)
-```kurz
-long Nine() => 9
-
-naked long Seven() {
-    asm("mov eax, 7", "ret")
-}
-
-naked long Answer() {
-    asm("mov eax, {k}", "ret", k = const 40 + 2)
-}
-
-naked long Forward() {
-    asm("jmp {f}", f = sym Nine)
-}
-
-print(Seven())
-print(Answer())
-print(Forward())
-```
 
 ### R13 (decided, §3) State outside a function
 

@@ -304,10 +304,14 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Contains("call void asm sideeffect inteldialect \"nop\", \"~{dirflag},~{fpsr},~{flags}\"()", calls[3], StringComparison.Ordinal);
         Assert.EndsWith(") nounwind memory(inaccessiblemem: readwrite)", calls[3], StringComparison.Ordinal);
         Assert.Contains("\"=&{si},={ax},={cx},={dx},={di},={r8},={r9},={r10},={r11},={xmm0},", calls[4], StringComparison.Ordinal); // rsi once, as the output names it
-        Assert.Contains(",={xmm15},~{st},~{st(1)},", calls[4], StringComparison.Ordinal);
-        Assert.Contains(",~{mm7},~{dirflag},", calls[4], StringComparison.Ordinal);
+        Assert.Contains(",={xmm15},~{xmm16},", calls[4], StringComparison.Ordinal); // Rust 1.91's list: AVX-512's registers, which no operand names, as clobbers
+        Assert.Contains(",~{xmm31},~{k0},", calls[4], StringComparison.Ordinal);
+        Assert.Contains(",~{k7},~{st},~{st(1)},", calls[4], StringComparison.Ordinal);
+        Assert.Contains(",~{mm7},~{tmm0},", calls[4], StringComparison.Ordinal);
+        Assert.Contains(",~{tmm7},~{dirflag},", calls[4], StringComparison.Ordinal);
         Assert.Contains("\"={ax},={cx},={dx},={r8},={r9},={r10},={r11},={xmm0},", calls[5], StringComparison.Ordinal); // no rsi, no rdi
-        Assert.Contains(",={xmm5},~{st},", calls[5], StringComparison.Ordinal); // xmm6 to xmm15 kept
+        Assert.Contains(",={xmm5},={xmm6},", calls[5], StringComparison.Ordinal); // xmm6 to xmm15 too, whose upper halves no callee keeps
+        Assert.Contains(",={xmm15},~{xmm16},", calls[5], StringComparison.Ordinal);
 
         const string naked = "long Nine() => 9\n\nnaked long Forward() {\n    asm(\"jmp {f}\", f = sym Nine)\n}\n\nprint(Forward())\n";
         const string symbol = @"\\22[^\\""]*\bForward\b[^\\""]*\\22"; // the function's symbol, quoted as LLVM writes a quote in a string
@@ -320,6 +324,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.True(Regex.IsMatch(module, typed), $"{target}:\n{module}");
             Assert.Matches($@"module asm ""{symbol}:""", module);
             Assert.Contains("module asm \".p2align 4\"", module, StringComparison.Ordinal);
+            Assert.Contains("module asm \".popsection\"", module, StringComparison.Ordinal); // the section the module's assembly was in, given back
+            Assert.Contains(target == Target.Windows ? "module asm \".pushsection .text,\\22xr\\22\"" : "module asm \".pushsection .text\"", module, StringComparison.Ordinal);
             Assert.Matches(@"module asm ""jmp \\22[^\\""]*\bNine\b[^\\""]*\\22""", module); // the `sym` as the symbol it names
             Assert.Matches(@"@llvm\.compiler\.used = appending global \[1 x ptr\] \[ptr @""[^""]*\bNine\b[^""]*""\]", module);
             Assert.Matches(@"(?m)^declare dso_local i64 @""[^""]*\bForward\b[^""]*""\(\)$", ir);
@@ -341,7 +347,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
             Assert.Null(arm.Program);
             var d = Assert.Single(arm.Diagnostics.Items);
             Assert.Equal((DiagnosticKind.NotSupported, line), (d.Kind, d.Line));
-            Assert.NotNull(Compile(text, toolchain.Runtime, testBuild: true, "raw").Program);
+            Assert.NotNull(Builder.Compile(SourceText.FromString("program.kz", text), ["raw"], toolchain.Runtime, testBuild: true, cpu: () => Cpu.Baseline).Program); // x86-64's baseline, whatever machine runs the test
         }
     }
 

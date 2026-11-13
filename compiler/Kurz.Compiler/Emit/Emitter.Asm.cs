@@ -19,8 +19,15 @@ public sealed partial class Emitter
     /// <summary>The functions and the state a <c>naked</c> body names by <c>sym</c>, which only the module's assembly reaches, kept in <c>llvm.compiler.used</c>.</summary>
     private readonly SortedSet<string> asmUsed = new(StringComparer.Ordinal);
 
-    /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and the place its output goes to.</summary>
-    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, string? Input, KurzType? InputType, string? Place, KurzType? PlaceType);
+    /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes.</summary>
+    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, string? Input, KurzType? InputType, AsmOutput? Output);
+
+    /// <summary>
+    /// R11: where an output goes: what a pointer points to, <c>*p</c> or <c>p[i]</c>, found where its operand stands; or a variable, or a
+    /// path of fields of a <c>data</c> value in one (M4), whose place is found when the output is stored, after the call, since the place
+    /// of a path into a block is a copy of the block that a later operand, or the place of another output, can let go of.
+    /// </summary>
+    private sealed record AsmOutput(KurzType Type, string? Pointer, NameExpression? Variable, List<MemberAccess> Members);
 
     /// <summary>R11: the classes of x86-64 a value goes into, each with LLVM's constraint letter.</summary>
     private static readonly Dictionary<string, string> AsmClassConstraints = new(StringComparer.Ordinal)
@@ -32,14 +39,16 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// R11: an <c>asm</c> statement. Every operand's value is read and every output's place found in the order the operands are written,
-    /// as Rust evaluates them; the call then writes each output into its place. <c>options</c> map as Rust maps them: no
+    /// R11: an <c>asm</c> statement. Every operand's value is read, and every place an output writes through a pointer found, in the order
+    /// the operands are written, as Rust evaluates them; the call then writes each output into its place, the place of a variable or of a
+    /// path of fields found as the output is stored, so that no place is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
     /// <c>sideeffect</c> under <c>pure</c>, no <c>alignstack</c> under <c>nostack</c>, AT&amp;T's dialect under <c>att_syntax</c> and Intel's
     /// otherwise, no clobber of the flags under <c>preserves_flags</c>, no clobber of memory under <c>nomem</c>, the call's attributes
     /// <c>willreturn</c> and <c>memory(none)</c> under <c>pure</c> and <c>nomem</c>, or <c>memory(read)</c> under <c>pure</c> and <c>readonly</c>,
     /// <c>memory(inaccessiblemem: readwrite)</c> under <c>nomem</c> alone, and the end of the block after the call under <c>noreturn</c>.
     /// <c>clobber_abi</c> adds, as Rust does, an output that is let go of for each register the ABI does not keep across a call and no
-    /// operand names, and a clobber for each of the x87 and MMX registers. A <c>label</c> operand is not laid out.
+    /// output names, and a clobber for each one no operand of Kurz can name (<see cref="OnlyClobbered"/>). A <c>label</c> operand is not
+    /// laid out.
     /// </summary>
     private void EmitAsm(AsmStatement a)
     {
@@ -84,11 +93,11 @@ public sealed partial class Emitter
         var outputs = new List<(string Constraint, string Type, AsmRegister? Register)>();
         var outputIndex = new Dictionary<AsmOperand, int>(ReferenceEqualityComparer.Instance);
         var written = new HashSet<string>(StringComparer.Ordinal); // the registers an operand's output names, which no clobber names again
-        foreach (var r in registers.Values)
+        foreach (var o in a.Operands)
         {
-            if (r.Operand.Word == "in")
+            if (!registers.TryGetValue(o, out var r) || o.Word == "in")
             {
-                continue;
+                continue; // the outputs in the order the operands are written
             }
 
             if (ExplicitBase(r.Operand) is { } b)
@@ -103,9 +112,9 @@ public sealed partial class Emitter
         var clobbers = new List<string>();
         foreach (var register in abis.SelectMany(AbiClobbers).Distinct(StringComparer.Ordinal))
         {
-            if (register.StartsWith("st", StringComparison.Ordinal) || register.StartsWith("mm", StringComparison.Ordinal))
+            if (OnlyClobbered(register))
             {
-                clobbers.Add($"~{{{register}}}"); // a class Rust takes only as a clobber
+                clobbers.Add($"~{{{register}}}");
             }
             else if (written.Add(register))
             {
@@ -183,10 +192,12 @@ public sealed partial class Emitter
             var result = fn.Value(call);
             for (var i = 0; i < outputs.Count; i++)
             {
-                if (outputs[i].Register is { Place: { } place } r)
+                if (outputs[i].Register is { Output: { } target } r)
                 {
                     var value = outputs.Count == 1 ? result : fn.Value($"extractvalue {resultType} {result}, {i.ToString(CultureInfo.InvariantCulture)}");
-                    fn.Emit($"store {Ir(r.PlaceType!)} {FromAsmOperand(value, r.OperandType, r.PlaceType!)}, ptr {place}");
+                    var place = target.Pointer
+                        ?? (target.Members.Count == 0 ? Place(Model.VariableOf(target.Variable!), target.Variable!.Line) : WritablePath(target.Variable!, target.Members).Place);
+                    fn.Emit($"store {Ir(target.Type)} {FromAsmOperand(value, r.OperandType, target.Type)}, ptr {place}");
                 }
             }
         }
@@ -204,29 +215,40 @@ public sealed partial class Emitter
         var registerClass = argument.Quoted ? Checker.ExplicitRegisterOf(argument.Text).Class : argument.Text;
         var constraint = argument.Quoted ? $"{{{Checker.ExplicitRegisterOf(argument.Text).Base}}}" : AsmClassConstraints[registerClass];
         var reads = o.Word is "in" or "inout" or "inlateout";
-        var output = o.Word == "in" ? null : o.Output ?? o.Value;
+        var written = o.Word == "in" ? null : o.Output ?? o.Value;
         string? input = null;
         KurzType? inputType = null;
-        if (reads)
+        AsmOutput? output = null;
+        if (o.Word is "inout" or "inlateout" && o.Output is null)
         {
-            inputType = TypeOf(o.Value!);
-            input = EmitExpression(o.Value!);
+            // an `inout` without `=>` reads and writes one place: a place through a pointer is found once, and the input loaded from it
+            output = AsmOutputOf(written!);
+            inputType = output.Type;
+            input = output.Pointer is { } pointer ? fn.Value($"load {Ir(inputType)}, ptr {pointer}") : EmitExpression(o.Value!);
+        }
+        else
+        {
+            if (reads)
+            {
+                inputType = TypeOf(o.Value!);
+                input = EmitExpression(o.Value!);
+            }
+
+            if (written is not null && !(Unwrap(written) is NameExpression { Name: "_" }))
+            {
+                output = AsmOutputOf(written);
+            }
         }
 
-        string? place = null;
-        KurzType? placeType = null;
-        if (output is not null && !(Unwrap(output) is NameExpression { Name: "_" }))
-        {
-            placeType = TypeOf(output);
-            place = AsmPlace(output);
-        }
-
-        var operandType = AsmOperandType(placeType ?? inputType, registerClass);
-        return new AsmRegister(o, registerClass, constraint, operandType, input is null ? null : ToAsmOperand(input, inputType!, operandType), inputType, place, placeType);
+        var operandType = AsmOperandType(output?.Type ?? inputType, registerClass);
+        return new AsmRegister(o, registerClass, constraint, operandType, input is null ? null : ToAsmOperand(input, inputType!, operandType), inputType, output);
     }
 
-    /// <summary>R11: the place an output writes: a variable, a path of fields of a <c>data</c> value in one (M4), or what a pointer points to.</summary>
-    private string AsmPlace(Expression output)
+    /// <summary>
+    /// R11: where an output writes (<see cref="AsmOutput"/>): what a pointer points to, whose place this finds; a variable, or a path of
+    /// fields of a <c>data</c> value in one (M4), whose place the store finds after the call.
+    /// </summary>
+    private AsmOutput AsmOutputOf(Expression output)
     {
         var members = new List<MemberAccess>();
         var root = Unwrap(output);
@@ -236,12 +258,12 @@ public sealed partial class Emitter
             root = Unwrap(m.Target);
         }
 
+        var type = TypeOf(output);
         return root switch
         {
-            NameExpression n when members.Count == 0 => Place(Model.VariableOf(n), n.Line),
-            NameExpression n => WritablePath(n, members).Place,
-            UnaryExpression { Operator: TokenKind.Star } u when members.Count == 0 => EmitExpression(u.Operand),
-            IndexExpression i when members.Count == 0 && TypeOf(i.Target) is PointerType p => ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index),
+            NameExpression n => new AsmOutput(type, null, n, members),
+            UnaryExpression { Operator: TokenKind.Star } u when members.Count == 0 => new AsmOutput(type, EmitExpression(u.Operand), null, members),
+            IndexExpression i when members.Count == 0 && TypeOf(i.Target) is PointerType p => new AsmOutput(type, ElementPointer(EmitExpression(i.Target), p.Pointee, i.Index), null, members),
             _ => throw Unsupported(output.Line, $"an `asm` output into {ExpressionName(output)} (R11)"),
         };
     }
@@ -341,22 +363,36 @@ public sealed partial class Emitter
         return llvm is null ? $"${{{number}}}" : $"${{{number}:{llvm}}}";
     }
 
-    /// <summary>R11: the general registers the System V ABI does not keep across a call, as Rust lists them for x86-64.</summary>
+    /// <summary>R11: the general registers the System V ABI does not keep across a call, as Rust lists them for x86-64 (<see cref="AbiClobbers"/>).</summary>
     private static readonly string[] SysVGeneralClobbers = ["ax", "cx", "dx", "si", "di", "r8", "r9", "r10", "r11"];
 
-    /// <summary>R11: the general registers the Windows x64 ABI does not keep across a call, as Rust lists them for x86-64.</summary>
+    /// <summary>R11: the general registers the Windows x64 ABI does not keep across a call, as Rust lists them for x86-64 (<see cref="AbiClobbers"/>).</summary>
     private static readonly string[] Win64GeneralClobbers = ["ax", "cx", "dx", "r8", "r9", "r10", "r11"];
 
-    /// <summary>R11: the registers an ABI of <c>clobber_abi</c> does not keep across a call, as Rust lists them for x86-64 without its feature classes.</summary>
+    /// <summary>
+    /// R11: the registers an ABI of <c>clobber_abi</c> does not keep across a call, as Rust 1.91 lists them for x86-64
+    /// (<c>rustc_target/src/asm/mod.rs</c>, <c>X86_64SysV</c> and <c>X86_64Win</c>): the general registers of the convention, <c>xmm0</c> to
+    /// <c>xmm15</c> on Windows x64 too, whose upper halves in <c>ymm6</c> to <c>ymm15</c> no callee keeps, <c>xmm16</c> to <c>xmm31</c> and
+    /// <c>k0</c> to <c>k7</c> of AVX-512, the x87 and MMX registers, and <c>tmm0</c> to <c>tmm7</c> of AMX.
+    /// </summary>
     private IEnumerable<string> AbiClobbers(string abi)
     {
         var win64 = abi is "win64" or "efiapi" || (abi is "C" or "system" && target == Target.Windows);
         var general = win64 ? Win64GeneralClobbers : SysVGeneralClobbers;
-        var vectors = Enumerable.Range(0, win64 ? 6 : 16).Select(i => $"xmm{i.ToString(CultureInfo.InvariantCulture)}");
+        static IEnumerable<string> Numbered(string prefix, int count) => Enumerable.Range(0, count).Select(i => prefix + i.ToString(CultureInfo.InvariantCulture));
         var x87 = Enumerable.Range(0, 8).Select(i => i == 0 ? "st" : $"st({i.ToString(CultureInfo.InvariantCulture)})");
-        var mmx = Enumerable.Range(0, 8).Select(i => $"mm{i.ToString(CultureInfo.InvariantCulture)}");
-        return general.Concat(vectors).Concat(x87).Concat(mmx);
+        return general.Concat(Numbered("xmm", 32)).Concat(Numbered("k", 8)).Concat(x87).Concat(Numbered("mm", 8)).Concat(Numbered("tmm", 8));
     }
+
+    /// <summary>
+    /// R11: a register of <c>clobber_abi</c> that no operand of Kurz can name, written as a clobber: the x87, MMX and AMX tile registers,
+    /// which Rust takes only as a clobber, and <c>xmm16</c> to <c>xmm31</c> and <c>k0</c> to <c>k7</c>, whose classes the checker reads for no
+    /// operand. Rust writes these two as a clobber where the CPU lacks AVX-512 and as an output let go of where it has it, which tells LLVM
+    /// the same where no operand can stand in the register (<c>rustc_codegen_llvm/src/asm.rs</c>).
+    /// </summary>
+    private static bool OnlyClobbered(string register) =>
+        register.StartsWith("st", StringComparison.Ordinal) || register.StartsWith("mm", StringComparison.Ordinal) || register.StartsWith("tmm", StringComparison.Ordinal)
+        || register.StartsWith('k') || (register.StartsWith("xmm", StringComparison.Ordinal) && int.Parse(register.AsSpan(3), CultureInfo.InvariantCulture) >= 16);
 
     /// <summary>R11: the value of a <c>const</c> operand, written into the template as its digits.</summary>
     private string ConstText(AsmOperand o) =>
@@ -475,9 +511,9 @@ public sealed partial class Emitter
         var lines = new List<string>();
         if (target == Target.Windows)
         {
-            lines.AddRange([".text", $".def \"{symbol}\"", ".scl 3", ".type 32", ".endef", ".p2align 4", $"\"{symbol}\":", ".intel_syntax noprefix"]);
+            lines.AddRange([".pushsection .text,\"xr\"", $".def \"{symbol}\"", ".scl 3", ".type 32", ".endef", ".p2align 4", $"\"{symbol}\":", ".intel_syntax noprefix"]);
             lines.AddRange(text.Split('\n'));
-            lines.Add(".att_syntax prefix");
+            lines.AddRange([".att_syntax prefix", ".popsection"]);
         }
         else
         {

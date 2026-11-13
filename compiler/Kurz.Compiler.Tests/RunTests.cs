@@ -96,7 +96,8 @@ public sealed class Toolchain : IDisposable
 
 /// <summary>
 /// Every corpus case that expects a run (<c>output</c> or <c>throws</c>), built by the emitter and the pinned clang and run on this
-/// machine. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
+/// machine, an x86-64 one, as the gates image and the Windows job are: on a 64-bit Arm machine the emitter says <c>not supported</c> to
+/// an <c>asm</c> and a <c>naked</c> function (R11, R12), whose cases this runs. A case the checker reads in full and the emitter lays out prints exactly the header's lines on standard output; an
 /// <c>output</c> case then exits with 0 and writes nothing on standard error; a <c>throws</c> case exits with 1, and its error stream
 /// is the one line <c>error: &lt;id&gt; at &lt;file&gt;:&lt;n&gt;</c> of the design record's section 6, with the header's id and line and
 /// the case's path under <c>corpus/</c> as the file, or for <c>thrown</c> that line ending in a colon with the thrown text below it, and
