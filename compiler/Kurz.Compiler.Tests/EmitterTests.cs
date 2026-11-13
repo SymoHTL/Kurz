@@ -359,7 +359,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // took, and each one whose addition clang refuses is `asm-refused` at its line, an inline one and a `naked` function's, in the
         // order of the lines, each under its rule; one that assembles is named by none, and the program without the refused instructions
         // builds (the controls). Of two `asm`s that define one label, the second is named, as LLVM refuses it in the second's text, and
-        // an `asm` between them that assembles is named by none
+        // an `asm` between them that assembles is named by none; those are the `asm`s of `naked` functions, as an inline `asm` defines no
+        // named label (R11, the owner, 2026-11-13, "Refuse as Rust")
         const string program = """
             mut long n = 1
             raw {
@@ -379,9 +380,10 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(compiled, "asm-refused"));
         Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 8)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "inc", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!, "asm-assembled")));
-        const string twice = "raw {\n    asm(\"twice:\", \"nop\")\n    asm(\"nop\")\n    asm(\"twice:\", \"nop\")\n}\n";
+        const string twice = "naked long One() {\n    asm(\"twice:\", \"mov eax, 1\", \"ret\")\n}\n\nnaked long Two() {\n    asm(\"mov eax, 2\", \"ret\")\n}\n\n"
+            + "naked long Three() {\n    asm(\"twice:\", \"mov eax, 3\", \"ret\")\n}\n\nprint(One() + Two() + Three())\n";
         refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(twice, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-twice"));
-        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.Equal([(ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
     }
 
     [Fact]

@@ -2192,7 +2192,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`, `not-visible`, `reference-cycle`,
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
-`string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
+`string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
