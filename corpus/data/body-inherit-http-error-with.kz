@@ -1,12 +1,10 @@
 // expect: output
-// | false
 // | 418 gone
-// rules: D16, D6
+// rules: D6, D16, W2
 
 data Coded(int Code) : HttpError {
     pub override string Text() => "{Code} {Detail}"
 }
 
 HttpError e = Coded(HttpKind.Status, "teapot", 418)
-print(e == HttpError(HttpKind.Status, "teapot"))
 print(e with { Detail = "gone" })

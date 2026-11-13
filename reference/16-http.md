@@ -200,10 +200,13 @@ the same comment, "Every one"): its text is that of the nearest `override` of `T
 chain of bases, its own among them, and `HttpError`'s, its `Detail`, where no type of the chain
 overrides it, and a `Text()` of its own without `override` is `hides-member` (D16, K7).
 *(assumed, §12: the nearest `override` along the chain, as D16 gives the text of a value of a chain;
-that no call of `std/` takes an `HttpError` as an argument and acts on its type, and none but a
-generic container's gives one the program made back to it, while a derived value does reach `std/`
-in a `List` or a `Map` that holds it and gives it back as it took it, and in `string.Join` (X6),
-which takes its text as `print` does)*
+that `std/` acts on the type of an `HttpError` it is given only where §4 does for a value of any
+chain, in its text, its `==` and its hash (D15, D16): `print`, a hole of an interpolated string (L6)
+and `string.Join` (X6) take its text through its `virtual` `Text()`, a `List`'s `IndexOf` (X9)
+compares it by `==`, and a `Map` compares and hashes it as a key (M9), each reading the number of
+the type the value holds; that no other call of `std/` acts on its type, and none but a generic
+container's gives one the program made back to it, a `List` or a `Map` giving a derived value back
+as it took it)*
 
 Case: [http/http-error-kind.kz](../corpus/http/http-error-kind.kz)
 
@@ -236,6 +239,16 @@ print(Plain(HttpKind.Protocol, "short", 1))
 HttpError t = Tagged(HttpKind.Status, "clash", 409, "twice")
 print(t)
 print(t.Text())
+```
+
+Case: [data/body-inherit-http-error-with.kz](../corpus/data/body-inherit-http-error-with.kz)
+```kurz
+data Coded(int Code) : HttpError {
+    pub override string Text() => "{Code} {Detail}"
+}
+
+HttpError e = Coded(HttpKind.Status, "teapot", 418)
+print(e with { Detail = "gone" })
 ```
 
 ### W3 (decided, §12) A server's request sent to another actor moves with its body
