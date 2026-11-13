@@ -706,8 +706,8 @@ those of Rust's experimental support for them, `local` on wasm32 and `reg`, `fre
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
 marks them)*. The operands' values are read, and the places outputs write through a pointer
-(`*p`, `p[i]`) found, in the order the operands are written, but an `inout`'s input, which is loaded
-when the `asm` runs, and an `inout` loads from and stores into the one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler
+(`*p`, `p[i]`) found, in the order the operands are written, except an `inout`'s input, which is loaded
+when the `asm` runs; an `inout` loads from and stores into the one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler
 lowers the operands of `asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3
 marks them)*. An `inout` loads its input when the `asm` runs, after every operand ran, one into a
 variable, or into a path of fields from one, from the place the variable has then, and one through a
@@ -726,47 +726,62 @@ function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as �
 `asm` the optimiser drops before the assembler reads it raises nothing, so a `pure` `asm` whose outputs
 nothing reads is `asm-refused` in a test build, which keeps its call, and builds in a release build,
 which drops it, as Rust's builds differ so (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). The
-build assembles the program's `asm`s together in the order LLVM meets them, the order the compiler
-writes them, in one file as across files: the `naked` functions' assembly first (R12), in the order the
-compiler writes the functions, then the `asm` statements, in the order of the functions that hold
-them, a guarded block's (R18) before the function it stands in, and of the statements in each; each
-beside those before it that the assembler took, and each one whose addition
-the assembler refuses is `asm-refused`, once, in that order, so that the line named is the one LLVM
-refuses: one it refuses alone, and of two `naked` functions that define one label the one LLVM meets
-second, whose label the assembler refuses beside the first's, the earlier line's where the two are
-called out of the order of their lines, where Rust's compiler, which gives a naked function's assembly
-no `!srcloc`, names neither (§3, the owner, 2026-11-13, pull request 530, comment 6855725580). The
+build assembles the program's `asm`s together in the order LLVM meets them, the order of the code its
+code generator writes, in one file as across files: the `naked` functions' assembly first (R12), in the
+order the compiler writes the functions, then the calls of the `asm` statements, in a test build as the
+compiler writes them, in the order of the functions that hold them, a guarded block's (R18) before the
+function it stands in, and of the statements in each, and in a release build as its code generator
+holds them (§3, the owner, 2026-11-13, pull request 532, comment 6860019854); each beside those before
+it that the assembler took, and each one whose addition the assembler refuses is `asm-refused` at the
+line of its `asm`, a line named once however many of its copies the assembler refuses, in that order,
+so that the line named is the one LLVM refuses: one it refuses alone, and of two `naked` functions that
+define one label the one LLVM meets second, whose label the assembler refuses beside the first's, the
+earlier line's where the two are first used out of the order of their lines, where Rust's compiler,
+which gives a naked function's assembly no `!srcloc`, names neither (§3, the owner, 2026-11-13, pull
+request 530, comment 6855725580). The copies are assembled beside a label for each symbol the program
+defines (R12), so that a `naked` function's label that is one of them is refused there and named at the
+line of its `asm`, where LLVM refuses it with no line of the template *(assumed: the build's mechanism,
+which no answer named, as §3 marks it)*. The
 compiler writes the top-level code's function first, then every other function in the order its first
 use, a call, a `sym` operand or a function value, is reached, those the top-level code reaches before
 those their own text reaches, each standing where its text ends, and a function no use reaches not at
 all, so that the `asm` of a `naked` function nothing uses is not assembled *(assumed: this compiler's
-order, which no answer named, as §3 marks it)*. Where clang refuses
-a release build, whose optimiser can copy the call of an `asm`, as where it inlines a function into two
-callers, or drop it, the build marks each `asm` call with its line and assembles one copy for each call
-the optimised module still holds, in the order that module holds them, so that the line named is the
-one LLVM refuses, the second copy of a call the optimiser copied among them, and an `asm` the optimiser
-dropped is named by none; a test build assembles its copies of the program as the compiler wrote it
-(§3, the owner, 2026-11-13, #532, comment 6860019854, "Copies from optimised IR", against R11
+order, which no answer named, as §3 marks it)*. The build
+marks every `asm` call with its line, in a test build as in a release build. Where clang refuses a
+release build, whose optimiser can copy the call of an `asm`, as where it inlines a function into two
+callers, or drop it, and whose code generator can copy it, as where it duplicates the block that holds
+it into the blocks before it, the build assembles one copy for each call the release build still holds
+when its code is generated, in the order it holds them, so that the line named is the one LLVM refuses,
+every copy after the first of a call LLVM copied among them, and an `asm` the optimiser dropped is
+named by none; a test build assembles its copies of the program as the compiler wrote it (§3, the
+owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR", against R11
 narrowed for a release build, so that an `asm` the optimiser copies or drops can stay clang's failure
 with no line, at the cost of a decided rule narrowed and a failure of a release build alone that names
 no line of the program; the cost is paid by a refused release build alone: the optimised IR is written
 and read again). The mark is a `!srcloc` on the call that holds the line of the `asm`, as Rust's
-compiler puts one on each call of inline assembly, and a copy LLVM inlines keeps it *(assumed: the mark,
-the build's mechanism, as §3 marks it)*. Two `asm`s that define one label by a name the reading of
+compiler puts one on each call of inline assembly where the build asks for neither LTO nor bitcode, and
+every copy LLVM makes keeps it, so the build reads the calls of a release build from the machine code
+its code generator holds once it has placed the blocks, the last of its passes that copies one, in
+place of the optimised IR, at the same one run of clang, as clang given IR maps no `!srcloc`
+*(assumed: the mark and the reading, the build's mechanism, which no answer named, as §3 marks them)*.
+Where the assembler refuses no copy, the failure stays clang's, which names no line of the program
+*(assumed: the build's mechanism, as §3 marks it)*. Two `asm`s that define one label by a name the reading of
 labels takes are those of two `naked` functions (R12), since such a label of an inline `asm` is
 `named-asm-label` (§3, the owner, 2026-11-13); two inline `asm`s can still define one label the reading
 takes for none, a quoted one, `"twice":`, or one after a comment, `/* c */ twice:`, and one symbol a
 directive defines, `.equiv twice, 1`, as Rust's lint leaves them, and the one the assembler refuses
 beside those before it is `asm-refused` in LLVM's order *(assumed: Rust's reading of a template, as §3
 marks it)*. Across the files of a
-program the `asm`s are named in the order LLVM meets them, the order the compiler writes the
-functions, and no order of the source is stated, as Rust's compiler reports the errors of LLVM as they
-come (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). A label an `asm`'s template
+program the `asm`s are named in the order LLVM meets them, the order of the code its code generator
+writes, and in no order of the files, by their paths or by their `use` lines, as Rust's compiler
+reports the errors of LLVM as they come (§3, the owner, 2026-11-13, pull request 530, comment
+6854386584). A label an `asm`'s template
 defines by name, `again:`, is the compile error `named-asm-label` at the line of the label, in a `"""` block
 the label's own line, and local labels, `2:` with `2b` or `2f`, take its place, since LLVM may copy an
 `asm`, as where a function is inlined into two callers, and the copy defines the label a second time; on
-x86 and x86-64 *(assumed: the answer's "On x86" read as the family, x86-64 among it, as Rust's
-`binary_asm_labels` takes both, which the answer did not name)* a label of only the digits 0 and 1, `1:`
+x86 and x86-64 *(assumed: the answer's "On x86", pull request 530, comment 6853075322, read as the
+family, x86-64 among it, as Rust's `binary_asm_labels` takes both, which the answer did not name, as §3
+marks it)* a label of only the digits 0 and 1, `1:`
 among them, is the compile error `binary-asm-label`,
 since the assembler reads its use, `1b`, as a binary number; R12 states which labels the `asm` of a
 `naked` function may define; each as Rust's lints `named_asm_labels` and `binary_asm_labels` refuse them (§3, the owner,
@@ -774,12 +789,18 @@ since the assembler reads its use, `1b`, as a binary number; R12 states which la
 each line break and `;`, a statement's text from `//` on is set aside, and each text before a `:` of a
 statement, trimmed, from the statement's start or from the label before it, is a label where it starts
 with an ASCII letter, `.` or `_` and goes on with ASCII letters, digits, `_` and `$`, or where it holds a
-placeholder outside `options(raw)`, `{}:` or the `{0` of `{0:e}`, both named, its characters outside the
-braces those of a name and any but `{` inside them, so that `inc {0` of `inc {0:e}` defines none, or where
-it holds the digits 0 and 1 alone, binary, the first such text that is no label ending the statement's
-labels, so that `2bar: done:` defines none; a binary label is an error in Intel's syntax alone, so that
-`options(att_syntax)` takes `1:`; and an `asm` one of whose templates cannot be read, `asm-operand`, is
-read for no label, as Rust's `asm!` is then no expression *(assumed: Rust's reading of a template, its exemption of `att_syntax`
+placeholder outside `options(raw)`, `{}:` or the `{0` of `{0:e}`, both named, and the text before its
+first `{` is empty, a name or the digits 0 and 1 alone, its characters after that `{` any but `{` inside
+the braces and those a name goes on with, ASCII letters, digits, `_` and `$`, outside them, so that
+`1{0}:` and `a{0}b:` define a label and `2{0}:` and `inc {0` of `inc {0:e}` none, or where it holds the
+digits 0 and 1 alone, binary, the first such text that is no label ending the statement's labels, so
+that `2bar: done:` defines none; a binary label is an error in Intel's syntax alone, so that
+`options(att_syntax)` takes `1:`; a template cannot be read where a `{` is not closed or a `}` closes
+none, or where a placeholder holds neither a position nor a name, `{a b}`, each `asm-operand`, and an
+`asm` one of whose templates cannot be read is read for no label and for no template after that one,
+so that it raises one such `asm-operand`, as Rust's `asm!` is then no expression and Rust's reading of
+its templates stops at that one, while the other breaches of `asm-operand`, a name no operand has,
+`{zz}`, among them, leave its labels read *(assumed: Rust's reading of a template, its exemption of `att_syntax`
 and the ids' names, which no answer named, as §3 marks them)*. A
 register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
@@ -1076,11 +1097,14 @@ only the digits 0 and 1 *(assumed: binary labels within the exemption, as §3 ma
 function with type parameters is one no rule states, and the compiler reads none; where one is read,
 its `asm`, which would be emitted once for each copy, is read for its labels as an inline `asm` is (R11),
 as Rust exempts a naked function that is not generic *(assumed: a function with type parameters
-outside the exemption, as §3 marks it)*. A label of its `asm` that is a symbol of the program is
-`asm-refused` (R11); the compiler names the program's symbols, but `main`, which the C library's start
-calls, and the C functions a program declares (R16), so which other label is one is the compiler's, as
-Rust's compiler mangles the symbols of its items but those of `#[no_mangle]` ones, and no case rests on
-one *(assumed: Rust's way, which no answer named, as §3 marks it)*. A body
+outside the exemption, as §3 marks it)*. A label of its `asm` that is a symbol the program defines is
+`asm-refused` (R11): those symbols are `main`, which the C library's start calls, and the functions,
+globals and constants the compiler writes, and the compiler names all of them but `main`, so which other
+label is one is the compiler's, as Rust's compiler mangles the symbols of its items but those of
+`#[no_mangle]` ones, and no case rests on one; a label with the name of a C function the program
+declares (R16) is no such symbol, and the assembler takes it, as Rust's compiler hands LLVM a naked
+function's assembly as module-level assembly, beside which LLVM takes a label of a symbol the module
+declares *(assumed: Rust's way, which no answer named, as §3 marks it)*. A body
 other than one `asm`, or an operand there other than `sym` and `const`, is the compile error
 `naked-body`, and instructions that fall through the function's end are a misuse of `raw` code, which
 no compiler checks *(assumed: as §3 marks them)*. `naked` stands before a function at the top level
