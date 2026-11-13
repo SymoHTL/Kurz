@@ -1401,7 +1401,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`; the call of an
   `asm` of the program carries its line as its mark, `!srcloc`, in a test build as in a release build, as rustc puts one on each call
-  where the build uses no LTO, the thin-local LTO of its default optimised build of several codegen units included, and needs no bitcode. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
+  where the build uses no LTO, not even the thin-local LTO of its default optimised build of several codegen units, and needs no bitcode. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
   `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes through a pointer (`*p`,
   `p[i]`) found once, in the order the operands are written, but the input of an `inout` without `=>`, which is loaded just before the call; an output is stored
   into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so

@@ -764,8 +764,8 @@ narrowed for a release build, so that an `asm` the optimiser copies or drops can
 with no line, at the cost of a decided rule narrowed and a failure of a release build alone that names
 no line of the program; the cost is paid by a refused release build alone: the optimised IR is written
 and read again). The mark is a `!srcloc` on the call that holds the line of the `asm`, as Rust's
-compiler puts one on each call of inline assembly where the build uses no LTO, the thin-local LTO of its
-default optimised build of several codegen units included, and needs no bitcode, and
+compiler puts one on each call of inline assembly where the build uses no LTO, not even the thin-local LTO of its
+default optimised build of several codegen units, and needs no bitcode, and
 every copy LLVM makes keeps it, so the build reads the calls of a release build from the machine IR
 its code generator holds once it has placed the blocks, the last of its passes that copies one, in
 place of the optimised IR, at the same one run of clang, as clang given IR maps no `!srcloc`

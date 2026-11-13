@@ -214,7 +214,7 @@ public sealed partial class Emitter
             asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
 
             // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly where the build uses no LTO,
-            // the thin-local LTO of its default optimised build of several codegen units included, and needs no bitcode (rustc_codegen_llvm's
+            // not even the thin-local LTO of its default optimised build of several codegen units, and needs no bitcode (rustc_codegen_llvm's
             // `asm.rs`, rustc_session's `Session::lto`), which every copy LLVM makes keeps: by it the build reads which calls
             // the code generator of a release build holds (Builder.Build)
             call += $", !srcloc !{{i64 {a.Line.ToString(CultureInfo.InvariantCulture)}}}";

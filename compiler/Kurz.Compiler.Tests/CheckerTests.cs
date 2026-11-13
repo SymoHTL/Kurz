@@ -2200,7 +2200,7 @@ public sealed class CheckerTests
     // empty, a name or the digits 0 and 1 alone, `1{0}:`, and none where it starts otherwise, `2{0}:`, and outside the braces a `{` opens
     // another placeholder, `a{0}{1}:`; in a `"""` block the error stands at the label's own line; and an `asm` one of whose templates
     // cannot be read, `{x // }`, `{` and `{a b}` among them, is read for no label, as Rust's `asm!` is then no expression
-    // (rustc_builtin_macros' `asm.rs`), so its `asm-operand` stands alone, and for no template after it, as Rust's loop over the templates
+    // (rustc_builtin_macros' `asm.rs`), so its `asm-operand` stands in place of the label's error, and for no template after it, as Rust's loop over the templates
     // returns at the first it cannot read, so `{` and `}` are one `asm-operand`; white space at the end of a placeholder's text before its
     // `:` or its `}` is set aside, as Rust's parser sets it aside after the operand (rustc_parse_format's `argument`), so `{ }:` and
     // `{a }:` are read and name a label (assumed: Rust's reading of a template, as section 3 marks it)
