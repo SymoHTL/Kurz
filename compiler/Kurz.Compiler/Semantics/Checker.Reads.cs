@@ -215,7 +215,7 @@ public sealed partial class Checker
 
     /// <summary>What a call holds while its arguments run: the receiver of a method, or the value of a variable or a field it calls (F11).</summary>
     private IReadOnlyList<Held> Callee(CallExpression c) =>
-        c.Callee is MemberAccess { Conditional: false } m && FieldOf(m) is null ? HeldBy(m.Target) : HeldBy(c.Callee);
+        c.Callee is MemberAccess { Conditional: false } m && (FieldOf(m) is null || (model.HasCall(c) && model.CallOf(c).Kind == CallKind.DataMethod)) ? HeldBy(m.Target) : HeldBy(c.Callee);
 
     /// <summary>The field of a data value a member names, or null for any other member.</summary>
     private FieldSymbol? FieldOf(MemberAccess m) =>

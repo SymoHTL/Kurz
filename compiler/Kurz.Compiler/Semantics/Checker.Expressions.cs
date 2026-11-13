@@ -843,7 +843,7 @@ public sealed partial class Checker
             case DataType d:
                 {
                     var field = d.Symbol.Field(member);
-                    if (field is not null)
+                    if (field is not null && !MethodOverPrivateField(d.Symbol, member))
                     {
                         return DataFieldVisible(field, d.Symbol, line) ? new Typed(Types.Read(SubstituteData(d, field.Type))) : Typed.Error; // R3
                     }
