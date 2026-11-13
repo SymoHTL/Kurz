@@ -135,7 +135,7 @@ public static class ErrorIds
     public const string NativeNotAllowed = "native-not-allowed";
     public const string NativeType = "native-type";
     public const string AsmOperand = "asm-operand";
-    public const string AsmRefused = "asm-refused"; // the build's, once clang refuses an instruction of an `asm` (R11, R12)
+    public const string AsmRefused = "asm-refused"; // the build's, once clang refuses the program: an `asm` whose text the assembler refuses, alone or beside the copies taken before it (R11, R12)
     public const string NamedAsmLabel = "named-asm-label";
     public const string BinaryAsmLabel = "binary-asm-label";
     public const string Semicolon = "semicolon";

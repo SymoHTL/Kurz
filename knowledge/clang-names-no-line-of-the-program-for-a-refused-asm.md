@@ -1,6 +1,6 @@
 ---
 name: clang-names-no-line-of-the-program-for-a-refused-asm
-description: clang 23 given a module of LLVM IR names no line of the program for an instruction of inline assembly it refuses, with Rust's `!srcloc` on the call or without (2026-11-13), while its C front end, which writes the `!srcloc` and reads it back, names the line of the `asm` statement, of two that define one label the second; and at -O0 it drops a call of no effect whose value nothing uses before anything is assembled, a `pure` asm of `memory(none)` or `memory(read)`, with `sideeffect` or without, and it refuses a label of module-level assembly that is a symbol the module defines where it writes that definition, with no `<inline asm>` line, so the build reads the line itself by assembling the program's `asm`s together in the order of their lines, beside a label for each symbol the program defines, an `asm` statement's copy a call with an effect.
+description: clang 23 given a module of LLVM IR names no line of the program for an instruction of inline assembly it refuses, with Rust's `!srcloc` on the call or without (2026-11-13), while its C front end, which writes the `!srcloc` and reads it back, names the line of the `asm` statement, of two that define one label the second; and at -O0 it drops a call of no effect whose value nothing uses before anything is assembled, a `pure` asm of `memory(none)` or `memory(read)`, with `sideeffect` or without, and it refuses a label of module-level assembly that is a symbol the module defines where it writes that definition, with no `<inline asm>` line, so the build reads the line itself by assembling the program's `asm`s together in the order LLVM meets them, the order the compiler writes them, in one file as across files, beside a label for each symbol the program defines, an `asm` statement's copy a call with an effect in the copies' `main`, and in a release build a copy for each call the optimised module holds, found by the `!srcloc` the emitter puts on it, which clang's optimiser keeps on a copy it inlines (2026-11-13).
 metadata:
   type: reference
 ---
@@ -47,18 +47,35 @@ the order the compiler writes them (R11, R12; the owner, 2026-11-13, pull reques
 6855725580, "LLVM's order everywhere"), each beside those before it that clang took, and names each
 one whose addition clang refuses: one clang refuses alone, and of two `naked` functions that define
 one label the one LLVM meets second, which LLVM's order makes the earlier line's where the two are
-called out of the order of their lines (clang 23 refused the label of the function called last).
+called out of the order of their lines (`clang-23 -O0 -c` on the copies, 23.1.4, 2026-11-13, refused the label of the
+function whose first call comes later).
 It does so on clang's `<inline asm>` line and on `cannot compile inline asm` alone. The copies'
 `asm` statements are calls in the function `main`, which every program defines, in place of its
 label: a function of the copies' own, `kz.asm0`, is a symbol a program's directive can define too,
 and `.equiv kz.asm0, 1` in the copy of that name drew `<inline asm>:2:18: error: redefinition of
-'kz.asm0'`, a refusal the program's own build does not have (clang 23). The copy of an `asm` statement
+'kz.asm0'`, a refusal the program's own build does not have (`clang-23 -O0 -c` on the copies, 23.1.4, 2026-11-13). The copy of an `asm` statement
 is a call with `sideeffect` and no attribute but `nounwind`, whatever the `asm`'s options, and a
 `naked` function's copy is its module-level assembly: in a test build the program's own `pure` call
 is kept by the store of its value into its variable, and the copy's value has none. A release build
 drops a `pure` call whose outputs nothing reads before anything is assembled, so it names no refusal
 of it, where a test build of the same program is `asm-refused` (R11, the owner, 2026-11-13, pull
 request 530, comment 6854386584, "As Rust, builds differ").
+
+Where clang refuses a release build, the copies of the `asm` statements are made from the module the
+optimiser wrote (R11; the owner, 2026-11-13, #532, comment 6860019854, "Copies from optimised IR"): the
+emitter puts the line of each `asm` of the program on its call, `!srcloc !{i64 <line>}`, as Rust's
+compiler puts a `!srcloc` on each call, `Clang.Optimise` has clang write the module it optimises at the
+release build's options with `-S -emit-llvm`, and `Builder.Held` takes a copy for each call that module
+holds with a mark, in its order, the `asm` of the mark's line whose template and constraints the call
+has. A call the optimiser dropped gets no copy, and one it copied gets two, the second refused where its
+text defines a symbol. Seen on 2026-11-13 with clang 23.1.4: `clang-23 -O2 -S -emit-llvm` on a module
+whose function `bump`, with the call of `.equiv k, 1` marked `!srcloc !{i64 4}`, is called from two
+functions wrote the call into both, each with `!srcloc !0` and `!0 = !{i64 4}`; `clang-23 -O2 -c` on it
+wrote `<inline asm>:2:12: error: redefinition of 'k'`, and `clang-23 -O0 -c` built it. A global the IR
+declares, `@declared = external global i64` or `@weakly = extern_weak global i64`, beside module-level
+assembly that defines the labels `declared:` and `weakly:`, built (`clang-23 -O0 -c`), while the copies'
+label `"declared":` beside the same assembly drew `symbol 'declared' is already defined`, so such a
+global takes no label beside the copies.
 
 Gate: `compiler-tests`
 (`EmitterTests.An_instruction_the_assembler_refuses_is_asm_refused_at_the_line_of_its_asm` for the
@@ -72,6 +89,13 @@ for the copies' `main`,
 `EmitterTests.A_pure_asm_the_assembler_refuses_is_asm_refused_at_its_line_in_a_test_build_and_a_release_build`
 for the copy's effect,
 `EmitterTests.A_pure_asm_whose_output_nothing_reads_is_asm_refused_in_a_test_build_and_builds_in_a_release_build`
-for the release build that drops it). Whether a clang of another major reads a `!srcloc` from IR is read by no test:
+for the release build that drops it,
+`EmitterTests.An_asm_the_optimiser_of_a_release_build_copies_is_asm_refused_at_its_line_where_the_assembler_refuses_a_copy`
+and `EmitterTests.A_release_build_names_no_asm_its_optimiser_dropped_beside_one_the_assembler_refuses`
+for the copies of the optimised module,
+`EmitterTests.Of_two_asm_statements_at_one_line_a_release_build_copies_each_call_as_its_own_asm`
+for the template a copy is found by, and
+`EmitterTests.A_global_the_IR_declares_and_does_not_define_takes_no_label_beside_the_copies`
+for a declared global). Whether a clang of another major reads a `!srcloc` from IR is read by no test:
 a `judgment step` where the pinned major changes. Related:
 [[a-front-end-option-of-clang-does-not-reach-ir]].
