@@ -1,0 +1,10 @@
+// expect: output
+// | 2
+// allow: raw
+// rules: R11
+
+mut long n = 0
+raw {
+    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
+}
+print(n)

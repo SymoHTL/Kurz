@@ -1987,14 +1987,14 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.AssignImmutable, 3)], Errors("long count = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
         // Rust's template and words: `{{`, a position, a modifier, `options`, `clobber_abi`, `_` as an output, `=>`, `label`, `sym`
         // and `const`; the variables an operand and a `label` block use count as used
-        Clean("raw {\n    asm(\"{{}} {0}\", in(reg) 1)\n    asm(\"{0:e}\", in(reg) 1)\n    asm(\"nop\", options(nomem, nostack), clobber_abi(\"C\"))\n    asm(\"{x}\", x = out(reg) _)\n}", grants: "raw");
+        Clean("raw {\n    asm(\"{{}} {0}\", in(reg) 1)\n    asm(\"inc {0:e}\", in(reg) 1)\n    asm(\"nop\", options(nomem, nostack), clobber_abi(\"C\"))\n    asm(\"{x}\", x = out(reg) _)\n}", grants: "raw");
         Clean("long a = 1\nmut long b = 2\nlong c = 3\nraw {\n    asm(\"{x}\", x = inout(reg) a => b, options(pure, nomem))\n    asm(\"jmp {l}\", l = label {\n        print(c)\n    })\n}\nprint(b)", grants: "raw");
         Clean("void G() {\n}\n\nraw {\n    asm(\"call {f}\", f = sym G)\n    asm(\"mov rax, {c}\", c = const 4)\n}", grants: "raw");
         // a breach of the template's rules is `asm-operand`, one for each defect, and a class or a modifier is read against x86-64
         Assert.Equal([(ErrorIds.AsmOperand, 3), (ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"add {x}, 1\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"nop\", r = inout(reg) count)\n}\nprint(count)", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 3)], Errors("mut long count = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(freg) count)\n}\nprint(count)", grants: "raw"));
-        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{0:h}\", in(reg) 1)\n}", grants: "raw"));
+        Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"inc {0:h}\", in(reg) 1)\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", options(fast))\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"nop\", clobber_abi(\"D\"))\n}", grants: "raw"));
         Assert.Equal([(ErrorIds.AsmOperand, 2)], Errors("raw {\n    asm(\"{x}\", x = in(reg) _)\n}", grants: "raw"));
@@ -2025,7 +2025,7 @@ public sealed class CheckerTests
     [InlineData("long n = 1\nraw {\n    asm(\"{s}\", s = sym n)\n}\nprint(n)", 3)] // `sym` no variable
     [InlineData("raw {\n    asm(\"}\")\n}", 2)] // a brace written twice
     [InlineData("raw {\n    asm(\"{\")\n}", 2)] // a brace closed
-    [InlineData("raw {\n    asm(\"{c:e}\", c = const 4)\n}", 2)] // a modifier after a register operand
+    [InlineData("raw {\n    asm(\"inc {c:e}\", c = const 4)\n}", 2)] // a modifier after a register operand
     [InlineData("raw {\n    asm(\"nop\", o = options(nostack))\n}", 2)] // `options` with no name
     [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a.Count)\n}\nprint(a)", 3)] // a field of a data value
     [InlineData("raw {\n    asm(\"nop\", options(pure, nomem))\n}", 2)] // `pure` an output
@@ -2093,7 +2093,7 @@ public sealed class CheckerTests
         Clean("long* p = null\nmut long n = 0\nraw {\n    asm(\"{r}\", r = inout(reg) p => n)\n}\nprint(n)", grants: "raw");
         Clean("mut long a = 1\nraw {\n    asm(\"{x}\", x = lateout(reg) a)\n}\nprint(a)", grants: "raw");
         Clean("mut long a = 1\nraw {\n    asm(\"{x}\", x = inlateout(reg) a)\n}\nprint(a)", grants: "raw");
-        Clean("raw {\n    asm(\"{0:h}\", in(reg_abcd) 1)\n}", grants: "raw");
+        Clean("raw {\n    asm(\"inc {0:h}\", in(reg_abcd) 1)\n}", grants: "raw");
         Clean("raw {\n    asm(\"{} {}\", in(reg) 1, in(reg) 2)\n}", grants: "raw");
         Clean("static mut long t = 0\n\nraw {\n    asm(\"lea rax, {s}\", s = sym t)\n}", grants: "raw");
         // R11: an operand in an explicit register, which the template names nowhere: a view of a register as the register, an input and
@@ -2181,6 +2181,44 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.NakedNotAllowed, 1), (ErrorIds.NativeNotAllowed, 1)], Errors("naked extern \"C\" void F() {\n    asm(\"ret\")\n}\n\nprint(1)"));
         // the `asm` of a `naked` body takes no `raw` block, and one beside it in the top-level code does
         Assert.Equal([(ErrorIds.RawRequired, 6)], Errors("naked void F() {\n    asm(\"ret\")\n}\n\nmut long n = 1\nasm(\"{x}\", x = inout(reg) n)\nprint(n)", grants: "raw"));
+    }
+
+    [Theory]
+    // R11 (the owner, 2026-11-13, "Refuse as Rust"): a label an `asm` defines by name is `named-asm-label` at its line, and a local label is
+    // clean (the control); a label of only 0 and 1 is `binary-asm-label`, of several digits too, `12:` none, and under `att_syntax` none
+    [InlineData("mut long n = 3\nraw {\n    asm(\"again:\", \"dec {n}\", \"jnz again\", n = inout(reg) n)\n}\nprint(n)", "named-asm-label 3")]
+    [InlineData("mut long n = 3\nraw {\n    asm(\"2:\", \"dec {n}\", \"jnz 2b\", n = inout(reg) n)\n}\nprint(n)", "")]
+    [InlineData("raw {\n    asm(\"1: jmp 1b\")\n}", "binary-asm-label 2")]
+    [InlineData("raw {\n    asm(\"10: jmp 10b\")\n}", "binary-asm-label 2")]
+    [InlineData("raw {\n    asm(\"12: jmp 12b\")\n}", "")]
+    [InlineData("raw {\n    asm(\"1: jmp 1b\", options(att_syntax))\n}", "")]
+    // Rust's reading (rustc_lint's `AsmLabels`): a statement ends at `;` and at a line break; its text from `//` on is set aside, which
+    // shows only where a placeholder's braces would hold the `:`; a name takes `.`, `_` and `$`; every label of a statement counts, up to
+    // the first text before a `:` that is none; a placeholder in a label names it, `{0` of `{0:e}` among them; in a `"""` block the error
+    // stands at the label's own line
+    [InlineData("raw {\n    asm(\"nop; done: nop\")\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"nop\\ndone: nop\")\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"{x // }: nop\")\n}", "asm-operand 2")]
+    [InlineData("raw {\n    asm(\"2bar: done: nop\")\n}", "")]
+    [InlineData("raw {\n    asm(\"a: b: nop; .Lc: nop\")\n}", "named-asm-label 2; named-asm-label 2; named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"_x$1: nop\")\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"ab cd: nop\")\n    asm(\"mov rax, qword ptr fs:[0]\")\n}", "")]
+    [InlineData("raw {\n    asm(\"{}: nop\", const 10)\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"{0:e}\", in(reg) 1)\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"\"\"\n        nop\n        done:\n        \"\"\")\n}", "named-asm-label 4")]
+    // R12: a `naked` function may define any label, as Rust's lint exempts a naked function that is not generic; the checker reads no
+    // `naked` function with type parameters, which R12 and R16 leave open (compiler/README.md)
+    [InlineData("naked long Seven() {\n    asm(\"jmp done\", \"ret\", \"done:\", \"0:\", \"mov eax, 7\", \"ret\")\n}\n\nprint(Seven())", "")]
+    public void A_label_an_asm_defines_is_read_as_Rusts_lint_reads_it(string program, string errors) =>
+        Assert.Equal(errors, string.Join("; ", Errors(program, grants: "raw").Select(e => $"{e.Id} {e.Line}")));
+
+    [Fact]
+    public void A_placeholder_names_a_label_outside_options_raw_alone()
+    {
+        // R11, Rust's reading: under `options(raw)` a brace is a character of the text, which no label holds (the control: the same
+        // template without `options(raw)`)
+        Assert.Contains(ErrorIds.NamedAsmLabel, Errors("raw {\n    asm(\"x{y}: nop\", y = const 10)\n}", grants: "raw").Select(e => e.Id));
+        Assert.DoesNotContain(ErrorIds.NamedAsmLabel, Errors("raw {\n    asm(\"x{y}: nop\", y = const 10, options(raw))\n}", grants: "raw").Select(e => e.Id));
     }
 
     [Fact]

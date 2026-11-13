@@ -217,8 +217,16 @@ public sealed record AsmStatement(int Line, IReadOnlyList<AsmTemplate> Templates
 /// </summary>
 public sealed record ConstAssertStatement(int Line, Expression Condition, StringLiteral Text) : Statement(Line);
 
-/// <summary>A template of an <c>asm</c>, its text with the escapes of a string literal read and its braces as written.</summary>
-public sealed record AsmTemplate(int Line, string Text);
+/// <summary>
+/// A template of an <c>asm</c>, its text with the escapes of a string literal read and its braces as written; for a <c>"""</c> block (L13),
+/// <paramref name="LineStarts"/> holds the offset in the text at which each line of the block starts, the first on the line after
+/// <paramref name="Line"/>, which is the opening quotes'.
+/// </summary>
+public sealed record AsmTemplate(int Line, string Text, IReadOnlyList<int>? LineStarts = null)
+{
+    /// <summary>The line of the program that holds the character of the text at <paramref name="offset"/>.</summary>
+    public int LineAt(int offset) => LineStarts is null ? Line : Line + LineStarts.Count(start => start <= offset);
+}
 
 /// <summary>
 /// An operand of an <c>asm</c> as Rust writes one (R11): an optional <c>name =</c>, a word, then the list in parentheses of

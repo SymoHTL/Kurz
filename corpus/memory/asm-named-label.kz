@@ -1,0 +1,10 @@
+// expect: error named-asm-label at 7
+// allow: raw
+// rules: R11
+
+mut long n = 3
+raw {
+    asm("again:", "dec {n}", "jnz again", n = inout(reg) n)
+}
+print(n)
+// LLVM may copy an `asm`, as where a function is inlined into two callers, and the copy defines `again` a second time; a local label, `2:` with `2b`, takes its place (R11)

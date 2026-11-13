@@ -19,11 +19,30 @@ public sealed partial class Emitter
     /// <summary>The functions and the state a <c>naked</c> body names by <c>sym</c>, which only the module's assembly reaches, kept in <c>llvm.compiler.used</c>.</summary>
     private readonly SortedSet<string> asmUsed = new(StringComparer.Ordinal);
 
-    /// <summary>R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program (<see cref="EmittedProgram.Asms"/>).</summary>
-    private readonly List<AsmAlone> asmsAlone = [];
+    /// <summary>
+    /// R11, R12: each <c>asm</c> of the program's file, as IR without the rest of the program, in the order emitted, with the function that
+    /// holds an <c>asm</c> statement (<see cref="EmittedProgram.Asms"/>).
+    /// </summary>
+    private readonly List<(AsmAlone Asm, IrFunction? Holder)> asmsAlone = [];
 
-    /// <summary>One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes.</summary>
-    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, string? Input, KurzType? InputType, AsmOutput? Output);
+    /// <summary>
+    /// R11, R12: the program's <c>asm</c>s in the order LLVM meets them (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's
+    /// order everywhere"): the <c>naked</c> functions' module-level assembly, which LLVM writes before every function, in the order emitted,
+    /// the order of their first calls, then each <c>asm</c> statement, in the order of the functions that hold them in the module, a guarded
+    /// block's before the function it stands in (R18), and of the statements in each.
+    /// </summary>
+    private List<AsmAlone> AsmsInLlvmOrder() =>
+    [
+        .. asmsAlone.Where(a => a.Holder is null).Select(a => a.Asm),
+        .. asmsAlone.Where(a => a.Holder is not null).OrderBy(a => emitted.IndexOf(a.Holder!)).Select(a => a.Asm),
+    ];
+
+    /// <summary>
+    /// One register operand of an <c>asm</c>, as the first pass read it: its class, its input and where its output goes. The input is
+    /// read where the first pass reads the operand, but an <c>inout</c>'s, which <c>Input</c> loads when it is called, just before
+    /// the call.
+    /// </summary>
+    private sealed record AsmRegister(AsmOperand Operand, string RegisterClass, string Constraint, string OperandType, Func<string>? Input, KurzType? InputType, AsmOutput? Output);
 
     /// <summary>
     /// R11: where an output goes: what a pointer points to, <c>*p</c> or <c>p[i]</c>, found where its operand stands; or a variable, or a
@@ -42,8 +61,9 @@ public sealed partial class Emitter
     };
 
     /// <summary>
-    /// R11: an <c>asm</c> statement. Every operand's value is read, and every place an output writes through a pointer found, in the order
-    /// the operands are written, as Rust evaluates them; the call then writes each output into its place, the place of a variable or of a
+    /// R11: an <c>asm</c> statement. Every operand's value is read, but an <c>inout</c>'s, which is loaded just before the call, and every
+    /// place an output writes through a pointer found, in the order the operands are written, as Rust evaluates them;
+    /// the call then writes each output into its place, the place of a variable or of a
     /// path of fields found as the output is stored, so that no copy of a block a path goes through is held across another operand (<see cref="AsmOutput"/>). <c>options</c> map as Rust maps them: no
     /// <c>sideeffect</c> under <c>pure</c>, no <c>alignstack</c> under <c>nostack</c>, AT&amp;T's dialect under <c>att_syntax</c> and Intel's
     /// otherwise, no clobber of the flags under <c>preserves_flags</c>, no clobber of memory under <c>nomem</c>, the call's attributes
@@ -132,7 +152,7 @@ public sealed partial class Emitter
             if (registers.TryGetValue(o, out var r) && r.Input is not null)
             {
                 inputIndex[o] = outputs.Count + inputs.Count;
-                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input}", $"{r.OperandType} poison"));
+                inputs.Add((o.Word == "in" ? r.Constraint : outputIndex[o].ToString(CultureInfo.InvariantCulture), $"{r.OperandType} {r.Input()}", $"{r.OperandType} poison"));
             }
             else if (symbols.TryGetValue(o, out var symbol))
             {
@@ -184,16 +204,13 @@ public sealed partial class Emitter
         if (!unit.Runtime)
         {
             // the program's `asm` without the rest of the program, which the build assembles where clang refuses inline assembly
-            // (EmittedProgram.Asms): the same template and constraints in a function of its own, with a poison value of its type for each
-            // register's input and each symbol a `sym` names declared; the call has an effect and no attribute but `nounwind`, whatever the
-            // options, which changes nothing clang assembles: LLVM drops a call of no effect whose value nothing uses, at -O0 too, a `pure`
-            // one of `memory(none)` or `memory(read)` with `sideeffect` or without (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
+            // (EmittedProgram.Asms): the same template and constraints, a call the build writes in the copies' `main`, with a poison
+            // value of its type for each register's input and each symbol a `sym` names declared; the call has an effect and no attribute
+            // but `nounwind`, whatever the options, which changes nothing clang assembles: LLVM drops a call of no effect whose value
+            // nothing uses, at -O0 too, a `pure` one of `memory(none)` or `memory(read)` with `sideeffect` or without
+            // (knowledge/clang-names-no-line-of-the-program-for-a-refused-asm.md)
             var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
-            asmsAlone.Add(new AsmAlone(
-                a.Line,
-                "R11",
-                [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")],
-                $"define void @kz.asm{asmsAlone.Count.ToString(CultureInfo.InvariantCulture)}() {{\n  {(outputs.Count == 0 ? "" : "%r = ")}{alone}\n  ret void\n}}\n"));
+            asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
         }
 
         if (outputs.Count == 0)
@@ -232,12 +249,18 @@ public sealed partial class Emitter
         string? input = null;
         KurzType? inputType = null;
         AsmOutput? output = null;
+        Func<string>? load = null;
         if (o.Word is "inout" or "inlateout" && o.Output is null)
         {
-            // an `inout` without `=>` reads and writes one place: a place through a pointer is found once, and the input loaded from it
+            // an `inout` without `=>` reads and writes one place: a place through a pointer is found once, here, and the input is loaded
+            // when the `asm` runs, after every operand ran, as Rust's compiler gives an `inout` the copy of its place as its input
+            // (`in_value: Operand::Copy(place)`, rustc_mir_build's builder/expr/into.rs): through the pointer found, or from the place a
+            // variable, or a path of fields from one, has then (R11)
             output = AsmOutputOf(written!);
             inputType = output.Type;
-            input = output.Pointer is { } pointer ? fn.Value($"load {Ir(inputType)}, ptr {pointer}") : EmitExpression(o.Value!);
+            var pointer = output.Pointer;
+            var type = inputType;
+            load = () => pointer is not null ? fn.Value($"load {Ir(type)}, ptr {pointer}") : EmitExpression(o.Value!);
         }
         else
         {
@@ -254,7 +277,13 @@ public sealed partial class Emitter
         }
 
         var operandType = AsmOperandType(output?.Type ?? inputType, registerClass);
-        return new AsmRegister(o, registerClass, constraint, operandType, input is null ? null : ToAsmOperand(input, inputType!, operandType), inputType, output);
+        if (load is not null)
+        {
+            return new AsmRegister(o, registerClass, constraint, operandType, () => ToAsmOperand(load(), inputType!, operandType), inputType, output);
+        }
+
+        var read = input is null ? null : ToAsmOperand(input, inputType!, operandType);
+        return new AsmRegister(o, registerClass, constraint, operandType, read is null ? null : () => read, inputType, output);
     }
 
     /// <summary>
@@ -542,7 +571,7 @@ public sealed partial class Emitter
 
         if (!unit.Runtime)
         {
-            asmsAlone.Add(new AsmAlone(body.Line, "R12", [], string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n")))); // the body without the program (EmittedProgram.Asms)
+            asmsAlone.Add((new AsmAlone(body.Line, "R12", [], string.Concat(lines.Select(l => $"module asm {IrModule.Quote(l)}\n"))), null)); // the body without the program (EmittedProgram.Asms)
         }
 
         var parameters = f.Parameters.Select(p => ParameterType(f, p.Type));

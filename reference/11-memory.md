@@ -705,10 +705,15 @@ template and of its words, as §3 marks them)*. On WebAssembly and on Xtensa the
 those of Rust's experimental support for them, `local` on wasm32 and `reg`, `freg`, `sreg` and
 `breg` on Xtensa; a breach of the template's rules is the compile error `asm-operand`, and an operand
 that writes a variable without `mut` is `assign-immutable`, as any assignment to it is *(assumed: as §3
-marks them)*. The operands' values are read, and the places outputs write through a pointer (`*p`,
-`p[i]`) found, in the order the operands are written, and an `inout` loads from and stores into the
-one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler lowers the operands of
-`asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3 marks them)*. An
+marks them)*. The operands' values are read, but an `inout`'s input, and the places outputs write
+through a pointer (`*p`, `p[i]`) found, in the order the operands are written, and an `inout` loads
+from and stores into the one place it finds, so a call in `p[Index()]` runs once, as Rust's compiler
+lowers the operands of `asm!` *(assumed: Rust's order and Rust's `inout`, which no answer named, as §3
+marks them)*. An `inout` loads its input when the `asm` runs, after every operand ran, one into a
+variable, or into a path of fields from one, from the place the variable has then, and one through a
+pointer from the place found in the order the operands are written, so the `asm` reads what a later
+operand's call wrote there, as Rust's compiler reads the copy of an `inout`'s place at the `asm`
+*(assumed: Rust's `inout`, which no answer named, as §3 marks it)*. An
 output into a variable, or into a path of fields from one, is stored after the call,
 into the place the variable has then, so a variable a later operand's call changed is written as that
 call left it, as Rust writes an `out` operand's place and as an assignment into a path is written (M4)
@@ -717,13 +722,39 @@ outputs into one variable the later one stays, as Rust's compiler stores them *(
 order, which no answer named, as §3 marks it)*. An instruction of an `asm`
 that the assembler refuses is the compile error `asm-refused` at the line of the `asm`, which the build
 raises once clang refuses the program (§3, the owner, 2026-11-13), and so is one of a `naked`
-function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. The
-build assembles the program's `asm`s together in the order of their lines, each beside those before it
-that the assembler took, and each one whose addition the assembler refuses is `asm-refused`, once, in
-the order of the lines: one it refuses alone, and of two that define one label the second, as LLVM
-refuses the label in the second's text and Rust's compiler names that `asm!` *(assumed: the order of the lines,
-Rust's within one function, and of two that define one label the second, which no answer named, as §3
-marks them)*. A
+function's `asm` (R12) *(assumed: the id's name and the `naked` function's, as §3 marks them)*. An
+`asm` the optimiser drops before the assembler reads it raises nothing, so a `pure` `asm` whose outputs
+nothing reads is `asm-refused` in a test build, which keeps its call, and builds in a release build,
+which drops it, as Rust's builds differ so (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). The
+build assembles the program's `asm`s together in the order LLVM meets them, the order the compiler
+writes them, in one file as across files: the `naked` functions' assembly first (R12), in the order the
+compiler writes the functions, at their first call, then the `asm` statements, in the order of the
+functions that hold them, a guarded block's (R18) before the function it stands in, and of the
+statements in each; each beside those before it that the assembler took, and each one whose addition
+the assembler refuses is `asm-refused`, once, in that order, so that the line named is the one LLVM
+refuses: one it refuses alone, and of two `naked` functions that define one label the one LLVM meets
+second, whose label the assembler refuses beside the first's, the earlier line's where the two are
+called out of the order of their lines, where Rust's compiler, which gives a naked function's assembly
+no `!srcloc`, names neither (§3, the owner, 2026-11-13, pull request 530, comment 6855725580). Two `asm`s that define one label are those of two `naked` functions (R12), since a label an
+inline `asm` defines by name is `named-asm-label` (§3, the owner, 2026-11-13). Across the files of a
+program the `asm`s are named in the order LLVM meets them, the order the compiler writes the
+functions, and no order of the source is stated, as Rust's compiler reports the errors of LLVM as they
+come (§3, the owner, 2026-11-13, pull request 530, comment 6854386584). A label an `asm`'s template
+defines by name, `again:`, is the compile error `named-asm-label` at the line of the label, in a `"""` block
+the label's own line, and local labels, `2:` with `2b` or `2f`, take its place, since LLVM may copy an
+`asm`, as where a function is inlined into two callers, and the copy defines the label a second time; on
+x86 a label of only the digits 0 and 1, `1:` among them, is the compile error `binary-asm-label`, since the
+assembler reads its use, `1b`, as a binary number; and the `asm` of a `naked` function may define labels by
+name (R12); each as Rust's lints `named_asm_labels` and `binary_asm_labels` refuse them (§3, the owner,
+2026-11-13). A template is read for its labels as Rust's lint pass reads it: it splits into statements at
+each line break and `;`, a statement's text from `//` on is set aside, and each text before a `:` of a
+statement, trimmed, from the statement's start or from the label before it, is a label where it starts
+with an ASCII letter, `.` or `_` and goes on with ASCII letters, digits, `_` and `$`, or where it holds a
+placeholder outside `options(raw)`, `{}:` or the `{0` of `{0:e}`, both named, or where it holds the digits 0
+and 1 alone, binary, the first such text that is no label ending the statement's labels, so that
+`2bar: done:` defines none; a binary label is an error in Intel's syntax alone, so that
+`options(att_syntax)` takes `1:` *(assumed: Rust's reading of a template, its exemption of `att_syntax`
+and the ids' names, which no answer named, as §3 marks them)*. A
 register class is read against the table of the target the build compiles for, so
 that a class that target does not have is `asm-operand`, and a case is read for x86-64 where its
 header names no target (§3, the owner, 2026-10-22); how a header names the target is open (§14), and
@@ -817,7 +848,34 @@ raw {
 print(n)
 ```
 
-Case: [memory/asm-operand-order.kz](../corpus/memory/asm-operand-order.kz)
+Case: [memory/asm-inout-after-call.kz](../corpus/memory/asm-inout-after-call.kz)
+```kurz
+data Point(long X, long Y)
+
+long Bump(mut Point point) {
+    point = Point(10, 20)
+    return 1
+}
+
+long Ten(long* slot) {
+    raw {
+        *slot = 10
+    }
+    return 1
+}
+
+mut Point p = Point(0, 0)
+mut long n = 0
+raw {
+    long* q = &n
+    asm("add {r}, {k}", r = inout(reg) p.X, k = in(reg) Bump(mut p))
+    asm("add {r}, {k}", r = inout(reg) *q, k = in(reg) Ten(q))
+}
+print(p)
+print(n)
+```
+
+Case: [memory/asm-operand-read-order.kz](../corpus/memory/asm-operand-read-order.kz)
 ```kurz
 long Show(long v) {
     print(v)
@@ -825,13 +883,19 @@ long Show(long v) {
 }
 
 mut long m = 0
-mut long n = 0
 raw {
     long* p = &m
     asm("mov {a}, {x}", a = out(reg) p[Show(0)], x = in(reg) Show(1))
-    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
 }
 print(m)
+```
+
+Case: [memory/asm-output-store-order.kz](../corpus/memory/asm-output-store-order.kz)
+```kurz
+mut long n = 0
+raw {
+    asm("mov {a}, 1", "mov {b}, 2", a = out(reg) n, b = out(reg) n)
+}
 print(n)
 ```
 
@@ -904,11 +968,64 @@ print(n)
 
 Case: [memory/asm-label-twice.kz](../corpus/memory/asm-label-twice.kz)
 ```kurz
-raw {
-    asm("twice:", "nop")
-    asm("nop")
-    asm("twice:", "nop")
+naked long One() {
+    asm("twice:", "mov eax, 1", "ret")
 }
+
+naked long Two() {
+    asm("mov eax, 2", "ret")
+}
+
+naked long Three() {
+    asm("twice:", "mov eax, 3", "ret")
+}
+
+print(One() + Two() + Three())
+```
+
+Case: [memory/asm-named-label.kz](../corpus/memory/asm-named-label.kz)
+```kurz
+mut long n = 3
+raw {
+    asm("again:", "dec {n}", "jnz again", n = inout(reg) n)
+}
+print(n)
+// LLVM may copy an `asm`, as where a function is inlined into two callers, and the copy defines `again` a second time; a local label, `2:` with `2b`, takes its place (R11)
+```
+
+Case: [memory/asm-binary-label.kz](../corpus/memory/asm-binary-label.kz)
+```kurz
+mut long n = 3
+raw {
+    asm("1:", "dec {n}", "jnz 1b", n = inout(reg) n)
+}
+print(n)
+// the case names no target, so it is read for x86-64, whose assembler reads `1b` in Intel's syntax as a binary number (R11)
+```
+
+Case: [memory/asm-local-label.kz](../corpus/memory/asm-local-label.kz)
+```kurz
+mut long n = 3
+mut long steps = 0
+mut long kept = 7
+raw {
+    asm("2:", "inc {s}", "dec {n}", "jnz 2b", n = inout(reg) n, s = inout(reg) steps)
+    asm("jmp 1f", "mov $9, {k}", "1:", k = inout(reg) kept, options(att_syntax))
+}
+print(steps)
+print(n)
+print(kept)
+// a label of only the digits 0 and 1 is binary-asm-label in Intel's syntax alone, so `1:` stands under `att_syntax` (R11)
+```
+
+Case: [memory/naked-named-label.kz](../corpus/memory/naked-named-label.kz)
+```kurz
+naked long Seven() {
+    asm("jmp done", "mov eax, 1", "ret", "done:", "mov eax, 7", "ret")
+}
+
+print(Seven())
+// the compiler emits a `naked` function with no type parameters once, so its `asm` may define a label by name (R12)
 ```
 
 ### R12 (decided, §3) A function with no frame
@@ -920,7 +1037,12 @@ there). One in a package without the grant, or in a program without a project fi
 error `naked-not-allowed`, and its body, a `raw` block, raises no `raw-not-allowed` beside it *(assumed:
 the id and the one error, as §3 marks them)*.
 Its `asm` takes `sym` and `const` operands alone, its instructions return or never end, and the
-function is called by the C calling convention of its target *(assumed: as §3 marks them)*. A body
+function is called by the C calling convention of its target *(assumed: as §3 marks them)*. Its `asm`
+may define labels by name, which R11 refuses in an inline `asm` (§3, the owner, 2026-11-13), and labels of
+only the digits 0 and 1, while the `asm` of a `naked` function with type parameters, which would be
+emitted once for each copy, is read for its labels as an inline `asm` is (R11), as Rust exempts a naked
+function that is not generic *(assumed: binary labels within the exemption and a function with type
+parameters outside it, as §3 marks them)*. A body
 other than one `asm`, or an operand there other than `sym` and `const`, is the compile error
 `naked-body`, and instructions that fall through the function's end are a misuse of `raw` code, which
 no compiler checks *(assumed: as §3 marks them)*. `naked` stands before a function at the top level
@@ -968,6 +1090,10 @@ naked long Seven() {
 
 print(Seven())
 ```
+
+Case: [memory/asm-label-twice.kz](../corpus/memory/asm-label-twice.kz)
+
+Case: [memory/naked-named-label.kz](../corpus/memory/naked-named-label.kz)
 
 ### R13 (decided, §3) State outside a function
 

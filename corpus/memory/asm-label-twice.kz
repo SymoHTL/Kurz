@@ -1,9 +1,17 @@
-// expect: error asm-refused at 8
+// expect: error asm-refused at 14
 // allow: raw
-// rules: R11
+// rules: R11, R12
 
-raw {
-    asm("twice:", "nop")
-    asm("nop")
-    asm("twice:", "nop")
+naked long One() {
+    asm("twice:", "mov eax, 1", "ret")
 }
+
+naked long Two() {
+    asm("mov eax, 2", "ret")
+}
+
+naked long Three() {
+    asm("twice:", "mov eax, 3", "ret")
+}
+
+print(One() + Two() + Three())

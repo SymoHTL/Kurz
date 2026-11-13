@@ -1,0 +1,10 @@
+// expect: error binary-asm-label at 7
+// allow: raw
+// rules: R11
+
+mut long n = 3
+raw {
+    asm("1:", "dec {n}", "jnz 1b", n = inout(reg) n)
+}
+print(n)
+// the case names no target, so it is read for x86-64, whose assembler reads `1b` in Intel's syntax as a binary number (R11)

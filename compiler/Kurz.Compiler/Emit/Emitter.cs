@@ -15,14 +15,20 @@ namespace Kurz.Compiler.Emit;
 /// </summary>
 public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, bool Release, bool Lines, string? CpuFlag = null)
 {
-    /// <summary>R11, R12: each <c>asm</c> of the program's file the module holds, as IR without the rest of the program, which a build assembles where clang refuses inline assembly.</summary>
+    /// <summary>
+    /// R11, R12: each <c>asm</c> of the program's file the module holds, as IR without the rest of the program, which a build assembles
+    /// where clang refuses inline assembly, in the order LLVM meets them: the <c>naked</c> functions' module-level assembly, which LLVM
+    /// writes before every function, in the order the compiler writes the functions, at their first call, then the <c>asm</c> statements,
+    /// in the order of the functions that hold them in the module and of the statements in each (the owner, 2026-11-13, pull request 530,
+    /// comment 6855725580, "LLVM's order everywhere").
+    /// </summary>
     public IReadOnlyList<AsmAlone> Asms { get; init; } = [];
 }
 
 /// <summary>
 /// R11, R12: an <c>asm</c> of the program, at its line, with the rule that states it, R11 for an <c>asm</c> statement and R12 for a
-/// <c>naked</c> function's, as IR without the rest of the program: the declarations of the symbols its <c>sym</c>s name, and its call in a
-/// function of its own or the function's module-level assembly.
+/// <c>naked</c> function's, as IR without the rest of the program: the declarations of the symbols its <c>sym</c>s name, and its call,
+/// which a build writes in the function <c>main</c> of the copies (<see cref="Builder.Build"/>), or the function's module-level assembly.
 /// </summary>
 public sealed record AsmAlone(int Line, string Rule, IReadOnlyList<string> Declarations, string Ir);
 
@@ -269,7 +275,7 @@ public sealed partial class Emitter
 
         EmitRegexTable(); // G4: the one global of the tables, once every pattern is emitted
         EmitAsmUsed(); // R12: once every `naked` body is emitted
-        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86)) { Asms = asmsAlone };
+        return new EmittedProgram(module.Render(), libraries.ToList(), !test, lines, cpu.Name is null ? null : Clang.CpuFlag(cpu.Name, cpu.X86)) { Asms = AsmsInLlvmOrder() };
     }
 
     /// <summary>The functions, the C declarations, the data types and the state outside a function of a file (R13, R16), each by its symbol.</summary>

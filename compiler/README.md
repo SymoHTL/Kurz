@@ -160,8 +160,8 @@ test build has where `--lines` says so (the owner, 2026-10-29, "build, run and e
 executable beside the source, named
 after it, `hello.exe` on Windows, or where `-o` says (design record, section 2). It writes over an
 executable that is there, writes nothing on standard output, and exits with 0. A program the
-compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines,
-and no executable, and the command exits with 1:
+compiler refuses gets its lines on standard error, one per diagnostic, an `asm-refused` line in the
+order LLVM meets its `asm` (R11), and no executable, and the command exits with 1:
 
     hello.kz:3: unknown-name: `y` is not declared
     hello.kz:2: not supported: `s.Chars` as a list (T15)
@@ -1400,7 +1400,7 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
-  `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes
+  `const` as its digits and a `sym` as its symbol. An operand's value is read, but an `inout`'s input, which is loaded just before the call, and the place an output writes
   through a pointer (`*p`, `p[i]`) found once, in the order the operands are written; an output is stored
   into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so
   that no copy of a block a path goes through is held across another operand, and a variable a later
@@ -1408,12 +1408,21 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
   is refused when clang builds the program. Clang 23 given IR names no line of the program for it, not
   the `!srcloc` either, so where clang refuses inline assembly the build assembles the program's `asm`s
-  together without the rest of the program, each as the emitter wrote it in IR of its own, a call with an
-  effect whatever its options, since LLVM drops a call of no effect whose value nothing uses at `-O0` too,
-  in the order of their lines, each beside those before it that clang took, and each one whose addition
-  clang refuses is the compile error `asm-refused` at the line of the `asm`, under R11, or R12 for a `naked`
-  function's, once, in the order of the lines: one clang refuses alone, and of two that define one label
-  the second (R11, R12). Where none is refused so, the failure stays clang's. The command writes each as
+  together without the rest of the program, beside a label for each symbol the program's IR defines, each as
+  the emitter wrote it in IR of its own, an `asm` statement's a call with an effect whatever its options,
+  since LLVM drops a call of no effect whose value nothing uses at `-O0` too, in the copies' `main`, which
+  every program defines, in place of its label, so that the copies define no symbol the program does not,
+  and a `naked` function's its module-level assembly, in the order LLVM meets them, the order the compiler
+  writes them, in one file as across files: the `naked` functions' assembly first, in the order of their
+  first calls, then the `asm` statements, in the order of the functions that hold them, a guarded block's
+  before the function it stands in, and of the statements in each; each beside those before it that clang
+  took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
+  `asm`, under R11, or R12 for a `naked` function's, once, in that order: one clang refuses alone, a
+  `naked` function's whose label is a symbol of the program among them, which LLVM refuses where it writes
+  that symbol's definition, with no line of the template, and of two `naked` functions that define one
+  label the one LLVM meets second, the earlier line's where the two are called out of the order of their
+  lines (R11, R12). Where none is refused so, as where the optimiser of a release build copies an `asm`
+  whose text the assembler takes once and refuses twice, the failure stays clang's. The command writes each as
   it writes a compile error. It grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
   whose refusal its failure `clang did not build the program` names as the compiler's defect;
@@ -2192,7 +2201,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `argument-mismatch`, `ambiguous-call`, `cannot-infer`, `duplicate-function`, `not-visible`, `reference-cycle`,
 `default-not-constant`, `base-cycle`, `enum-number`, `missing-return`, `throw-needs-value`, `unlisted-case`,
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
-`string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`,
+`string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
