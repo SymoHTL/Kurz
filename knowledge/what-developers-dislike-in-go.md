@@ -108,7 +108,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Go 1.26 Release Notes (https://go.dev/doc/go1.26): "A *leaked* goroutine is a goroutine blocked on some concurrency primitive (channels, sync.Mutex, sync.Cond, etc) that cannot possibly become unblocked." It shows a real-world leak: an early `return` in a collector loop leaves every sender blocked on an unbuffered channel. The paper of finding 13 shows the same shape in Kubernetes.
 - Since: the `goroutineleak` profile, an experiment in Go 1.26 and generally available in Go 1.27 (https://go.dev/doc/go1.27). Its limit, in the Go 1.26 notes: "While it is impossible to detect permanently blocked goroutines in all cases, this approach detects a large class of such leaks."
-- Kurz: answered: "With its supervisor", section 6 of the record; a parallel view or block gives no task value that could leak ("View + parallel block", section 6, 2026-11-13), and its read waits for every body that started ("Stop unstarted; deadline per call", section 6, 2026-11-13). Before the answers: OPEN.
+- Kurz: answered: "With its supervisor", section 6 of the record; a parallel view or block gives no task value that could leak ("View + parallel block", section 6, 2026-11-13); a view's read waits for every body that started, and a block waits for every statement that started at its own end, where it stands ("Stop unstarted; deadline per call", section 6, 2026-11-13). Before the answers: OPEN.
 
 ## 16. Network timeouts default to none
 

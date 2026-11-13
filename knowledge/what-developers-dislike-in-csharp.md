@@ -36,7 +36,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 3. A blocking call starves the thread pool
 
 - Evidence: "Debug ThreadPool Starvation - .NET" (https://learn.microsoft.com/en-us/dotnet/core/diagnostics/debug-threadpool-starvation): "ThreadPool starvation occurs when the pool has no available threads to process new work items and it often causes applications to respond slowly." and "This is the sync-over-async code pattern, which is known to block threads and is the most common cause of ThreadPool starvation."
-- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record; a form that runs work in parallel holds no thread idle while its splits remain: the caller's thread runs splits while it waits at the read, as rayon's `join` does ("Scheduler + 10ms yield", section 6, 2026-11-13). Before the answers: OPEN.
+- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record; a form that runs work in parallel holds no thread idle while its splits remain: the caller's thread runs splits while it waits at the read, as rayon's `join` does inside its pool (checked 2026-11-13: the documentation of `join` in `rayon-core/src/join/mod.rs` of rayon's main branch, "When `join` is called within the pool, the calling thread still actively participates in the thread pool") ("Scheduler + 10ms yield", section 6, 2026-11-13). Before the answers: OPEN.
 
 ## 4. Exceptions carry normal failures, and no signature shows them
 

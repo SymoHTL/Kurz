@@ -1308,15 +1308,24 @@ An actor that exhausts its stack on Linux or on Windows dies as it does for any 
 runtime's `data` type (O7); its parent lives under `on crash restart` and `on crash stop`, and crashes
 too under `on crash escalate`, as for any crash (O6), while at the top level, the root actor, the
 process exits with the exit code 1 (O6); on WebAssembly an exhausted stack ends the program, as the
-engine's trap does (§2, the owner, 2026-10-21), a trap that the stack's place before the static data
+engine's trap does (§2, the owner, 2026-10-21), the engine's own call stack on both of its targets, which no
+check covers (§2, a cost the question of 2026-11-13 did not name), and on the target with §6's state machine
+the one stack in linear memory too, a trap that the stack's place before the static data
 makes certain (§2, an assumption there), with no error line of the program's, since no code of it runs
 after a trap (§2, from the WebAssembly specification it checks), and with the exit code each engine
 gives of its own, which that specification does not define, while on the WebAssembly target that
 takes the host's switch an actor's stack in linear memory, 64 KiB by default, is checked at each
 function that moves its pointer, so that its overflow is that actor's `stack-overflow`, as on Linux and
 on Windows (§2, the owner, 2026-11-13, #519, comment 6851105334, "64 KiB + check, actor crash
-(Recommended)"); on the ESP32 models a watchpoint the runtime sets once, on the end of the one stack every actor
-runs on there (§6, comment 6850539879), catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
+(Recommended)"), the root actor's stack there, 1 MiB, checked too, so that its overflow ends the process with
+the exit code 1 (O6) *(assumed, §2: the root actor's stack, its size and its check)*, and the error line of
+such a crash names the line of the call that did not fit and its trace is walked along the chain of frames
+the compiler keeps in the linear stack, as for any crash on that target (§2) *(proposed: the line and the
+trace of that crash, which the record does not name for it)*; on the ESP32 models a watchpoint the runtime
+sets once on the stack of each scheduler thread, at its end, every actor running on the stack of the thread
+that runs it (§6, the owner, 2026-11-13, #519, comment 6850539879, "State machine there (Recommended)")
+*(assumed, §6: the place of the watchpoint under that answer, set once on the stack of each thread, one for
+each core)*, catches an overflow at the first write past that stack's end, and on AVR nothing checks the stack, so that an overflow there
 writes over memory unnoticed (§6, the owner, 2026-10-21), and a caught overflow on the ESP32 models
 ends the program as ESP-IDF's panic handler ends it *(assumed, as §6 marks it)*. On Linux and on Windows the exception is
 `stack-overflow`, at the line of the call that did not fit (the owner, 2026-10-10, confirming the
