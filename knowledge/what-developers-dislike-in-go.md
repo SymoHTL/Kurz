@@ -92,7 +92,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Fixing For Loops in Go 1.22 (https://go.dev/blog/loopvar-preview): "This kind of mistake has caused production problems at many companies, including a publicly documented issue at Lets Encrypt." spec: less error-prone loop variable scoping (https://github.com/golang/go/issues/60078): 453 thumbs-up.
 - Since: Go 1.22 (https://go.dev/doc/go1.22): "The long-standing "for" loop gotcha with accidental sharing of loop variables between iterations is now resolved."
-- Kurz: AVOIDED, for every variable and not only loop variables. F15 (decided): "A lambda takes the value each variable it reads (F11) has when the lambda is made, as an assignment does (M3)." F11 makes an assignment to a captured variable the error `capture-assign`.
+- Kurz: AVOIDED, for every variable and not only loop variables. F15 (decided): "A lambda takes the value each variable it reads (F11) has when the lambda is made, as an assignment does (M3)." F11 makes an assignment to a captured variable the error `capture-assign`. A body of a parallel view or block is such a lambda, and a mutable class instance it captures or takes as its item crosses into it only with `copy` or `move` ("Actor crossing rule", section 6, 2026-11-13), so that bodies share no mutable instance either.
 
 ## 13. Blocking bugs and channel deadlocks
 
@@ -108,7 +108,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 
 - Evidence: Go 1.26 Release Notes (https://go.dev/doc/go1.26): "A *leaked* goroutine is a goroutine blocked on some concurrency primitive (channels, sync.Mutex, sync.Cond, etc) that cannot possibly become unblocked." It shows a real-world leak: an early `return` in a collector loop leaves every sender blocked on an unbuffered channel. The paper of finding 13 shows the same shape in Kubernetes.
 - Since: the `goroutineleak` profile, an experiment in Go 1.26 and generally available in Go 1.27 (https://go.dev/doc/go1.27). Its limit, in the Go 1.26 notes: "While it is impossible to detect permanently blocked goroutines in all cases, this approach detects a large class of such leaks."
-- Kurz: answered: "With its supervisor", section 6 of the record. Before the answers: OPEN.
+- Kurz: answered: "With its supervisor", section 6 of the record; a parallel view or block gives no task value that could leak ("View + parallel block", section 6, 2026-11-13), and its read waits for every body that started ("Stop unstarted; deadline per call", section 6, 2026-11-13). Before the answers: OPEN.
 
 ## 16. Network timeouts default to none
 

@@ -58,7 +58,7 @@ Before a design change, name the finding it meets (knowledge/diagram-design-chan
 ## 7. One async runtime per library, and blocking calls that stall it
 
 - Evidence: the async status quo (https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo.html): "The async Rust support in Rust itself is very basic, consisting only of the core Future mechanism." and "Furthermore, the async ecosystem is fractured. Choosing one library may entail choosing a specific runtime."; Tokio's documentation of tasks (https://docs.rs/tokio/latest/tokio/task/index.html, 1.54.1): "A blocking operation performed in a task running on a thread that is also running other tasks would block the entire thread, preventing other tasks from running."
-- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record. Before the answers: OPEN.
+- Kurz: answered: "Readiness I/O, as Tokio", section 12 of the record; work run in parallel beside actors takes no runtime of its own: its bodies run on the scheduler's threads, the actors', and let the queued actors run at the 10 ms mark ("Scheduler + 10ms yield", section 6, 2026-11-13), where Rust puts rayon's pool beside Tokio's. Before the answers: OPEN.
 
 ## 8. `Send` bounds spread through async code
 
