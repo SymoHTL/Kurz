@@ -1650,8 +1650,8 @@ public sealed class Parser
     /// <summary>
     /// U1: the clauses after an actor's name, before its body, in any order (section 6, the owner, 2026-11-13, #519, comment 6847932993,
     /// Q10): each starts with <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>, words only there, which the parser
-    /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to. Any other
-    /// text before the body is <c>syntax</c> (E4).
+    /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to, but for a
+    /// <c>:</c>, whose list stands in the head before the clauses (U1). Any other text before the body is <c>syntax</c> (E4).
     /// </summary>
     private List<ActorClause> ParseActorClauses()
     {
@@ -1672,6 +1672,10 @@ public sealed class Parser
             else if (clauses.Count == 0)
             {
                 throw Fail("a clause after the actor's name, `per`, `yield`, `inbox`, `stack` or `on crash`, or its body (U1)");
+            }
+            else if (At(TokenKind.Colon))
+            {
+                throw new ParseError(Current.Line, "the `:` list of an actor stands in its head, before its clauses (U1, K7)"); // no clause's words hold a `:`
             }
             else
             {
@@ -1696,20 +1700,35 @@ public sealed class Parser
     }
 
     /// <summary>
-    /// <c>spawn Counter(1)</c> (U2): the actor's name and the arguments of its constructor, which bind as C#'s <c>new</c> does, so that a
-    /// member after them is the new reference's, <c>spawn Counter(1).Get()</c>. An <c>on crash</c> after the arguments is passed over to
-    /// the end of the expression, its line kept, which the checker says <c>not supported</c> to.
+    /// <c>spawn Counter(1)</c> (U2): the actor's name, its type arguments where it writes them, <c>spawn Pair&lt;int&gt;(1)</c>, as a
+    /// generic class's construction takes them (T19, U14), and the arguments of its constructor, which bind as C#'s <c>new</c> does, so
+    /// that a member after them is the new reference's, <c>spawn Counter(1).Get()</c>. An <c>on crash</c> after the arguments is passed
+    /// over to the end of the expression, its line kept, which the checker says <c>not supported</c> to.
     /// </summary>
     private SpawnExpression ParseSpawn()
     {
         var spawn = Advance();
         var name = Advance();
+        var typeArguments = new List<TypeSyntax>();
+        if (At(TokenKind.Less))
+        {
+            Advance();
+            suppressNewlines++;
+            do
+            {
+                typeArguments.Add(AtConstantTypeArgument() ? new ConstantTypeArgument(Current.Line, ParseUnary()) : ParseType());
+            }
+            while (Match(TokenKind.Comma));
+            suppressNewlines--;
+            ExpectGreater();
+        }
+
         if (!At(TokenKind.LeftParen))
         {
             throw Fail("the arguments of the actor's constructor, `spawn Counter(1)` (U2)");
         }
 
-        var call = new CallExpression(name.Line, new NameExpression(name.Line, name.Text), [], ParseArguments());
+        var call = new CallExpression(name.Line, new NameExpression(name.Line, name.Text), typeArguments, ParseArguments());
         var onCrash = 0;
         if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
         {

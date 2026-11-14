@@ -1573,6 +1573,7 @@ public sealed class ParserTests
     [InlineData("actor Worker on crash restart {\n}", "(actor Worker [on crash 1] {})")]
     [InlineData("actor Worker yield checks {\n}", "(actor Worker [yield 1] {})")]
     [InlineData("c = spawn Counter(1)", "(assign-or-declare c (spawn (call Counter (int 1))))")]
+    [InlineData("c = spawn Pair<int>(1)", "(assign-or-declare c (spawn (call Pair<int> (int 1))))")]
     [InlineData("print(spawn Counter().Get())", "(call print (call (. (spawn (call Counter)) Get)))")]
     [InlineData("c = spawn Worker() on crash restart", "(assign-or-declare c (spawn (call Worker) [on crash 1]))")]
     [InlineData("f(spawn Worker() on crash restart, 2)", "(call f (spawn (call Worker) [on crash 1]), (int 2))")]
@@ -1583,7 +1584,8 @@ public sealed class ParserTests
     public void The_forms_of_actors_parse(string program, string tree)
     {
         // U1: `actor` before a name declares an actor, the clauses after its name kept by their first word and its line; U2: `spawn` before a
-        // name makes one and binds as C#'s `new`, an `on crash` after it kept by its line to the end of the expression; U6: `send` before a call
+        // name, its type arguments where it writes them (U14, T19), makes one and binds as C#'s `new`, an `on crash` after it kept by its line
+        // to the end of the expression; U6: `send` before a call
         Assert.Equal(tree, Tree(program));
     }
 
@@ -1595,6 +1597,7 @@ public sealed class ParserTests
     [InlineData("c = spawn Counter")] // U2: the arguments of the constructor; U16: `spawn Box` of a class, the form before the name
     [InlineData("actor Counter = 1")] // U1: a clause or the body after the name
     [InlineData("actor Counter(int Start) Start stack 8mb {\n}")] // U1: a clause starts with its word
+    [InlineData("actor Store per Id : IStore {\n}")] // U1: the clauses follow the head a class has, its `:` list among it (K7)
     public void A_form_of_actors_without_its_parts_is_syntax(string program)
     {
         Assert.Equal([(ErrorIds.Syntax, 1)], Errors(program));
