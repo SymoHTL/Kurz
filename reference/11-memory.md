@@ -734,8 +734,9 @@ compiler writes them, in the order of the functions that hold them, a guarded bl
 function it stands in, and of the statements in each, and in a release build as its code generator
 holds them (§3, the owner, 2026-11-13, pull request 532, comment 6860019854); each beside those before
 it that the assembler took, and each one whose addition the assembler refuses is `asm-refused` at the
-line of its `asm`, a line named once for each text the assembler refuses its copies with, so that
-copies refused with one text are one error *(assumed: Rust's, whose compiler reports identical
+line of its `asm`, a line named once for each message the assembler refuses its copies with, the first
+message it gives for a copy without the place in the template it names, as the build compares them, so
+that copies refused with one message are one error *(assumed: Rust's, whose compiler reports identical
 diagnostics once, `deduplicate_diagnostics` and `emit_diagnostic` in `rustc_errors/src/lib.rs` of Rust
 1.100.0, read on 2026-11-13, which no answer named)*, in that order,
 so that the line named is the one LLVM refuses: one it refuses alone, and of two `naked` functions that
@@ -756,9 +757,13 @@ release build, whose optimiser can copy the call of an `asm`, as where it inline
 callers, or drop it, and whose code generator can copy it, as where it duplicates the block that holds
 it into the blocks before it, the build assembles one copy for each call the release build still holds
 when its code is generated, in the order it holds them, so that the line named is the one LLVM refuses:
-each copy whose addition the assembler refuses is named, among them every copy after the first of a
-call LLVM copied whose text defines a symbol, and an `asm` the optimiser dropped is
-named by none; a test build assembles its copies of the program as the compiler wrote it (§3, the
+each copy is assembled, and one whose addition the assembler refuses is `asm-refused`, its line named
+once for each message, among them a copy after the first of a call LLVM copied whose text defines again
+a symbol that a copy the assembler took defines and that the assembler takes one definition of, a label
+or a symbol of `.equiv`, and not one whose text defines it by `.set` or `=` or as a local label, `2:`,
+which the assembler takes again *(assumed: the assembler's, clang 23.1.4's, as §3 marks it)*, and an
+`asm` the optimiser dropped is named by none; a test build assembles its copies of the program as the
+compiler wrote it (§3, the
 owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR", against R11
 narrowed for a release build, so that an `asm` the optimiser copies or drops can stay clang's failure
 with no line, at the cost of a decided rule narrowed and a failure of a release build alone that names
@@ -806,8 +811,13 @@ that `2bar: done:` defines none; a binary label is an error in Intel's syntax al
 `options(att_syntax)` takes `1:`; a template cannot be read where a `{` is not closed or a `}` closes
 none, or where a placeholder's text before a `:` or its `}`, white space at its end set aside, is
 neither empty, which takes the operands without a name in their order, nor digits, a position, nor a
-name, as in `{a b}`, each `asm-operand`, so that `{}`, `{:e}`, `{ }` and `{a }` are read *(assumed:
-Rust's, `argument` in `rustc_parse_format/src/lib.rs` of Rust 1.100.0, read on 2026-11-13, which no answer
+name, as in `{a b}`, each `asm-operand`, so that `{}`, `{:e}`, `{ }`, `{a }` and `{a :e}` are read,
+while the text after the `:`, white space at its end set aside too, is the modifier, none where that
+text is empty, so that `{r:e }` is read as `{r:e}`, and `{r:}` and `{r: }` as `{r}`; white space is the
+characters of Unicode's White_Space, as Rust's `char::is_whitespace` takes them, a no-break space
+among them *(assumed: Rust's, `argument`, `inline_asm` and `next` in `rustc_parse_format/src/lib.rs`,
+`expand_preparsed_asm` in `rustc_builtin_macros/src/asm.rs` and `char::is_whitespace` in
+`library/core/src/char/methods.rs` of Rust 1.100.0, read on 2026-11-13 and 2026-11-14, which no answer
 named)*, and an
 `asm` one of whose templates cannot be read is read for no label and for no template after that one,
 so that it raises one such `asm-operand`, and none for an operand its templates do not use, as Rust's
@@ -1120,9 +1130,11 @@ label is one is the compiler's, as Rust's compiler mangles the symbols of its it
 declares (R16) is no such symbol, and the assembler takes it, as Rust's compiler hands LLVM a naked
 function's assembly as module-level assembly, beside which LLVM takes a label of a symbol the module
 declares *(assumed: Rust's way, which no answer named, as §3 marks it)*. Where the program calls that
-C function, the call reaches the label in a build that keeps the call, as LLVM resolves it in the one
-object the build writes, and not where the optimiser of a release build puts the function's value in
-place of the call, so a test build and a release build of such a program can differ; this is a misuse
+C function, the call reaches the label in a build that keeps the call, as the call is bound to the
+label in the one object the build writes, by the assembler or by the linker as the target has it, and
+not where a release build replaces the call of a C function LLVM knows as a library function, `abs`
+among them, with code of its own, so a test build and a release build of such a program can differ;
+this is a misuse
 of `raw` code, which no compiler checks, as Rust's compiler checks no such label *(assumed: Rust's,
 `codegen_naked_asm` in `rustc_codegen_ssa/src/mir/naked_asm.rs` of Rust 1.100.0, read on 2026-11-13,
 which no answer named)*. A body

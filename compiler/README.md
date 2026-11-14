@@ -1426,12 +1426,15 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   (`-S -mllvm -stop-after=block-placement` at the release build's options), found by its mark and in that
   order (R11, the reading by the mark assumed there as the build's mechanism), so that a call the
   optimiser dropped is named by none and every copy after the first of one the optimiser or the code
-  generator copied is assembled, and refused where its text defines a symbol, and the line named is the
-  one LLVM refuses (R11; the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from
-  optimised IR"); each beside those before it that clang
+  generator copied is assembled, and refused where its text defines again a symbol that a copy clang
+  took defines and that the assembler takes one definition of, a label or a symbol of `.equiv`, and not
+  where it defines it by `.set` or `=` or as a local label, which the assembler takes again, and the line
+  named is the one LLVM refuses (R11; the owner, 2026-11-13, pull request 532, comment 6860019854,
+  "Copies from optimised IR"); each beside those before it that clang
   took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
-  `asm`, under R11, or R12 for a `naked` function's, a line named once for each text clang refuses its
-  copies with (R11, assumed there as Rust's), in that order: one clang refuses alone, a
+  `asm`, under R11, or R12 for a `naked` function's, a line named once for each message clang refuses its
+  copies with, the first it gives for a copy without the place in the template it names (R11, assumed
+  there as Rust's), in that order: one clang refuses alone, a
   `naked` function's whose label is a symbol the program defines among them, which LLVM refuses where it writes
   that symbol's definition, with no line of the template, and of two `naked` functions that define one
   label the one LLVM meets second, the earlier line's where the two are first used out of the order of their

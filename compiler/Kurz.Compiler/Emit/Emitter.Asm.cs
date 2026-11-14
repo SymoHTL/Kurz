@@ -517,7 +517,12 @@ public sealed partial class Emitter
                     var inside = text[(i + 1)..end];
                     var colon = inside.IndexOf(':', StringComparison.Ordinal);
                     var reference = (colon < 0 ? inside : inside[..colon]).TrimEnd(); // as the checker reads it (Checker.CheckTemplate)
-                    var modifier = colon < 0 ? null : inside[(colon + 1)..];
+                    var modifier = colon < 0 ? null : inside[(colon + 1)..].TrimEnd(); // white space before the `}` set aside, as the checker reads it
+                    if (modifier is "")
+                    {
+                        modifier = null; // an empty modifier is none, as the checker reads it
+                    }
+
                     var operand = reference.Length == 0 ? positional[implicitIndex++]
                         : char.IsAsciiDigit(reference[0]) ? positional[int.Parse(reference, NumberStyles.None, CultureInfo.InvariantCulture)]
                         : named[reference];

@@ -2008,6 +2008,20 @@ public sealed class CheckerTests
     }
 
     [Theory]
+    [InlineData("raw {\n    asm(\"inc {r:e }\", r = in(reg) 1)\n}")] // white space at the end of a modifier set aside
+    [InlineData("raw {\n    asm(\"inc {r:}\", r = in(reg) 1)\n}")] // an empty modifier none
+    [InlineData("raw {\n    asm(\"inc {r: }\", r = in(reg) 1)\n}")] // both
+    [InlineData("raw {\n    asm(\"inc {a :e}\", a = in(reg) 1)\n}")] // white space at the end of the text before the `:` set aside
+    [InlineData("raw {\n    asm(\"inc {a }\", a = in(reg) 1)\n}")] // a no-break space among the white space, Unicode's White_Space
+    public void A_placeholder_is_read_as_Rusts_parser_reads_it(string program)
+    {
+        // R11 (assumed: Rust's reading of a template, as section 3 marks it): white space at the end of a placeholder's text before
+        // its `:` and at the end of its modifier is set aside, as Rust's parser sets it aside before the `:` and before the `}`
+        // (rustc_parse_format's `argument` and `next`), and an empty modifier is none, as Rust's `expand_preparsed_asm` reads it
+        Clean(program, grants: "raw");
+    }
+
+    [Theory]
     [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = inout(reg) a, x = in(reg) 2)\n}\nprint(a)", 3)] // each name on one operand
     [InlineData("raw {\n    asm(\"{x} {}\", x = in(reg) 1, in(reg) 2)\n}", 2)] // the operands without a name first
     [InlineData("mut long a = 1\nraw {\n    asm(\"{x}\", x = out(reg) a, options(pure))\n}\nprint(a)", 3)] // `pure` with `nomem` or `readonly`

@@ -91,16 +91,18 @@ public static partial class Builder
     /// statement's copy once for each call the code generator holds once it placed the blocks, in its order, read by the mark on each
     /// call, the build's mechanism, which R11 marks assumed (<see cref="Held"/>); each with
     /// those before it that clang took, and each one whose addition clang refuses is the compile error <c>asm-refused</c> at its line, a
-    /// line named once for each text clang refuses its copies with, as Rust's compiler reports identical diagnostics once (R11, assumed
-    /// there), an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
+    /// line named once for each message clang refuses its copies with, the first it gives for a copy without the place in the template
+    /// it names, as Rust's compiler reports identical diagnostics once (R11, assumed there), an <see cref="AsmRefusedException"/> that
+    /// names them in that order (R11, R12; the
     /// owner, 2026-11-13, "Rust's srcloc", for the error at the line of the <c>asm</c>, pull request 530, comment 6855725580, "LLVM's
     /// order everywhere", for the order, and pull request 532, comment 6860019854, "Copies from optimised IR", for the line named in a
     /// release build, the one LLVM refuses): one
     /// clang refuses alone, a <c>naked</c> function's whose label is a symbol of the program among them, of two <c>naked</c> functions that
     /// define one label the second LLVM meets, whose label clang refuses beside the first's, where Rust's compiler, which gives a naked
-    /// function's assembly no <c>!srcloc</c>, names neither, and in a release build every copy after the first of a call the optimiser or
-    /// the code generator copied whose text defines a symbol, which clang takes once and refuses again. Where none is refused so, the
-    /// failure stays clang's.
+    /// function's assembly no <c>!srcloc</c>, names neither, and in a release build a copy after the first of a call the optimiser or the
+    /// code generator copied whose text defines again a symbol that a copy clang took defines and that the assembler takes one definition
+    /// of, a label or a symbol of <c>.equiv</c>, and not one that defines it by <c>.set</c> or <c>=</c> or as a local label, which the
+    /// assembler takes again. Where none is refused so, the failure stays clang's.
     /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
@@ -144,7 +146,7 @@ public static partial class Builder
                 throw;
             }
 
-            throw new AsmRefusedException([.. refused.DistinctBy(d => (d.Line, d.Message))]); // an `asm` of a function emitted or copied twice, once for each text (E1)
+            throw new AsmRefusedException([.. refused.DistinctBy(d => (d.Line, d.Message))]); // an `asm` of a function emitted or copied twice, once for each message (E1)
         }
     }
 
