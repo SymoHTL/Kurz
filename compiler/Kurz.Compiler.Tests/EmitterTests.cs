@@ -344,6 +344,17 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void White_space_at_the_end_of_a_modifier_is_set_aside_and_an_empty_modifier_is_none_as_Rusts_parser_reads_them()
+    {
+        // R11 (assumed: Rust's reading of a template, as section 3 marks it): `{o:e }` is `{o:e}`, the low 32 bits of `o`'s register, as
+        // Rust's parser sets white space aside before the `}` (rustc_parse_format's `next`), and `{0:}` and `{0: }` are `{0}`, the 64 bits
+        // of the first operand's, as an empty modifier is none (rustc_builtin_macros' `expand_preparsed_asm`); the program the emitter
+        // writes from them runs and prints the low 32 bits of twice its input, 2 of 2^32 + 2, where all 64 would print 4294967298
+        const string text = "long a = 2147483649\nmut long b = 0\nraw {\n    asm(\"lea {o:e }, [{0:} + {0: }]\", in(reg) a, o = out(reg) b)\n}\nprint(b)\n";
+        Ran(BuildAndRun(text, "asm-modifier-white-space", "raw"), 0, ["2"], "");
+    }
+
+    [Fact]
     public void On_an_arm_machine_an_asm_and_a_naked_function_are_not_supported_at_their_lines()
     {
         // R11, R12: the checker reads an `asm` for x86-64, the target a program is read for where nothing names one, so a build for a
@@ -666,8 +677,9 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // R11 (assumed: Rust's, whose compiler reports identical diagnostics once, as section 3 marks it): the optimiser of a release
         // build inlines `Bump` into its two callers, and the build assembles the copies in the order LLVM meets them, the first, then
         // the `asm` of `Two`, which defines `j`, then the second; the assembler refuses the first for `frobnicate` and the second for
-        // `.err`, which the `.ifdef j` before it reaches, two texts, so the line of the `asm` is named twice; with `nop` in place of
-        // `.equiv j, 1` it refuses both copies with one text, which are one error at that line (the control)
+        // the `.err` the `.ifdef j` before it reaches, beside `frobnicate`, whose message comes after the one of `.err`, the first the
+        // build compares, two messages, so the line of the `asm` is named twice; with `nop` in place of `.equiv j, 1` it refuses both
+        // copies with one message, which are one error at that line (the control)
         const string program = """
             long Bump(long x) {
                 mut long n = x
