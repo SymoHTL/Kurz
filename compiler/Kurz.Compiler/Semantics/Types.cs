@@ -130,6 +130,20 @@ public sealed record ClassType(ClassSymbol Symbol) : KurzType
     public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
 }
 
+/// <summary>
+/// U1, U4: a reference to an actor, which <c>spawn</c> gives (U2): a call of a <c>pub</c> method through it is a message (U4, U6), and
+/// nothing outside the actor reaches its fields (U8). Its <see cref="Symbol"/> is the actor's state, a class's body, whose instance
+/// is <c>this</c> inside its methods and a <see cref="ClassType"/> there.
+/// </summary>
+public sealed record ActorType(ClassSymbol Symbol) : KurzType
+{
+    public override string Text => Symbol.Name;
+
+    public bool Equals(ActorType? other) => other is not null && ReferenceEquals(Symbol, other.Symbol);
+
+    public override int GetHashCode() => Symbol.Name.GetHashCode(StringComparison.Ordinal);
+}
+
 /// <summary>K6: an <c>interface</c>: a reference to a counted instance of any class that implements it, one type per declaration.</summary>
 public sealed record InterfaceType(InterfaceSymbol Symbol) : KurzType
 {
@@ -529,6 +543,7 @@ public static class Types
             (EnumType x, EnumType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (FlagsType x, FlagsType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (ClassType x, ClassType y) => ReferenceEquals(x.Symbol, y.Symbol),
+            (ActorType x, ActorType y) => ReferenceEquals(x.Symbol, y.Symbol), // U1
             (InterfaceType x, InterfaceType y) => ReferenceEquals(x.Symbol, y.Symbol),
             (WeakRefType x, WeakRefType y) => ReferenceEquals(x.Target.Symbol, y.Target.Symbol),
             (HandleType x, HandleType y) => x.Kind == y.Kind,

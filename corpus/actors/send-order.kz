@@ -1,0 +1,20 @@
+// expect: output
+// | 1
+// | 2
+// | 3
+// | done
+// rules: U5, U6
+
+actor Printer {
+    pub void Show(int n) {
+        print(n)
+    }
+
+    pub string Done() => "done"
+}
+
+p = spawn Printer()
+send p.Show(1)
+send p.Show(2)
+send p.Show(3)
+print(p.Done())

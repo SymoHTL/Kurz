@@ -172,12 +172,20 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
         "system/command-words.kz", "system/spawn-input.kz", "system/spawn-kill.kz", "system/spawn-pipes.kz", "system/status-input.kz", "system/status-piped.kz",
     ];
 
+    /// <summary>The cases of actors that expect a run, which the checker reads and the emitter does not emit, on every system (U1).</summary>
+    private static readonly string[] ActorCases =
+    [
+        "actors/constructor-arguments.kz", "actors/counter.kz", "actors/own-method-direct.kz", "actors/relay.kz", "actors/send-order.kz",
+        "actors/send-own-method.kz", "actors/two-instances.kz", "actors/union-result.kz",
+    ];
+
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>
     private static readonly Dictionary<string, string> NotEmitted = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["types/string-chars.kz"] = "`s.Chars` as a list (T15)",
         ["values/text-more.kz"] = "`s.Chars` as a list (T15)",
-    }.Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
+    }.Concat(ActorCases.Select(c => KeyValuePair.Create(c, Emitter.ActorNotEmitted)))
+        .Concat(OperatingSystem.IsWindows() ? FileCases.Select(c => KeyValuePair.Create(c, Emitter.NotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? ProcessCases.Select(c => KeyValuePair.Create(c, Emitter.ProcessNotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? LogCases.Select(c => KeyValuePair.Create(c, Emitter.LogNotOnWindows)) : [])
         .Concat(OperatingSystem.IsWindows() ? StdinCases.Select(c => KeyValuePair.Create(c, Emitter.StdinNotOnWindows)) : [])

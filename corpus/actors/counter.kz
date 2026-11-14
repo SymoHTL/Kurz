@@ -1,0 +1,18 @@
+// expect: output
+// | 3
+// rules: U1, U2, U4, U5, U6
+
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+send c.Add(1)
+send c.Add(2)
+print(c.Get())

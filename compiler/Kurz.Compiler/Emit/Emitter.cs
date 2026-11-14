@@ -167,9 +167,17 @@ public sealed partial class Emitter
 
     private static UnsupportedException Unsupported(int line, string construct) => new(line, construct);
 
+    /// <summary>U1: the words of the one diagnostic of a program that declares an actor, which the emitter does not emit.</summary>
+    internal const string ActorNotEmitted = "an actor, which the emitter does not emit (U1)";
+
     private EmittedProgram Run()
     {
         RefuseArmTests();
+        if (program.Model.Classes.Where(c => c.IsActor).OrderBy(c => c.Line).FirstOrDefault() is { } actor)
+        {
+            throw Unsupported(actor.Line, ActorNotEmitted); // U1
+        }
+
         foreach (var u in units)
         {
             Register(u);

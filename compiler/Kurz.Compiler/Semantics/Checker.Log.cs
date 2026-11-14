@@ -16,6 +16,13 @@ public sealed partial class Checker
     /// </summary>
     private Typed CheckLogFunction(MemberAccess m, CallExpression c)
     {
+        if (CurrentClass() is { IsActor: true })
+        {
+            NotSupported(m.Line, "a log call inside an actor, whose line P8 holds open (P8, U1)");
+            CheckArgumentsLoosely(c);
+            return Typed.Error;
+        }
+
         var level = Array.IndexOf(LogLevels, m.Member);
         if (level < 0)
         {

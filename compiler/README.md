@@ -1751,7 +1751,8 @@ alone.
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
-checker's shape, and no executable: a generic `data` type with a base or a type
+checker's shape, and no executable: an actor (U1), at the line of the program's first one, so that
+every program the checker reads with an actor stops there, a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
 (M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
@@ -2124,6 +2125,18 @@ that sit under a rule by its id. Every one is pinned by a test.
   one. A modifier other than `mut` before a variable's name (`pub x = 1`) is `syntax` the same
   way: V2 and V4 give a variable `mut` and nothing else, so the word begins no declaration and the
   statement ends at it; which id it takes is a question for the same design round.
+- U1, U2, U6, U14: the words of actors. `actor` begins a declaration before a name, `spawn` an
+  expression before a name and `send` a statement before what can begin an expression, and each is
+  read as a name elsewhere, as L12's reading reads a core word, but `send` where an expression stands
+  before what can begin one, which is `syntax` there, as a statement form's word is. After an
+  actor's name and its primary constructor the parser keeps each clause's first word, `per`, `yield`,
+  `inbox`, `stack` or `on crash`, with its line, passes over the words that follow it up to the body,
+  and reads any other word there as `syntax`; an `on crash` after the arguments of a `spawn` is kept
+  by its line and passed over to the end of the expression. The checker says `not supported` to
+  both. `spawn` binds as C#'s `new`, so that `spawn Counter().Get()` calls `Get` on the new
+  reference, a name after `spawn` without its `(` is `syntax`, and `send` before what the parser
+  reads as no call is `syntax` (U14), and before a call of anything but an actor's method the
+  checker's `syntax`. A `spawn` as a statement on its own is a value on its own, F5's `syntax`.
 - Recovery (no rule id): after an error the parser skips the rest of the statement, which is the
   rest of its line once every parenthesis, bracket and brace the statement opened is closed again,
   and a block the statement opened, with an `else` clause after it, so that the next statement
@@ -2170,7 +2183,10 @@ types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, 
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 16 (regular expressions: G1, the names `Regex`, `Match`,
 `RegexError` and `RegexKind` among those `Checker.Prelude` names, G2's linear engine, G3, whose check of a literal pattern is
 `RegexPattern`, a copy of the standard library's parse and count that `RegexTests` holds to it, and a `data` type of the file derived from `RegexError`, as from a `data` type of the file (D6, D16), which prints `RegexError`'s text, G4 and G5), 17 (logging: P1 and P2, a call site's record
-of P3 and its category of P6), and the rules of `print` and of a value's text that
+of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12 and U14, the
+others the run's, an actor's body read as a class's, its reference a type of its own, the calls
+through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
+a `send` of its own method inside it recorded as `CallKind.ActorSend`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -2208,7 +2224,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
-`equal-by-unknown`, `equals-method`, `mutable-key`, and
+`equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -2339,7 +2355,24 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); and a field or a constructor among statements, which the parser reads in a
+name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters, a base or
+an interface (U1), `equal by`, whose `==` stands open (U2), a constructor in its body (U2), a `static` member (U1),
+a property and a `pub` field, which stand open (U8), and a modifier of a method but `pub` (U9), each of which leaves the
+actor and every use of its name unread, besides what a class's body does not read, and an actor named after
+`:` (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
+or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
+method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
+an actor's constructor, that takes or gives what crosses no actor, a class instance, every one, since
+whether an immutable class is one with no `mut` field of its own or one through which nothing reachable has
+one stands open on issue 519 (comment 6866132292, Q14), an interface's value or a function value among them
+(U12); a `mut` parameter of a method called through a reference (U9) or
+sent to by the actor itself (U11); an
+actor's reference inside a list, a map, a union, a `?`, a function type or a type argument, written or
+inferred, and as a field of a class or a data type (U12); `this` as a value inside an actor (U10); the
+text of an actor's reference, in `print` and an interpolation, and `==` and `!=` of one (U2); and a log call
+inside an actor (P8). Those that stand open stand so on issue 519, comment 6866132292 (Q4, Q6, Q7 and
+Q10), and the refusal of a mutable class instance, a function value, the clauses and `on crash` is the lean of its Q1, and that of an
+immutable one follows from its Q14, open; and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
 lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the

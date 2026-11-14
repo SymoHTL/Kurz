@@ -547,6 +547,10 @@ public sealed class Parser
                 case "use": return ParseUse();
                 case "data": case "class": case "interface": case "enum": case "flags":
                     return ParseTypeDeclaration(Modifiers.None);
+                case "actor" when Peek().Kind is TokenKind.Name or TokenKind.Keyword:
+                    return ParseTypeDeclaration(Modifiers.None); // U1: an actor's declaration; `actor` alone is a name (the reading on L12)
+                case "send" when CanStartExpression(Peek().Kind):
+                    return ParseSend(); // U6
                 case "else":
                     // C2: `else` follows the closing brace on its line; one on a line of its own is `syntax` (E4 lists it; decided)
                     ReportSyntax(token.Line, "`else` follows the closing brace of the `if` block on the same line");
@@ -1315,7 +1319,7 @@ public sealed class Parser
     {
         var start = Current;
         var modifiers = ParseModifiers();
-        if (At(TokenKind.Keyword) && Current.Text is "data" or "class" or "interface" or "enum" or "flags")
+        if (At(TokenKind.Keyword) && Current.Text is "data" or "class" or "interface" or "enum" or "flags" or "actor")
         {
             committed = true; // `pub class`: a type declaration, whatever follows; an error in its body is reported where it stands
             return ParseTypeDeclaration(modifiers);
@@ -1541,6 +1545,7 @@ public sealed class Parser
             "class" => TypeDeclarationKind.Class,
             "interface" => TypeDeclarationKind.Interface,
             "enum" => TypeDeclarationKind.Enum,
+            "actor" => TypeDeclarationKind.Actor,
             _ => TypeDeclarationKind.Flags,
         };
         var name = ExpectName("the name of the type");
@@ -1556,7 +1561,8 @@ public sealed class Parser
         var equalBy = new List<string>();
         List<Statement>? members = null; // null where no body is written; an empty list for `{ }`
         var values = new List<EnumMember>();
-        if (kind is TypeDeclarationKind.Data or TypeDeclarationKind.Class)
+        List<ActorClause>? clauses = null;
+        if (kind is TypeDeclarationKind.Data or TypeDeclarationKind.Class or TypeDeclarationKind.Actor)
         {
             if (At(TokenKind.LeftParen))
             {
@@ -1596,7 +1602,12 @@ public sealed class Parser
                 }
             }
 
-            if (At(TokenKind.LeftBrace) || BraceOnNextLine())
+            if (kind == TypeDeclarationKind.Actor)
+            {
+                clauses = ParseActorClauses();
+                members = ParseTypeBody(name.Text, name.Line); // U1: an actor has a body, as an interface has one
+            }
+            else if (At(TokenKind.LeftBrace) || BraceOnNextLine())
             {
                 members = ParseTypeBody(name.Text, name.Line);
             }
@@ -1633,7 +1644,95 @@ public sealed class Parser
             openBraces--; // after the `}`: an error at the `}` leaves the brace for recovery to close
         }
 
-        return new TypeDeclaration(keyword.Line, modifiers, kind, name.Text, typeParameters, primary, bases, equalBy, members, values);
+        return new TypeDeclaration(keyword.Line, modifiers, kind, name.Text, typeParameters, primary, bases, equalBy, members, values, clauses);
+    }
+
+    /// <summary>
+    /// U1: the clauses after an actor's name, before its body, in any order (section 6, the owner, 2026-11-13, #519, comment 6847932993,
+    /// Q10): each starts with <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>, words only there, which the parser
+    /// keeps with their lines, and passes over the words that follow each, which the checker says <c>not supported</c> to. Any other
+    /// text before the body is <c>syntax</c> (E4).
+    /// </summary>
+    private List<ActorClause> ParseActorClauses()
+    {
+        var clauses = new List<ActorClause>();
+        while (!At(TokenKind.LeftBrace) && !At(TokenKind.Newline) && !At(TokenKind.EndOfFile))
+        {
+            if (Current is { Kind: TokenKind.Name, Text: "per" or "yield" or "inbox" or "stack" })
+            {
+                var word = Advance();
+                clauses.Add(new ActorClause(word.Line, word.Text));
+            }
+            else if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
+            {
+                var on = Advance();
+                Advance();
+                clauses.Add(new ActorClause(on.Line, "on crash"));
+            }
+            else if (clauses.Count == 0)
+            {
+                throw Fail("a clause after the actor's name, `per`, `yield`, `inbox`, `stack` or `on crash`, or its body (U1)");
+            }
+            else
+            {
+                Advance(); // a word of the clause before it
+            }
+        }
+
+        return clauses;
+    }
+
+    /// <summary><c>send c.Add(1)</c> (U6): the call that follows is the statement's; anything but a call there is <c>syntax</c> (U14).</summary>
+    private SendStatement ParseSend()
+    {
+        var send = Advance();
+        var value = ParseExpression();
+        if (value is not CallExpression call)
+        {
+            throw new ParseError(send.Line, "`send` stands before a call of an actor's method, `send c.Add(1)` (U6, U14)");
+        }
+
+        return new SendStatement(send.Line, call);
+    }
+
+    /// <summary>
+    /// <c>spawn Counter(1)</c> (U2): the actor's name and the arguments of its constructor, which bind as C#'s <c>new</c> does, so that a
+    /// member after them is the new reference's, <c>spawn Counter(1).Get()</c>. An <c>on crash</c> after the arguments is passed over to
+    /// the end of the expression, its line kept, which the checker says <c>not supported</c> to.
+    /// </summary>
+    private SpawnExpression ParseSpawn()
+    {
+        var spawn = Advance();
+        var name = Advance();
+        if (!At(TokenKind.LeftParen))
+        {
+            throw Fail("the arguments of the actor's constructor, `spawn Counter(1)` (U2)");
+        }
+
+        var call = new CallExpression(name.Line, new NameExpression(name.Line, name.Text), [], ParseArguments());
+        var onCrash = 0;
+        if (Current is { Kind: TokenKind.Name, Text: "on" } && Peek() is { Kind: TokenKind.Name, Text: "crash" })
+        {
+            onCrash = Current.Line;
+            var depth = 0;
+            while (!At(TokenKind.EndOfFile))
+            {
+                if (depth == 0 && (At(TokenKind.Newline) || At(TokenKind.Comma) || At(TokenKind.RightParen) || At(TokenKind.RightBracket) || At(TokenKind.RightBrace)))
+                {
+                    break;
+                }
+
+                depth += Current.Kind switch
+                {
+                    TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.LeftBrace => 1,
+                    TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace => -1,
+                    _ => 0,
+                };
+                index++;
+            }
+        }
+
+        return new SpawnExpression(spawn.Line, call, onCrash);
     }
 
     private List<Statement> ParseTypeBody(string typeName, int line)
@@ -2150,6 +2249,10 @@ public sealed class Parser
                         return new MatchExpression(token.Line, subject, ParseArms(token.Line, "`match`"));
                     case "asm" when Peek().Kind == TokenKind.LeftParen:
                         throw new ParseError(token.Line, "`asm` is a statement of its own (R11)");
+                    case "spawn" when Peek().Kind == TokenKind.Name:
+                        return ParseSpawn(); // U2
+                    case "send" when CanStartExpression(Peek().Kind):
+                        throw new ParseError(token.Line, "`send` is a statement of its own (U6)");
                     default:
                         if (token.Text is "if" or "while" or "for" or "else" or "return" or "throw" or "break" or "continue"
                             or "data" or "class" or "interface" or "enum" or "flags" or "raw" or "use" or "with" or "in")

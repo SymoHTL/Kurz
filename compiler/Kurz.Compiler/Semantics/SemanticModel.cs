@@ -328,6 +328,20 @@ public enum CallKind
 
     /// <summary>An intrinsic of a class under <c>X86</c> or <c>Arm</c>, or a lane operation of a vector (R18); <see cref="CallInfo.Intrinsic"/> is the one picked, and <see cref="CallInfo.Target"/> the vector a lane operation is called on.</summary>
     Intrinsic,
+
+    /// <summary>
+    /// U4: a call of an actor's <c>pub</c> method through its reference, <c>c.Get()</c>, a message whose caller waits for its result;
+    /// <see cref="CallInfo.Function"/> is the method picked (F13), and <see cref="CallInfo.Target"/> the <see cref="ActorType"/> the
+    /// value before the dot has.
+    /// </summary>
+    ActorCall,
+
+    /// <summary>
+    /// U6, U11: the call after <c>send</c>, a message no one waits for: <c>send c.Add(1)</c> through a reference, or
+    /// <c>send Add(1)</c> and <c>send this.Add(1)</c> of the actor's own method inside it; <see cref="CallInfo.Function"/> is the method
+    /// picked, and <see cref="CallInfo.Target"/> the <see cref="ActorType"/> of the actor that receives it.
+    /// </summary>
+    ActorSend,
 }
 
 /// <summary>

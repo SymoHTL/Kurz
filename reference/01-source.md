@@ -612,6 +612,7 @@ before `static`)*. `Ptr` and `SizeOf`, which R14 uses as syntax, are core words 
 everywhere else *(assumed, §13)*. `internal`, which F9 uses as syntax for a member visible to its
 folder (§8, the owner, 2026-11-03), is a core word too *(assumed, §8: as C# reserves it)*. `base` is a
 word right after a constructor's `:` (K14) and a name everywhere else (§4, the owner, 2026-11-03).
+`actor`, `spawn` and `send`, which chapter 19 uses as syntax, are core words too (U1).
 
 Case: [source/core-word-as-name.kz](../corpus/source/core-word-as-name.kz)
 ```kurz

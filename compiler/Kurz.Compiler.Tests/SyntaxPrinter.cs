@@ -20,6 +20,7 @@ internal static class SyntaxPrinter
         AssignOrDeclare a => $"(assign-or-declare {a.Name} {Print(a.Value)})",
         Assignment a => $"(assign {Print(a.Target)} {Print(a.Value)})",
         ExpressionStatement e => Print(e.Expression),
+        SendStatement s => $"(send {Print(s.Call)})",
         IfStatement i => $"(if {Print(i.Condition)} {Print(i.Then)}{(i.Else is null ? "" : " else " + Print(i.Else))})",
         WhileStatement w => $"(while {Print(w.Condition)} {Print(w.Body)})",
         ForInStatement f => $"(for {f.Variable}{(f.Second is null ? "" : ", " + f.Second.Name)} in {Print(f.Collection)} {Print(f.Body)}{(f.Arms is null ? "" : " else " + Arms(f.Arms))})",
@@ -98,6 +99,11 @@ internal static class SyntaxPrinter
             sb.Append(" {").Append(string.Join(", ", t.Values.Select(v => v.Number is null ? v.Name : $"{v.Name} = {Print(v.Number)}"))).Append('}');
         }
 
+        if (t.Clauses is { Count: > 0 } clauses)
+        {
+            sb.Append(' ').Append(string.Join(" ", clauses.Select(c => $"[{c.Word} {c.Line}]"))); // U1: each clause's word with its line
+        }
+
         if (t.Members is not null)
         {
             sb.Append(" {").Append(string.Join(" ", t.Members.Select(Print))).Append('}'); // `{}` for a body with nothing in it, nothing for no body
@@ -172,6 +178,7 @@ internal static class SyntaxPrinter
         WithExpression w => $"(with {Print(w.Target)} {string.Join(", ", w.Assignments.Select(a => a.Field + " = " + Print(a.Value)))})",
         ElseExpression e => $"(else {Print(e.Call)} {Arms(e.Arms)})",
         ParenthesizedExpression p => $"(paren {Print(p.Inner)})",
+        SpawnExpression s => $"(spawn {Print(s.Call)}{(s.OnCrashLine == 0 ? "" : $" [on crash {s.OnCrashLine}]")})",
         _ => throw new InvalidOperationException(expression.GetType().Name),
     };
 
