@@ -334,6 +334,16 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void White_space_after_the_operand_of_a_placeholder_is_set_aside_as_Rusts_parser_sets_it_aside()
+    {
+        // R11 (assumed: Rust's reading of a template, as section 3 marks it): `{ }` takes the operands without a name in their order, `{0 }` the
+        // first and `{o }` the one named `o`, as `{}`, `{0}` and `{o}` do, as Rust's parser sets white space aside after the operand
+        // (rustc_parse_format's `argument`); the program the emitter writes from them runs and prints twice its input
+        const string text = "long a = 1\nmut long b = 0\nraw {\n    asm(\"lea {o }, [{ } + {0 }]\", in(reg) a, o = out(reg) b)\n}\nprint(b)\n";
+        Ran(BuildAndRun(text, "asm-white-space", "raw"), 0, ["2"], "");
+    }
+
+    [Fact]
     public void On_an_arm_machine_an_asm_and_a_naked_function_are_not_supported_at_their_lines()
     {
         // R11, R12: the checker reads an `asm` for x86-64, the target a program is read for where nothing names one, so a build for a
@@ -391,8 +401,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void Of_two_naked_functions_that_define_one_label_the_build_names_the_one_LLVM_refuses_in_the_order_of_their_calls()
     {
-        // R12 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes a function at
-        // its first call, and LLVM writes the `naked` functions' module-level assembly in that order, so of two that define one label and
+        // R12 (the owner, 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"): the compiler writes the functions
+        // in the order their first uses are reached (R11), and LLVM writes the `naked` functions' module-level assembly in that order, so of two that define one label and
         // are called out of the order of their lines, LLVM refuses the label of the earlier line, the one it meets second, and the build
         // names that line
         const string program = """
@@ -550,7 +560,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     {
         // R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the optimiser of a release build
         // inlines `Bump` into its two callers, so the module defines the symbol of `.equiv k, 1` twice and clang refuses it; the build reads
-        // the calls the optimised module holds by the mark on each, its line, and assembles a copy of each, so the second is refused and
+        // the calls its code generator holds by the mark on each, its line, and assembles a copy of each, so the second is refused and
         // named at the line of the `asm`, once; a test build, which keeps one call, builds the program (the control)
         const string program = """
             long Bump(long x) {
@@ -573,13 +583,42 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
+    public void An_asm_the_code_generator_of_a_release_build_copies_is_asm_refused_at_its_line_where_the_assembler_refuses_a_copy()
+    {
+        // R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR", for the line named in a release
+        // build, the one LLVM refuses): the optimised module of a release build holds one call of `.equiv k, 1`, and LLVM's code generator
+        // duplicates the block that holds it, after the inner `if`, into the two blocks before it, so clang refuses the second copy; the
+        // build reads the calls the code generator holds once it placed the blocks, by the mark each copy keeps (assumed: the build's
+        // mechanism, as section 3 marks it), so the second is refused and named at the line of the `asm`, once; a test build, which
+        // copies no block, builds the program (the control)
+        const string program = """
+            void Pick(bool a, bool b) {
+                if a {
+                    if b { print(1) } else { print("two") }
+                    raw { asm(".equiv k, 1") }
+                } else {
+                    print(3.5)
+                }
+                print(4)
+            }
+
+            Pick(true, false)
+            Pick(true, true)
+            Pick(false, true)
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-generated-release"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Assert.True(File.Exists(toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw").Program!, "asm-generated-test")));
+    }
+
+    [Fact]
     public void A_release_build_names_no_asm_its_optimiser_dropped_beside_one_the_assembler_refuses()
     {
         // R11 (the owner, 2026-11-13, pull request 530, comment 6854386584, "As Rust, builds differ", and pull request 532, comment
-        // 6860019854, "Copies from optimised IR"): where clang refuses a release build, the build assembles copies of the calls the
-        // optimised module holds alone, so the `pure` `asm` whose output nothing reads, which the optimiser dropped, raises nothing beside
-        // the `asm` of the top-level code the assembler refuses; a test build, which keeps both calls, names both, in the order LLVM meets
-        // them, the top-level code's function first (the control)
+        // 6860019854, "Copies from optimised IR"): where clang refuses a release build, the build assembles copies of the calls its code
+        // generator holds alone, so the `pure` `asm` whose output nothing reads, which the optimiser dropped, raises nothing beside
+        // the `asm` of the top-level code the assembler refuses; a test build's copies, taken as the compiler wrote the program, hold both
+        // calls and name both, in the order LLVM meets them, the top-level code's function first (the control)
         const string program = """
             long Zero() {
                 mut long n = 0
@@ -605,8 +644,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void Of_two_asm_statements_at_one_line_a_release_build_copies_each_call_as_its_own_asm()
     {
         // R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the mark of a call is its line,
-        // and two `asm`s can stand at one line, so the build copies each call the optimised module holds as the `asm` of that line whose
-        // template and constraints the call has: the one the assembler refuses is named, and the one beside it that it takes is no copy
+        // and two `asm`s can stand at one line, so the build copies each call the code generator holds as the `asm` of that line whose
+        // template the call has: the one the assembler refuses is named, and the one beside it that it takes is no copy
         // of it (the control: the program without the refused instruction builds)
         const string program = """
             long Pick(bool c) {
@@ -619,6 +658,38 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-one-line-release"));
         Assert.Equal([(ErrorIds.AsmRefused, 2)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         Assert.True(File.Exists(toolchain.Build(Compile(program.Replace("frobnicate", "pause", StringComparison.Ordinal), toolchain.Runtime, testBuild: false, "raw").Program!, "asm-one-line-built")));
+    }
+
+    [Fact]
+    public void Copies_of_one_asm_the_assembler_refuses_with_two_texts_are_two_errors_at_its_line()
+    {
+        // R11 (assumed: Rust's, whose compiler reports identical diagnostics once, as section 3 marks it): the optimiser of a release
+        // build inlines `Bump` into its two callers, and the build assembles the copies in the order LLVM meets them, the first, then
+        // the `asm` of `Two`, which defines `j`, then the second; the assembler refuses the first for `frobnicate` and the second for
+        // `.err`, which the `.ifdef j` before it reaches, two texts, so the line of the `asm` is named twice; with `nop` in place of
+        // `.equiv j, 1` it refuses both copies with one text, which are one error at that line (the control)
+        const string program = """
+            long Bump(long x) {
+                mut long n = x
+                raw {
+                    asm(".ifdef j", ".err", ".endif", "frobnicate", "add {r}, 1", r = inout(reg) n)
+                }
+                return n
+            }
+
+            long One() => Bump(1)
+
+            long Two() {
+                raw { asm(".equiv j, 1") }
+                return Bump(2)
+            }
+
+            print(One() + Two())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: false, "raw").Program!, "asm-two-texts"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4), (ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program.Replace(".equiv j, 1", "nop", StringComparison.Ordinal), toolchain.Runtime, testBuild: false, "raw").Program!, "asm-one-text"));
+        Assert.Equal([(ErrorIds.AsmRefused, 4)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
     }
 
     [Fact]
@@ -647,6 +718,35 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Assert.Equal([(ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
         var built = Compile(program.Replace("frobnicate", "nop", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw").Program!;
         Assert.True(File.Exists(toolchain.Build(built with { Ir = built.Ir + declarations }, "asm-declared-built")));
+    }
+
+    [Fact]
+    public void A_C_function_the_program_declares_takes_no_label_beside_the_copies()
+    {
+        // R12 (assumed: Rust's way, as section 3 marks it): a label of a `naked` function's `asm` that is a symbol the program defines is
+        // `asm-refused`, and a C function the program declares (R16) is a `declare` line of the IR, no definition, beside which the
+        // assembler takes a label of its name, so where clang refuses another `asm` the label `abs:` is named by none; the program whose
+        // `asm` the assembler takes builds beside the same declaration (the control: clang takes the label), and its call of `abs`, which
+        // the assembler resolves in the one object a test build writes, runs the label's code and prints 7, where the C library's
+        // `abs(-3)` is 3: a misuse of `raw` code, which no compiler checks (assumed: Rust's way, as section 3 marks it)
+        const string program = """
+            extern "C" {
+                int abs(int n)
+            }
+
+            naked long Seven() {
+                asm("abs:", "mov eax, 7", "ret")
+            }
+
+            raw {
+                asm("frobnicate")
+                print(abs(-3))
+            }
+            print(Seven())
+            """;
+        var refused = Assert.Throws<AsmRefusedException>(() => toolchain.Build(Compile(program, toolchain.Runtime, testBuild: true, "raw", "native").Program!, "asm-c-declared"));
+        Assert.Equal([(ErrorIds.AsmRefused, 10)], refused.Refused.Select(d => (d.Id, d.Line)).ToList());
+        Ran(Toolchain.Run(toolchain.Build(Compile(program.Replace("frobnicate", "nop", StringComparison.Ordinal), toolchain.Runtime, testBuild: true, "raw", "native").Program!, "asm-c-declared-built")), 0, ["7", "7"], "");
     }
 
     [Fact]
