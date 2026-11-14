@@ -17,7 +17,7 @@ other source is the project's own record (elixir-lang.org, hexdocs, erlang.org),
 paper, marked so, and the Dashbit post that announced Nx (finding 6). Verdicts on actors rest on
 section 6 of the design record, of which the reference's chapter 19 holds the actors of one machine,
 and verdicts on distribution and keywords on the design record alone, which the reference leaves
-out; the compiler builds those actors on one thread alone.
+out; the compiler builds those actors on one thread alone (2026-11-14).
 
 Summary: 24 findings: 5 avoided, 1 not applicable, 2 open, 1 repeated for some sends and answered for the rest, 4 repeated in part (the hiring pool, a call whose caller crashed, a lasting fault, a large expansion); 11 answered and recorded.
 

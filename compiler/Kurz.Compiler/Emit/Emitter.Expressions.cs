@@ -50,7 +50,7 @@ public sealed partial class Emitter
             case ThisExpression t:
                 return This(t, t.Line); // K7: borrowed, as a parameter is
             case SpawnExpression s:
-                return EmitActorSpawn(s); // U2: no count, since an actor lives to the end of the process
+                return EmitActorSpawn(s); // U2's reference, with no count: an actor ends with its supervisor (section 6), here with the process
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);

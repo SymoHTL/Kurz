@@ -1822,17 +1822,20 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
-Of section 6 the emitter builds the actors of one thread, each message run to its end (the lean of the
-round of 2026-11-13, issue 519, comment 6866132292, Q1, which no answer named), and no case shows
+Of section 6 the emitter builds the actors of one thread, each message run to its end (Q1 (a), the
+answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, a message with no stack of its own, and messages run only while the top-level code waits for
 a call's result, one message of each actor in turn, so that a `send` made after the last call that
 waits does not run (U13); a crash in a method ends the process with its error line and the exit code
 1, as a crash outside an actor ends it, the method's frame and `main`'s in its trace, and no
 actor restarts; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
-and an inbox grows with no bound, where section 6 spills it at 64 MB, until the allocator ends the
-process with `allocation-failed`. `ActorTests` pins the crash, the turns, the end and the inbox's
-growth; no test pins the wait with no bound, which would not end.
+and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
+process with `allocation-failed`. An actor and its state live to the end of the process, which is
+section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
+actor that spawned it (the owner, 2026-10-30), at the root the top-level code, which ends with the
+process, and no actor stops, nor crashes without ending the process. `ActorTests` pins the crash,
+the turns, the end and the inbox's growth; no test pins the wait with no bound, which would not end.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -1900,7 +1903,9 @@ ask about it.
 - P8: a log call inside an actor is `not supported`, and a line holds no chain ID and none of the
   actor's parts, nothing standing in their place, also one a function writes while an actor's
   message runs: P7's layout as it reads.
-  Pinned by `LogTests`, whose lines are held whole.
+  Pinned by `CheckerTests.A_log_call_inside_an_actor_is_not_supported` for the refusal, and by
+  `LogTests`, whose lines are held whole, for the layout, a line written while a message runs
+  among them.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).
   Pinned by the classes' program of `ListTests`.
