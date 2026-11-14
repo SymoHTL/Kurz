@@ -429,7 +429,8 @@ public sealed partial class Emitter
 
     /// <summary>
     /// Whether two values of one type are equal: integers, <c>char</c> and <c>bool</c> by their bits, strings by their bytes (T18),
-    /// data by their type and their fields (D3, D15), instances of a class by identity or by the fields that count (K4, K5), and the
+    /// data by their type and their fields (D3, D15), instances of a class by identity or by the fields that count (K4, K5), two
+    /// references to actors by the actor they name (U2), and the
     /// values of a field of a union by their case and that case's values (D3, the owner, 2026-10-23); a <c>float</c> or a <c>double</c> here is a field's or a case's, which compares as C#'s
     /// <c>Equals</c> does, NaN equal to NaN and 0 to -0 (D3, the owner, 2026-10-09 and 2026-10-24); a <c>decimal</c> by its value,
     /// 1.5 equal to 1.50, as C#'s <c>Equals</c> compares it. <paramref name="ieee"/> is set for the two sides of a list's <c>==</c>,
@@ -452,6 +453,8 @@ public sealed partial class Emitter
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}");
             case EnumType or FlagsType:
                 return fn.Value($"icmp eq {Ir(type)} {left}, {right}"); // D12: the same value; D13: a set, the same names
+            case ActorType:
+                return fn.Value($"icmp eq ptr {left}, {right}"); // U2: one actor, whose reference is the address of its state
             case PrimitiveType p when Types.IsFloating(p):
                 {
                     var same = fn.Value($"fcmp oeq {Ir(type)} {left}, {right}");

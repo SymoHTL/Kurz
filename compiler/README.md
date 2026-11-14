@@ -879,10 +879,13 @@ library a block of C functions names (R16), the Linux runtime's own block among 
 - actors (chapter 19), on the one thread the runtime runs, as tokio's `current_thread` runtime runs
   its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
   constructs the state as an instance of the actor's body is constructed, both its counts at one
-  (K1, K7), in a block of the runtime's `ActorNew` that holds the actor's record in the 32 bytes in front of it, as a string's
-  block stands in front of its bytes: the first and the last message of its inbox, the actor after it
-  in the run queue, and whether it stands there. The reference is the address of the state, which
-  nothing counts, an actor living to the end of the process, and the constructor and the defaults of
+  (K1, K7), in a block of the runtime's `ActorNew` that holds the actor's record in the 40 bytes in front of it, as a string's
+  block stands in front of its bytes: the actor's number, the first and the last message of its inbox, the actor after it
+  in the run queue, and whether it stands there. The number counts the actors of every type from 1, in the order
+  `ActorNew` makes them (U2). The reference is the address of the state, which
+  nothing counts, an actor living to the end of the process: `==` of two references compares the two addresses, `this` as
+  a value inside an actor is the address of its own state (U2, U10), and the runtime's `ActorText` makes the text of a
+  reference, the name of the actor's type, `#` and its number, `Counter#1` (U2). The constructor and the defaults of
   the body run inside `spawn`, so that what they print comes before what the spawner prints after it
   (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
   message, one block of the allocator, as actix packs a message and the sender of its reply into one

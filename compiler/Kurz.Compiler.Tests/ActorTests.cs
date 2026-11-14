@@ -16,7 +16,8 @@ namespace Kurz.Compiler.Tests;
 /// sender's messages and of a message sent inside a message (U5, U15), in a test build and a release build; the run queue, one message
 /// of each actor in turn in the order the actors were queued, as tokio's <c>current_thread</c> runs its tasks, an actor that sends itself
 /// a message while it runs standing in that queue once (U11); what is still queued
-/// when the top-level code ends, which does not run (U13).
+/// when the top-level code ends, which does not run (U13); and the number in an actor's text, one count over the actors of every type,
+/// the text of <c>this</c> and <c>!=</c> of two references (U2, U10).
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -287,6 +288,37 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(end, toolchain.Runtime, "actor-end"), 0, ["1", "2"], "");
+    }
+
+    [Fact]
+    public void An_actors_number_counts_the_actors_of_every_type_in_the_order_they_were_spawned()
+    {
+        // U2: one count over the actors of every type, from 1, so that the second actor, the first of its type, takes the number 2;
+        // `this` as a value is the actor's own reference, whose text is its own (U10); `!=` is true of two actors alone
+        const string numbered = """
+            actor Counter {
+                pub string Name() => "{this}"
+            }
+
+            actor Logger {
+                mut int lines = 0
+
+                pub void Add() {
+                    lines = lines + 1
+                }
+            }
+
+            a = spawn Counter()
+            l = spawn Logger()
+            b = spawn Counter()
+            c = b
+            print(a)
+            print("{l} {b.Name()}")
+            print(a != b)
+            print(b != c)
+
+            """;
+        Ran(BuildAndRun(numbered, toolchain.Runtime, "actor-numbered"), 0, ["Counter#1", "Logger#2 Counter#3", "true", "false"], "");
     }
 
 }
