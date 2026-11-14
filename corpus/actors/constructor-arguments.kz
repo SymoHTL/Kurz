@@ -2,7 +2,7 @@
 // | made 10
 // | spawned
 // | 15
-// rules: U2, U3
+// rules: U2, U3, U5
 
 int Made(int n) {
     print("made {n}")

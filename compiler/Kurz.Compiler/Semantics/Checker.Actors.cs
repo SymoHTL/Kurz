@@ -252,7 +252,8 @@ public sealed partial class Checker
     /// <summary>
     /// U6: <c>send c.Add(1)</c>, a call of an actor's <c>pub</c> method through its reference, or of its own method inside it (U11),
     /// recorded as <see cref="CallKind.ActorSend"/>; a method with a result is <c>send-result</c>, a <c>void</c> with cases beside it among
-    /// them (U7), and anything else after <c>send</c> is <c>syntax</c> (U14).
+    /// them (U7), and anything else after <c>send</c> is <c>syntax</c> (U14). A message to its own method takes what one through a
+    /// reference takes: its arguments cross (U12), and a <c>mut</c> parameter is open (Q6 of comment 6866132292).
     /// </summary>
     private void CheckSend(SendStatement s)
     {
@@ -276,6 +277,18 @@ public sealed partial class Checker
 
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
+            if (call.Function.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
+            {
+                NotSupported(s.Line, $"the `mut` parameter `{mut.Name}` of `{own.Name}.{call.Function.Name}` in a `send` of the actor's own method, which issue 519 holds open, comment 6866132292, Q6 (U11)");
+                return;
+            }
+
+            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t)) is { } stays)
+            {
+                NotSupported(s.Line, $"{Types.A(stays)} in the message `{own.Name}.{call.Function.Name}`, which is no value or actor's reference (U12)");
+                return;
+            }
+
             call = call with { Kind = CallKind.ActorSend, Target = new ActorType(own) }; // U11: the actor's own method, which `this` alone calls
             model.RecordCall(s.Call, call);
         }

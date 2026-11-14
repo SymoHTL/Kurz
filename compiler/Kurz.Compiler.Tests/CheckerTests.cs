@@ -7142,10 +7142,13 @@ public sealed class CheckerTests
     [InlineData(12, "U12", "class Box(int N)\n\ndata Pair(Box B)\n\nactor A {\n    pub void Take(Pair p) {\n        print(p.B.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Pair(Box(1)))\n")]
     [InlineData(3, "U12", "class Box(int N)\n\nactor A(Box B) {\n}\n")]
     [InlineData(9, "U9", "actor A {\n    pub void Bump(mut int n) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\na.Bump(mut x)\nprint(x)\n")]
+    [InlineData(5, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        send Take(Box(1))\n    }\n\n    void Take(Box b) {\n        print(b.N)\n    }\n}\n")]
+    [InlineData(4, "U11", "actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    void Bump(mut int n) {\n        n = n + 1\n    }\n}\n")]
     public void What_crosses_no_actor_in_a_message_is_not_supported(int line, string rule, string program)
     {
         // U12: a class instance, a function value and a data value that holds an instance, as an argument, a result or a constructor's
-        // argument (Q1 of issue 519, comment 6866132292); U9: a `mut` parameter of a method called through a reference, open (Q6)
+        // argument (Q1 of issue 519, comment 6866132292), in a message through a reference and in a `send` of the actor's own method
+        // (U11); U9, U11: a `mut` parameter of a method called through a reference or sent to by the actor itself, open (Q6)
         NotSupportedAt(line, rule, program);
     }
 
@@ -7161,6 +7164,7 @@ public sealed class CheckerTests
     [InlineData(14, "U2", "c = spawn Counter()\nprint(c)\n")]
     [InlineData(14, "U2", "c = spawn Counter()\nprint(\"{c}\")\n")]
     [InlineData(14, "U2", "c = spawn Counter()\nprint(c == c)\n")]
+    [InlineData(14, "U2", "c = spawn Counter()\nprint(c != c)\n")]
     public void An_actors_reference_inside_another_type_or_as_text_or_compared_is_not_supported(int line, string rule, string program)
     {
         // U12: a reference alone is a variable's, a parameter's or a result's type, and inside a list, a `?`, a function type, a type argument

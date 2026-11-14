@@ -2362,13 +2362,17 @@ actor and every use of its name unread, besides what a class's body does not rea
 `:` (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
 or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
 method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
-an actor's constructor, that takes or gives what crosses no actor, a class instance, an interface's value
-or a function value among them (U12); a `mut` parameter of a method called through a reference (U9); an
+an actor's constructor, that takes or gives what crosses no actor, a class instance, every one, since
+whether an immutable class is one with no `mut` field of its own or one through which nothing reachable has
+one stands open on issue 519 (comment 6866132292, Q14), an interface's value or a function value among them
+(U12); a `mut` parameter of a method called through a reference (U9) or
+sent to by the actor itself (U11); an
 actor's reference inside a list, a map, a union, a `?`, a function type or a type argument, written or
 inferred, and as a field of a class or a data type (U12); `this` as a value inside an actor (U10); the
 text of an actor's reference, in `print` and an interpolation, and `==` and `!=` of one (U2); and a log call
 inside an actor (P8). Those that stand open stand so on issue 519, comment 6866132292 (Q4, Q6, Q7 and
-Q10), and the refusal of a class instance, a function value, the clauses and `on crash` is the lean of its Q1; and a field or a constructor among statements, which the parser reads in a
+Q10), and the refusal of a mutable class instance, a function value, the clauses and `on crash` is the lean of its Q1, and that of an
+immutable one follows from its Q14, open; and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
 lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the

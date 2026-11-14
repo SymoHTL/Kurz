@@ -1,6 +1,6 @@
 // expect: output
 // | 6
-// rules: U10
+// rules: U5, U10
 
 actor Doubler {
     mut int total = 0

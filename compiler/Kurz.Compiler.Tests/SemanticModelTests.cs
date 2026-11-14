@@ -523,7 +523,6 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         Assert.False(model.HasType(stray));
     }
 
-    /// <summary>Every node of a tree, found through the properties of its records.</summary>
     [Fact]
     public void A_call_through_an_actors_reference_is_recorded_as_a_message()
     {
@@ -577,6 +576,7 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
         Assert.Empty(walk.Missing);
     }
 
+    /// <summary>Every node of a tree, found through the properties of its records.</summary>
     private static class Nodes
     {
         public static void Collect<T>(object? node, List<T> found)

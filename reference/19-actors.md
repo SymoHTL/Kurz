@@ -174,6 +174,32 @@ send p.Show(3)
 print(p.Done())
 ```
 
+Case: [actors/counter.kz](../corpus/actors/counter.kz)
+
+Case: [actors/two-instances.kz](../corpus/actors/two-instances.kz)
+
+Case: [actors/own-method-direct.kz](../corpus/actors/own-method-direct.kz)
+```kurz
+actor Doubler {
+    mut int total = 0
+
+    pub void Add(int n) {
+        total = total + Twice(n)
+    }
+
+    int Twice(int n) => n * 2
+
+    pub int Total() => this.total
+}
+
+d = spawn Doubler()
+send d.Add(1)
+send d.Add(2)
+print(d.Total())
+```
+
+Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
+
 ### U6 (decided, §6) `send`
 
 `send` before a call of an actor's method, `send c.Add(1)`, makes the call a message that nobody
@@ -293,24 +319,6 @@ Inside an actor its own fields and methods are reached as a class's are, by thei
 inside an actor stands open, asked on issue 519 (comment 6866132292, Q7).
 
 Case: [actors/own-method-direct.kz](../corpus/actors/own-method-direct.kz)
-```kurz
-actor Doubler {
-    mut int total = 0
-
-    pub void Add(int n) {
-        total = total + Twice(n)
-    }
-
-    int Twice(int n) => n * 2
-
-    pub int Total() => this.total
-}
-
-d = spawn Doubler()
-send d.Add(1)
-send d.Add(2)
-print(d.Total())
-```
 
 ### U11 (assumed, §6) `send` of its own method
 
@@ -346,7 +354,8 @@ w.Done()
 What crosses between actors is a value (`data`, a collection, a string, a number), an immutable
 class instance and an actor's reference; a mutable class instance crosses with `copy` or `move`
 alone (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
-do the arguments of an actor's constructor, which cross as a call's do (§6, 2026-11-13, Q13).
+do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
+2026-11-13, #519, comment 6847932993, Q13).
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -356,7 +365,7 @@ Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
 
 When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
 messages still queued behind it are dropped, since the end of the root actor stops its children
-after their current message (§6, 2026-11-13, Q16) *(assumed: that reading, the lean of the round of
+after their current message (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16) *(assumed: that reading, the lean of the round of
 2026-11-13, issue 519, comment 6866132292, Q8, which no answer named)*.
 
 No case: which message runs when the top-level code ends is the scheduler's to say where actors run

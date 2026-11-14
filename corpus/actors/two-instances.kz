@@ -1,7 +1,7 @@
 // expect: output
 // | 1
 // | 2
-// rules: U2, U4
+// rules: U2, U4, U5
 
 actor Counter {
     mut int count = 0
