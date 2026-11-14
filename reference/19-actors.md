@@ -20,9 +20,12 @@ struct that a task runs takes type parameters and implements traits, and its met
 class's modifiers (K7); it has no base, so that a type after its name that is no interface is
 `syntax`, and so is an actor after a class's `:` *(assumed: that id, which the answer did not give,
 as E4 gives one to a form no rule gives a meaning)*, and it holds no `static` state (§6, the owner,
-2026-11-14, #519, comment 6882624606, Q26, "All six leans (Recommended)"). How a generic actor's
-messages and a call through an interface as a message are built, and the id of a `static` field of
-an actor, stand open (§14).
+2026-11-14, #519, comment 6882624606, Q26, "All six leans (Recommended)"): a `static mut` field of
+an actor, or a `static` field whose type is or holds a class, is `static-state`, as K18 makes a
+class's, and an immutable one stands as a class's does *(assumed: K18's reading of `static` state,
+which the answer did not name; a class's immutable `static` field is reached from every actor, so
+that one of an actor shares nothing more, as a Rust `static` that is `Sync` stands)*. How a generic
+actor's messages and a call through an interface as a message are built stand open (§14).
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 ```kurz

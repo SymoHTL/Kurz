@@ -7130,8 +7130,8 @@ public sealed class CheckerTests
     public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
     {
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), a modifier of the actor, and type parameters and
-        // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, whose id stands
-        // open; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's does and the build does not read
+        // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads as K18
+        // reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's does and the build does not read
         NotSupportedAt(line, rule, program);
     }
 
