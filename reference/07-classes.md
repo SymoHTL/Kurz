@@ -210,8 +210,9 @@ type `==` does not take, among the fields that count of a class that implements 
 key type `type-mismatch`, at the type that names it *(assumed, §4: proposed on #110, comment
 6567439435, and not objected to in the answer, comment 6573113786; the cost is that of K13's reading of
 the classes derived from a class, and a test of the two instances' classes at run time for each `==`)*. This speaks of a value whose
-class implements the interface; one of an actor or of a type an `impl` block declares stands open
-(§14).
+class implements the interface. One of an actor, which may implement an interface (U1), its own
+`==` and hash being those of the actor it names (U2), or of a type an `impl` block declares stands
+open (§14).
 
 Case: [classes/equality-inherited.kz](../corpus/classes/equality-inherited.kz)
 ```kurz

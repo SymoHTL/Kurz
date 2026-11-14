@@ -1,0 +1,9 @@
+// expect: error spawn-required at 8
+// rules: U2, U16
+
+actor Counter(int Start) {
+    pub int Get() => Start
+}
+
+c = Counter("x")
+print(c.Get())

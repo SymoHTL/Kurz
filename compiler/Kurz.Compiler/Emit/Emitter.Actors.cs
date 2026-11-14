@@ -5,7 +5,7 @@ namespace Kurz.Compiler.Emit;
 
 /// <summary>
 /// Chapter 19 on the one thread the runtime runs, each message run to its end, as tokio's <c>current_thread</c> runtime runs its tasks
-/// (the lean of the round of 2026-11-13, issue 519, comment 6866132292, Q1, which no answer named; <c>compiler/README.md</c> lists
+/// (Q1 (a), the answers of 2026-11-14, issue 519, comment 6880404917; <c>compiler/README.md</c> lists
 /// what of section 6 this does not build). An actor's state is an instance of its body, laid out and constructed as a class's
 /// (<see cref="Construct"/>), in a block of the runtime's <c>ActorNew</c> that holds the actor's record in front of it, as a string's
 /// block stands in front of its bytes: the reference is the address of the state, so that the actor's own methods reach the record

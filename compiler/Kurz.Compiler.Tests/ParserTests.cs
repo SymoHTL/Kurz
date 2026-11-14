@@ -1591,7 +1591,8 @@ public sealed class ParserTests
     [InlineData("send c")] // U14: no call after `send`
     [InlineData("send c.Count")]
     [InlineData("print(send c.Add(1))")] // U6: `send` is a statement of its own
-    [InlineData("c = spawn Counter")] // U2: the arguments of the constructor
+    [InlineData("x = send c.Get()")] // U16: the form before the result, so `syntax` and not `send-result`
+    [InlineData("c = spawn Counter")] // U2: the arguments of the constructor; U16: `spawn Box` of a class, the form before the name
     [InlineData("actor Counter = 1")] // U1: a clause or the body after the name
     [InlineData("actor Counter(int Start) Start stack 8mb {\n}")] // U1: a clause starts with its word
     public void A_form_of_actors_without_its_parts_is_syntax(string program)

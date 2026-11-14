@@ -1,17 +1,23 @@
 // expect: output
 // | first
 // | second
+// | third
 // | done
 // rules: U11, U15
 
 actor Worker {
     pub void Start() {
         send Second()
+        send Third()
         print("first")
     }
 
     pub void Second() {
         print("second")
+    }
+
+    pub void Third() {
+        print("third")
     }
 
     pub void Done() {

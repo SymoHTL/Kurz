@@ -17,8 +17,9 @@ reports which languages people use and lists no complaints about Go, so no findi
 peer-reviewed studies of real Go code and are marked so. Sources marked "third party" are neither a
 survey, nor a study, nor the Go project's own record. The language reference
 covers the sequential core and the actors of one machine (chapter 19, from section 6 of the design
-record), and the compiler builds those actors on one thread alone. So the verdicts on concurrency
-(findings 9, 13, 15 and 18) rest on section 6 of the design record alone.
+record), and the compiler builds those actors on one thread alone (2026-11-14). So the verdicts on
+concurrency (findings 9, 13, 15 and 18) rest on section 6 of the design record, of which chapter 19
+holds the actors of one machine.
 
 Summary: 25 findings: 14 avoided, 3 repeated in part; 8 answered and recorded.
 

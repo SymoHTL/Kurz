@@ -12,7 +12,7 @@ namespace Kurz.Compiler.Tests;
 /// never before, under the allocator that makes every freed block inaccessible, and an inbox no call that waits runs, which grows
 /// until that system's memory is gone; the state an actor's record holds, which a lambda's
 /// count of <c>this</c> does not let go of; a crash in a method, which ends the process with its error line and a trace that leaves the
-/// message's function and the runtime out (the lean of the round of 2026-11-13, issue 519, comment 6866132292, Q1); the order of one
+/// message's function and the runtime out (Q1 (a), the answers of 2026-11-14, issue 519, comment 6880404917); the order of one
 /// sender's messages and of a message sent inside a message (U5, U15), in a test build and a release build; the run queue, one message
 /// of each actor in turn in the order the actors were queued, as tokio's <c>current_thread</c> runs its tasks, an actor that sends itself
 /// a message while it runs standing in that queue once (U11); what is still queued
@@ -104,7 +104,7 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void An_inbox_nobody_runs_grows_until_the_allocator_ends_the_process()
     {
         // the positive control of the test of the freed messages: with no call that waits, every message stays in the inbox, and the
-        // inbox has no bound of its own (the lean of the round of 2026-11-13, issue 519, comment 6866132292, Q1)
+        // inbox has no bound of its own (Q1 (a), the answers of 2026-11-14, issue 519, comment 6880404917)
         const string sink = """
             actor Sink {
                 mut long total = 0

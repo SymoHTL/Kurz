@@ -101,6 +101,20 @@ public sealed partial class LogTests(Toolchain toolchain) : IClassFixture<Toolch
     }
 
     [Fact]
+    public void A_line_written_while_a_message_runs_holds_none_of_the_actors_parts()
+    {
+        // P8: a line a function writes while an actor's message runs is P7's layout, with no chain ID and none of the actor's parts, and
+        // nothing stands in their place
+        const string text = "void Note(int n) {\n    Log.Information(\"noted {n}\")\n}\n\nactor Keeper {\n    mut int total = 0\n\n    pub int Add(int n) {\n        total = total + n\n        Note(total)\n        return total\n    }\n}\n\nk = spawn Keeper()\nprint(k.Add(2))\n";
+        if (Logged(text, "log-in-message") is { } run)
+        {
+            Assert.Equal(0, run.Code);
+            Assert.Equal(["2"], run.Output);
+            Assert.Equal(["Information program: noted 2 n=2"], run.Lines);
+        }
+    }
+
+    [Fact]
     public void A_call_in_a_lambda_takes_the_category_of_the_code_that_holds_it_and_a_member_named_Log_leaves_the_log_call()
     {
         // P6 for a lambda in a method and at the top, and P1 for a method named `Log` of the type whose method logs

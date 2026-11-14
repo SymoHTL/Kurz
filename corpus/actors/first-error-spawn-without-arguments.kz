@@ -1,0 +1,7 @@
+// expect: error syntax at 6
+// rules: U14, U16
+
+class Box(int Size)
+
+b = spawn Box
+print(b.Size)

@@ -7065,8 +7065,10 @@ public sealed class CheckerTests
     public void An_actor_is_spawned_called_and_sent_to_in_the_top_level_statements_and_inside_an_actor()
     {
         // U2, U4, U6: the top-level statements, in a block of theirs too, spawn, wait on a call and send; U2, U6: an actor's method spawns and
-        // sends (the relay); U10, U11: inside an actor its own method is called by name and through `this`, and sent to
+        // sends (the relay); U10, U11: inside an actor its own method is called by name and through `this`, and sent to, one without `pub`
+        // among them (Q23 of issue 519, comment 6881678834); U2: what follows `spawn Name(args)` applies to the reference (Q25)
         Assert.Empty(Errors(ActorCounter + "c = spawn Counter()\nsend c.Add(1)\nprint(c.Get())\nif c.Get() > 0 {\n    c.Add(2)\n}\nfor i in 0..<2 {\n    send c.Add(i)\n}\n"));
+        Assert.Empty(Errors(ActorCounter + "print(spawn Counter().Get())\n"));
         Assert.Empty(Errors(ActorCounter + "actor Maker(Counter Target) {\n    pub void Make() {\n        c = spawn Counter()\n        send c.Add(1)\n        send Target.Add(1)\n    }\n}\n\nm = spawn Maker(spawn Counter())\nm.Make()\n"));
         Assert.Empty(Errors("actor A {\n    mut int n = 0\n\n    pub void Go() {\n        Step()\n        this.Step()\n        send Step()\n        send this.Step()\n        n = this.n + 1\n    }\n\n    void Step() {\n        n = n + 1\n    }\n}\n\na = spawn A()\na.Go()\n"));
     }
@@ -7089,8 +7091,10 @@ public sealed class CheckerTests
     [Fact]
     public void A_send_of_a_method_that_gives_a_result_is_send_result()
     {
-        // U6: a result (section 6, Q12), through a reference and of its own method; U7: a `void` with cases beside it
+        // U6: a result (Q12 of issue 519, comment 6847932993), through a reference and of its own method, and one that crosses no actor,
+        // which a `send` drops (U12); U7: a `void` with cases beside it
         Assert.Equal([(ErrorIds.SendResult, 14)], Errors(ActorCounter + "c = spawn Counter()\nsend c.Get()\n"));
+        Assert.Equal([(ErrorIds.SendResult, 8)], Errors("class Box(int N)\n\nactor A {\n    pub Box Make() => Box(1)\n}\n\na = spawn A()\nsend a.Make()\n"));
         Assert.Equal([(ErrorIds.SendResult, 4)], Errors("actor A {\n    pub int Get() => 1\n    pub void Go() {\n        send Get()\n    }\n}\n"));
         Assert.Equal([(ErrorIds.SendResult, 10)], Errors("data Full\n\nactor Store {\n    pub void | Full Add() {\n        return Full\n    }\n}\n\ns = spawn Store()\nsend s.Add()\n"));
     }
@@ -7098,8 +7102,10 @@ public sealed class CheckerTests
     [Fact]
     public void A_field_or_a_private_method_of_an_actor_through_its_reference_is_not_visible()
     {
-        // U8: nothing outside an actor reaches its fields, read, assigned or called; U9: a message calls a `pub` method, waiting or sent
+        // U8: nothing outside an actor reaches its fields, read, assigned or called, those of its primary constructor among them; U9: a
+        // call through a reference calls a `pub` method, waiting or sent
         Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c.count)\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 6)], Errors("actor Account(int Start) {\n    pub int Get() => Start\n}\n\na = spawn Account(1)\nprint(a.Start)\n"));
         Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nc.count = 1\n"));
         Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nc.count()\n"));
         Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c.Hidden())\n"));
@@ -7130,20 +7136,50 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
     [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
-    [InlineData(3, "U1", "class B(int X)\n\nactor A : B {\n}\n")]
-    [InlineData(1, "U2", "actor A(int X) equal by X {\n}\n")]
-    [InlineData(2, "U2", "actor A {\n    pub A() {\n    }\n}\n")]
+    [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
     [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
     [InlineData(2, "U9", "actor A {\n    prot void Go() {\n    }\n}\n")]
-    [InlineData(4, "U1", "actor A {\n}\n\nclass B : A\n")]
     [InlineData(1, "U1", "static actor A {\n}\n")]
     public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
     {
-        // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), type parameters, bases and interfaces, `static`
-        // members, and an actor as a class's base; U2: `equal by`, while its `==` compares the actor itself (Q10), and a constructor in the
-        // body; U9: a modifier of a method but `pub`
+        // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), a modifier of the actor, and type parameters and
+        // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
+        // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
+        // does and the build does not read
         NotSupportedAt(line, rule, program);
+    }
+
+    [Theory]
+    [InlineData(3, "class B(int X)\n\nactor A : B {\n}\n")]
+    [InlineData(4, "actor B {\n}\n\nactor A : B {\n}\n")]
+    [InlineData(1, "actor A(int X) equal by X {\n}\n")]
+    [InlineData(2, "actor A {\n    pub A() {\n    }\n}\n")]
+    [InlineData(4, "actor A {\n}\n\nclass B : A\n")]
+    public void What_no_actor_declares_is_syntax(int line, string program)
+    {
+        // U1: a base after an actor's name and an actor after a class's `:` (Q26 of issue 519, comment 6881678834, assumed: the id); U2:
+        // `equal by` and a constructor in the body (Q26), since the actor's `==` and its constructor are U2's
+        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+    }
+
+    [Fact]
+    public void A_name_nothing_declares_after_an_actors_name_is_unknown_name()
+    {
+        // V10, as U14 reads a name after `spawn` that nothing declares
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("actor A : Nope {\n}\n"));
+    }
+
+    [Fact]
+    public void A_construct_that_breaks_two_rules_of_actors_is_the_first_error_read()
+    {
+        // U16 (Q27 of issue 519, comment 6881678834): its form, the name after `spawn`, whom the call reaches, its arguments, then its result;
+        // the form is the parser's, `spawn Box` and `x = send c.Get()` among its rows (ParserTests) and the cases of U16
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("class Box(int Size)\n\nb = spawn Box(\"x\")\nprint(b)\n"));
+        Assert.Equal([(ErrorIds.SpawnRequired, 5)], Errors("actor Counter(int Start) {\n    pub int Get() => Start\n}\n\nc = Counter(\"x\")\nprint(c.Get())\n"));
+        Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nsend c.Hidden()\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 10)], Errors("actor A {\n    pub int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n"));
     }
 
     [Theory]
@@ -7182,8 +7218,8 @@ public sealed class CheckerTests
     [Fact]
     public void A_mut_parameter_of_a_message_is_mut_in_message()
     {
-        // U9: a method called through a reference, waiting or sent; U11: a `send` of the actor's own method (Q6 of issue 519, comment
-        // 6866132292); a direct call of its own method takes the place, as a class's does (U10)
+        // U9: a method called through a reference, waiting or sent (Q6 of issue 519, comment 6866132292); U11: a `send` of the actor's own
+        // method, U11's assumed reading of Q6; a direct call of its own method takes the place, as a class's does (U10)
         const string Bump = "actor A {\n    pub void Bump(mut int n) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\n";
         Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors(Bump + "a.Bump(mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors(Bump + "send a.Bump(mut x)\nprint(x)\n"));
@@ -7222,7 +7258,7 @@ public sealed class CheckerTests
     public void An_actors_reference_has_a_text_and_compares_by_the_actor()
     {
         // U2: `print`, an interpolation, `==` and `!=` of two references to actors of one type (Q10 of issue 519, comment 6866132292); two
-        // actors' types are type-mismatch, as two classes that no base joins are (T18)
+        // actors' types are type-mismatch, as two classes that no base joins are (T18, U2)
         Assert.Empty(Errors(ActorCounter + "c = spawn Counter()\nd = spawn Counter()\nprint(c)\nprint(\"{c} and {d}\")\nprint(c == c)\nprint(c != d)\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(ActorCounter + "actor Other {\n}\n\nc = spawn Counter()\no = spawn Other()\nprint(c == o)\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c == 1)\n"));

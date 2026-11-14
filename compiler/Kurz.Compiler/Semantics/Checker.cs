@@ -333,6 +333,7 @@ public sealed partial class Checker
             ResolveClass(symbol); // K1
         }
 
+        RefuseActorBases(); // U1: once every interface is declared
         CheckActorFields(); // U12: once every field's type is known
 
         RefuseChainMembers(); // K6, K7, K18: once every base is known
