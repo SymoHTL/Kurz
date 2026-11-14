@@ -1,0 +1,11 @@
+// expect: error syntax at 6
+// rules: U1
+
+class Box(int Size)
+
+actor Store : Box {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get())

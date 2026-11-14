@@ -74,6 +74,18 @@ send c.Add(1)
 print(c.Get())
 ```
 
+Case: [actors/base-after-name.kz](../corpus/actors/base-after-name.kz)
+```kurz
+class Box(int Size)
+
+actor Store : Box {
+    pub int Get() => 1
+}
+
+s = spawn Store()
+print(s.Get())
+```
+
 ### U2 (decided, §6) `spawn`
 
 `spawn Name(args)` makes an actor, its arguments bound to its primary constructor as a class's
@@ -90,11 +102,12 @@ another's, an actor having no base (U1), as T18 makes an operator on two values 
 as C#'s `==` takes no two classes neither of which converts to the other, and as Q10
 (comment 6880404917) compares a reference as C# compares a class's instances, by reference. An
 actor's reference beside a value of an interface it implements stands with K13's open item (§14).
-`spawn` takes the name, its type arguments where the actor has type parameters, written or
-inferred as a generic class's construction takes them (T19, T27), and its argument list, and what
-follows applies to the reference, so that
+`spawn` takes the name and its argument list, and what follows applies to the reference, so that
 `spawn Counter().Get()` calls `Get` on the new actor, as C#'s `new Counter().Get()` binds (§6, the
-owner, 2026-11-14, #519, comment 6882624606, Q25, "All six leans (Recommended)"). `equal by` on an
+owner, 2026-11-14, #519, comment 6882624606, Q25, "All six leans (Recommended)"). Between the name
+and its argument list stand the actor's type arguments where it has type parameters (U1, Q26),
+written or inferred as a generic class's construction takes them (T19, T27) *(assumed: Q26's type
+parameters read with T19's use of a generic type and U2's binding, which no answer named)*. `equal by` on an
 actor and a constructor in its body are `syntax`, since this rule gives the actor's `==` and its
 constructor (§6, comment 6882624606, Q26).
 
@@ -181,6 +194,16 @@ actor Counter(int Start) {
 
 c = Counter("x")
 print(c.Get())
+```
+
+Case: [actors/equal-by.kz](../corpus/actors/equal-by.kz)
+```kurz
+actor Point(int X) equal by X {
+    pub int Get() => X
+}
+
+p = spawn Point(1)
+print(p.Get())
 ```
 
 ### U3 (decided, §6) The constructor runs while the spawner waits
@@ -541,8 +564,9 @@ actor Worker {
 
 ### U12 (decided, §6) What crosses
 
-What crosses between actors is a value (`data`, a collection, a string, a number), an immutable
-class instance and an actor's reference; a mutable class instance crosses with `copy` or `move`
+What crosses between actors is a value (a string, a number), a collection or a `data` value where
+every value it reaches crosses, an immutable class instance and an actor's reference; a mutable
+class instance crosses with `copy` or `move`
 alone (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
 2026-11-13, #519, comment 6847932993, Q13). A mutable class instance among a message's arguments
@@ -553,9 +577,9 @@ rule and not in the table of errors, as §6 keeps it (§6, the owner, 2026-11-13
 cross, at its argument, as rustc gives one error, E0277, for a closure as for any type that is not
 `Send` (§6, the owner, 2026-11-14, #519, comment 6882624606, Q24, "All six leans (Recommended)").
 No word at the argument makes such a function value cross, `copy f` and `move f` among them, the
-fix being in what it captures, as Q24's cost reads, "the error stands at the argument, where the
-fix is in the capture", and as rustc reads a closure's `Send` from the types of what it captures,
-written `move` or not (§6).
+fix being in what it captures (§6) *(assumed: Q24's cost, "the fix is in the capture", read for a
+word at the argument, as rustc reads a closure's `Send` from the types of what it captures,
+written `move` or not)*.
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
 collection's items and a `data` value's fields among them, as Rust's `Send` is structural
@@ -567,7 +591,15 @@ A collection or a `data` value that reaches a mutable class instance is `send-ne
 argument with neither word, and crosses with `copy`, a deep copy of all it reaches, or with
 `move`, every path into it ending, `move-reachable` where one cannot *(assumed: that reading of
 §6's `copy` and `move`, carried from a mutable class instance to a value that holds one, where
-rustc reads `Send` through a struct's fields whatever a call writes)*.
+rustc reads `Send` through a struct's fields whatever a call writes)*. A collection or a `data`
+value that reaches a function value whose captures do not cross is `send-needs-word` at its
+argument with a word or with none, as that function value is, the deep copy of `copy` and the
+paths `move` ends stopping at a function value it reaches *(assumed: Q24's cost read for a word at
+the argument as for that function value, as rustc reads `Send` through a struct's fields and a
+closure's through its captures)*. `copy` or `move` before a value that crosses with no word, an
+immutable class instance or a number among them, stands and does what it does before a mutable
+class instance, the receiver getting a deep copy or the sender's variable dead after it
+*(assumed: as Rust clones or moves a value that is `Send` already, with no error)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -597,9 +629,11 @@ actor's method is `syntax` (E4), as Rust gives a type error (E0277) for a value 
 `tokio::spawn` takes (§6, the owner, 2026-11-14, #519, comment 6880404917, Q3, "All nine leans (Recommended)"). `spawn Name(...)` on its own, its reference dropped, is
 no statement and is `syntax`, as a value on its own is (F5), since nothing can send to an actor that
 no reference reaches (§6, the same comment, Q21, "All five leans (Recommended)"). What follows
-`spawn` that is no name, its type arguments where the actor has type parameters (U2), and its
-argument list, `spawn Box`, `spawn x.Make()` or `spawn 3`, is `syntax` (E4), as U2's form gives,
-`spawn Box` of a class among them, its form read before its name (U16).
+`spawn` that is no name, its type arguments written or not (U2), and its argument list,
+`spawn Box`, `spawn x.Make()` or `spawn 3`, is `syntax` (E4), as U2's form gives, `spawn Box` of
+a class among them, its form read before its name (U16). After an actor's name, a count of type
+arguments that does not match its type parameters is T19's `syntax`, and type arguments neither
+written nor inferable are `cannot-infer` (T27), each of the stage of the name (U16).
 
 Case: [actors/spawn-not-actor.kz](../corpus/actors/spawn-not-actor.kz)
 ```kurz
@@ -665,10 +699,12 @@ stage of its arguments an argument's own error comes first, a `type-mismatch` am
 `send-needs-word` (U12), then `mut-in-message` (U9, U11), as rustc reports a type that is not
 `Send` (E0277) in its type check and its borrow check skips a body with a type error (§6, the
 owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order"). A declaration
-in an actor that breaks two rules of this chapter is the error of the word read first, so that
-`pub static mut int n = 0` is `actor-field-public` (U8) and not `static-state` (U1), as Q27's
-order of reading holds of a declaration as of a call (§6, the owner, 2026-11-14, #519, comment
-6884160133, item 7, option (a), "word order").
+in an actor that breaks two rules, one of them this chapter's, is the error of the word read
+first, so that `pub static mut int n = 0` is `actor-field-public` (U8) and not `static-state`
+(U1), and `static mut Nope x = 0` and `static mut int n = "a"` are `static-state` and not the
+type's `unknown-name` (V10) or the initial value's `type-mismatch`, as Q27's order of reading
+holds of a declaration as of a call (§6, the owner, 2026-11-14, #519, comment 6884160133, item 7,
+option (a), "word order").
 
 Case: [actors/first-error-send-as-value.kz](../corpus/actors/first-error-send-as-value.kz)
 

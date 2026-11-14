@@ -7136,6 +7136,7 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
     [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
+    [InlineData(1, "U1, T19", "actor A<T> {\n    static List<T> xs = []\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
@@ -7148,7 +7149,7 @@ public sealed class CheckerTests
         // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
-        // loosely (E1)
+        // loosely (E1); a `static` field's type that names the actor's type parameter is read in its scope (T19), no `unknown-name`
         NotSupportedAt(line, rule, program);
     }
 
@@ -7161,6 +7162,7 @@ public sealed class CheckerTests
     [InlineData(1, "actor A : A {\n}\n")]
     [InlineData(1, "actor A : B {\n}\n\nactor B : A {\n}\n", 4)]
     [InlineData(1, "actor A<T>(int X) equal by X {\n}\n")]
+    [InlineData(1, "actor A<T> : List<T> {\n}\n")]
     [InlineData(6, "interface IShape {\n}\n\nclass Box(int N)\n\nactor A : IShape, Box {\n}\n")]
     [InlineData(4, "interface IShape {\n}\n\nactor A(int X) : IShape equal by X {\n}\n")]
     public void What_no_actor_declares_is_syntax(int line, string program, int also = 0)
@@ -7169,7 +7171,8 @@ public sealed class CheckerTests
         // `equal by` and a constructor in the body (Q26), since the actor's `==` and its constructor are U2's. An actor the file declares,
         // read or not, after an actor's name is a base, so that one that is its own base, and each of two that are each the other's, gets
         // it; the language's error of a declaration stands in place of the build's `not supported` of another part, its type parameters or
-        // an interface (README, "What the checker does not read")
+        // an interface (README, "What the checker does not read"); a type after the name that names the actor's type parameter is read in
+        // its scope (T19)
         List<(string, int)> expected = [(ErrorIds.Syntax, line)];
         if (also != 0)
         {
@@ -7182,8 +7185,10 @@ public sealed class CheckerTests
     [Fact]
     public void A_name_nothing_declares_after_an_actors_name_is_unknown_name()
     {
-        // V10, as U14 reads a name after `spawn` that nothing declares
+        // V10, as U14 reads a name after `spawn` that nothing declares; a type parameter of the actor that holds a constant names no type
+        // (T35)
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("actor A : Nope {\n}\n"));
+        Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("actor A<const int N> : N {\n}\n"));
     }
 
     [Fact]
@@ -7208,12 +7213,16 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.MutInMessage, 10)], Errors("actor A {\n    pub int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n"));
 
-        // U16, its stage of the arguments: an argument's own error, then what crosses, `send-needs-word` in the language and `not supported`
-        // in this build (U12), then `mut-in-message`, through a reference and in a `send` of the actor's own method (the owner, 2026-11-14,
-        // #519, comment 6884160133, item 6)
+        // U16, its stage of the arguments: an argument's own error, then a mutable class instance, one a field reaches among them,
+        // `send-needs-word` in the language and `not supported` in this build (U12), then `mut-in-message`, through a reference and in a
+        // `send` of the actor's own method (the owner, 2026-11-14, #519, comment 6884160133, item 6), which stands before the build's
+        // `not supported` of an immutable class instance, which the language lets cross with no word (U12, E1)
         Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("actor A {\n    pub void Bump(mut int n, int k) {\n        n = n + k\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x, \"k\")\nprint(x)\n"));
-        NotSupportedAt(11, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n");
-        NotSupportedAt(6, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n");
+        NotSupportedAt(11, "U12", "class Box(mut int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n");
+        NotSupportedAt(6, "U12", "class Box(mut int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n");
+        NotSupportedAt(13, "U12", "class Cell(mut int N)\n\nclass Box(Cell C)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.C.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(Cell(1)))\nprint(x)\n");
+        Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 6)], Errors("class Box(int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 12)], Errors("class Box(int N)\n\nactor A {\n    pub Box Bump(mut int n) {\n        n = n + 1\n        return Box(n)\n    }\n}\n\na = spawn A()\nmut x = 1\nb = a.Bump(mut x)\nprint(b.N)\nprint(x)\n")); // the result's crossing, of U16's stage of the result, after it
 
         // A declaration that breaks two rules: the error of the word read first, `pub` before `static` (the owner, 2026-11-14, #519, comment
