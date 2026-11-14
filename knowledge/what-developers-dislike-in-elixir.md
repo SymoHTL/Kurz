@@ -16,7 +16,7 @@ or a chart and in no sentence, the quote is the table's text as the page prints 
 other source is the project's own record (elixir-lang.org, hexdocs, erlang.org), except one research
 paper, marked so, and the Dashbit post that announced Nx (finding 6). Verdicts on actors, distribution and keywords rest on the design record alone: the reference
 leaves distribution and keywords out and holds the actors of one machine alone (chapter 19, from
-section 6 of the design record), and the compiler builds no actor.
+section 6 of the design record), and the compiler builds those actors on one thread alone.
 
 Summary: 24 findings: 5 avoided, 1 not applicable, 2 open, 1 repeated for some sends and answered for the rest, 4 repeated in part (the hiring pool, a call whose caller crashed, a lasting fault, a large expansion); 11 answered and recorded.
 
