@@ -1,0 +1,26 @@
+// expect: output
+// | relayed 7
+// | 7
+// rules: U6, U12, U15
+
+actor Printer {
+    mut int last = 0
+
+    pub void Show(int n) {
+        print("relayed {n}")
+        last = n
+    }
+
+    pub int Last() => last
+}
+
+actor Relay(Printer Target) {
+    pub void Pass(int n) {
+        send Target.Show(n)
+    }
+}
+
+p = spawn Printer()
+r = spawn Relay(p)
+r.Pass(7)
+print(p.Last())

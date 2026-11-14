@@ -215,6 +215,9 @@ public sealed class ClassSymbol(string name, TypeDeclaration declaration)
 
     public TypeDeclaration Declaration { get; } = declaration;
 
+    /// <summary>U1: the class is an actor's body, written <c>actor</c>, whose references are <see cref="ActorType"/> and whose instance is <c>this</c> alone.</summary>
+    public bool IsActor => Declaration.Kind == TypeDeclarationKind.Actor;
+
     public List<FieldSymbol> Fields { get; } = [];
 
     public Dictionary<string, List<FunctionSymbol>> Methods { get; } = new(StringComparer.Ordinal);

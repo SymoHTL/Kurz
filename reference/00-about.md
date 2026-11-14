@@ -5,9 +5,9 @@ same thing rule by rule, precisely enough to write a compiler and its tests agai
 nothing to the design: where the record is silent, a rule here is marked `proposed` or `open`,
 and it stays that way until the owner has answered.
 
-It covers the sequential core: what a program without actors needs. Actors, distribution,
-keywords, jobs, tests, packages and clients (sections 6, 7 and 9 to 13 of the record) are
-outside it.
+It covers the sequential core, what a program without actors needs, and the actors of one machine
+(chapter 19). The rest of actors, distribution, keywords, jobs, tests, packages and clients
+(sections 6, 7 and 9 to 13 of the record) are outside it.
 
 ## The status of a rule
 

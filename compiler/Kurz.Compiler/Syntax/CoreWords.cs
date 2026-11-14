@@ -3,13 +3,14 @@ namespace Kurz.Compiler.Syntax;
 /// <summary>The words a declared name may not be (L12): the core words of L18 and the names of the built-in types of L19. What a use of one is, where no declaration drew the error, is the reading on L12 the README lists.</summary>
 public static class CoreWords
 {
-    /// <summary>L18, the closed list of the sequential core.</summary>
+    /// <summary>L18, the closed list of the sequential core, with the words of actors, <c>actor</c>, <c>spawn</c> and <c>send</c> (U1).</summary>
     public static readonly IReadOnlySet<string> Syntax = new HashSet<string>(StringComparer.Ordinal)
     {
         "if", "else", "match", "for", "in", "while", "break", "continue", "return", "throw",
         "mut", "data", "class", "interface", "enum", "flags", "with", "equal", "by",
         "pub", "prot", "internal", "static", "this", "virtual", "override", "weak", "raw", "use", "void",
         "true", "false", "null", "asm", "naked", "extern", "Ptr", "SizeOf",
+        "actor", "spawn", "send",
     };
 
     /// <summary>L19, the built-in types, in the order of T2, T13 and T24, and the reading of the monotonic clock (T36).</summary>

@@ -1,0 +1,11 @@
+// expect: error not-visible at 11
+// rules: U9
+
+actor Counter {
+    int count = 0
+
+    int Get() => count
+}
+
+c = spawn Counter()
+print(c.Get())

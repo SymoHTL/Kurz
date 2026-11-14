@@ -126,6 +126,13 @@ public sealed record ElseExpression(int Line, Expression Call, IReadOnlyList<Mat
 /// <summary>An expression in parentheses, which is an expression like any other (C1).</summary>
 public sealed record ParenthesizedExpression(int Line, Expression Inner) : Expression(Line);
 
+/// <summary>
+/// <c>spawn Counter(1)</c> (U2): an actor made by its name and the arguments of its constructor, which <paramref name="Call"/> holds.
+/// <paramref name="OnCrashLine"/> is the line of an <c>on crash</c> written after the call, the policy of section 6, whose words the
+/// parser passes over and the checker says <c>not supported</c> to; 0 without one.
+/// </summary>
+public sealed record SpawnExpression(int Line, CallExpression Call, int OnCrashLine = 0) : Expression(Line);
+
 // ---- match -------------------------------------------------------------------------------------
 
 public abstract record Pattern(int Line) : Node(Line);
@@ -204,6 +211,9 @@ public sealed record RawBlock(int Line, Block Body) : Statement(Line);
 
 /// <summary><c>use folder</c> (F10).</summary>
 public sealed record UseStatement(int Line, string Target) : Statement(Line);
+
+/// <summary><c>send c.Add(1)</c> (U6): a call of an actor's method that does not wait, which <paramref name="Call"/> holds.</summary>
+public sealed record SendStatement(int Line, CallExpression Call) : Statement(Line);
 
 /// <summary>
 /// An <c>asm</c> statement (R11): its templates, each a string literal whose <c>{name}</c> names an operand and is no
@@ -308,7 +318,14 @@ public enum TypeDeclarationKind
     Interface,
     Enum,
     Flags,
+    Actor, // U1: a class's body behind `actor`
 }
+
+/// <summary>
+/// A word that starts a clause after an actor's name (section 6): <c>per</c>, <c>yield</c>, <c>inbox</c>, <c>stack</c> or <c>on crash</c>,
+/// with its line. The parser keeps the word and passes over what follows it, which the checker says <c>not supported</c> to.
+/// </summary>
+public sealed record ActorClause(int Line, string Word);
 
 /// <summary>A base class or an interface after the colon (K6, K10), with the arguments of the explicit form.</summary>
 public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argument>? Arguments);
@@ -317,11 +334,12 @@ public sealed record BaseSpecifier(int Line, TypeSyntax Type, IReadOnlyList<Argu
 public sealed record EnumMember(int Line, string Name, Expression? Number);
 
 /// <summary>
-/// <c>data</c>, <c>class</c>, <c>interface</c>, <c>enum</c> or <c>flags</c>. The primary constructor is
+/// <c>data</c>, <c>class</c>, <c>interface</c>, <c>enum</c>, <c>flags</c> or <c>actor</c>. The primary constructor is
 /// null when none is written (a class without one, D8's bare <c>data</c> name). Members are the
 /// fields, methods and constructors of the body, null where no body is written and an empty list
 /// for <c>{ }</c>; values are the members of an enum or flags type. The modifiers written in
-/// front of the declaration stay on it for the checker to judge.
+/// front of the declaration stay on it for the checker to judge. <paramref name="Clauses"/> are the
+/// clauses an actor writes after its name and before its body (U1), null for every other kind.
 /// </summary>
 public sealed record TypeDeclaration(
     int Line,
@@ -333,7 +351,8 @@ public sealed record TypeDeclaration(
     IReadOnlyList<BaseSpecifier> Bases,
     IReadOnlyList<string> EqualBy,
     IReadOnlyList<Statement>? Members,
-    IReadOnlyList<EnumMember> Values) : Statement(Line);
+    IReadOnlyList<EnumMember> Values,
+    IReadOnlyList<ActorClause>? Clauses = null) : Statement(Line);
 
 /// <summary>One file: its statements and declarations in source order (F5).</summary>
 public sealed record ProgramSyntax(IReadOnlyList<Statement> Statements);

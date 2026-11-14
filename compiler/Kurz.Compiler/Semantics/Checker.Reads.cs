@@ -160,6 +160,7 @@ public sealed partial class Checker
         StringLiteral s => s.Segments.OfType<HoleSegment>().Select(h => h.Expression),
         MatchExpression m => [m.Subject, .. ArmValues(m.Arms)],
         ElseExpression x => [x.Call, .. ArmValues(x.Arms)],
+        SpawnExpression s => [s.Call],
         _ => [],
     };
 
