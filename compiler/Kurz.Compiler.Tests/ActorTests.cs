@@ -17,7 +17,7 @@ namespace Kurz.Compiler.Tests;
 /// of each actor in turn in the order the actors were queued, as tokio's <c>current_thread</c> runs its tasks, an actor that sends itself
 /// a message while it runs standing in that queue once (U11); what is still queued
 /// when the top-level code ends, which does not run (U13); and the number in an actor's text, one count over the actors of every type,
-/// the text of <c>this</c> and <c>!=</c> of two references (U2, U10).
+/// the text of <c>this</c> and <c>!=</c> of two references (U2, U10); and a state aligned to the 16 a vector field needs (R18).
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -319,6 +319,33 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(numbered, toolchain.Runtime, "actor-numbered"), 0, ["Counter#1", "Logger#2 Counter#3", "true", "false"], "");
+    }
+
+    [Fact]
+    public void An_actors_state_is_aligned_to_16_as_a_vector_field_needs()
+    {
+        // The record in front of the state is a multiple of 16 bytes, as Rust's `ArcInner` pads its counts to what it holds, so that the
+        // state keeps the alignment of the allocator's block: a `Vector128<int>` field is loaded and stored at its alignment of 16 (R18,
+        // `Lower.Align`), which x86-64 faults on where the address is not a multiple of it
+        const string vector = """
+            actor Lanes {
+                mut Vector128<int> lanes = Vector128.Create(1, 2, 3, 4)
+
+                pub int Third() => lanes.GetElement(2)
+
+                pub void Set(int n) {
+                    lanes = Vector128.Create(n, n * 2, n * 3, n * 4)
+                }
+            }
+
+            a = spawn Lanes()
+            print(a.Third())
+            send a.Set(2)
+            print(a.Third())
+
+            """;
+        Ran(BuildAndRun(vector, toolchain.Runtime, "actor-aligned"), 0, ["3", "6"], "");
+        Ran(BuildAndRun(vector, toolchain.Runtime, "actor-aligned-release", testBuild: false), 0, ["3", "6"], "");
     }
 
 }

@@ -3291,11 +3291,13 @@ pub string ExitErrorText(ExitError e) {
 // The actors of a program run on the one thread the runtime runs, each message to its end, while the
 // top-level code waits for a call's result (U4), as tokio's `current_thread` runtime runs its tasks
 // inside `block_on` (compiler/README.md, "What the emitter emits"). An actor's reference is the address
-// of its state, which the emitted code constructs, with the actor's record in the 40 bytes in front of
-// it, as a string's block stands in front of its bytes: the actor's number (U2), the first message of its
-// inbox, the last, the actor after it in the run queue, and whether it stands in that queue, as a tokio
-// task's state has a bit for "has been pushed into a run queue". A message is a block the emitted code makes: the message after
-// it in the inbox, the function that runs it, its reply, and its arguments; that function frees it.
+// of its state, which the emitted code constructs, with the actor's record in the 48 bytes in front of
+// it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps the
+// alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds: 8 bytes of
+// nothing, the actor's number (U2), the first message of its inbox, the last, the actor after it in the
+// run queue, and whether it stands in that queue, as a tokio task's state has a bit for "has been pushed
+// into a run queue". A message is a block the emitted code makes: the message after it in the inbox, the
+// function that runs it, its reply, and its arguments; that function frees it.
 
 // The first and the last actor of the run queue, each with a message in its inbox.
 static mut byte* runFirst = null
@@ -3308,9 +3310,9 @@ static mut long actorCount = 0
 // queue, with room for a state of `size` bytes behind it: the address of that room, which is the actor's
 // reference (U2).
 pub byte* ActorNew(long size) {
-    mut byte* state = Allocate(40 + size)
+    mut byte* state = Allocate(48 + size)
     raw {
-        state = state + 40
+        state = state + 48
         actorCount = actorCount + 1
         *Ptr<long>(state - 40) = actorCount
         *Ptr<byte*>(state - 32) = null
