@@ -4030,7 +4030,7 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
     private static string TargetFile => $"runtime/{Runtime.Directory(Builder.HostTarget!.Value)}/{Runtime.Directory(Builder.HostTarget!.Value)}.kz";
 
     /// <summary>The runtime of this machine's target whose system gives 16 pieces of memory and refuses every request after them.</summary>
-    private static CheckedRuntime Budget() => Edited((TargetFile, "pub byte* Memory(long bytes) {", """
+    internal static CheckedRuntime Budget() => Edited((TargetFile, "pub byte* Memory(long bytes) {", """
         thread static mut long pieces = 0
 
         pub byte* Memory(long bytes) {

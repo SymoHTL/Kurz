@@ -167,17 +167,9 @@ public sealed partial class Emitter
 
     private static UnsupportedException Unsupported(int line, string construct) => new(line, construct);
 
-    /// <summary>U1: the words of the one diagnostic of a program that declares an actor, which the emitter does not emit.</summary>
-    internal const string ActorNotEmitted = "an actor, which the emitter does not emit (U1)";
-
     private EmittedProgram Run()
     {
         RefuseArmTests();
-        if (program.Model.Classes.Where(c => c.IsActor).OrderBy(c => c.Line).FirstOrDefault() is { } actor)
-        {
-            throw Unsupported(actor.Line, ActorNotEmitted); // U1
-        }
-
         foreach (var u in units)
         {
             Register(u);
@@ -326,9 +318,9 @@ public sealed partial class Emitter
 
                         break;
                     }
-                case TypeDeclaration { Kind: TypeDeclarationKind.Class } t:
+                case TypeDeclaration { Kind: TypeDeclarationKind.Class or TypeDeclarationKind.Actor } t:
                     {
-                        var symbol = u.Model.ClassOf(t);
+                        var symbol = u.Model.ClassOf(t); // U1: an actor's state is an instance of its body, read as a class's
                         classOwners[symbol] = u;
                         foreach (var method in symbol.Methods.Values.SelectMany(m => m))
                         {
@@ -721,6 +713,9 @@ public sealed partial class Emitter
                 break;
             case ExpressionStatement e:
                 EmitEffect(e.Expression, e.Line);
+                break;
+            case SendStatement s:
+                EmitCall(s.Call); // U6: a message nobody waits for, which gives nothing
                 break;
             case IfStatement i:
                 EmitIf(i);
