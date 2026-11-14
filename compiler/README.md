@@ -2191,7 +2191,7 @@ types of `std/` that the list `Checker.Prelude` names, `HttpKind`, `HttpError`, 
 file's own declaration of one is the file's own, where W1 makes it `redeclared`), 16 (regular expressions: G1, the names `Regex`, `Match`,
 `RegexError` and `RegexKind` among those `Checker.Prelude` names, G2's linear engine, G3, whose check of a literal pattern is
 `RegexPattern`, a copy of the standard library's parse and count that `RegexTests` holds to it, and a `data` type of the file derived from `RegexError`, as from a `data` type of the file (D6, D16), which prints `RegexError`'s text, G4 and G5), 17 (logging: P1 and P2, a call site's record
-of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12 and U14, the
+of P3 and its category of P6), 19 (actors of one machine: U1, U2, U4, U6 to U12, U14 and U16, the
 others the run's, an actor's body read as a class's, its reference a type of its own, the calls
 through it recorded as messages that wait or not, `CallKind.ActorCall` and `CallKind.ActorSend`, and
 a `send` of its own method inside it recorded as `CallKind.ActorSend`), and the rules of `print` and of a value's text that
@@ -2364,11 +2364,11 @@ or a type declared inside a block (F1, F6, below); `-` on a `uint` or a `ulong` 
 rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none of which is a number
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
-name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters, a base or
-an interface (U1), `equal by`, while its `==` compares the actor itself (U2), a constructor in its body (U2), a `static`
-member (U1), and a modifier of a method but `pub` (U9), each of which leaves the
-actor and every use of its name unread, besides what a class's body does not read, and an actor named after
-`:` (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
+name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters and
+an interface, which an actor may declare (U1), a `static` member (U1), and a modifier of a method but `pub`, which a method
+may take as a class's does (U1, U9), each of which leaves the
+actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
+an actor's name, `equal by` and a constructor in its body (U1, U2) leaves it too; a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
 or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
 method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
 an actor's constructor, that takes or gives what crosses no actor in this build, a class instance, an immutable one

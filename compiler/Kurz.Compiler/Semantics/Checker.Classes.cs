@@ -659,7 +659,7 @@ public sealed partial class Checker
 
             if (baseSymbol.IsActor)
             {
-                NotSupported(b.Line, $"the actor `{named.Name}` after `:`, which no class derives from (U1)");
+                Report(ErrorIds.Syntax, b.Line, $"the actor `{named.Name}` after `:`, which no class derives from, is text no rule gives a meaning (U1, E4)");
                 continue;
             }
 

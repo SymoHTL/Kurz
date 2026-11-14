@@ -1,0 +1,12 @@
+// expect: error syntax at 11
+// rules: U6, U16
+
+actor Counter {
+    int count = 0
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+x = send c.Get()
+print(x)
