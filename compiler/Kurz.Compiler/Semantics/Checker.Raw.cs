@@ -1511,7 +1511,9 @@ public sealed partial class Checker
     /// a name in their order, <c>{0}</c> one by its position, <c>{name}</c> one by its name, and a modifier after a colon, <c>{r:e}</c>, gives the form of a
     /// register operand's register, from the modifiers of its class. Whether the template was read: false where its braces or its
     /// placeholders cannot be read (<see cref="Unreadable"/>), a <c>{</c> no <c>}</c> closes, a <c>}</c> that closes no <c>{</c> or a
-    /// placeholder that holds neither a position nor a name, after which <see cref="CheckAsm"/> reads no more of the <c>asm</c>, as Rust's
+    /// placeholder whose text before a <c>:</c> or its <c>}</c>, white space at its end set aside as Rust's parser sets it aside after the
+    /// operand (<c>argument</c> in <c>rustc_parse_format</c>), is neither empty, digits nor a name, <c>{a b}</c>, after which
+    /// <see cref="CheckAsm"/> reads no more of the <c>asm</c>, as Rust's
     /// compiler reads no more of an <c>asm!</c> after "invalid asm template string" (<c>rustc_builtin_macros/src/asm.rs</c>); a name no
     /// operand has leaves it read, as Rust reads on after <c>AsmNoMatchedArgumentName</c>.
     /// </summary>
@@ -1553,7 +1555,7 @@ public sealed partial class Checker
             var inside = text[(i + 1)..end];
             i = end;
             var colon = inside.IndexOf(':', StringComparison.Ordinal);
-            var reference = colon < 0 ? inside : inside[..colon];
+            var reference = (colon < 0 ? inside : inside[..colon]).TrimEnd(); // white space after the operand set aside, as Rust's parser does
             var modifier = colon < 0 ? null : inside[(colon + 1)..];
             AsmSlot? slot;
             if (reference.Length == 0)

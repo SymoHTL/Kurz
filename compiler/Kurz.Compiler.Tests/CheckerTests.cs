@@ -2197,10 +2197,13 @@ public sealed class CheckerTests
     // template unread, `{x // }`, or stands after the `:` of a modifier, which ends the label before it; a name starts with an ASCII
     // letter, `.` or `_` and goes on with ASCII letters, digits, `_` and `$`; every label of a statement counts, up to the first text
     // before a `:` that is none; a placeholder in a label names it, `{0` of `{0:e}` among them, where the text before its first `{` is
-    // empty, a name or the digits 0 and 1 alone, `1{0}:`, and none where it starts otherwise, `2{0}:`; in a `"""` block the error stands
-    // at the label's own line; and an `asm` one of whose templates cannot be read, `{x // }`, `{` and `{a b}` among them, is read for no
-    // label, as Rust's `asm!` is then no expression (rustc_builtin_macros' `asm.rs`), so its `asm-operand` stands alone, and for no
-    // template after it, as Rust's loop over the templates returns at the first it cannot read, so `{` and `}` are one `asm-operand`
+    // empty, a name or the digits 0 and 1 alone, `1{0}:`, and none where it starts otherwise, `2{0}:`, and outside the braces a `{` opens
+    // another placeholder, `a{0}{1}:`; in a `"""` block the error stands at the label's own line; and an `asm` one of whose templates
+    // cannot be read, `{x // }`, `{` and `{a b}` among them, is read for no label, as Rust's `asm!` is then no expression
+    // (rustc_builtin_macros' `asm.rs`), so its `asm-operand` stands in place of the label's error, and for no template after it, as Rust's loop over the templates
+    // returns at the first it cannot read, so `{` and `}` are one `asm-operand`; white space at the end of a placeholder's text before its
+    // `:` or its `}` is set aside, as Rust's parser sets it aside after the operand (rustc_parse_format's `argument`), so `{ }:` and
+    // `{a }:` are read and name a label (assumed: Rust's reading of a template, as section 3 marks it)
     [InlineData("raw {\n    asm(\"nop; done: nop\")\n}", "named-asm-label 2")]
     [InlineData("raw {\n    asm(\"nop\\ndone: nop\")\n}", "named-asm-label 2")]
     [InlineData("raw {\n    asm(\"{x // }: nop\")\n}", "asm-operand 2")]
@@ -2213,9 +2216,12 @@ public sealed class CheckerTests
     [InlineData("raw {\n    asm(\"\"\"\n        nop\n        done:\n        \"\"\")\n}", "named-asm-label 4")]
     [InlineData("raw {\n    asm(\"{: nop\")\n}", "asm-operand 2")]
     [InlineData("raw {\n    asm(\"{a b}: nop\")\n}", "asm-operand 2")]
+    [InlineData("raw {\n    asm(\"{ }: nop\", const 10)\n}", "named-asm-label 2")]
+    [InlineData("raw {\n    asm(\"{a }: nop\", a = const 10)\n}", "named-asm-label 2")]
     [InlineData("raw {\n    asm(\"{\", \"}\")\n}", "asm-operand 2")]
     [InlineData("raw {\n    asm(\"1{0}: nop\", const 10)\n}", "named-asm-label 2")]
     [InlineData("raw {\n    asm(\"2{0}: nop\", const 10)\n}", "")]
+    [InlineData("raw {\n    asm(\"a{0}{1}: nop\", const 1, const 2)\n}", "named-asm-label 2")]
     // R12: a `naked` function may define any label, as Rust's lint exempts a naked function that is not generic; the checker reads no
     // `naked` function with type parameters, which R12 and R16 leave open (compiler/README.md)
     [InlineData("naked long Seven() {\n    asm(\"jmp done\", \"ret\", \"done:\", \"0:\", \"mov eax, 7\", \"ret\")\n}\n\nprint(Seven())", "")]
