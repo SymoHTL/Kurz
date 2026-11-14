@@ -99,6 +99,8 @@ expects it (V12).
 | `regex-invalid` | G2, G3 | a pattern given to `Regex.New` as a literal without interpolation, with no flag or a flag written as `true` or `false`, that does not parse, that takes a construct its engine does not take, a backreference or a lookaround on the linear engine among them (G2), or whose automaton is above the bound, at the literal (G3) |
 | `spawn-required` | U2 | an actor's name called without `spawn`, `Counter()` where `spawn Counter()` makes the actor |
 | `send-result` | U6, U7 | a `send` of a method that gives a result, one whose success is `void` with cases beside it among them |
+| `actor-field-public` | U8 | a `pub` field or a `pub` property of an actor, whose state nothing outside it reaches |
+| `mut-in-message` | U9, U11 | a `mut` parameter of a method called through an actor's reference, waiting or sent, or sent to by the actor itself |
 
 ## Run-time errors
 

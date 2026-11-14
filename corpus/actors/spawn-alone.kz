@@ -1,0 +1,10 @@
+// expect: error syntax at 10
+// rules: U14
+
+actor Greeter {
+    pub void Hello() {
+        print("hello")
+    }
+}
+
+spawn Greeter()

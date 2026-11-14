@@ -1,0 +1,11 @@
+// expect: error actor-field-public at 5
+// rules: U8
+
+actor Counter {
+    pub int count = 0
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+print(c.Get())

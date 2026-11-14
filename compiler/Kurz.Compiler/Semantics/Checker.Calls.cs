@@ -451,10 +451,6 @@ public sealed partial class Checker
         {
             NotSupported(c.Line, VectorText);
         }
-        else if (t.Type is ActorType)
-        {
-            NotSupported(c.Line, ActorText); // U2
-        }
         else if (!t.IsError && !HasText(t.Type))
         {
             Report(ErrorIds.NoText, c.Line, $"{Types.A(t.Type)} has no text to print (A4, A7, A10)");
