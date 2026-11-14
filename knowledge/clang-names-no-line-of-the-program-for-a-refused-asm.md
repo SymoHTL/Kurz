@@ -45,8 +45,9 @@ symbol the program's IR defines, so that a `naked` function's label that is one 
 its text, each as the emitter wrote it in IR of its own (`AsmAlone`), in the order LLVM meets them,
 the order the compiler writes them (R11, R12; the owner, 2026-11-13, pull request 530, comment
 6855725580, "LLVM's order everywhere"), each beside those before it that clang took, and names each
-one whose addition clang refuses: one clang refuses alone, and of two `naked` functions that define
-one label the one LLVM meets second, which LLVM's order makes the earlier line's where the two are
+one whose addition clang refuses, a line once for each message clang refuses its copies with, the first
+it gives for a copy without the place in the template it names: one clang refuses alone, and of two
+`naked` functions that define one label the one LLVM meets second, which LLVM's order makes the earlier line's where the two are
 called out of the order of their lines (`clang-23 -O0 -c` on the copies, 23.1.4, 2026-11-13, refused the label of the
 function whose first call comes later).
 It does so on clang's `<inline asm>` line and on `cannot compile inline asm` alone. The copies'
@@ -80,7 +81,12 @@ from `clang-23 -O2 -S -mllvm -stop-after=block-placement`, 2026-11-13), so a bar
 with the quotes the IR's call has. It keeps no constraint string, only a flag word for each operand, so of
 two `asm`s at one line with one template the build takes the first's, by choice, and both name that one
 line. A call the optimiser dropped gets no copy, and one LLVM copied gets one for each
-copy, every one after the first refused where its text defines a symbol. Seen on 2026-11-13 with clang
+copy, one after the first refused where its text defines again a symbol that a copy clang took defines
+and that the assembler takes one definition of, a label or a symbol of `.equiv`, and taken where it
+defines it by `.set` or `=` or as a local label: `clang-23 -O0 -x ir -c` on one function with two calls
+each of `.set k, 1`, `m = 1`, `2: nop`, `.equiv e, 1` and `lbl: nop` in Intel's dialect and of `1: nop`
+in AT&T's wrote `redefinition of 'e'` and `symbol 'lbl' is already defined` alone (23.1.4,
+2026-11-14). Seen on 2026-11-13 with clang
 23.1.4: `clang-23 -O2 -S -emit-llvm` on a module whose function `bump`, with the call of `.equiv k, 1`
 marked `!srcloc !{i64 4}`, is called from two functions wrote the call into both, each with `!srcloc !0`
 and `!0 = !{i64 4}`; `clang-23 -O2 -c` on it wrote `<inline asm>:2:12: error: redefinition of 'k'`, and
@@ -88,9 +94,16 @@ and `!0 = !{i64 4}`; `clang-23 -O2 -c` on it wrote `<inline asm>:2:12: error: re
 `asm` stands in the block after an inner `if`, the module `-O2 -S -emit-llvm` wrote held one call,
 `-O2 -c` wrote the same `redefinition of 'k'`, and `-O2 -S -mllvm -stop-after=block-placement` wrote two
 `INLINEASM`, each with the call's `!0`, as LLVM's tail duplication copied the block into the two before
-it (`llvm/lib/CodeGen/TailDuplicator.cpp` of LLVM 23.1.4, whose `shouldTailDuplicate` refuses a block for an
-instruction that is not duplicable, a convergent one, an `asm goto`, `INLINEASM_BR`, or before register
-allocation a return or a call, and an `INLINEASM` the emitter writes is none of these); the same for `x86_64-pc-windows-msvc`,
+it (`llvm/lib/CodeGen/TailDuplicator.cpp` of LLVM 23.1.4, whose `shouldTailDuplicate` copies no block
+that holds an instruction of these kinds: one that is not duplicable, but a CFI instruction where the
+target is not Darwin, a convergent one, an `asm goto`, `INLINEASM_BR`, or before register allocation a
+return or a call; nor one of more instructions than its limit, `MaxDuplicateCount`, which every
+instruction but a PHI or a meta instruction counts toward. An `INLINEASM` the emitter writes is of none
+of these kinds: `llvm/include/llvm/Target/Target.td` gives `INLINEASM` none of the flags of a call, a
+return or an instruction that is not duplicable, and `MachineInstr::isConvergent` in
+`llvm/include/llvm/CodeGen/MachineInstr.h` holds for an inline assembly call only with
+`Extra_IsConvergent`, which a call with the attribute `convergent` carries and the emitter writes none
+of; each at the tag `llvmorg-23.1.4`, read on 2026-11-14); the same for `x86_64-pc-windows-msvc`,
 and for a module of IR of that shape for `aarch64-linux-gnu`. Clang given IR prints LLVM's diagnostic and
 `cannot compile inline asm` without the call's cookie (`clang/lib/CodeGen/CodeGenAction.cpp` of LLVM
 23.1.4), so the copies are read from the code generator's own text. A C function the IR declares,
