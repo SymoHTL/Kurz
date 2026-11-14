@@ -141,7 +141,8 @@ public sealed partial class Checker
     /// <c>syntax</c> before the type is resolved, so that an actor that is its own base, and each of two actors that are each the other's,
     /// gets it, and so is any other type that is no interface, a base, which an actor has none of (U1; Q26 of issue 519, comment
     /// 6882624606, assumed: the id, as reading 1 of comment 6882879015 gives it); then <c>equal by</c> and, in the body's order, a
-    /// constructor (U2) and a <c>static</c> field's error (<see cref="StaticActorFieldError"/>).
+    /// constructor (U2), a <c>pub</c> field's or property's <c>actor-field-public</c> (U8) and a <c>static</c> field's error
+    /// (<see cref="StaticActorFieldError"/>).
     /// </summary>
     private bool ActorDeclarationError(TypeDeclaration d)
     {
@@ -178,6 +179,12 @@ public sealed partial class Checker
             {
                 case ConstructorDeclaration c:
                     Report(ErrorIds.Syntax, c.Line, "a constructor in the body of an actor, whose constructor is its primary one, is text no rule gives a meaning (U2, E4)");
+                    return true;
+                case FunctionDeclaration { Property: true } p when (p.Modifiers & Modifiers.Pub) != 0:
+                    Report(ErrorIds.ActorFieldPublic, p.Line, $"`{p.Name}` is a `pub` property of the actor `{d.Name}`, whose state nothing outside it reaches: a `pub` method gives it (U8)");
+                    return true;
+                case FieldDeclaration f when (f.Modifiers & (Modifiers.Pub | Modifiers.Static)) == Modifiers.Pub:
+                    Report(ErrorIds.ActorFieldPublic, f.Line, $"`{f.Name}` is a `pub` field of the actor `{d.Name}`, whose state nothing outside it reaches: a `pub` method gives it (U8)");
                     return true;
                 case FieldDeclaration f when (f.Modifiers & Modifiers.Static) != 0 && StaticActorFieldError(d, f):
                     return true;

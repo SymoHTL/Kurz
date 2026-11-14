@@ -7271,6 +7271,10 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub int x = 1\n}\n"));
         Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub int X => 1\n}\n"));
         Assert.Equal([(ErrorIds.ActorFieldPublic, 3)], Errors("actor A {\n    mut int count = 0\n    pub mut int total = 0\n\n    pub int Get() => count + total\n}\n\na = spawn A()\nprint(a.Get())\n"));
+
+        // In an actor the build does not read, the language's error in place of the build's `not supported` (U1, U16; compiler/README.md)
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A<T> {\n    pub int x = 1\n}\n"));
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A<T> {\n    pub int X => 1\n}\n"));
         Assert.Empty(Errors("actor A {\n    int x = 1\n\n    int Twice => x * 2\n\n    pub int Get() => Twice\n}\n\na = spawn A()\nprint(a.Get())\n"));
     }
 

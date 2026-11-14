@@ -2288,7 +2288,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 
 A program that uses one of these gets `not supported` at the construct's line and no error that
 comes from the construct (E1), but where the construct holds an error of its own, a grant's or
-`raw-required` (the reading on R7, R12 and R16 below), or the language's error of an actor's declaration, a type after its name that is no interface (U1), `equal by` or a constructor in its body (U2), or a `static` field's `actor-field-public` (U8) or `static-state` (U1), the first in the order of its words (U16), which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
+`raw-required` (the reading on R7, R12 and R16 below), or the language's error of an actor's declaration, a type after its name that is no interface (U1), `equal by` or a constructor in its body (U2), a `pub` field's or property's `actor-field-public` (U8) or a `static` field's `static-state` (U1), the first in the order of its words (U16), which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
