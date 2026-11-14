@@ -49,6 +49,8 @@ public sealed partial class Emitter
                 return ImplicitField(n, field, type); // K7
             case ThisExpression t:
                 return This(t, t.Line); // K7: borrowed, as a parameter is
+            case SpawnExpression s:
+                return EmitActorSpawn(s); // U2: no count, since an actor lives to the end of the process
             case NameExpression n when Model.IsVariable(n):
                 {
                     var stored = Sub(Model.VariableOf(n).Type);

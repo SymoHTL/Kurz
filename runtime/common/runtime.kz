@@ -19,7 +19,8 @@ pub void Start(int count, byte* values) {
 }
 
 // Called by the emitted `main` after the program's last statement: the end of the process with the
-// exit code 0 through the runtime's one exit (design record, section 6).
+// exit code 0 through the runtime's one exit (design record, section 6). A message still in an actor's
+// inbox does not run (U13).
 pub void Finish() {
     sys.Exit(0)
 }
@@ -3283,4 +3284,109 @@ pub string ExitErrorText(ExitError e) {
     }
 
     return text
+}
+
+// ---- actors (chapter 19) -----------------------------------------------------------------------------
+
+// The actors of a program run on the one thread the runtime runs, each message to its end, while the
+// top-level code waits for a call's result (U4), as tokio's `current_thread` runtime runs its tasks
+// inside `block_on` (compiler/README.md, "What the emitter emits"). An actor's reference is the address
+// of its state, which the emitted code constructs, with the actor's record in the 32 bytes in front of
+// it, as a string's block stands in front of its bytes: the first message of its inbox, the last, the
+// actor after it in the run queue, and whether it stands in that queue, as a tokio task's state has a bit
+// for "has been pushed into a run queue". A message is a block the emitted code makes: the message after
+// it in the inbox, the function that runs it, its reply, and its arguments; that function frees it.
+
+// The first and the last actor of the run queue, each with a message in its inbox.
+static mut byte* runFirst = null
+static mut byte* runLast = null
+
+// The record of a new actor, its inbox empty and outside the run queue, with room for a state of `size`
+// bytes behind it: the address of that room, which is the actor's reference (U2).
+pub byte* ActorNew(long size) {
+    mut byte* state = Allocate(32 + size)
+    raw {
+        state = state + 32
+        *Ptr<byte*>(state - 32) = null
+        *Ptr<byte*>(state - 24) = null
+        *Ptr<byte*>(state - 16) = null
+        *Ptr<long>(state - 8) = 0
+    }
+
+    return state
+}
+
+// The message at the end of the inbox of the actor whose reference is `state`, as tokio's `mpsc` channel
+// pushes a value at the tail of its list, so that an inbox keeps the order in which its messages were sent
+// (U5, U15); and the actor at the end of the run queue where it does not stand there.
+pub void Enqueue(byte* state, byte* message) {
+    raw {
+        *Ptr<byte*>(message) = null
+        byte* last = *Ptr<byte*>(state - 24)
+        if last == null {
+            *Ptr<byte*>(state - 32) = message
+        } else {
+            *Ptr<byte*>(last) = message
+        }
+
+        *Ptr<byte*>(state - 24) = message
+        if *Ptr<long>(state - 8) == 0 {
+            Queue(state)
+        }
+    }
+}
+
+// The actor whose reference is `state` at the end of the run queue.
+void Queue(byte* state) {
+    raw {
+        *Ptr<long>(state - 8) = 1
+        *Ptr<byte*>(state - 16) = null
+        if runLast == null {
+            runFirst = state
+        } else {
+            *Ptr<byte*>(runLast - 16) = state
+        }
+
+        runLast = state
+    }
+}
+
+// A call that waits for its result (U4): the messages of the run queue run one at a time, in its order,
+// until the byte `done` of the call's reply is set, as tokio's `block_on` runs the tasks of its queue in
+// a loop until its future is ready. The loop keeps no frame of a message it ran, so a call behind any
+// count of messages takes the stack of one. While `done` is not set, the message the call waits on stands
+// in its actor's inbox, so the run queue is not empty.
+pub void Wait(byte* done) {
+    raw {
+        while *done == 0 {
+            RunOne()
+        }
+    }
+}
+
+// The first message of the first actor of the run queue, run to its end. The actor stands at the end of
+// the queue again where its inbox still holds a message, unless a message sent to it while that one ran
+// put it there already (U11).
+void RunOne() {
+    raw {
+        byte* state = runFirst
+        runFirst = *Ptr<byte*>(state - 16)
+        if runFirst == null {
+            runLast = null
+        }
+
+        *Ptr<long>(state - 8) = 0
+        byte* message = *Ptr<byte*>(state - 32)
+        byte* next = *Ptr<byte*>(message)
+        *Ptr<byte*>(state - 32) = next
+        if next == null {
+            *Ptr<byte*>(state - 24) = null
+        }
+
+        extern "C" (byte*, byte*) => void run = *Ptr<extern "C" (byte*, byte*) => void>(message + 8)
+        run(state, message)
+        if *Ptr<byte*>(state - 32) != null && *Ptr<long>(state - 8) == 0 {
+            Queue(state)
+        }
+    }
 }

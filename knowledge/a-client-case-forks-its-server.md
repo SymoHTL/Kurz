@@ -11,7 +11,7 @@ The server's cases (W9) run a server and a client in one program, in turn: the c
 request and shuts its side down, then `ServeConnection` serves the connection to its end, then the
 client reads what came back. The client's `Get` (W13) cannot run that way. It connects, writes its
 request and waits for the response in one call, and nothing else runs in the program while it waits,
-since the compiler builds no actors and a call blocks its thread (S10). A server in the same thread
+since the compiler runs every actor on the program's one thread and a call blocks it (S10). A server in the same thread
 never gets to answer.
 
 A child process would serve it, but the checker says `not supported` to `Spawn()` and `ChildProcess`

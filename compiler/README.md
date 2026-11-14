@@ -876,6 +876,28 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   and its name holds the pair of the address and that class's table for the arm's interface (C4, O5, comment
   6748445211, "Test at run time, as C#"). The
   counting is below;
+- actors (chapter 19), on the one thread the runtime runs, as tokio's `current_thread` runtime runs
+  its tasks ("What the emitter does not emit" names what of section 6 this does not build): `spawn`
+  constructs the state as an instance of the actor's body is constructed, both its counts at one
+  (K1, K7), in a block of the runtime's `ActorNew` that holds the actor's record in the 32 bytes in front of it, as a string's
+  block stands in front of its bytes: the first and the last message of its inbox, the actor after it
+  in the run queue, and whether it stands there. The reference is the address of the state, which
+  nothing counts, an actor living to the end of the process, and the constructor and the defaults of
+  the body run inside `spawn`, so that what they print comes before what the spawner prints after it
+  (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
+  message, one block of the allocator, as actix packs a message and the sender of its reply into one
+  envelope: the message after it in the inbox, the function that runs it, the reply, none after
+  `send`, and the arguments, each with a count of its own; the runtime's `Enqueue` puts it at the end
+  of the inbox, and the actor at the end of the run queue where it does not stand there, so that an
+  inbox keeps the order its messages were sent in (U5, U15). The function of a method's messages,
+  made at its first use and named outside the program's functions, so that a trace leaves its frame
+  out with the runtime's, calls the method on the state, lets go of the arguments, moves the result
+  beside the reply and sets the reply's byte, as tokio's `oneshot` stores its value and marks it
+  sent, and frees the message. A call that waits (U4) passes a reply in its own frame, and the
+  runtime's `Wait` runs the first message of the first actor of the run queue, an actor that still
+  holds a message going to the end of the queue again, in a loop until the byte is set, as tokio's
+  `block_on` runs its queue until its future is ready, so that a call behind any count of messages
+  takes the stack of one (`ActorTests`);
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
   that a built-in type the runtime's files see as one symbol and a program's as another, `IoError` or `ExitError`,
@@ -1751,8 +1773,7 @@ alone.
 ### What the emitter does not emit
 
 A program that uses one of these gets one `not supported` at the construct's line, in the
-checker's shape, and no executable: an actor (U1), at the line of the program's first one, so that
-every program the checker reads with an actor stops there, a generic `data` type with a base or a type
+checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
 (M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
@@ -1783,6 +1804,18 @@ Rust's standard library does at its start, and a program whose request the syste
 with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
+
+Of section 6 the emitter builds the actors of one thread, each message run to its end (the lean of the
+round of 2026-11-13, issue 519, comment 6866132292, Q1, which no answer named), and no case shows
+where a program it builds differs from the section: every actor runs on the one thread the runtime
+runs, a message with no stack of its own, and messages run only while the top-level code waits for
+a call's result, one message of each actor in turn, so that a `send` made after the last call that
+waits does not run (U13); a crash in a method ends the process with its error line and the exit code
+1, as a crash outside an actor ends it, the method's frame and `main`'s in its trace, and no
+actor restarts; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+and an inbox grows with no bound, where section 6 spills it at 64 MB, until the allocator ends the
+process with `allocation-failed`. `ActorTests` pins the crash, the turns, the end and the inbox's
+growth; no test pins the wait with no bound, which would not end.
 
 On Linux an exception that ends the process writes the trace of the calls below its error line
 (section 6), but `allocation-failed` and `random-failed`, which write no place and no trace (O11, M9): the runtime's `Trace` (`runtime/linux/linux.kz`) walks the stack it raised on with
@@ -1847,8 +1880,9 @@ ask about it.
   in one write call as a `print` is (above), and not by a writer on a pool of threads, which the
   record names; a slow standard error slows the program that logs. Pinned by `LogTests`, whose
   refused writes are counted in the next line.
-- P8: the compiler builds no actor, so every line is written outside an actor, and a line holds no
-  chain ID and none of the actor's parts, nothing standing in their place: P7's layout as it reads.
+- P8: a log call inside an actor is `not supported`, and a line holds no chain ID and none of the
+  actor's parts, nothing standing in their place, also one a function writes while an actor's
+  message runs: P7's layout as it reads.
   Pinned by `LogTests`, whose lines are held whole.
 - K2 with section 3: a read of a counted value from a field of an instance takes a count of its own,
   and the work lists of a release are linked through the strong count of the instances on them (above).

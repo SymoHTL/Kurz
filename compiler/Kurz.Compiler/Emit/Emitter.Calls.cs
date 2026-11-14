@@ -48,6 +48,7 @@ public sealed partial class Emitter
             CallKind.DataNew => EmitConstruction(c, info),
             CallKind.ClassNew => EmitClassNew(c, info),
             CallKind.Method => EmitMethodCall(c, info),
+            CallKind.ActorCall or CallKind.ActorSend => EmitMessage(c, info), // U4, U6
             CallKind.DataMethod => EmitDataMethodCall(c, info),
             CallKind.ListClear => EmitListClear(c),
             CallKind.ListIndexOf or CallKind.ListIndexOfRun => EmitListIndexOf(c, info.Kind == CallKind.ListIndexOfRun),
