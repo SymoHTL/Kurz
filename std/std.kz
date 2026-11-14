@@ -8153,7 +8153,7 @@ class HttpConnection(TcpStream Stream, string Key, instant Opened) {
 // A client of HTTP/1.1, as .NET's `HttpClient` (design record, section 12; W13): `HttpClient()` with `HttpClientOptions()`, and
 // `HttpClient(options)`; it keeps a pool of connections, several to each host, as .NET's `SocketsHttpHandler` keeps one, each
 // connection carrying one request at a time, as hyper's client `conn` carries it, and held by its response until the body ends.
-// While the compiler builds no actors, the pool lives in the program's one actor (section 12).
+// The pool lives in the instance, in the actor that made it: no class instance crosses into a message here (U12, section 12).
 pub class HttpClient(HttpClientOptions Options = HttpClientOptions()) {
     mut List<HttpConnection> idle = List<HttpConnection>()
     mut List<HttpConnection> busy = List<HttpConnection>()
