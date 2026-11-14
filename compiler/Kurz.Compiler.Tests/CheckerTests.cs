@@ -7136,6 +7136,7 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
     [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
+    [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
     [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
@@ -7146,7 +7147,8 @@ public sealed class CheckerTests
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), a modifier of the actor, and type parameters and
         // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
-        // does and the build does not read
+        // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
+        // loosely (E1)
         NotSupportedAt(line, rule, program);
     }
 
@@ -7212,6 +7214,7 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("actor A {\n    pub void Bump(mut int n, int k) {\n        n = n + k\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x, \"k\")\nprint(x)\n"));
         NotSupportedAt(11, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n");
         NotSupportedAt(6, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n");
+        Assert.Equal([(ErrorIds.MutInMessage, 12)], Errors("class Box(int N)\n\nactor A {\n    pub Box Bump(mut int n) {\n        n = n + 1\n        return Box(n)\n    }\n}\n\na = spawn A()\nmut x = 1\nb = a.Bump(mut x)\nprint(b.N)\nprint(x)\n")); // the result's crossing, of U16's stage of the result, after it
 
         // A declaration that breaks two rules: the error of the word read first, `pub` before `static` (the owner, 2026-11-14, #519, comment
         // 6884160133, item 7)
