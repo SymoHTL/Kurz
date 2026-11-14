@@ -154,13 +154,17 @@ public sealed partial class Clang
     }
 
     /// <summary>
-    /// R11: writes the module a release build hands the code generator, the IR at <paramref name="irPath"/> optimised as <see cref="Build"/>
-    /// optimises it, into <paramref name="outputPath"/>, for the CPU of the build, where <see cref="Builder.Build"/> reads which calls of
-    /// inline assembly the optimiser left; null, or what clang wrote where it does not exit with 0.
+    /// R11: writes the code a release build hands the assembler, the IR at <paramref name="irPath"/> optimised and turned into machine code
+    /// as <see cref="Build"/> does it, in LLVM's text of machine IR as the code generator holds it once it placed the blocks
+    /// (<c>-stop-after=block-placement</c>), into <paramref name="outputPath"/>, for the CPU of the build, where <see cref="Builder.Build"/>
+    /// reads which calls of inline assembly the optimiser left and which the code generator copied: its tail duplication, which block
+    /// placement runs too, copies a block that holds such a call into the blocks before it, as it copies any instruction but one that
+    /// cannot be duplicated, a convergent one or an <c>asm goto</c> (<c>INLINEASM_BR</c>, <c>llvm/lib/CodeGen/TailDuplicator.cpp</c>, LLVM
+    /// 23.1.4), and no pass after it copies a block (clang 23); null, or what clang wrote where it does not exit with 0.
     /// </summary>
-    internal string? Optimise(string irPath, string outputPath, string? cpuFlag)
+    internal string? Generate(string irPath, string outputPath, string? cpuFlag)
     {
-        var (code, _, error) = Processes.Capture(Path, [.. Release, "-S", "-emit-llvm", irPath, "-o", outputPath, .. cpuFlag is null ? Array.Empty<string>() : [cpuFlag]], null, TimeSpan.FromMinutes(2));
+        var (code, _, error) = Processes.Capture(Path, [.. Release, "-S", "-mllvm", "-stop-after=block-placement", irPath, "-o", outputPath, .. cpuFlag is null ? Array.Empty<string>() : [cpuFlag]], null, TimeSpan.FromMinutes(2));
         return code == 0 ? null : error;
     }
 

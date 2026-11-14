@@ -17,11 +17,13 @@ public sealed record EmittedProgram(string Ir, IReadOnlyList<string> Libraries, 
 {
     /// <summary>
     /// R11, R12: each <c>asm</c> of the program's file the module holds, as IR without the rest of the program, which a build assembles
-    /// where clang refuses inline assembly, in the order LLVM meets them: the <c>naked</c> functions' module-level assembly, which LLVM
-    /// writes before every function, in the order the compiler writes the functions, at their first call, then the <c>asm</c> statements,
-    /// in the order of the functions that hold them in the module and of the statements in each (the owner, 2026-11-13, pull request 530,
-    /// comment 6855725580, "LLVM's order everywhere"). A release build assembles a statement's copy once for each call the optimised module
-    /// holds, in that module's order (<see cref="Builder.Build"/>).
+    /// where clang refuses inline assembly, in the order LLVM meets them in a test build: the <c>naked</c> functions' module-level assembly,
+    /// which LLVM writes before every function, in the order the compiler writes the functions, the top-level code's function first, then
+    /// every other in the order its first use is reached, those the top-level code reaches before those their own text reaches, then the
+    /// <c>asm</c> statements, in the order of the functions that hold them in the module and of the statements in each (the owner,
+    /// 2026-11-13, pull request 530, comment 6855725580, "LLVM's order everywhere"). A release build assembles a statement's copy once for
+    /// each call its code generator holds once it placed the blocks, in that order, the order LLVM meets them there
+    /// (<see cref="Builder.Build"/>).
     /// </summary>
     public IReadOnlyList<AsmAlone> Asms { get; init; } = [];
 }
