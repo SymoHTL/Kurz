@@ -1509,7 +1509,10 @@ public sealed partial class Checker
     /// <summary>
     /// R11: the placeholders of a template, as Rust reads them: <c>{{</c> and <c>}}</c> write a brace, <c>{}</c> takes the operands without
     /// a name in their order, <c>{0}</c> one by its position, <c>{name}</c> one by its name, and a modifier after a colon, <c>{r:e}</c>, gives the form of a
-    /// register operand's register, from the modifiers of its class. Whether the template was read: false where its braces or its
+    /// register operand's register, from the modifiers of its class: the text after the colon, white space at its end set aside as Rust's
+    /// parser sets it aside before the <c>}</c>, and none where that text is empty, <c>{r:}</c> and <c>{r: }</c>, as Rust's parser and
+    /// compiler read an empty modifier (<c>inline_asm</c> and <c>next</c> in <c>rustc_parse_format</c>, <c>expand_preparsed_asm</c> in
+    /// <c>rustc_builtin_macros/src/asm.rs</c>). Whether the template was read: false where its braces or its
     /// placeholders cannot be read (<see cref="Unreadable"/>), a <c>{</c> no <c>}</c> closes, a <c>}</c> that closes no <c>{</c> or a
     /// placeholder whose text before a <c>:</c> or its <c>}</c>, white space at its end set aside as Rust's parser sets it aside after the
     /// operand (<c>argument</c> in <c>rustc_parse_format</c>), is neither empty, digits nor a name, <c>{a b}</c>, after which
@@ -1556,7 +1559,12 @@ public sealed partial class Checker
             i = end;
             var colon = inside.IndexOf(':', StringComparison.Ordinal);
             var reference = (colon < 0 ? inside : inside[..colon]).TrimEnd(); // white space after the operand set aside, as Rust's parser does
-            var modifier = colon < 0 ? null : inside[(colon + 1)..];
+            var modifier = colon < 0 ? null : inside[(colon + 1)..].TrimEnd(); // white space before the `}` set aside, as Rust's parser does
+            if (modifier is "")
+            {
+                modifier = null; // an empty modifier is none, `{r:}`, as Rust reads it
+            }
+
             AsmSlot? slot;
             if (reference.Length == 0)
             {
