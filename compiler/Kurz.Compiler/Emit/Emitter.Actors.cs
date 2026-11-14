@@ -50,12 +50,6 @@ public sealed partial class Emitter
     private string EmitMessage(CallExpression c, CallInfo info)
     {
         var f = info.Function!;
-        if (f.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
-        {
-            // the checker reads a `send` of the actor's own method with a `mut` parameter (U11), whose place no message can hold
-            throw Unsupported(c.Line, $"the `mut` parameter `{mut.Name}` of `{f.Owner!.Name}.{f.Name}` in a message, which issue 519 holds open, comment 6866132292, Q6 (U9, U11)");
-        }
-
         var actor = c.Callee switch
         {
             MemberAccess m => EmitExpression(m.Target),

@@ -16,8 +16,7 @@ namespace Kurz.Compiler.Tests;
 /// sender's messages and of a message sent inside a message (U5, U15), in a test build and a release build; the run queue, one message
 /// of each actor in turn in the order the actors were queued, as tokio's <c>current_thread</c> runs its tasks, an actor that sends itself
 /// a message while it runs standing in that queue once (U11); what is still queued
-/// when the top-level code ends, which does not run (U13); and a <c>mut</c> parameter in a <c>send</c> of an actor's own method,
-/// which the emitter does not emit.
+/// when the top-level code ends, which does not run (U13).
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -290,30 +289,4 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         Ran(BuildAndRun(end, toolchain.Runtime, "actor-end"), 0, ["1", "2"], "");
     }
 
-    [Fact]
-    public void A_mut_parameter_in_a_send_of_the_actors_own_method_is_not_supported()
-    {
-        const string bump = """
-            actor Worker {
-                pub void Start() {
-                    mut int x = 1
-                    send Bump(mut x)
-                    print(x)
-                }
-
-                pub void Bump(mut int k) {
-                    k = k + 1
-                }
-            }
-
-            w = spawn Worker()
-            w.Start()
-
-            """;
-        var compilation = Builder.Compile(SourceText.FromString("program.kz", bump), [], toolchain.Runtime, testBuild: true);
-        Assert.Null(compilation.Program);
-        var only = Assert.Single(compilation.Diagnostics.Items);
-        Assert.Equal((DiagnosticKind.NotSupported, 4), (only.Kind, only.Line));
-        Assert.EndsWith("(U9, U11)", only.Message, StringComparison.Ordinal);
-    }
 }

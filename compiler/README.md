@@ -1776,7 +1776,7 @@ A program that uses one of these gets one `not supported` at the construct's lin
 checker's shape, and no executable: a generic `data` type with a base or a type
 derived from it (D6, T19) or that holds a value of its own type (D1, T19), `SizeOf<T>()` of a
 `data` type or a union (R14), a `mut` parameter given anything but a variable or a `mut` field named alone in its method, and a `mut` parameter of a lambda
-(M7), a `mut` parameter of an actor's own method in a `send` inside it, whose place no message holds (U9, U11), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
+(M7), a `label` operand of an `asm` and an `asm` output into an item of a list or a map (R11), `s.Chars` as a list (T15), a call on a file or a socket, a read of the
 command line, the environment or the clock, and a log call, in a build for Windows (S11, P6), a vector held in a list, a
 map, a field or a union and a lambda that reads a variable of a vector's type, whose places are not
 aligned to it, and on a 64-bit Arm machine a test of a class under `Arm`, whose intrinsics are not
