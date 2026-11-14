@@ -619,7 +619,8 @@ A construct that breaks two rules of this chapter is one compile error, the firs
 construct is read: its form, the name after `spawn`, whom the call reaches, its arguments, then its
 result. So `syntax` comes before every other id, `spawn-required`, and U14's `type-mismatch` and
 `unknown-name`, before what its arguments break, `not-visible` before `mut-in-message` and
-`send-needs-word`, and `send-result` last, as E1 holds a case to one error and reads a type's name
+`send-needs-word` *(assumed: `send-needs-word` an error of the arguments, which the answer's list
+does not name)*, and `send-result` last, as E1 holds a case to one error and reads a type's name
 before its arguments, `unknown-name` first (§6, the owner, 2026-11-14, #519, comment 6882624606,
 Q27, "All six leans (Recommended)").
 
