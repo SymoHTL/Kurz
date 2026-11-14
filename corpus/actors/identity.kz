@@ -1,0 +1,20 @@
+// expect: output
+// | Counter#1 Counter#2
+// | true
+// | false
+// rules: U2
+
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+}
+
+a = spawn Counter()
+b = spawn Counter()
+c = a
+print("{a} {b}")
+print(a == c)
+print(a == b)

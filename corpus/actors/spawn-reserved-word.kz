@@ -1,0 +1,5 @@
+// expect: error reserved-word at 4
+// rules: U1
+
+spawn = 1
+print(spawn)

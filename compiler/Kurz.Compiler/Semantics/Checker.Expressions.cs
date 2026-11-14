@@ -27,6 +27,7 @@ public sealed partial class Checker
             ? CheckMadeArgument(expression, made, () => CheckExpressionCore(expression, expected, keepCases, given)) // T33: in its field's pass
             : CheckExpressionCore(expression, expected, keepCases, given);
         expressionDepth--;
+        typed = ActorInsideValue(expression, typed); // U12
         model.RecordType(expression, typed); // the last reading stands: a call's literal argument is read a second time, against the parameter of the function picked
         if (expressionDepth == 0)
         {
@@ -119,6 +120,8 @@ public sealed partial class Checker
                 return CheckElse(e, isStatement: false, expected);
             case ParenthesizedExpression p:
                 return CheckExpression(p.Inner, expected, keepCases, given);
+            case SpawnExpression s:
+                return CheckSpawn(s); // U2
             default:
                 throw new InvalidOperationException(expression.GetType().Name);
         }
@@ -421,6 +424,7 @@ public sealed partial class Checker
     private static bool HasText(KurzType type, List<DataSymbol> seen) => type switch
     {
         PrimitiveType or EnumType or NullType => true, // A4: null shows `null`
+        ActorType => true, // U2: its actor's name and number (Q10 of comment 6866132292)
         FlagsType => true, // A13: the names it holds, or `None`
         HasherType => true, // H6: the name of its type
         ErrorType => true,
@@ -866,6 +870,8 @@ public sealed partial class Checker
 
             case ClassType c:
                 return ClassMember(c, member, line); // K1, F9
+            case ActorType actor:
+                return ActorMember(actor, member, line); // U8
             case InterfaceType face:
                 return InterfaceMember(face, member, line); // K6, K7
             case EnumType e when member == "Number":
@@ -1626,6 +1632,16 @@ public sealed partial class Checker
         else if (!equality && left.Type is PrimitiveType { Kind: Primitive.String } && right.Type is PrimitiveType { Kind: Primitive.String })
         {
             ok = true; // T32: two strings in the order of their code points
+        }
+        else if (equality && (left.Type is ActorType || right.Type is ActorType))
+        {
+            if (!Types.Same(left.Type, right.Type))
+            {
+                Report(ErrorIds.TypeMismatch, b.Line, $"`{op}` takes no `{left.Type}` and `{right.Type}`: it compares two references to actors of one type (T18, U2)");
+                return new Typed(Types.Bool);
+            }
+
+            ok = true; // U2: by the actor each names, as Erlang compares two pids (Q10 of comment 6866132292)
         }
         else if (equality && left.Type is FlagsType && Types.Same(left.Type, right.Type))
         {

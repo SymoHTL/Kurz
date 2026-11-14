@@ -46,6 +46,16 @@ public sealed class LexerTests
         Assert.Equal(["total", "Total", "_count2", "if", "match", "string", "equal"], tokens.Select(t => t.Text));
     }
 
+    [Fact]
+    public void The_words_of_actors_are_core_words_and_their_clause_words_are_names()
+    {
+        // U1: `actor`, `spawn` and `send` are core words (section 6, Q10); `per`, `yield`, `inbox`, `stack`, `on` and `crash` are words only where they stand
+        var tokens = Meaningful("actor spawn send Spawn per yield inbox stack on crash");
+        Assert.Equal(
+            [TokenKind.Keyword, TokenKind.Keyword, TokenKind.Keyword, TokenKind.Name, TokenKind.Name, TokenKind.Name, TokenKind.Name, TokenKind.Name, TokenKind.Name, TokenKind.Name],
+            tokens.Select(t => t.Kind));
+    }
+
     [Theory]
     [InlineData("zähler = 1")]
     [InlineData("@total = 1")]

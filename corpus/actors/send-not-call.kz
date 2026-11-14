@@ -1,0 +1,8 @@
+// expect: error syntax at 8
+// rules: U14
+
+void Show(int n) {
+    print(n)
+}
+
+send Show(1)

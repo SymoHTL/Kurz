@@ -1,0 +1,24 @@
+// expect: output
+// | first
+// | second
+// | done
+// rules: U11, U15
+
+actor Worker {
+    pub void Start() {
+        send Second()
+        print("first")
+    }
+
+    pub void Second() {
+        print("second")
+    }
+
+    pub void Done() {
+        print("done")
+    }
+}
+
+w = spawn Worker()
+w.Start()
+w.Done()

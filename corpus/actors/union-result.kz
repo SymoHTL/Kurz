@@ -1,0 +1,25 @@
+// expect: output
+// | 10
+// | none
+// rules: U4, U12
+
+data NotFound
+
+actor Store {
+    pub int | NotFound Find(int id) {
+        if id == 1 {
+            return 10
+        }
+        return NotFound
+    }
+}
+
+s = spawn Store()
+value = s.Find(1) else {
+    NotFound => 0
+}
+print(value)
+match s.Find(2) {
+    int n => print(n)
+    NotFound => print("none")
+}

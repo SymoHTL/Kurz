@@ -1,0 +1,24 @@
+// expect: output
+// | true
+// rules: U10, U12, U15
+
+actor Worker {
+    pub void Join(Registry to) {
+        send to.Add(this)
+    }
+}
+
+actor Registry(Worker Expected) {
+    mut bool matched = false
+
+    pub void Add(Worker who) {
+        matched = who == Expected
+    }
+
+    pub bool Matched() => matched
+}
+
+w = spawn Worker()
+r = spawn Registry(w)
+w.Join(r)
+print(r.Matched())

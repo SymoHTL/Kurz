@@ -657,6 +657,12 @@ public sealed partial class Checker
                 continue;
             }
 
+            if (baseSymbol.IsActor)
+            {
+                NotSupported(b.Line, $"the actor `{named.Name}` after `:`, which no class derives from (U1)");
+                continue;
+            }
+
             if (symbol.Interfaces.Count > 0)
             {
                 NotSupported(b.Line, $"the base class `{named.Name}` after an interface, where a class names its base class first (K7)");
@@ -1298,7 +1304,7 @@ public sealed partial class Checker
         }
 
         model.RecordImplicitField(t, ThisVariable(), null);
-        return new Typed(new ClassType(CurrentClass()!));
+        return new Typed(ActorThisAsValue(t) ? new ActorType(CurrentClass()!) : new ClassType(CurrentClass()!)); // U10: inside an actor, as a value, its own reference
     }
 
     /// <summary>

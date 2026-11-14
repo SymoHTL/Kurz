@@ -1,0 +1,25 @@
+// expect: output
+// | made 10
+// | spawned
+// | 15
+// rules: U2, U3, U5
+
+int Made(int n) {
+    print("made {n}")
+    return n
+}
+
+actor Account(int Start) {
+    mut int balance = Made(Start)
+
+    pub void Deposit(int n) {
+        balance = balance + n
+    }
+
+    pub int Balance() => balance
+}
+
+a = spawn Account(10)
+print("spawned")
+send a.Deposit(5)
+print(a.Balance())
