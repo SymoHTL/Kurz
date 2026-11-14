@@ -213,8 +213,9 @@ public sealed partial class Emitter
             var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
             asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
 
-            // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly, which a copy LLVM inlines
-            // keeps: by it the build reads which calls the optimised module of a release build holds (Builder.Build)
+            // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly where the build asks for
+            // neither LTO nor bitcode (rustc_codegen_llvm's `asm.rs`), which every copy LLVM makes keeps: by it the build reads which calls
+            // the code generator of a release build holds (Builder.Build)
             call += $", !srcloc !{{i64 {a.Line.ToString(CultureInfo.InvariantCulture)}}}";
         }
 

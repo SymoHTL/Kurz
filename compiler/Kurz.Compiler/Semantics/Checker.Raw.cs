@@ -998,7 +998,8 @@ public sealed partial class Checker
     /// The labels its templates define are read (<see cref="CheckLabels"/>), but in a <c>naked</c> function, which may define any: the checker
     /// reads a <c>naked</c> function with no type parameters alone (<see cref="CheckCSignature"/>), and Rust's lint exempts that one too. Nor
     /// are they read in an <c>asm</c> one of whose templates cannot be read (<see cref="CheckTemplate"/>), so that its <c>asm-operand</c>
-    /// stands with no label's error beside it.
+    /// stands with no label's error beside it, and no template after that one is read, as Rust's <c>expand_preparsed_asm</c> returns at the
+    /// first template it cannot read (<c>rustc_builtin_macros/src/asm.rs</c>), so that the <c>asm</c> has one such <c>asm-operand</c>.
     /// </summary>
     private void CheckAsm(AsmStatement a, bool naked)
     {
@@ -1104,7 +1105,11 @@ public sealed partial class Checker
         var read = true;
         foreach (var template in a.Templates)
         {
-            read &= CheckTemplate(template, positional, named, ref implicitIndex);
+            if (!CheckTemplate(template, positional, named, ref implicitIndex))
+            {
+                read = false;
+                break; // no template after one that cannot be read, as Rust's loop over the templates returns there
+            }
         }
 
         if (!naked && read) // one template that cannot be read leaves the `asm` no labels, as Rust's whole `asm!` is then no expression
@@ -1505,8 +1510,10 @@ public sealed partial class Checker
     /// R11: the placeholders of a template, as Rust reads them: <c>{{</c> and <c>}}</c> write a brace, <c>{}</c> takes the operands without
     /// a name in their order, <c>{0}</c> one by its position, <c>{name}</c> one by its name, and a modifier after a colon, <c>{r:e}</c>, gives the form of a
     /// register operand's register, from the modifiers of its class. Whether the template was read: false where its braces or its
-    /// placeholders cannot be read (<see cref="Unreadable"/>), as Rust's compiler reads no more of an <c>asm!</c> after "invalid asm template
-    /// string" (<c>rustc_builtin_macros/src/asm.rs</c>).
+    /// placeholders cannot be read (<see cref="Unreadable"/>), a <c>{</c> no <c>}</c> closes, a <c>}</c> that closes no <c>{</c> or a
+    /// placeholder that holds neither a position nor a name, after which <see cref="CheckAsm"/> reads no more of the <c>asm</c>, as Rust's
+    /// compiler reads no more of an <c>asm!</c> after "invalid asm template string" (<c>rustc_builtin_macros/src/asm.rs</c>); a name no
+    /// operand has leaves it read, as Rust reads on after <c>AsmNoMatchedArgumentName</c>.
     /// </summary>
     private bool CheckTemplate(AsmTemplate template, List<AsmSlot> positional, Dictionary<string, AsmSlot> named, ref int implicitIndex)
     {

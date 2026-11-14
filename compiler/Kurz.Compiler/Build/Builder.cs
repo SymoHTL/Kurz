@@ -86,16 +86,17 @@ public static partial class Builder
     /// Writes the IR into the working directory and has clang build the executable at <paramref name="outputPath"/>. Where clang refuses
     /// inline assembly, its text names no line of the program, not even the <c>!srcloc</c> Rust's compiler puts on the call (clang 23 on
     /// IR), so the program's <c>asm</c>s are assembled together without the rest of the program, beside a label for each symbol its IR
-    /// defines (<see cref="Definitions"/>), in the order LLVM meets them, the order the compiler writes them, in one file as across files
-    /// (<see cref="EmittedProgram.Asms"/>), in a release build an <c>asm</c> statement's copy once for each call the optimised module holds
-    /// (<see cref="Held"/>), each with those before it that clang took, and each one whose addition clang refuses is the
-    /// compile error <c>asm-refused</c> at its line, an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
+    /// defines (<see cref="Definitions"/>), in the order LLVM meets them, the order of the code its code generator writes, in one file as
+    /// across files: in a test build as the compiler writes them (<see cref="EmittedProgram.Asms"/>), in a release build an <c>asm</c>
+    /// statement's copy once for each call the code generator holds once it placed the blocks, in its order (<see cref="Held"/>); each with
+    /// those before it that clang took, and each one whose addition clang refuses is the compile error <c>asm-refused</c> at its line, a
+    /// line named once however many of its copies clang refuses, an <see cref="AsmRefusedException"/> that names them in that order (R11, R12; the
     /// owner, 2026-11-13, "Rust's srcloc", for the error at the line of the <c>asm</c>, pull request 530, comment 6855725580, "LLVM's
     /// order everywhere", for the order, and pull request 532, comment 6860019854, "Copies from optimised IR", for a release build): one
     /// clang refuses alone, a <c>naked</c> function's whose label is a symbol of the program among them, of two <c>naked</c> functions that
     /// define one label the second LLVM meets, whose label clang refuses beside the first's, where Rust's compiler, which gives a naked
-    /// function's assembly no <c>!srcloc</c>, names neither, and in a release build the second copy of a call the optimiser copied, whose
-    /// text clang takes once and refuses twice. Where none is refused so, the failure stays clang's.
+    /// function's assembly no <c>!srcloc</c>, names neither, and in a release build every copy after the first of a call the optimiser or
+    /// the code generator copied, whose text clang takes once and refuses again. Where none is refused so, the failure stays clang's.
     /// </summary>
     public static void Build(EmittedProgram program, Clang clang, string workingDirectory, string outputPath)
     {
@@ -145,37 +146,39 @@ public static partial class Builder
 
     /// <summary>
     /// R11 (the owner, 2026-11-13, pull request 532, comment 6860019854, "Copies from optimised IR"): the copies a release build assembles,
-    /// whose optimiser drops a call of no effect whose value nothing reads and copies a call where it inlines a function into two callers:
-    /// the <c>naked</c> functions' module-level assembly, which the optimiser leaves as it is, then a copy for each call of an <c>asm</c>
-    /// statement the optimised module holds (<see cref="Clang.Optimise"/>), in the order it holds them, the order LLVM meets them, each the
-    /// <see cref="AsmAlone"/> of the line the call's mark names, the <c>!srcloc</c> the emitter puts on it, which a copy LLVM inlines keeps,
-    /// whose template and constraints the call has, since two <c>asm</c>s can stand at one line. A call without a mark is the runtime's.
-    /// Null where clang does not write the optimised module.
+    /// whose optimiser drops a call of no effect whose value nothing reads and copies a call where it inlines a function into two callers,
+    /// and whose code generator copies a call where it duplicates the block that holds it into the blocks before it: the <c>naked</c>
+    /// functions' module-level assembly, which neither changes, then a copy for each call of an <c>asm</c> statement the code generator holds
+    /// once it placed the blocks (<see cref="Clang.Generate"/>), in the order it holds them, the order LLVM meets them, each the
+    /// <see cref="AsmAlone"/> of the line the call's mark names, the <c>!srcloc</c> the emitter puts on it, which every copy LLVM makes keeps,
+    /// whose template the call has, since two <c>asm</c>s can stand at one line; the machine code keeps no constraints, so of two at one line
+    /// with one template, which name one line, the first. A call without a mark is the runtime's. Null where clang does not write the code.
     /// </summary>
     private static List<AsmAlone>? Held(EmittedProgram program, Clang clang, string irPath, string workingDirectory)
     {
-        var path = Path.Combine(workingDirectory, OptimisedFile);
-        if (clang.Optimise(irPath, path, program.CpuFlag) is not null)
+        var path = Path.Combine(workingDirectory, GeneratedFile);
+        if (clang.Generate(irPath, path, program.CpuFlag) is not null)
         {
             return null;
         }
 
-        var ir = File.ReadAllText(path);
-        var lines = Mark().Matches(ir).ToDictionary(m => m.Groups[1].Value, m => int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), StringComparer.Ordinal);
+        var code = File.ReadAllText(path);
+        var lines = Mark().Matches(code).ToDictionary(m => m.Groups[1].Value, m => int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), StringComparer.Ordinal);
         var statements = program.Asms.Where(a => a.Rule == "R11").ToList();
         return
         [
             .. program.Asms.Where(a => a.Rule != "R11"),
-            .. MarkedCall().Matches(ir)
-                .Select(m => lines.TryGetValue(m.Groups[2].Value, out var line)
-                    ? statements.FirstOrDefault(a => a.Line == line && a.Ir.Contains(m.Groups[1].Value, StringComparison.Ordinal))
+            .. MarkedCopy().Matches(code)
+                .Select(m => (Template: m.Groups[1].Value.StartsWith('"') ? m.Groups[1].Value : $"\"{m.Groups[1].Value}\"", Mark: m.Groups[2].Value))
+                .Select(c => lines.TryGetValue(c.Mark, out var line)
+                    ? statements.FirstOrDefault(a => a.Line == line && a.Ir.Contains($"{c.Template}, \"", StringComparison.Ordinal))
                     : null)
                 .OfType<AsmAlone>(),
         ];
     }
 
-    /// <summary>The name of the optimised module in a build's working directory (<see cref="Held"/>).</summary>
-    private const string OptimisedFile = "optimised.ll";
+    /// <summary>The name of the code generator's machine IR in a build's working directory (<see cref="Held"/>).</summary>
+    private const string GeneratedFile = "generated.mir";
 
     /// <summary>
     /// R11, R12: one module of IR that holds the <c>asm</c>s given after the labels of <paramref name="defined"/>, the symbols the
@@ -200,8 +203,8 @@ public static partial class Builder
     /// name LLVM gives it in the assembly, a private one's after <c>.L</c> on ELF and on COFF, so that a <c>naked</c> function's label that
     /// is one of them is refused in that function's text. LLVM writes a <c>naked</c> function's module-level assembly before the program's own
     /// definitions and refuses such a label where it writes the definition, with no line of the template (clang 23); a <c>naked</c>
-    /// function's own symbol, which the IR declares, is none of them, nor is a global the IR declares, <c>external</c> or
-    /// <c>extern_weak</c>, beside which clang takes the label (clang 23).
+    /// function's own symbol, which the IR declares, is none of them, nor is a C function the program declares (R16), a <c>declare</c>
+    /// line, nor a global the IR declares, <c>external</c> or <c>extern_weak</c>, beside each of which clang takes the label (clang 23).
     /// </summary>
     private static List<(string Name, string Label)> Definitions(string ir) =>
     [
@@ -227,13 +230,16 @@ public static partial class Builder
     [GeneratedRegex(@"<inline asm>:\d+:\d+: error: ([^\r\n]*)")]
     private static partial Regex AssemblerError();
 
-    /// <summary>A node of the optimised module that is a call's mark (<see cref="Held"/>): its number and the line it holds.</summary>
-    [GeneratedRegex(@"^!(\d+) = !\{i64 (\d+)\}\r?$", RegexOptions.Multiline)]
+    /// <summary>A node of the module the machine IR holds that is a call's mark (<see cref="Held"/>): its number and the line it holds.</summary>
+    [GeneratedRegex(@"^ *!(\d+) = !\{i64 (\d+)\}\r?$", RegexOptions.Multiline)]
     private static partial Regex Mark();
 
-    /// <summary>A call of inline assembly in the optimised module with a mark: its template and constraints with the parenthesis after them, and the number of its mark.</summary>
-    [GeneratedRegex("""\bcall [^"\r\n]* asm[a-z ]* ("[^"\r\n]*", "[^"\r\n]*"\()[^\r\n]*, !srcloc !(\d+)""")]
-    private static partial Regex MarkedCall();
+    /// <summary>
+    /// A call of inline assembly in the machine IR with a mark: its template, quoted as the IR quotes it or bare where it is a name LLVM
+    /// writes without quotes, <c>&amp;nop</c>, and the number of its mark, the one metadata operand of the call.
+    /// </summary>
+    [GeneratedRegex("""^ *INLINEASM &("[^"\r\n]*"|[-a-zA-Z0-9._]+), [^\r\n]*?, !(\d+)\b""", RegexOptions.Multiline)]
+    private static partial Regex MarkedCopy();
 
     /// <summary>The name of the executable a build of this source writes beside it: the source's name without its extension, with <c>.exe</c> on Windows.</summary>
     public static string ExecutableBeside(string sourcePath)

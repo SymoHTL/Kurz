@@ -163,8 +163,8 @@ executable that is there, writes nothing on standard output, and exits with 0. A
 compiler refuses gets its lines on standard error, one per diagnostic in the order of their lines, but an
 `asm-refused` line in the order LLVM meets its `asm` (R11), and no executable, and the command exits with 1:
 
-    hello.kz:3: unknown-name: `y` is not declared
-    hello.kz:2: not supported: `s.Chars` as a list (T15)
+    hello.kz:2: assign-immutable: `x` was declared without `mut` (V7)
+    hello.kz:3: unknown-name: no `y` is visible here (V10)
 
 The file is named as the command line gave it. The command grants a program neither `raw` nor
 `native` (R7, R16): a program that needs them is refused with the grant's error. It refuses to
@@ -1400,7 +1400,8 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   `sideeffect` unless `pure`, `alignstack` unless `nostack`, Intel syntax unless `att_syntax`, `nounwind`, under
   `pure` `willreturn` and of `memory(none)` with `nomem` or `memory(read)` with `readonly`, of
   `memory(inaccessiblemem: readwrite)` under `nomem` alone, and `unreachable` follows it under `noreturn`; the call of an
-  `asm` of the program carries its line as its mark, `!srcloc`, as rustc puts one on each call. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
+  `asm` of the program carries its line as its mark, `!srcloc`, in a test build as in a release build, as rustc puts one on each call
+  where the build asks for neither LTO nor bitcode. The template takes LLVM's placeholders, a modifier as Rust's table maps it, `$` doubled, a
   `const` as its digits and a `sym` as its symbol. An operand's value is read, and the place an output writes through a pointer (`*p`,
   `p[i]`) found once, in the order the operands are written, but the input of an `inout` without `=>`, which is loaded just before the call; an output is stored
   into its place after the call, in the order the operands are written, the place of a variable or of a path of fields found as it is stored, so
@@ -1409,24 +1410,29 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   checker reads the template's operands and not its instructions, so an instruction the assembler refuses
   is refused when clang builds the program. Clang 23 given IR names no line of the program for it, not
   the `!srcloc` either, so where clang refuses inline assembly the build assembles the program's `asm`s
-  together without the rest of the program, beside a label for each symbol the program's IR defines, each as
+  together without the rest of the program, beside a label for each symbol the program's IR defines,
+  `main` and the functions, globals and constants the compiler writes, and not a C function it declares
+  (R16), beside whose declaration clang takes a label of its name, each as
   the emitter wrote it in IR of its own, an `asm` statement's a call with an effect whatever its options,
   since LLVM drops a call of no effect whose value nothing uses at `-O0` too, in the copies' `main`, which
   every program defines, in place of its label, so that the copies define no symbol the program does not,
-  and a `naked` function's its module-level assembly, in the order LLVM meets them, the order the compiler
-  writes them, in one file as across files: the `naked` functions' assembly first, in the order the compiler
+  and a `naked` function's its module-level assembly, in the order LLVM meets them, the order of the code
+  its code generator writes, in one file as across files: the `naked` functions' assembly first, in the order the compiler
   writes the functions, the top-level code's first and every other at its first use, those the top-level code
-  reaches before those their own text reaches, then the `asm` statements, in the order of the functions that hold them, a guarded block's
+  reaches before those their own text reaches, then the calls of the `asm` statements, in a test build as the
+  compiler writes them, in the order of the functions that hold them, a guarded block's
   before the function it stands in, and of the statements in each, in a release build a statement's copy
-  once for each call the module clang optimises (`-S -emit-llvm` at the release build's options) still holds,
-  found by its mark and in that module's order, so that a call the optimiser dropped is named by none and
-  the second copy of one it copied is named (R11; the owner, 2026-11-13, #532, comment 6860019854, "Copies
-  from optimised IR"); each beside those before it that clang
+  once for each call the code generator holds once it placed the blocks, in its text of machine IR
+  (`-S -mllvm -stop-after=block-placement` at the release build's options), found by its mark and in that
+  order, so that a call the optimiser dropped is named by none and every copy after the first of one the
+  optimiser or the code generator copied is named (R11; the owner, 2026-11-13, pull request 532, comment
+  6860019854, "Copies from optimised IR"); each beside those before it that clang
   took, and each one whose addition clang refuses is the compile error `asm-refused` at the line of the
-  `asm`, under R11, or R12 for a `naked` function's, once, in that order: one clang refuses alone, a
-  `naked` function's whose label is a symbol of the program among them, which LLVM refuses where it writes
+  `asm`, under R11, or R12 for a `naked` function's, a line named once however many of its copies clang
+  refuses, in that order: one clang refuses alone, a
+  `naked` function's whose label is a symbol the program defines among them, which LLVM refuses where it writes
   that symbol's definition, with no line of the template, and of two `naked` functions that define one
-  label the one LLVM meets second, the earlier line's where the two are called out of the order of their
+  label the one LLVM meets second, the earlier line's where the two are first used out of the order of their
   lines (R11, R12). Where none is refused so, the failure stays clang's. The command writes each as
   it writes a compile error. It grants a program no `raw` (R7), so no program it
   builds holds an `asm`, and a template it hands to clang is one of the runtime or of the standard library,
