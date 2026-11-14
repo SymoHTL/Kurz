@@ -213,8 +213,10 @@ public sealed partial class Emitter
             var alone = $"call {resultType} asm sideeffect{words} {IrModule.Quote(template)}, {IrModule.Quote(constraints)}({string.Join(", ", inputs.Select(x => x.Alone))}) nounwind";
             asmsAlone.Add((new AsmAlone(a.Line, "R11", [.. symbols.Values.Distinct(StringComparer.Ordinal).Select(s => $"declare void {s}()")], $"  {alone}\n"), fn));
 
-            // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly, which a copy LLVM inlines
-            // keeps: by it the build reads which calls the optimised module of a release build holds (Builder.Build)
+            // the call's mark, its line, as Rust's compiler puts a `!srcloc` on each call of inline assembly where the build uses no LTO,
+            // not even the thin-local LTO of its default optimised build of several codegen units, and needs no bitcode (rustc_codegen_llvm's
+            // `asm.rs`, rustc_session's `Session::lto`), which every copy LLVM makes keeps: by it the build reads which calls
+            // the code generator of a release build holds (Builder.Build)
             call += $", !srcloc !{{i64 {a.Line.ToString(CultureInfo.InvariantCulture)}}}";
         }
 
@@ -514,7 +516,7 @@ public sealed partial class Emitter
                     var end = text.IndexOf('}', i + 1);
                     var inside = text[(i + 1)..end];
                     var colon = inside.IndexOf(':', StringComparison.Ordinal);
-                    var reference = colon < 0 ? inside : inside[..colon];
+                    var reference = (colon < 0 ? inside : inside[..colon]).TrimEnd(); // as the checker reads it (Checker.CheckTemplate)
                     var modifier = colon < 0 ? null : inside[(colon + 1)..];
                     var operand = reference.Length == 0 ? positional[implicitIndex++]
                         : char.IsAsciiDigit(reference[0]) ? positional[int.Parse(reference, NumberStyles.None, CultureInfo.InvariantCulture)]
