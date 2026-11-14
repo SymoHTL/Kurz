@@ -1,0 +1,17 @@
+// expect: error static-state at 5
+// rules: U1
+
+actor Counter {
+    static mut int total = 0
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+send c.Add(1)
+print(c.Get())

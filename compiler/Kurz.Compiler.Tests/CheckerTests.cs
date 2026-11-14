@@ -7156,11 +7156,25 @@ public sealed class CheckerTests
     [InlineData(1, "actor A(int X) equal by X {\n}\n")]
     [InlineData(2, "actor A {\n    pub A() {\n    }\n}\n")]
     [InlineData(4, "actor A {\n}\n\nclass B : A\n")]
-    public void What_no_actor_declares_is_syntax(int line, string program)
+    [InlineData(1, "actor A : A {\n}\n")]
+    [InlineData(1, "actor A : B {\n}\n\nactor B : A {\n}\n", 4)]
+    [InlineData(1, "actor A<T>(int X) equal by X {\n}\n")]
+    [InlineData(6, "interface IShape {\n}\n\nclass Box(int N)\n\nactor A : IShape, Box {\n}\n")]
+    [InlineData(4, "interface IShape {\n}\n\nactor A(int X) : IShape equal by X {\n}\n")]
+    public void What_no_actor_declares_is_syntax(int line, string program, int also = 0)
     {
         // U1: a base after an actor's name and an actor after a class's `:` (Q26 of issue 519, comment 6881678834, assumed: the id); U2:
-        // `equal by` and a constructor in the body (Q26), since the actor's `==` and its constructor are U2's
-        Assert.Equal([(ErrorIds.Syntax, line)], Errors(program));
+        // `equal by` and a constructor in the body (Q26), since the actor's `==` and its constructor are U2's. An actor the file declares,
+        // read or not, after an actor's name is a base, so that one that is its own base, and each of two that are each the other's, gets
+        // it; the language's error of a declaration stands in place of the build's `not supported` of another part, its type parameters or
+        // an interface (README, "What the checker does not read")
+        List<(string, int)> expected = [(ErrorIds.Syntax, line)];
+        if (also != 0)
+        {
+            expected.Add((ErrorIds.Syntax, also));
+        }
+
+        Assert.Equal(expected, Errors(program));
     }
 
     [Fact]
@@ -7171,15 +7185,37 @@ public sealed class CheckerTests
     }
 
     [Fact]
+    public void A_static_field_of_an_actor_that_is_mut_or_holds_a_class_is_static_state()
+    {
+        // U1, as K18 reads a class's `static` field (U1, assumed: K18's reading of `static` state); an immutable one of another type is the
+        // build's limit (What_an_actor_declares_beyond_its_rules_is_not_supported)
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("actor A {\n    static mut int n = 0\n}\n"));
+        Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class Box(int N)\n\nactor A {\n    static Box b = Box(1)\n}\n"));
+        Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class Box(int N)\n\nactor A {\n    static List<Box> boxes = []\n}\n"));
+    }
+
+    [Fact]
     public void A_construct_that_breaks_two_rules_of_actors_is_the_first_error_read()
     {
         // U16 (Q27 of issue 519, comment 6881678834): its form, the name after `spawn`, whom the call reaches, its arguments, then its result;
-        // the form is the parser's, `spawn Box` and `x = send c.Get()` among its rows (ParserTests) and the cases of U16
-        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("class Box(int Size)\n\nb = spawn Box(\"x\")\nprint(b)\n"));
+        // the form is the parser's, `spawn Box` and `x = send c.Get()` among its rows (ParserTests) and the cases of U16. `spawn Box()` of a
+        // class whose constructor takes an argument: the name's `type-mismatch`, not the arguments' `argument-mismatch`
+        Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("class Box(int Size)\n\nb = spawn Box()\nprint(b)\n"));
         Assert.Equal([(ErrorIds.SpawnRequired, 5)], Errors("actor Counter(int Start) {\n    pub int Get() => Start\n}\n\nc = Counter(\"x\")\nprint(c.Get())\n"));
         Assert.Equal([(ErrorIds.NotVisible, 14)], Errors(ActorCounter + "c = spawn Counter()\nsend c.Hidden()\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 10)], Errors("actor A {\n    pub int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    int Bump(mut int n) {\n        n = n + 1\n        return n\n    }\n}\n"));
+
+        // U16, its stage of the arguments: an argument's own error, then what crosses, `send-needs-word` in the language and `not supported`
+        // in this build (U12), then `mut-in-message`, through a reference and in a `send` of the actor's own method (the owner, 2026-11-14,
+        // #519, comment 6884160133, item 6)
+        Assert.Equal([(ErrorIds.TypeMismatch, 9)], Errors("actor A {\n    pub void Bump(mut int n, int k) {\n        n = n + k\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Bump(mut x, \"k\")\nprint(x)\n"));
+        NotSupportedAt(11, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n");
+        NotSupportedAt(6, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n");
+
+        // A declaration that breaks two rules: the error of the word read first, `pub` before `static` (the owner, 2026-11-14, #519, comment
+        // 6884160133, item 7)
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub static mut int n = 0\n}\n"));
     }
 
     [Theory]

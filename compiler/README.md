@@ -2288,7 +2288,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 
 A program that uses one of these gets `not supported` at the construct's line and no error that
 comes from the construct (E1), but where the construct holds an error of its own, a grant's or
-`raw-required` (the reading on R7, R12 and R16 below), which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
+`raw-required` (the reading on R7, R12 and R16 below), or the language's error of an actor's declaration, a type after its name that is no interface (U1), `equal by` or a constructor in its body (U2), or a `static` field's `actor-field-public` (U8) or `static-state` (U1), the first in the order of its words (U16), which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
@@ -2413,10 +2413,13 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none o
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters and
-an interface, which an actor may declare (U1), a `static` member (U1), and a modifier of a method but `pub`, which a method
+an interface, which an actor may declare (U1), a `static` method and an immutable `static` field of a type that holds no class,
+or of a type not written (U1), and a modifier of a method but `pub`, which a method
 may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
-an actor's name, `equal by` and a constructor in its body (U1, U2) leaves it too; a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
+an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
+whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
+that base (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
 or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
 method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
 an actor's constructor, that takes or gives what crosses no actor in this build, a class instance, an immutable one

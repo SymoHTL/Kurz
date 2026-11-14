@@ -24,39 +24,23 @@ public sealed partial class Checker
     /// <summary>U10: each <c>this</c> in an actor's methods that stands before a member, the one place it is read.</summary>
     private readonly HashSet<ThisExpression> actorMemberThis = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>U1: each actor with a type after its name, an interface or a base, which <see cref="RefuseActorBases"/> tells apart once every type is declared.</summary>
-    private readonly List<TypeDeclaration> actorBases = [];
+    /// <summary>U1: each actor the checker does not read, whose one diagnostic <see cref="RefuseUnreadActors"/> gives once every type is resolved.</summary>
+    private readonly List<TypeDeclaration> unreadActors = [];
 
-    /// <summary>What a part of an actor's declaration that the checker does not read is: the build's limit, <c>syntax</c>, or a type after its name.</summary>
-    private enum ActorPart
-    {
-        NotBuilt,
-        Syntax,
-        Base,
-    }
+    /// <summary>U1: the name of each actor the file declares, read or not, which no type after an actor's name may name.</summary>
+    private readonly HashSet<string> actorNames = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// U1: an actor the checker reads is declared as a class is, its body read by the class's code; what an actor writes that the
-    /// checker does not read is <c>not supported</c> at that line, or <c>syntax</c> where no rule gives it a meaning (U1, U2), and its
-    /// name joins the types the checker does not read (E1).
+    /// U1: an actor the checker reads is declared as a class is, its body read by the class's code; an actor with a part the build does
+    /// not read, or with <c>equal by</c> or a constructor in its body, which no rule gives a meaning (U2), joins the types the checker does
+    /// not read (E1), its one diagnostic given by <see cref="RefuseUnreadActors"/>.
     /// </summary>
     private void DeclareActor(TypeDeclaration d)
     {
-        if (UnreadActorPart(d) is { } unread)
+        actorNames.Add(d.Name);
+        if (UnreadActorPart(d) is not null || d.EqualBy.Count > 0 || (d.Members ?? []).OfType<ConstructorDeclaration>().Any())
         {
-            switch (unread.Part)
-            {
-                case ActorPart.Syntax:
-                    Report(ErrorIds.Syntax, unread.Line, unread.Construct);
-                    break;
-                case ActorPart.Base:
-                    actorBases.Add(d);
-                    break;
-                default:
-                    NotSupported(unread.Line, unread.Construct);
-                    break;
-            }
-
+            unreadActors.Add(d);
             unsupportedTypes.Add(d.Name);
             unsupportedBases[d.Name] = "an actor a data type names (U1)";
             return;
@@ -89,49 +73,44 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// The first part of an actor's declaration that the checker does not read beyond a class's, with its line and what it is; null where
-    /// it reads all of it. Type parameters and an interface are the language's (U1) and the build's limit; <c>equal by</c> and a constructor
-    /// in the body are <c>syntax</c> (U2; Q26 of issue 519, comment 6882624606).
+    /// The first part of an actor's declaration that the build does not read beyond a class's, with its line and what it is; null where
+    /// there is none: a clause, a modifier, type parameters, a type after its name and a <c>static</c> member (U1), and a modifier of a
+    /// method but <c>pub</c> (U9). A type after the name is named here as an interface, since <see cref="RefuseUnreadActors"/>
+    /// reads every such type once the types are resolved and leaves an actor to this part only where each is one; <c>equal by</c> and a
+    /// constructor in the body are no part of it, being <c>syntax</c> (U2; Q26 of issue 519, comment 6882624606).
     /// </summary>
-    private static (int Line, string Construct, ActorPart Part)? UnreadActorPart(TypeDeclaration d)
+    private static (int Line, string Construct)? UnreadActorPart(TypeDeclaration d)
     {
         if (d.Clauses is [var clause, ..])
         {
-            return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)", ActorPart.NotBuilt);
+            return (clause.Line, $"the clause `{clause.Word}` after an actor's name (U1)");
         }
 
         if ((d.Modifiers & ~Modifiers.Pub) != 0)
         {
-            return (d.Line, $"the modifier `{(d.Modifiers & ~Modifiers.Pub).ToString().ToLowerInvariant()}` of an actor (U1)", ActorPart.NotBuilt);
+            return (d.Line, $"the modifier `{(d.Modifiers & ~Modifiers.Pub).ToString().ToLowerInvariant()}` of an actor (U1)");
         }
 
         if (d.TypeParameters.Count > 0)
         {
-            return (d.Line, "a generic actor (U1, T19)", ActorPart.NotBuilt);
+            return (d.Line, "a generic actor (U1, T19)");
         }
 
         if (d.Bases.Count > 0)
         {
-            return (d.Bases[0].Line, "", ActorPart.Base);
-        }
-
-        if (d.EqualBy.Count > 0)
-        {
-            return (d.Line, "`equal by` on an actor, whose `==` is that of the actor its reference names, is text no rule gives a meaning (U2, E4)", ActorPart.Syntax);
+            return (d.Bases[0].Line, "an interface after an actor's name (U1)");
         }
 
         foreach (var member in d.Members ?? [])
         {
             switch (member)
             {
-                case ConstructorDeclaration c:
-                    return (c.Line, "a constructor in the body of an actor, whose constructor is its primary one, is text no rule gives a meaning (U2, E4)", ActorPart.Syntax);
                 case FieldDeclaration f when (f.Modifiers & Modifiers.Static) != 0:
-                    return (f.Line, "a `static` field of an actor (U1)", ActorPart.NotBuilt);
+                    return (f.Line, "a `static` field of an actor (U1)");
                 case FunctionDeclaration f when (f.Modifiers & Modifiers.Static) != 0:
-                    return (f.Line, "a `static` method of an actor (U1)", ActorPart.NotBuilt);
+                    return (f.Line, "a `static` method of an actor (U1)");
                 case FunctionDeclaration f when (f.Modifiers & ~Modifiers.Pub) != 0:
-                    return (f.Line, $"the modifier `{(f.Modifiers & ~Modifiers.Pub).ToString().ToLowerInvariant()}` of an actor's method (U9)", ActorPart.NotBuilt);
+                    return (f.Line, $"the modifier `{(f.Modifiers & ~Modifiers.Pub).ToString().ToLowerInvariant()}` of an actor's method (U9)");
                 default:
                     break;
             }
@@ -141,30 +120,112 @@ public sealed partial class Checker
     }
 
     /// <summary>
-    /// U1: the type after an actor's name, once every type is declared: an interface is the language's and <c>not supported</c> in the
-    /// build; anything else is a base, which an actor has none of, and <c>syntax</c> (Q26 of issue 519, comment 6882624606, assumed: the
-    /// id); a name nothing declares is <c>unknown-name</c> where it is resolved (V10).
+    /// U1, U16: once every type is resolved, the one diagnostic of each actor the checker does not read: the language's error of its
+    /// declaration where it has one (<see cref="ActorDeclarationError"/>), else <c>not supported</c> at the first part the build does not
+    /// read (<see cref="UnreadActorPart"/>), so that the build's limit hides no error of the language (E1).
     /// </summary>
-    private void RefuseActorBases()
+    private void RefuseUnreadActors()
     {
-        foreach (var d in actorBases)
+        foreach (var d in unreadActors)
         {
-            var b = d.Bases[0];
+            if (!ActorDeclarationError(d) && UnreadActorPart(d) is { } part)
+            {
+                NotSupported(part.Line, part.Construct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The language's error of an actor's declaration, the first in the order of its words (U16; the owner, 2026-11-14, #519, comment
+    /// 6884160133, item 7), reported; whether it has one. Each type after its name in turn: an actor the file declares, read or not, is
+    /// <c>syntax</c> before the type is resolved, so that an actor that is its own base, and each of two actors that are each the other's,
+    /// gets it, and so is any other type that is no interface, a base, which an actor has none of (U1; Q26 of issue 519, comment
+    /// 6882624606, assumed: the id, as reading 1 of comment 6882879015 gives it); then <c>equal by</c> and, in the body's order, a
+    /// constructor (U2) and a <c>static</c> field's error (<see cref="StaticActorFieldError"/>).
+    /// </summary>
+    private bool ActorDeclarationError(TypeDeclaration d)
+    {
+        foreach (var b in d.Bases)
+        {
+            if (b.Type is NamedType n && actorNames.Contains(n.Name))
+            {
+                Report(ErrorIds.Syntax, b.Line, $"the actor `{n.Name}` after the name of the actor `{d.Name}`, which names interfaces alone and has no base, is text no rule gives a meaning (U1, E4)");
+                return true;
+            }
+
             var type = Resolve(b.Type);
             if (Types.IsError(type))
             {
-                continue; // `unknown-name` (V10), or a type the checker does not read, said `not supported` at its declaration
+                return true; // `unknown-name` (V10), where it is resolved, or a type of another kind the checker does not read, said `not supported` at its declaration; the actor's own base is not reported then
             }
 
-            if (type is InterfaceType)
-            {
-                NotSupported(b.Line, $"the interface `{type}` after an actor's name (U1)");
-            }
-            else
+            if (type is not InterfaceType)
             {
                 Report(ErrorIds.Syntax, b.Line, $"`{type}` after the name of the actor `{d.Name}`, which names interfaces alone and has no base, is text no rule gives a meaning (U1, E4)");
+                return true;
             }
         }
+
+        if (d.EqualBy.Count > 0)
+        {
+            Report(ErrorIds.Syntax, d.Line, "`equal by` on an actor, whose `==` is that of the actor its reference names, is text no rule gives a meaning (U2, E4)");
+            return true;
+        }
+
+        foreach (var member in d.Members ?? [])
+        {
+            switch (member)
+            {
+                case ConstructorDeclaration c:
+                    Report(ErrorIds.Syntax, c.Line, "a constructor in the body of an actor, whose constructor is its primary one, is text no rule gives a meaning (U2, E4)");
+                    return true;
+                case FieldDeclaration f when (f.Modifiers & Modifiers.Static) != 0 && StaticActorFieldError(d, f):
+                    return true;
+                default:
+                    break;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// A <c>static</c> field of an actor the checker does not read: <c>pub</c> before it is <c>actor-field-public</c>, its word read before
+    /// <c>static</c> (U8, U16; the owner, 2026-11-14, #519, comment 6884160133, item 7), and <c>static mut</c>, or a type that is or holds a
+    /// class, is <c>static-state</c>, as K18 reads a class's field (<see cref="ResolveStaticField"/>; U1, assumed: K18's reading of
+    /// <c>static</c> state); whether it has its error, reported here or, for a type that resolves to none, where the type is resolved. A
+    /// field whose type is not written takes its value's (V2), which the checker does not read in an actor it does not read, so that it
+    /// stays the build's limit, as an immutable one of another type does.
+    /// </summary>
+    private bool StaticActorFieldError(TypeDeclaration d, FieldDeclaration f)
+    {
+        if ((f.Modifiers & Modifiers.Pub) != 0)
+        {
+            Report(ErrorIds.ActorFieldPublic, f.Line, $"`{f.Name}` is a `pub` field of the actor `{d.Name}`, whose state nothing outside it reaches: a `pub` method gives it (U8)");
+            return true;
+        }
+
+        if ((f.Modifiers & Modifiers.Mut) != 0)
+        {
+            Report(ErrorIds.StaticState, f.Line, $"`{f.Name}` is a `static mut` field of the actor `{d.Name}`, which holds no `static` state (U1, K18)");
+            return true;
+        }
+
+        if (f.Type is null)
+        {
+            return false;
+        }
+
+        var type = Resolve(f.Type);
+        var held = new HashSet<ClassSymbol>();
+        ClassesHeld(type, held, []);
+        if (held.Count > 0)
+        {
+            Report(ErrorIds.StaticState, f.Line, $"the `static` field `{f.Name}` of the actor `{d.Name}` would hold an instance of `{held.First().Name}`, which lives in one actor's heap (U1, K18)");
+            return true;
+        }
+
+        return Types.IsError(type);
     }
 
     /// <summary>
@@ -317,7 +378,8 @@ public sealed partial class Checker
     /// U6: <c>send c.Add(1)</c>, a call of an actor's <c>pub</c> method through its reference, or of its own method inside it (U11),
     /// recorded as <see cref="CallKind.ActorSend"/>; a method with a result is <c>send-result</c>, a <c>void</c> with cases beside it among
     /// them (U7), and anything else after <c>send</c> is <c>syntax</c> (U14). A message to its own method takes what one through a
-    /// reference takes: its arguments cross (U12), and a <c>mut</c> parameter is <c>mut-in-message</c> (U9, U11; Q6 of comment 6880404917).
+    /// reference takes: its arguments cross (U12), and then a <c>mut</c> parameter is <c>mut-in-message</c> (U11, assumed: U11's reading of
+    /// Q6 of comment 6880404917, which answers it of a call through a reference, U9), in U16's order (<see cref="CallActor"/>).
     /// </summary>
     private void CheckSend(SendStatement s)
     {
@@ -341,15 +403,15 @@ public sealed partial class Checker
 
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
-            if (call.Function.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
-            {
-                Report(ErrorIds.MutInMessage, s.Line, $"`{mut.Name}` of `{own.Name}.{call.Function.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)");
-                return;
-            }
-
             if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t)) is { } stays)
             {
                 NotSupported(s.Line, $"{Types.A(stays)} in the message `{own.Name}.{call.Function.Name}`, which is no value or actor's reference (U12)");
+                return;
+            }
+
+            if (call.Function.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
+            {
+                Report(ErrorIds.MutInMessage, s.Line, $"`{mut.Name}` of `{own.Name}.{call.Function.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)");
                 return;
             }
 
@@ -382,8 +444,11 @@ public sealed partial class Checker
     /// <summary>
     /// U4, U9: a call of an actor's method through its reference: a <c>pub</c> one alone is seen (U9), else <c>not-visible</c>; it
     /// waits for its result, in the top-level statements alone, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
-    /// after <c>send</c> (U6). Its arguments cross (U12), and so does its result where it waits, a <c>send</c> dropping it (U6), and a
-    /// <c>mut</c> parameter is <c>mut-in-message</c> (U9, U11; Q6 of comment 6880404917).
+    /// after <c>send</c> (U6). Its arguments cross (U12), then a <c>mut</c> parameter is <c>mut-in-message</c> (U9; Q6 of comment
+    /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads what
+    /// crosses, which the language reads as <c>send-needs-word</c> and this build says <c>not supported</c> to, before a <c>mut</c>
+    /// parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14, #519, comment 6884160133,
+    /// item 6), and its stage of the result follows.
     /// </summary>
     private Typed CallActor(ActorType type, MemberAccess m, CallExpression c, KurzType? expected)
     {
@@ -425,21 +490,21 @@ public sealed partial class Checker
             return typed;
         }
 
+        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t)) is { } stays)
+        {
+            NotSupported(m.Line, $"{Types.A(stays)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
+            return Typed.Error;
+        }
+
         if (picked.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
         {
             Report(ErrorIds.MutInMessage, m.Line, $"`{mut.Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)");
             return Typed.Error;
         }
 
-        var crossing = picked.Parameters.Select(p => p.Type);
-        if (!send)
+        if (!send && !CrossesActors(picked.ReturnType)) // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
         {
-            crossing = crossing.Append(picked.ReturnType); // U6: a `send` drops the result, so nothing of it crosses, and its result is `send-result`
-        }
-
-        if (crossing.FirstOrDefault(t => !CrossesActors(t)) is { } stays)
-        {
-            NotSupported(m.Line, $"{Types.A(stays)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
+            NotSupported(m.Line, $"{Types.A(picked.ReturnType)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
             return Typed.Error;
         }
 
