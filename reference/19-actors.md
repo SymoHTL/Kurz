@@ -47,8 +47,11 @@ print(spawn)
 construction binds them (K1, D11), and gives its reference, a value of the type `Name`; each `spawn`
 makes an actor with a state of its own. An actor's constructor is its primary one, and a call of an
 actor's name without `spawn` is the compile error `spawn-required` (§6, the owner, 2026-11-13, #519,
-comment 6847932993, Q13, "Primary ctor, kept args (Recommended)"). What `==`, a hash and the text of
-an actor's reference are stands open (§14), asked on issue 519 (comment 6866132292, Q10).
+comment 6847932993, Q13, "Primary ctor, kept args (Recommended)"). An actor's reference compares by
+the actor it names: `==` is true of two references to one actor, `!=` of two to different actors,
+and its text is its actor's type and number, `Counter#1`, the number counted from 1 in the order in
+which the actors of one machine are spawned (§6, the owner, 2026-11-14, #519, comment 6880404917, Q10, "All eight leans (Recommended)") *(assumed: that shape and that
+count, which the answer did not give)*.
 
 Case: [actors/two-instances.kz](../corpus/actors/two-instances.kz)
 ```kurz
@@ -107,13 +110,30 @@ print(c.Get())
 
 Case: [actors/counter.kz](../corpus/actors/counter.kz)
 
-### U3 (assumed, §6) The constructor runs while the spawner waits
+Case: [actors/identity.kz](../corpus/actors/identity.kz)
+```kurz
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+}
+
+a = spawn Counter()
+b = spawn Counter()
+c = a
+print("{a} {b}")
+print(a == c)
+print(a == b)
+```
+
+### U3 (decided, §6) The constructor runs while the spawner waits
 
 An actor's constructor, its fields' defaults with it, runs in the new actor while the code that
 spawned it waits, as Elixir's `GenServer.start_link` waits for `init/1`, so that on one machine what
-the constructor prints comes before what the spawner prints after its `spawn` *(assumed: that
-reading, the lean of the round of 2026-11-13, issue 519, comment 6866132292, Q2, which no answer
-named)*.
+the constructor prints comes before what the spawner prints after its `spawn`, and a throw in it is
+the spawner's crash (§6, the owner, 2026-11-14, #519, comment 6880404917, Q2, "All nine leans (Recommended)").
 
 Case: [actors/constructor-arguments.kz](../corpus/actors/constructor-arguments.kz)
 
@@ -275,10 +295,10 @@ send s.Add()
 ### U8 (decided, §6) Its fields are its own
 
 Nothing outside an actor reaches its fields (§6, "Nobody outside can touch its fields"): a read or
-an assignment of one through a reference is the compile error `not-visible` *(proposed: F9's id,
-which section 6 does not name)*. Whether a `pub` field or a property of an actor is a compile error,
-a read that waits, or allowed and never visible stands open, asked on issue 519 (comment 6866132292,
-Q4).
+an assignment of one through a reference is the compile error `not-visible`, F9's id (§6, the owner, 2026-11-14, #519, comment 6880404917,
+Q20, "All five leans (Recommended)"). A `pub` field or a `pub` property of an actor is the compile error `actor-field-public`,
+at its declaration (§6, the same comment, Q4, "All nine leans (Recommended)") *(assumed: the id's name, which the answer did
+not give, and that a property without `pub` is the actor's own, as a method without `pub` is)*.
 
 Case: [actors/field-not-visible.kz](../corpus/actors/field-not-visible.kz)
 ```kurz
@@ -292,12 +312,25 @@ c = spawn Counter()
 print(c.count)
 ```
 
-### U9 (proposed) A message calls a `pub` method
+Case: [actors/field-public.kz](../corpus/actors/field-public.kz)
+```kurz
+actor Counter {
+    pub int count = 0
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+print(c.Get())
+```
+
+### U9 (decided, §6) A message calls a `pub` method
 
 A method called through an actor's reference has `pub`, and a call of one without it is
-`not-visible`, as F9 makes a method without `pub` private to its class: section 6 makes a call on an
-actor look like an ordinary method call and says nothing of its visibility. What a `mut` parameter
-of a method called through a reference is stands open, asked on issue 519 (comment 6866132292, Q6).
+`not-visible`, as F9 makes a method without `pub` private to its class (§6, the owner, 2026-11-14, #519, comment 6880404917, Q19, "All five leans (Recommended)"). A
+`mut` parameter of a method called through a reference, waiting or sent, is the compile error
+`mut-in-message`, since a message holds no place of its caller's (§6, the same comment, Q6, "All nine leans (Recommended)")
+*(assumed: the id's name, which the answer did not give)*.
 
 Case: [actors/private-method.kz](../corpus/actors/private-method.kz)
 ```kurz
@@ -311,21 +344,60 @@ c = spawn Counter()
 print(c.Get())
 ```
 
+Case: [actors/mut-in-message.kz](../corpus/actors/mut-in-message.kz)
+```kurz
+actor Counter {
+    pub void Bump(mut int n) {
+        n = n + 1
+    }
+}
+
+c = spawn Counter()
+mut x = 1
+c.Bump(mut x)
+print(x)
+```
+
 ### U10 (decided, §6) Inside, its own members are direct
 
 Inside an actor its own fields and methods are reached as a class's are, by their names or through
 `this` (K7), and a call of its own method is a direct call and no message (§6, the owner,
-2026-11-13, #519, comment 6847932993, Q14, "Direct call (Recommended)"). What `this` is as a value
-inside an actor stands open, asked on issue 519 (comment 6866132292, Q7).
+2026-11-13, #519, comment 6847932993, Q14, "Direct call (Recommended)"). `this` as a value inside
+an actor, not before a member, is the actor's own reference, a value of its type, which crosses into
+a message as any reference does (U12) (§6, the owner, 2026-11-14, #519, comment 6880404917, Q7, "All nine leans (Recommended)").
 
 Case: [actors/own-method-direct.kz](../corpus/actors/own-method-direct.kz)
 
-### U11 (assumed, §6) `send` of its own method
+Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
+```kurz
+actor Worker {
+    pub void Join(Registry to) {
+        send to.Add(this)
+    }
+}
+
+actor Registry(Worker Expected) {
+    mut bool matched = false
+
+    pub void Add(Worker who) {
+        matched = who == Expected
+    }
+
+    pub bool Matched() => matched
+}
+
+w = spawn Worker()
+r = spawn Registry(w)
+w.Join(r)
+print(r.Matched())
+```
+
+### U11 (decided, §6) `send` of its own method
 
 `send` of an actor's own method inside it, `send Second()` or `send this.Second()`, is a message
 queued behind the one that runs, as Akka's `self ! m` and Elixir's `GenServer.cast(self(), ...)`
-are *(assumed: that reading, the lean of the round of 2026-11-13, issue 519, comment 6866132292,
-Q5, which no answer named)*.
+are (§6, the owner, 2026-11-14, #519, comment 6880404917, Q5, "All nine leans (Recommended)"), and a `mut` parameter of the method so sent is `mut-in-message`, as in
+U9 *(assumed: that U9's answer, Q6, holds this `send` too, which is a message)*.
 
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
 ```kurz
@@ -349,34 +421,55 @@ w.Start()
 w.Done()
 ```
 
+Case: [actors/mut-in-own-send.kz](../corpus/actors/mut-in-own-send.kz)
+```kurz
+actor Worker {
+    pub void Go() {
+        mut x = 1
+        send Bump(mut x)
+        print(x)
+    }
+
+    void Bump(mut int n) {
+        n = n + 1
+    }
+}
+```
+
 ### U12 (decided, §6) What crosses
 
 What crosses between actors is a value (`data`, a collection, a string, a number), an immutable
 class instance and an actor's reference; a mutable class instance crosses with `copy` or `move`
 alone (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
-2026-11-13, #519, comment 6847932993, Q13).
+2026-11-13, #519, comment 6847932993, Q13). An immutable class is one through which nothing
+reachable has a `mut` field, a function value crosses where every value it captures crosses, and a
+mutable class instance given as a call's result, where no word can stand, is a compile error whose
+id stands open (§6, §14, the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)").
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
 Case: [actors/union-result.kz](../corpus/actors/union-result.kz)
 
-### U13 (assumed, §6) The end of the program drops what is queued
+Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)
+
+### U13 (decided, §6) The end of the program drops what is queued
 
 When the top-level code ends, a message that runs in an actor it spawned runs to its end, and the
 messages still queued behind it are dropped, since the end of the root actor stops its children
-after their current message (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16) *(assumed: that reading, the lean of the round of
-2026-11-13, issue 519, comment 6866132292, Q8, which no answer named)*.
+after their current message (§6, the owner, 2026-11-13, #519, comment 6847932993, Q16, and the owner, 2026-11-14, #519, comment 6880404917,
+Q8, "All nine leans (Recommended)").
 
 No case: which message runs when the top-level code ends is the scheduler's to say where actors run
 on more than one thread, so that a case's output would hang on it.
 
-### U14 (proposed) `spawn` and `send` before what is not theirs
+### U14 (decided, §6) `spawn` and `send` before what is not theirs
 
 `spawn` before a name that is no actor is `type-mismatch`, and `send` before what is no call of an
 actor's method is `syntax` (E4), as Rust gives a type error (E0277) for a value that is not what
-`tokio::spawn` takes: section 6 names neither id *(proposed: the lean of the round of 2026-11-13,
-issue 519, comment 6866132292, Q3, which no answer named)*.
+`tokio::spawn` takes (§6, the owner, 2026-11-14, #519, comment 6880404917, Q3, "All nine leans (Recommended)"). `spawn Name(...)` on its own, its reference dropped, is
+no statement and is `syntax`, as a value on its own is (F5), since nothing can send to an actor that
+no reference reaches (§6, the same comment, Q21, "All five leans (Recommended)").
 
 Case: [actors/spawn-not-actor.kz](../corpus/actors/spawn-not-actor.kz)
 ```kurz
@@ -395,13 +488,26 @@ void Show(int n) {
 send Show(1)
 ```
 
-### U15 (proposed) A message sent inside a message
+Case: [actors/spawn-alone.kz](../corpus/actors/spawn-alone.kz)
+```kurz
+actor Greeter {
+    pub void Hello() {
+        print("hello")
+    }
+}
+
+spawn Greeter()
+```
+
+### U15 (decided, §6) A message sent inside a message
 
 On one machine, a message that an actor sends while it runs a message stands in its receiver's
 inbox before every message that the caller of the running one sends after its call returned, as a
-queue keeps the order in which its items were put in: U5 holds the order of one sender's messages,
-and section 6 says nothing of two senders'.
+queue keeps the order in which its items were put in; across machines only the order of U5 holds
+(§6, the owner, 2026-11-14, #519, comment 6880404917, Q18, "All five leans (Recommended)").
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
 Case: [actors/send-own-method.kz](../corpus/actors/send-own-method.kz)
+
+Case: [actors/this-reference.kz](../corpus/actors/this-reference.kz)

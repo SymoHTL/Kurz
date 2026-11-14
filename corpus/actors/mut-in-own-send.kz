@@ -1,0 +1,14 @@
+// expect: error mut-in-message at 7
+// rules: U11
+
+actor Worker {
+    pub void Go() {
+        mut x = 1
+        send Bump(mut x)
+        print(x)
+    }
+
+    void Bump(mut int n) {
+        n = n + 1
+    }
+}

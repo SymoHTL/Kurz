@@ -2224,7 +2224,8 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `match-not-exhaustive`, `unreachable-arm`, `reversed-range`, `break-outside-loop`, `nullable-unchecked`,
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
-`equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, and
+`equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
+`mut-in-message`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -2356,23 +2357,18 @@ rule gives a meaning (below); a conversion to `string`, `bool` or `char`, none o
 type or a time type (T10, T29);
 a modifier of a method on a top-level function, which leaves the function and every call of its
 name unread (K7, M6); of an actor, a clause after its name (U1), a modifier but `pub`, type parameters, a base or
-an interface (U1), `equal by`, whose `==` stands open (U2), a constructor in its body (U2), a `static` member (U1),
-a property and a `pub` field, which stand open (U8), and a modifier of a method but `pub` (U9), each of which leaves the
+an interface (U1), `equal by`, while its `==` compares the actor itself (U2), a constructor in its body (U2), a `static`
+member (U1), and a modifier of a method but `pub` (U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, and an actor named after
 `:` (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
 or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
 method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
-an actor's constructor, that takes or gives what crosses no actor, a class instance, every one, since
-whether an immutable class is one with no `mut` field of its own or one through which nothing reachable has
-one stands open on issue 519 (comment 6866132292, Q14), an interface's value or a function value among them
-(U12); a `mut` parameter of a method called through a reference (U9) or
-sent to by the actor itself (U11); an
-actor's reference inside a list, a map, a union, a `?`, a function type or a type argument, written or
-inferred, and as a field of a class or a data type (U12); `this` as a value inside an actor (U10); the
-text of an actor's reference, in `print` and an interpolation, and `==` and `!=` of one (U2); and a log call
-inside an actor (P8). Those that stand open stand so on issue 519, comment 6866132292 (Q4, Q6, Q7 and
-Q10), and the refusal of a mutable class instance, a function value, the clauses and `on crash` is the lean of its Q1, and that of an
-immutable one follows from its Q14, open; and a field or a constructor among statements, which the parser reads in a
+an actor's constructor, that takes or gives what crosses no actor in this build, a class instance, an immutable one
+too, whose class the checker does not read through every class it reaches (U12), an interface's value or a function
+value among them (U12); an actor's reference inside a list, a map, a union, a `?`, a function type or a type argument,
+written or inferred, and as a field of a class or a data type (U12); and a log call inside an actor (P8). The refusal of
+a mutable class instance, a function value, the clauses and `on crash` is Q1 of issue 519 (comment 6866132292, answered
+on 2026-11-14, comment 6880404917); and a field or a constructor among statements, which the parser reads in a
 type body only (K7, K14), so that only a tree built another way holds one. The corpus theory
 lists the rule ids whose cases the checker may say `not supported` to, and the cases by name that
 cite only rules it reads and still use such a construct, each with the construct; a case the

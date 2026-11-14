@@ -7084,7 +7084,7 @@ public sealed class CheckerTests
     [Fact]
     public void A_spawn_of_what_is_no_actor_is_type_mismatch_and_a_send_of_what_is_no_message_is_syntax()
     {
-        // U14 (proposed: issue 519, comment 6866132292, Q3): `spawn` of a class, a data type or a function; a name nothing declares is
+        // U14 (issue 519, comment 6866132292, Q3): `spawn` of a class, a data type or a function; a name nothing declares is
         // `unknown-name` (V10); `send` before a call of a function or of a class's method
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("class Box(int Size)\n\nb = spawn Box(1)\nprint(b.Size)\n"));
         Assert.Equal([(ErrorIds.TypeMismatch, 3)], Errors("data Box(int Size)\n\nb = spawn Box(1)\nprint(b.Size)\n"));
@@ -7092,6 +7092,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.UnknownName, 1)], Errors("b = spawn Box(1)\nprint(b)\n"));
         Assert.Equal([(ErrorIds.Syntax, 5)], Errors("void Show(int n) {\n    print(n)\n}\n\nsend Show(1)\n"));
         Assert.Equal([(ErrorIds.Syntax, 7)], Errors("class Box {\n    pub void Show() {\n        print(1)\n    }\n}\n\nsend Box().Show()\n"));
+
+        // U14: `spawn` on its own, its reference dropped, is a value on its own (F5, Q21 of issue 519, comment 6868154068); with a name it
+        // is a declaration
+        Assert.Equal([(ErrorIds.Syntax, 13)], Errors(ActorCounter + "spawn Counter()\n"));
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter()\nprint(c.Get())\n"));
     }
 
     [Theory]
@@ -7104,16 +7109,14 @@ public sealed class CheckerTests
     [InlineData(2, "U2", "actor A {\n    pub A() {\n    }\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
     [InlineData(2, "U1", "actor A {\n    pub static int Get() => 1\n}\n")]
-    [InlineData(2, "U8", "actor A {\n    pub int X => 1\n}\n")]
-    [InlineData(2, "U8", "actor A {\n    pub int x = 1\n}\n")]
     [InlineData(2, "U9", "actor A {\n    prot void Go() {\n    }\n}\n")]
     [InlineData(4, "U1", "actor A {\n}\n\nclass B : A\n")]
     [InlineData(1, "U1", "static actor A {\n}\n")]
     public void What_an_actor_declares_beyond_its_rules_is_not_supported(int line, string rule, string program)
     {
         // U1: the clauses after the name (section 6, Q1 of issue 519, comment 6866132292), type parameters, bases and interfaces, `static`
-        // members, and an actor as a class's base; U2: `equal by`, whose `==` is open (Q10), and a constructor in the body; U8: a property and
-        // a `pub` field, open (Q4); U9: a modifier of a method but `pub`
+        // members, and an actor as a class's base; U2: `equal by`, while its `==` compares the actor itself (Q10), and a constructor in the
+        // body; U9: a modifier of a method but `pub`
         NotSupportedAt(line, rule, program);
     }
 
@@ -7141,15 +7144,36 @@ public sealed class CheckerTests
     [InlineData(8, "U12", "actor A {\n    pub void Run((int) => int f) {\n        print(f(1))\n    }\n}\n\na = spawn A()\nsend a.Run(n => n)\n")]
     [InlineData(12, "U12", "class Box(int N)\n\ndata Pair(Box B)\n\nactor A {\n    pub void Take(Pair p) {\n        print(p.B.N)\n    }\n}\n\na = spawn A()\nsend a.Take(Pair(Box(1)))\n")]
     [InlineData(3, "U12", "class Box(int N)\n\nactor A(Box B) {\n}\n")]
-    [InlineData(9, "U9", "actor A {\n    pub void Bump(mut int n) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\na.Bump(mut x)\nprint(x)\n")]
     [InlineData(5, "U12", "class Box(int N)\n\nactor A {\n    pub void Go() {\n        send Take(Box(1))\n    }\n\n    void Take(Box b) {\n        print(b.N)\n    }\n}\n")]
-    [InlineData(4, "U11", "actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    void Bump(mut int n) {\n        n = n + 1\n    }\n}\n")]
     public void What_crosses_no_actor_in_a_message_is_not_supported(int line, string rule, string program)
     {
         // U12: a class instance, a function value and a data value that holds an instance, as an argument, a result or a constructor's
         // argument (Q1 of issue 519, comment 6866132292), in a message through a reference and in a `send` of the actor's own method
-        // (U11); U9, U11: a `mut` parameter of a method called through a reference or sent to by the actor itself, open (Q6)
+        // (U11)
         NotSupportedAt(line, rule, program);
+    }
+
+    [Fact]
+    public void A_mut_parameter_of_a_message_is_mut_in_message()
+    {
+        // U9: a method called through a reference, waiting or sent; U11: a `send` of the actor's own method (Q6 of issue 519, comment
+        // 6866132292); a direct call of its own method takes the place, as a class's does (U10)
+        const string Bump = "actor A {\n    pub void Bump(mut int n) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\n";
+        Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors(Bump + "a.Bump(mut x)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 9)], Errors(Bump + "send a.Bump(mut x)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 4)], Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        send Bump(mut x)\n        print(x)\n    }\n\n    void Bump(mut int n) {\n        n = n + 1\n    }\n}\n"));
+        Assert.Empty(Errors("actor A {\n    pub void Go() {\n        mut x = 1\n        Bump(mut x)\n        print(x)\n    }\n\n    void Bump(mut int n) {\n        n = n + 1\n    }\n}\n"));
+    }
+
+    [Fact]
+    public void A_pub_field_or_a_pub_property_of_an_actor_is_actor_field_public()
+    {
+        // U8: nothing outside an actor reaches its state (Q4 of issue 519, comment 6866132292); a field and a property without `pub` are the
+        // actor's own, as a method without `pub` is (U9)
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub int x = 1\n}\n"));
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub int X => 1\n}\n"));
+        Assert.Equal([(ErrorIds.ActorFieldPublic, 3)], Errors("actor A {\n    mut int count = 0\n    pub mut int total = 0\n\n    pub int Get() => count + total\n}\n\na = spawn A()\nprint(a.Get())\n"));
+        Assert.Empty(Errors("actor A {\n    int x = 1\n\n    int Twice => x * 2\n\n    pub int Get() => Twice\n}\n\na = spawn A()\nprint(a.Get())\n"));
     }
 
     [Theory]
@@ -7161,23 +7185,38 @@ public sealed class CheckerTests
     [InlineData(16, "U12", "T Same<T>(T x) => x\n\nc = spawn Counter()\nprint(Same(c).Get())\n")]
     [InlineData(13, "U12", "data Holder(Counter C)\n")]
     [InlineData(13, "U12", "class Holder(Counter C)\n")]
-    [InlineData(14, "U2", "c = spawn Counter()\nprint(c)\n")]
-    [InlineData(14, "U2", "c = spawn Counter()\nprint(\"{c}\")\n")]
-    [InlineData(14, "U2", "c = spawn Counter()\nprint(c == c)\n")]
-    [InlineData(14, "U2", "c = spawn Counter()\nprint(c != c)\n")]
-    public void An_actors_reference_inside_another_type_or_as_text_or_compared_is_not_supported(int line, string rule, string program)
+    public void An_actors_reference_inside_another_type_is_not_supported(int line, string rule, string program)
     {
         // U12: a reference alone is a variable's, a parameter's or a result's type, and inside a list, a `?`, a function type, a type argument
-        // or a field of a class or a data type is what the build does not make; U2: its text and `==` are open (Q10)
+        // or a field of a class or a data type is what the build does not make
         NotSupportedAt(line, rule, ActorCounter + program);
     }
 
-    [Theory]
-    [InlineData(4, "U10", "actor A {\n    int n = 1\n\n    pub int Me() => Same(this)\n}\n\nint Same(A a) => 1\n")]
-    [InlineData(3, "P8, U1", "actor A {\n    pub void Go() {\n        Log.Information(\"go\")\n    }\n}\n")]
-    public void This_as_a_value_and_a_log_call_inside_an_actor_are_not_supported(int line, string rule, string program)
+    [Fact]
+    public void An_actors_reference_has_a_text_and_compares_by_the_actor()
     {
-        // U10: `this` as a value inside an actor is open (Q7); P8: what a line written inside an actor holds is open
+        // U2: `print`, an interpolation, `==` and `!=` of two references to actors of one type (Q10 of issue 519, comment 6866132292); two
+        // actors' types are type-mismatch, as two classes that no base joins are (T18)
+        Assert.Empty(Errors(ActorCounter + "c = spawn Counter()\nd = spawn Counter()\nprint(c)\nprint(\"{c} and {d}\")\nprint(c == c)\nprint(c != d)\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 18)], Errors(ActorCounter + "actor Other {\n}\n\nc = spawn Counter()\no = spawn Other()\nprint(c == o)\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 14)], Errors(ActorCounter + "c = spawn Counter()\nprint(c == 1)\n"));
+    }
+
+    [Theory]
+    [InlineData(3, "P8, U1", "actor A {\n    pub void Go() {\n        Log.Information(\"go\")\n    }\n}\n")]
+    public void A_log_call_inside_an_actor_is_not_supported(int line, string rule, string program)
+    {
+        // P8: what a line written inside an actor holds is open
         NotSupportedAt(line, rule, program);
+    }
+
+    [Fact]
+    public void This_as_a_value_inside_an_actor_is_its_own_reference()
+    {
+        // U10: `this` as a value inside an actor is its reference, of the actor's type (Q7 of issue 519, comment 6866132292), which a message
+        // takes as any reference (U12); before a member it reads the actor's own state
+        Assert.Empty(Errors("actor A {\n    int n = 1\n\n    pub int Me() => Same(this) + this.n\n}\n\nint Same(A a) => 1\n"));
+        Assert.Empty(Errors("actor B {\n    pub void Hello(A from) {\n        send from.Back()\n    }\n}\n\nactor A(B Peer) {\n    pub void Start() {\n        send Peer.Hello(this)\n    }\n\n    pub void Back() {\n        print(this == this)\n    }\n}\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 6)], Errors("class Box(int N)\n\nactor A {\n    int n = 1\n\n    pub Box Me() => this\n}\n"));
     }
 }

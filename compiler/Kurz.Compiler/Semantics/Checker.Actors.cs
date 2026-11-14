@@ -39,6 +39,19 @@ public sealed partial class Checker
         }
 
         DeclareClass(d);
+        foreach (var member in d.Members ?? [])
+        {
+            switch (member)
+            {
+                case FunctionDeclaration { Property: true } p when (p.Modifiers & Modifiers.Pub) != 0:
+                    Report(ErrorIds.ActorFieldPublic, p.Line, $"`{p.Name}` is a `pub` property of the actor `{d.Name}`, whose state nothing outside it reaches: a `pub` method gives it (U8)");
+                    break;
+                case FieldDeclaration f when (f.Modifiers & Modifiers.Pub) != 0:
+                    Report(ErrorIds.ActorFieldPublic, f.Line, $"`{f.Name}` is a `pub` field of the actor `{d.Name}`, whose state nothing outside it reaches: a `pub` method gives it (U8)");
+                    break;
+            }
+        }
+
         foreach (var f in (d.Members ?? []).OfType<FunctionDeclaration>())
         {
             SyntaxCopy.Walk(f, e =>
@@ -76,7 +89,7 @@ public sealed partial class Checker
 
         if (d.EqualBy.Count > 0)
         {
-            return (d.Line, "`equal by` on an actor, whose `==` issue 519 holds open, comment 6866132292, Q10 (U2)");
+            return (d.Line, "`equal by` on an actor, whose `==` compares the actor itself (U2)");
         }
 
         foreach (var member in d.Members ?? [])
@@ -89,10 +102,6 @@ public sealed partial class Checker
                     return (f.Line, "a `static` field of an actor (U1)");
                 case FunctionDeclaration f when (f.Modifiers & Modifiers.Static) != 0:
                     return (f.Line, "a `static` method of an actor (U1)");
-                case FunctionDeclaration { Property: true } f:
-                    return (f.Line, "a property of an actor, which issue 519 holds open, comment 6866132292, Q4 (U8)");
-                case FieldDeclaration f when (f.Modifiers & Modifiers.Pub) != 0:
-                    return (f.Line, "a `pub` field of an actor, which issue 519 holds open, comment 6866132292, Q4 (U8)");
                 case FunctionDeclaration f when (f.Modifiers & ~Modifiers.Pub) != 0:
                     return (f.Line, $"the modifier `{(f.Modifiers & ~Modifiers.Pub).ToString().ToLowerInvariant()}` of an actor's method (U9)");
                 default:
@@ -279,7 +288,7 @@ public sealed partial class Checker
         {
             if (call.Function.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
             {
-                NotSupported(s.Line, $"the `mut` parameter `{mut.Name}` of `{own.Name}.{call.Function.Name}` in a `send` of the actor's own method, which issue 519 holds open, comment 6866132292, Q6 (U11)");
+                Report(ErrorIds.MutInMessage, s.Line, $"`{mut.Name}` of `{own.Name}.{call.Function.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)");
                 return;
             }
 
@@ -362,7 +371,7 @@ public sealed partial class Checker
 
         if (picked.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
         {
-            NotSupported(m.Line, $"the `mut` parameter `{mut.Name}` of `{symbol.Name}.{picked.Name}` called through a reference, which issue 519 holds open, comment 6866132292, Q6 (U9)");
+            Report(ErrorIds.MutInMessage, m.Line, $"`{mut.Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)");
             return Typed.Error;
         }
 
@@ -409,18 +418,6 @@ public sealed partial class Checker
         return true;
     }
 
-    /// <summary>U10: <c>this</c> inside an actor reads its members alone; as a value it is open (Q7 of comment 6866132292).</summary>
-    private bool ActorThisAsValue(ThisExpression t)
-    {
-        if (CurrentClass() is not { IsActor: true } || actorMemberThis.Contains(t))
-        {
-            return false;
-        }
-
-        NotSupported(t.Line, "`this` as a value inside an actor, which issue 519 holds open, comment 6866132292, Q7 (U10)");
-        return true;
-    }
-
-    /// <summary>U2: the text of an actor's reference, for <c>print</c> and an interpolation, is open (Q10 of comment 6866132292).</summary>
-    private const string ActorText = "the text of an actor's reference, which issue 519 holds open, comment 6866132292, Q10 (U2)";
+    /// <summary>U10: <c>this</c> as a value inside an actor, not before a member, is the actor's own reference (Q7 of comment 6866132292).</summary>
+    private bool ActorThisAsValue(ThisExpression t) => CurrentClass() is { IsActor: true } && !actorMemberThis.Contains(t);
 }

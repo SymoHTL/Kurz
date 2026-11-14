@@ -175,8 +175,8 @@ public sealed class RunTests(Toolchain toolchain) : IClassFixture<Toolchain>
     /// <summary>The cases of actors that expect a run, which the checker reads and the emitter does not emit, on every system (U1).</summary>
     private static readonly string[] ActorCases =
     [
-        "actors/constructor-arguments.kz", "actors/counter.kz", "actors/own-method-direct.kz", "actors/relay.kz", "actors/send-order.kz",
-        "actors/send-own-method.kz", "actors/two-instances.kz", "actors/union-result.kz",
+        "actors/constructor-arguments.kz", "actors/counter.kz", "actors/identity.kz", "actors/own-method-direct.kz", "actors/relay.kz",
+        "actors/send-order.kz", "actors/send-own-method.kz", "actors/this-reference.kz", "actors/two-instances.kz", "actors/union-result.kz",
     ];
 
     /// <summary>Cases the checker reads in full and the emitter does not lay out, each with what the emitter says.</summary>

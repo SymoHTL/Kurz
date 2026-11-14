@@ -1,0 +1,13 @@
+// expect: error mut-in-message at 12
+// rules: U9
+
+actor Counter {
+    pub void Bump(mut int n) {
+        n = n + 1
+    }
+}
+
+c = spawn Counter()
+mut x = 1
+c.Bump(mut x)
+print(x)
