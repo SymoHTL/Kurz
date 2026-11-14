@@ -319,6 +319,14 @@ public sealed partial class Checker
         !Holds(type, t => t is not (PrimitiveType or EnumType or FlagsType or NullType or VoidType or ErrorType or ListType or MapType or UnionType or DataType or ActorType), []);
 
     /// <summary>
+    /// U12, U16: whether the language may say <c>send-needs-word</c> of a message's argument of the type written with no word, so that
+    /// the build's <c>not supported</c> stands first in the stage of the arguments, before <c>mut-in-message</c>: a type that reaches a
+    /// mutable class instance (<see cref="ReachesMutableClass"/>), or one that holds a function value, whose captures decide it (U12)
+    /// and which the build does not read.
+    /// </summary>
+    private bool MayNeedWord(KurzType type) => ReachesMutableClass(type) || Holds(type, t => t is FunctionType, []);
+
+    /// <summary>
     /// U12: whether a value of the type reaches a mutable class instance, which a message's argument with no word makes
     /// <c>send-needs-word</c>: an instance of a class through which something reachable has a <c>mut</c> field, each class read through
     /// the classes a value of its fields' types holds (<see cref="ClassesHeld"/>).
@@ -448,7 +456,7 @@ public sealed partial class Checker
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
             var mut = call.Function.Parameters.FirstOrDefault(p => p.Mut);
-            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || ReachesMutableClass(t))) is { } stays)
+            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
             {
                 NotSupported(s.Line, $"{Types.A(stays)} in the message `{own.Name}.{call.Function.Name}`, which is no value or actor's reference (U12)");
                 return;
@@ -538,7 +546,7 @@ public sealed partial class Checker
         }
 
         var mut = picked.Parameters.FirstOrDefault(p => p.Mut);
-        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || ReachesMutableClass(t))) is { } stays)
+        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
         {
             NotSupported(m.Line, $"{Types.A(stays)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
             return Typed.Error;
