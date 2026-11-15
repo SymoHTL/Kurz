@@ -14,7 +14,7 @@
 // gives no call, which on a side that called the switch is where that call returns, and on a stack's
 // first frame its entry with x30 0 (`Enter`). The floating-point control register, which the standard
 // keeps too, is not saved, as nothing in Kurz changes it; nor does the switch carry unwind directives,
-// since no walk of a stack crosses it (design record, section 2, both assumed there).
+// since the runtime's walk of a crash never crosses it (design record, section 2, both assumed there).
 pub naked void Switch(byte* from, byte* to) {
     asm(
         "mov x16, sp",
