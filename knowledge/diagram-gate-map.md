@@ -189,7 +189,7 @@ flowchart TD
         fetched file is kept under its hash in the system's temporary directory and read again while the hash holds,
         and fetched again where it cannot be read. Not seen: a move of Rust's pin away from the tool's version
         (HAZARD issue 143)"]
-        G4["ci-config: a pinned fact of a workflow changed. All four workflows: an action not pinned by commit SHA (flow-style
+        G4["ci-config: a pinned fact of a workflow changed. All five workflows: an action not pinned by commit SHA (flow-style
         steps included), another runner label, any spelling of pip or pipx without hashes, no timeout,
         continue-on-error, a step with an if, an expression inside a run line, a secret read anywhere but the
         env of the job's last step (in any case, behind any literal), a workflow- or job-level env, a job-level
@@ -248,10 +248,23 @@ flowchart TD
         (self-tests).
         The gates job reads that list with issues: read, the one grant of its token beyond the tree and the
         pull request (ci-config pins the grant); a refused read fails the gate closed.
+        compiler-arm.yml: another label than the versioned Arm one, a push trigger for any branch but main,
+        a pull_request without its pinned types, an if, a token wider than contents read, a second job,
+        a checkout that keeps the credential, no SDK step or one with a version typed in the workflow, an LLVM
+        install that is not the pinned script for Linux on Arm
+        (the archive checked by its SHA-256 before it is unpacked into /usr/local), an LLVM_VERSION of another
+        major than Clang.PinnedMajor, an LLVM_SHA256 that is no SHA-256, no cache of the archive before the
+        install or one keyed by another release, and a deciding step that is not the compiler gate's Arm call.
         The gate's verdict is the one of the moment the job ran: resolving a thread starts no run"]
     end
     subgraph C["CI: workflow compiler-windows, on the same events as the job gates"]
         C1["job compiler-windows: the gate compiler-tests (G10) on the versioned Windows runner label.
+        Not a required check of the ruleset: a red run holds no merge. HAZARD issue 30"]
+    end
+    subgraph A["CI: workflow compiler-arm, on pull requests and pushes to main"]
+        A1["job compiler-arm: the compiler gate's Arm call on the versioned Arm runner label: the tests of the
+        actors' stacks, the runtime's check for every target and architecture, the naked function and the switch
+        of every pair, and the actors' corpus cases, held to their own floor; a skipped test is red as in G10.
         Not a required check of the ruleset: a red run holds no merge. HAZARD issue 30"]
     end
     subgraph R["CI: workflow review, pull_request_target and dispatch"]
@@ -367,6 +380,7 @@ flowchart TD
     W --> P --> G --> M
     P --> R --> M
     P --> C
+    P --> A
     L -.-> P
 ```
 
@@ -383,13 +397,15 @@ flowchart TD
   whose replay runs every suite in it; `kit.message_text` changes: P1 and G6, which read commit and tag messages
   through it.
 - `tools/lint_knowledge.py` changes a check: G3. `tools/lint_ci.py` changes a fact: G4 and R6.
-- `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check): G10 and C1.
+- `tools/compiler_gate.py` changes (the command, the floor, a verdict, the config check): G10 and C1; its Arm
+  call, filter or floor: A1.
   `compiler/global.json` changes the SDK: G10, whose command reads it from inside `compiler/`, and C1, whose SDK
   step installs it. A lock file, `compiler/Directory.Packages.props`, `compiler/Directory.Build.props` or
   `compiler/NuGet.config` changes what the gate restores or builds: G10 and C1.
 - `tools/unicode_tables.py` changes (the version, a hash, the form of the tables, a floor), or
   `compiler/Kurz.Compiler/Emit/CaseTables.cs` does, or how `tools/gates.py` runs the tool: G11.
 - `.github/workflows/compiler-windows.yml` (its events, runner or steps) changes: the subgraph C and G4.
+  `.github/workflows/compiler-arm.yml` changes: the subgraph A and G4.
 - `tools/lint_reference.py` changes a check: G9 and X2. The emitter emits more of the corpus, or the runner's
   lists change, `CorpusTests.BuildIds` among them: G10 and X2.
 - `tools/pr_gates.py` changes a pull-request gate: G6, G7, G8; its `resolve` command plans, and with `--go` resolves, the reviewer's threads that G8 reads as answered by an edit.

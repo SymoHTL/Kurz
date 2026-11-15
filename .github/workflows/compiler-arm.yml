@@ -1,0 +1,53 @@
+name: compiler-arm
+
+# The tests of the actors' stacks and of `naked` functions on 64-bit Arm, run natively on the
+# forge's hosted Arm runner (design record, section 2), where the switch of a thread to an actor's
+# stack runs on the machine it is written for; the gates job runs every test on x86-64. Facts of
+# this file are pinned by tools/lint_ci.py. The job is not a required check of the ruleset: a red
+# run here holds no merge (HAZARD #30, as for compiler-windows). No image serves this job, so it
+# installs the LLVM release the compiler pins on every run, from a cache of LLVM's archive for Linux
+# on Arm, into /usr/local, whose bin is on the runner's path, where the command finds clang (design
+# record, section 2); zstd unpacks the archive with --long=31 first, as the Windows job's.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # One job, no `if`: a skipped job reports success.
+  compiler-arm:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm-archive
+          key: llvm-23.1.4-aarch64-linux
+      - name: Install the pinned LLVM
+        env:
+          LLVM_VERSION: "23.1.4"
+          LLVM_SHA256: "0975f753e0f9b5f83146a7a2f4678bc143e713496b56520716a4de047a63f99f"
+        run: |
+          set -eu
+          name="LLVM-$LLVM_VERSION-Linux-ARM64.tar.zst"
+          archive="$RUNNER_TEMP/llvm-archive/$name"
+          if [ ! -f "$archive" ]; then
+            mkdir -p "$RUNNER_TEMP/llvm-archive"
+            curl -fsSL -o "$archive" "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$name"
+          fi
+          echo "$LLVM_SHA256  $archive" | sha256sum -c -
+          zstd -d -q -f --long=31 "$archive" -o "$RUNNER_TEMP/llvm.tar"
+          sudo tar -xf "$RUNNER_TEMP/llvm.tar" -C /usr/local --strip-components 1
+          /usr/local/bin/clang --version
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: compiler/global.json
+      - name: Build and test the actors and naked functions on Arm
+        run: python3 tools/compiler_gate.py --arm

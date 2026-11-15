@@ -11,6 +11,8 @@ the clang it found with that clang's release (design record, section 2, round 20
 one line of 2026-10-23).
 
   compiler_gate.py               build, test and ask the command; exit 0 when every check passed
+  compiler_gate.py --arm         the same for the tests ARM_FILTER names alone, held to ARM_FLOOR: the run of the
+                                 workflow compiler-arm on the forge's Arm runner
   compiler_gate.py --self-test
 
 Each call alone: any other, `--help` among them, is refused with the usage and exit 2 before
@@ -47,6 +49,14 @@ CONFIG = "compiler/NuGet.config"
 FLOOR = 1000  # below the tests the suites hold, above what is left without either corpus theory (over 300 cases each): a run that lost a project or a corpus theory cannot pass
 TIMEOUT = 900  # seconds for restore, build and tests together
 COMMAND = ["dotnet", "test", SOLUTION, "--nologo", "-c", "Release", "-p:RestoreLockedMode=true", "--disable-build-servers"]
+# the tests of the actors' stacks and of `naked` on 64-bit Arm, which the workflow compiler-arm runs natively (design record,
+# section 2; the owner, 2026-11-15, #519, comment 6892835500, Q8, "GitHub Arm runner job"): the actors, the check of the runtime
+# for every target and architecture, the naked function and the switch of every pair, and the actors' corpus cases; the floor is
+# the count of those tests on x86-64 on 2026-11-15, which no test of them skips on Arm
+ARM_FILTER = ("FullyQualifiedName~ActorTests|FullyQualifiedName~RuntimeTests|FullyQualifiedName~EmitterTests.On_an_arm"
+              "|FullyQualifiedName~EmitterTests.The_switch|(FullyQualifiedName~RunTests&DisplayName~actors/)")
+ARM_FLOOR = 77  # 19 of ActorTests, 32 of RuntimeTests, 2 of EmitterTests and 24 actors' cases of RunTests
+ARM_COMMAND = COMMAND + ["--filter", ARM_FILTER]
 # the command the test run built, run without a build of its own; the dotnet host reads global.json from CWD as for the tests
 VERSION_COMMAND = ["dotnet", "run", "--project", "Kurz", "-c", "Release", "--no-build", "--", "--version"]
 VERSION_TIMEOUT = 120  # seconds: the command starts and asks one clang for its version
@@ -80,12 +90,12 @@ def config_errors(root):
     return errors
 
 
-def run_tests(cwd=None, timeout=TIMEOUT, run=subprocess.run):
+def run_tests(cwd=None, timeout=TIMEOUT, run=subprocess.run, command=COMMAND):
     """(exit code, combined output) of the test command, run inside compiler/ unless cwd says
     otherwise. A command that cannot start or ran out of time is a refusal (kit.Unanswered is a
     kit.Refused): nothing was proven."""
     try:
-        p = run(COMMAND, cwd=cwd or os.path.join(kit.ROOT, CWD), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        p = run(command, cwd=cwd or os.path.join(kit.ROOT, CWD), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         raise kit.Unanswered(f"dotnet test: no answer within {timeout} s") from None
     except OSError as e:
@@ -147,7 +157,7 @@ def readable_log():
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
-def main(root=kit.ROOT, run=subprocess.run):
+def main(root=kit.ROOT, run=subprocess.run, arm=False):
     readable_log()
     errors = config_errors(root)
     if errors:
@@ -156,12 +166,12 @@ def main(root=kit.ROOT, run=subprocess.run):
         print(f"compiler tests: 0 passed, {len(errors)} errors")
         return 1
     try:
-        code, output = run_tests(run=run)
+        code, output = run_tests(run=run, command=ARM_COMMAND if arm else COMMAND)
     except kit.Refused as e:  # a run out of time (kit.Unanswered) as much as a command that cannot start
         print(f"ERROR: {e}")
         print("compiler tests: 0 passed, 1 errors")
         return 1
-    errors, (failed, passed, skipped, total) = judge(code, output)
+    errors, (failed, passed, skipped, total) = judge(code, output, ARM_FLOOR if arm else FLOOR)
     if errors:
         print(output[-6000:])
     try:
@@ -303,17 +313,43 @@ def self_test():
         cases.append(("the gate's own run prints a red run's output into a cp1252 log, and names its failing tests after it",
                       code == 1 and "↓ (pos 0)" in said and "ERROR: 5 tests failed" in said
                       and said.index("↓ (pos 0)") < said.index("ERROR: 5 tests failed"), said[-300:]))
-    good = [[], ["--self-test"]]
-    odd = [["--help"], ["-h"], ["--slef-test"], ["compiler"], ["--self-test", "--self-test"], ["--self-test", "-v"]]
-    cases.append(("call: no argument and --self-test are its calls, each alone; --help, -h, a mistyped option, a positional "
+    good = [[], ["--arm"], ["--self-test"]]
+    odd = [["--help"], ["-h"], ["--slef-test"], ["compiler"], ["--self-test", "--self-test"], ["--self-test", "-v"], ["--arm", "--self-test"], ["--Arm"]]
+    cases.append(("call: no argument, --arm and --self-test are its calls, each alone; --help, -h, a mistyped option, a positional "
                   "argument and a second argument are not, so none of them builds the compiler",
                   [calls.understood(a, CALLS) for a in good] == list(CALLS) and not any(calls.understood(a, CALLS) for a in odd),
                   ([calls.understood(a, CALLS) for a in good], [a for a in odd if calls.understood(a, CALLS)])))
+    cases.append(("the Arm run is the gate's command with the actors' filter alone",
+                  ARM_COMMAND == COMMAND + ["--filter", ARM_FILTER] and "ActorTests" in ARM_FILTER and "RunTests&DisplayName~actors/" in ARM_FILTER,
+                  ARM_COMMAND))
+    cases.append(("the Arm floor is at least 77 tests", ARM_FLOOR >= 77, ARM_FLOOR))
+    with kit.scratch("compiler-gate-arm-") as root:
+        os.makedirs(os.path.join(root, "compiler"))
+        with open(os.path.join(root, CONFIG), "w", encoding="utf-8") as f:
+            f.write(CONFIG_TEXT)
+        asked = []
+
+        def arm_run(command, **kwargs):
+            asked.append(command)
+            if command is ARM_COMMAND:
+                below = f"{ARM_FLOOR - 1:5d}"
+                return subprocess.CompletedProcess(command, 0, GREEN.replace(" 1263", below), "")
+            return subprocess.CompletedProcess(command, 0, VERSION_OUTPUT, "")
+
+        saved = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            code = main(root=root, run=arm_run, arm=True)
+            said = sys.stdout.getvalue()
+        finally:
+            sys.stdout = saved
+        cases.append(("the Arm run asks the Arm command and holds it to the Arm floor, not the gate's",
+                      code == 1 and asked[:1] == [ARM_COMMAND] and f"floor is {ARM_FLOOR}" in said, (code, said[-300:])))
     return kit.report(cases)
 
 
 # the calls this tool takes, each alone; any other is refused before anything runs (tools/calls.py)
-CALLS = {"the gate": (), "self-test": ("--self-test",)}
+CALLS = {"the gate": (), "the stacks on Arm": ("--arm",), "self-test": ("--self-test",)}
 
 
 if __name__ == "__main__":
@@ -321,4 +357,4 @@ if __name__ == "__main__":
         sys.exit(calls.REFUSED)
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    sys.exit(main())
+    sys.exit(main(arm="--arm" in sys.argv))
