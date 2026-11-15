@@ -1004,6 +1004,23 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
   holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
   `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
+  A `move` before an argument copies nothing and changes no count (U12): a variable's value leaves its
+  place, which is stored null, or a string of no block, the count it held going to the message or to
+  the parameter written `move` the argument fills, which its function owns and lets go of where it
+  leaves; the item of a loop that takes its list leaves its place in the list the same way, and the
+  release of a list of an item type such a loop takes, read from every unit's model before the first
+  helper is built, tests each item for null, so that the list lets go of every item it still holds
+  and of no moved one; a value of another type, inline or a function value, is counted once more. A
+  place a `move` names is let go of through a test for null, at its scope's end and where an
+  assignment replaces it, as rustc keeps a drop flag, and a message's function lets go of no
+  argument of a parameter written `move`, which the method owns. A function value whose parameter is
+  not written `move` where its type writes it, and a loop that takes a list of `weak` references,
+  are the emitter's `not supported`. `ActorTests` pins a moved instance that the receiver changes and
+  keeps, a `move` that allocates nothing where `copy` allocates its copy, and the allocations equal
+  to the frees on a branch, in a loop that takes its list, after a reassignment and through a
+  parameter written `move`; the line `actor-move-fenced` of `ListTests` a branch, a loop that takes
+  its list, a variable moved and assigned again in a loop, and a parameter written `move` left by a
+  `return` or moved on.
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, and its file and line, and the runtime's `Wait` sets the activation
   that waits on it: in the top-level code it runs the first actor of the run queue ("The runtime"),
@@ -2182,6 +2199,14 @@ ask about it.
   keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
   `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
   and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
+- U12 with section 6: on one thread a `move` copies nothing and changes no count, the moved place's
+  count becoming the message's or the parameter's, and a place a `move` names is let go of through a
+  test for null, as rustc keeps a drop flag *(assumed in section 6, "What a `move` ends, and where it
+  stands")*; a loop that takes its list empties the item's place in the list, one store per round, as
+  answer 1 of comment 6897778812 costs it. Pinned by `ActorTests`, the cases
+  `corpus/actors/move-mutable.kz`, `move-parameter.kz`, `move-in-loop-reassigned.kz`,
+  `move-on-one-branch.kz`, `move-loop-takes-list.kz` and `move-crossing-value.kz`, and the line
+  `actor-move-fenced` of `ListTests`.
 
 ## What the compiler says about a program
 
@@ -2408,7 +2433,23 @@ through it recorded as messages that wait or not, `CallKind.ActorCall` and `Call
 a `send` of its own method inside it recorded as `CallKind.ActorSend`, and of U12 what crosses, by
 the type of the parameter, with `send-needs-word` at an argument and at a waiting call's result, a
 function value by the lambda its function shows, and `copy` at any call recorded for the emitter,
-`SemanticModel.IsCopied`), and the rules of `print` and of a value's text that
+`SemanticModel.IsCopied`, and `move` before an argument, before a parameter's type and in a function
+type, a lambda's parameter whose type is not written taking it from the type the lambda is given for:
+`Checker.Moves.cs` keeps the regions of each function beside what `Frame.Known` keeps, as Swift's
+SE-0414 does, a tag for each place that makes a value, the tag 0 for the region outside the function,
+a parameter not written `move`, `this` with its fields, a captured variable and a static, and the
+links a call, an assignment to a field or an item, a `with`, a lambda's captures and a binding of
+`match` or `else` make between them, joined where `Known` is joined, after an `if`, a `match`, `&&`,
+`||` and a loop's rounds until both stand still; a value that crosses with no word joins none. A
+`move` ends the variable it names and every variable its region reaches, on the paths that reach a
+later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
+moves its variable takes its list; a `move` of what the region outside reaches is `move-reachable`,
+and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a variable
+declared in a block that an arm of `match` or `else` ends with, read in that block's last expression,
+is read there as the region outside the function, since the block's end dropped its region, so that
+a `move` of the arm's value is `move-reachable` where section 6 lets it stand. The model
+records each `move` argument, each variable a `move` names and each loop that takes its list for the
+emitter, `SemanticModel.IsMove`, `IsMoved` and `TakesItsList`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the
 one it declares itself. A program's
 grants, `raw`, `native` or both (R7, R16), are given to it: the corpus theory gives a case those
@@ -2447,7 +2488,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 `string-index`, `no-text`, `raw-not-allowed`, `raw-required`, `counted-pointee`, `asm-operand`, `named-asm-label`, `binary-asm-label`,
 `naked-not-allowed`, `naked-body`, `static-state`, `static-mismatch`, `static-cycle`, `field-unassigned`, `native-not-allowed`, `native-type`, `intrinsic-unguarded`, `lane-out-of-range`,
 `equal-by-unknown`, `equals-method`, `mutable-key`, `spawn-required`, `send-result`, `actor-field-public`,
-`mut-in-message`, `send-needs-word`, and
+`mut-in-message`, `send-needs-word`, `used-after-move`, `move-reachable`, `move-at-call`, and
 `syntax` for the shapes E4 leaves to it (the readings below).
 
 ### What the checker does not read
@@ -2586,8 +2627,10 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); an `on crash` after a `spawn` (U2); `move` before an argument, at a message or any
-other call, whose check of the paths it ends (section 6) the checker does not make (U12); an argument
+that base (U1); an `on crash` after a `spawn` (U2); `move` before a field of a primary
+constructor, a parameter of a constructor of K14, of a C function's declaration or of a `naked`
+function, a `move` of the variable of a loop over anything but a list, and a `move` of a value whose
+region the checker does not keep (U12); an argument
 or a result of a message or of an actor's constructor, and a value after `copy` at any call, that
 reaches a value of a type parameter, an instance of a class of `std/`, `HttpRequest` and
 `HttpHeaders` among them, a handle of section 12, a pointer or a map whose keys reach a class
