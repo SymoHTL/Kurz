@@ -586,7 +586,16 @@ written `move` or not)*. A value of an interface's type is read by its written t
 a mutable class instance whatever the program puts there, so that one among a message's arguments
 or a constructor's written with no word is `send-needs-word`, as K18 reads a `static` field's type
 and as rustc finds no auto trait on a trait object but in its bounds (§4, §6, the owner,
-2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust").
+2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust"). No word makes
+such a value cross: it is `send-needs-word` with `copy` or `move` too, as `Box<dyn Trait>` is not
+`Send` in Rust, moved or cloned, unless its type says `+ Send` (§6, the owner, 2026-11-15, issue
+519, comment 6892275110, item 2, option (a), "No, never crosses"), and so is a collection, a `data`
+value or a class instance that reaches one *(assumed: the answer read through what a value reaches,
+as a function value whose captures do not cross is read, as rustc reads `Send` through a struct's
+fields)*. A value of an interface's type given as a message's result is, by its written type, the
+compile error of a mutable class instance given as a call's result, whose id stands open (§6, §14,
+the owner, 2026-11-15, issue 519, comment 6892275110, item 3, option (a), "Same error, by written
+type").
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
 collection's items and a `data` value's fields among them, as Rust's `Send` is structural
@@ -651,9 +660,11 @@ no reference reaches (§6, the same comment, Q21, "All five leans (Recommended)"
 `spawn` that is no name, its type arguments written or not (U2), and its argument list,
 `spawn Box`, `spawn x.Make()` or `spawn 3`, is `syntax` (E4), as U2's form gives, `spawn Box` of
 a class among them, its form read before its name (U16). After an actor's name, its type arguments
-(U2): a count that does not match its type parameters is T19's count, `syntax` (T35), and type
-arguments neither written nor inferable are `cannot-infer` (T27), each of the stage of the name
-(U16).
+(U2): a count that does not match its type parameters is T19's count, `syntax` (T35), of the
+stage of the name (U16), and type arguments neither written nor inferable are `cannot-infer`
+(T27), said only where every argument reads clean, an argument's own error standing alone, as rustc
+reports no "type annotations needed" once the body has another error (§6, the owner, 2026-11-15,
+issue 519, comment 6892275110, item 1, option (a), "Argument's error only").
 
 Case: [actors/spawn-not-actor.kz](../corpus/actors/spawn-not-actor.kz)
 ```kurz
@@ -722,7 +733,10 @@ owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order")
 of an argument written with `move` (§6, U12) comes after `send-needs-word` too, and between it and
 `mut-in-message` the error of the argument written first comes first, as rustc's borrow check,
 whose errors both are, sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
-comment 6891937666, item 4, option (a), "Rust: by argument order"). A declaration
+comment 6891937666, item 4, option (a), "Rust: by argument order"). An argument's own error
+stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
+argument reads clean (§6, the owner, 2026-11-15, issue 519, comment 6892275110, item 1, option (a),
+"Argument's error only"). A declaration
 in an actor that breaks two rules, one of them this chapter's, is the error of the word read
 first, so that `pub static mut int n = 0` is `actor-field-public` (U8) and not `static-state`
 (U1), and `static mut Nope x = 0` and `static mut int n = "a"` are `static-state` and not the
