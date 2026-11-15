@@ -4326,6 +4326,17 @@ public sealed class CheckerTests
         Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
     }
 
+    /// <summary>
+    /// K18 (the owner, 2026-11-15, issue 519, comment 6891937666, "Written type, Rust"): a <c>static</c> field whose written type holds an
+    /// interface's type or a function type, through a list's items, a map's values or a data value's fields, is <c>static-state</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("interface I {\n}\n\nclass C {\n    pub static List<I>? Items = null\n}\n\nprint(1)", 5)] // a list's items
+    [InlineData("class C {\n    pub static Map<string, () => int>? Fs = null\n}\n\nprint(1)", 2)] // a map's values
+    [InlineData("interface I {\n}\n\ndata D(I X)\n\nclass C {\n    pub static D? Held = null\n}\n\nprint(1)", 7)] // a data value's fields
+    public void A_static_field_whose_written_type_holds_an_interface_or_a_function_type_is_static_state(string program, int line) =>
+        Assert.Equal([(ErrorIds.StaticState, line)], Errors(program));
+
     [Fact]
     public void The_initial_value_of_a_static_field_reads_any_static_field_and_a_cycle_among_them_is_static_cycle()
     {
