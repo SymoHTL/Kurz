@@ -556,7 +556,8 @@ public sealed partial class Emitter
             }
         }
 
-        EmitBody(d.ExpressionBody, d.BlockBody, d.Line);
+        // U12: a parameter written `move` is the function's, which lets go of it where it leaves (section 6)
+        OwningMoved(f.Parameters.Select((p, i) => (p, i)).Where(x => x.p.Move).Select(x => (Model.DeclarationOf(d.Parameters[x.i]), Sub(x.p.Type))), () => EmitBody(d.ExpressionBody, d.BlockBody, d.Line));
         End();
     }
 
@@ -1033,7 +1034,11 @@ public sealed partial class Emitter
     {
         var old = Counted(type) ? fn.Value($"load {Ir(type)}, ptr {place}") : null;
         fn.Emit($"store {Ir(type)} {value}, ptr {place}");
-        if (old is not null)
+        if (old is not null && MovedSlot(place))
+        {
+            ReleaseHeld(old, type); // U12: a `move` may have emptied the place, and the assignment makes the variable live again
+        }
+        else if (old is not null)
         {
             Release(old, type);
         }

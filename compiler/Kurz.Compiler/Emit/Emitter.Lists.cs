@@ -177,7 +177,15 @@ public sealed partial class Emitter
         for (var i = variables.Count - 1; i >= 0; i--)
         {
             var (slot, type) = variables[i];
-            Release(fn.Value($"load {Ir(type)}, ptr {slot}"), type);
+            var value = fn.Value($"load {Ir(type)}, ptr {slot}");
+            if (MovedSlot(slot))
+            {
+                ReleaseHeld(value, type); // U12: a `move` may have emptied the place
+            }
+            else
+            {
+                Release(value, type);
+            }
         }
     }
 
@@ -338,7 +346,18 @@ public sealed partial class Emitter
                 fn.Block(free);
                 if (Counted(list.Element))
                 {
-                    EachItem("%a0", list.Element, item => Release(item, list.Element));
+                    var taken = TakenItems(list.Element); // U12: a loop that takes such a list empties the place of each item it moved
+                    EachItem("%a0", list.Element, item =>
+                    {
+                        if (taken)
+                        {
+                            ReleaseHeld(item, list.Element);
+                        }
+                        else
+                        {
+                            Release(item, list.Element);
+                        }
+                    });
                 }
 
                 fn.Emit($"call void {StdFunction("ListFree")}(ptr %a0, i64 {ItemSize(list.Element)})");
@@ -3396,6 +3415,16 @@ public sealed partial class Emitter
         var wide = fn.Value($"sext i32 {i} to i64");
         var item = fn.Value($"load {Ir(type.Element)}, ptr {fn.Value($"getelementptr {Ir(type.Element)}, ptr {items}, i64 {wide}")}");
         loops.Push((exit, next, regions.Count, scopes.Count));
+        if (Model.TakesItsList(f))
+        {
+            if (type.Element is WeakRefType)
+            {
+                throw Unsupported(f.Line, "a loop over a list of `weak` references that takes its list (U12, R3)");
+            }
+
+            takenItems[variable] = (items, counter, type.Element); // U12: the loop takes its list (comment 6897778812, Q1 (b))
+        }
+
         if (type.Element is WeakRefType weak)
         {
             // R3: each round's variable is the item's read, a strong `T?` the round holds, let go of where the round ends or leaves

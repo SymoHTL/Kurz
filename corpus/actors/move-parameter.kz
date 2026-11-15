@@ -1,0 +1,17 @@
+// expect: output
+// | took 1
+// | took 2
+// | kept 2
+// rules: U12
+
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print("took {c.Items}")
+}
+
+cart = Cart(1)
+Take(move cart)
+other = Cart(2)
+Take(copy other)
+print("kept {other.Items}")

@@ -4768,6 +4768,72 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(actorCrossing, fenced, "actor-crossing-fenced"), 0, ["2 a x true 0", "kept label", "kept label", "true", "101 made"], "");
+        // U12 (the owner, 2026-11-15, #519, comment 6895076937): a variable moved on one branch only, whose place the scope's end lets go of
+        // through the test for the empty address, and on the other branch let go of as it is; a loop that takes its list, which lets go of
+        // the items it did not move and of no moved one, as the list's last holder lets go of it (comment 6897778812, Q1 (b)); a variable
+        // moved and assigned again in a loop, whose assignment lets go of no emptied place; and a parameter written `move`, which the
+        // function lets go of where it leaves, after a `return` too, unless it moved it on
+        const string actorMove = """
+            class Cart(mut int Items, List<int> Marks)
+
+            actor Shop {
+                mut int total = 0
+
+                pub void Add(Cart c) {
+                    total = total + c.Items + c.Marks.Count
+                }
+
+                pub int Total() => total
+            }
+
+            void Branch(Shop s, bool give) {
+                cart = Cart(1, [1])
+                if give {
+                    send s.Add(move cart)
+                }
+            }
+
+            void Loop(Shop s) {
+                carts = [Cart(10, [1]), Cart(20, [2, 2]), Cart(30, [3])]
+                for c in carts {
+                    if c.Items != 20 {
+                        send s.Add(move c)
+                    }
+                }
+            }
+
+            void Again(Shop s) {
+                mut cart = Cart(100, [0])
+                for i in 0..<2 {
+                    send s.Add(move cart)
+                    cart = Cart(200, [i])
+                }
+            }
+
+            int Keep(move Cart c, bool early) {
+                if early {
+                    return c.Items
+                }
+
+                return c.Marks.Count
+            }
+
+            void Pass(Shop s, move Cart c) {
+                send s.Add(move c)
+            }
+
+            shop = spawn Shop()
+            Branch(shop, true)
+            Branch(shop, false)
+            Loop(shop)
+            Again(shop)
+            print(Keep(move Cart(5, [1, 2]), true))
+            print(Keep(move Cart(5, [1, 2]), false))
+            Pass(shop, move Cart(1000, []))
+            print(shop.Total())
+
+            """;
+        Ran(BuildAndRun(actorMove, fenced, "actor-move-fenced"), 0, ["5", "2", "1346"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");

@@ -113,7 +113,7 @@ public sealed partial class Emitter
             result = crossed;
         }
 
-        foreach (var (type, value) in arguments.Where(a => Counted(a.Type)))
+        foreach (var (type, value) in arguments.Where((a, i) => Counted(a.Type) && !f.Parameters[i].Move)) // U12: the method owns a parameter written `move`
         {
             Release(value, type);
         }

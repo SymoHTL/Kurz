@@ -120,7 +120,8 @@ public sealed partial class Emitter
                 slots[info.Parameters[i]] = slot;
             }
 
-            EmitBody(l.ExpressionBody, l.BlockBody, l.Line);
+            // U12: a parameter its function type writes `move` is the lambda's (section 6, Q4 of comment 6657251688)
+            OwningMoved(info.Parameters.Select((p, i) => (p, i)).Where(x => type.MovesAt(x.i)).Select(x => (x.p, type.Parameters[x.i])), () => EmitBody(l.ExpressionBody, l.BlockBody, l.Line));
             End();
         }
         finally

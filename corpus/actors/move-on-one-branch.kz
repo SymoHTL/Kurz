@@ -1,0 +1,21 @@
+// expect: output
+// | took 1
+// | took 2
+// rules: U12
+
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print("took {c.Items}")
+}
+
+void Maybe(bool give, int n) {
+    c = Cart(n)
+    if give {
+        Take(move c)
+    }
+}
+
+Maybe(true, 1)
+Maybe(false, 9)
+Maybe(true, 2)

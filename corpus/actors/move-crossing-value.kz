@@ -1,0 +1,18 @@
+// expect: output
+// | in the shop: apples
+// | kept apples
+// rules: U12
+
+class Cart(mut int Items, string Name)
+
+actor Shop {
+    pub void Add(string name) {
+        print("in the shop: {name}")
+    }
+}
+
+cart = Cart(1, "apples")
+s = spawn Shop()
+label = cart.Name
+s.Add(move label)
+print("kept {cart.Name}")
