@@ -107,6 +107,9 @@ public sealed partial class Checker
     // each `used-after-move` with its variable and the moves it names, so that one is kept for each (E1)
     private readonly List<(Diagnostic Diagnostic, VariableSymbol Variable, string Moves)> movedUses = [];
 
+    // the tags each variable had where its block ended, which the last expression of a block that ends an arm gives to the arm's value
+    private readonly Dictionary<VariableSymbol, ImmutableHashSet<int>> endedTags = new(ReferenceEqualityComparer.Instance);
+
     private int RegionTag(object node)
     {
         if (!regionTags.TryGetValue(node, out var tag))
@@ -135,9 +138,12 @@ public sealed partial class Checker
         return joins;
     }
 
-    /// <summary>The tags of the variable's region here; a variable of the function with no entry was declared where no region is kept, and is read as outside.</summary>
+    /// <summary>
+    /// The tags of the variable's region here, or where its block ended, as rustc reads a block's tail after the block's own variables;
+    /// a variable with neither is outside the function.
+    /// </summary>
     private ImmutableHashSet<int> TagsOf(VariableSymbol variable) =>
-        !JoinsRegion(variable.Type) ? [] : frame.Moves.Tags.TryGetValue(variable, out var tags) ? tags : Outside;
+        !JoinsRegion(variable.Type) ? [] : frame.Moves.Tags.TryGetValue(variable, out var tags) ? tags : endedTags.TryGetValue(variable, out var ended) ? ended : Outside;
 
     /// <summary>Whether the variable belongs to the region outside the function: a parameter not written <c>move</c>, <c>this</c>, a captured variable, a static.</summary>
     private bool OutsideVariable(VariableSymbol variable) => !frame.Moves.Tags.ContainsKey(variable);
@@ -252,8 +258,19 @@ public sealed partial class Checker
     /// <summary>An assignment to a field or an item of <paramref name="target"/>: its region and the value's merge.</summary>
     private void MergeAssigned(Expression target, Expression value) => Merge([RegionOf(target), RegionOf(value)]);
 
-    /// <summary>A variable whose block ends: nothing holds it any more.</summary>
-    private void EndRegions(Scope scope) => frame.Moves = frame.Moves.Without(scope.Variables.Values);
+    /// <summary>A variable whose block ends: nothing holds it any more, but the block's last expression, which keeps its tags.</summary>
+    private void EndRegions(Scope scope)
+    {
+        foreach (var variable in scope.Variables.Values)
+        {
+            if (frame.Moves.Tags.TryGetValue(variable, out var tags))
+            {
+                endedTags[variable] = endedTags.TryGetValue(variable, out var before) ? before.Union(tags) : tags; // each round of a loop
+            }
+        }
+
+        frame.Moves = frame.Moves.Without(scope.Variables.Values);
+    }
 
     /// <summary>
     /// Q1 of comment 6896192351: a read of a variable a <c>move</c> may have ended, on any path, is <c>used-after-move</c> at the read,

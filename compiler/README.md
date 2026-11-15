@@ -2444,10 +2444,9 @@ links a call, an assignment to a field or an item, a `with`, a lambda's captures
 `move` ends the variable it names and every variable its region reaches, on the paths that reach a
 later read, which is `used-after-move` at the read, naming each `move`'s line; a loop whose body
 moves its variable takes its list; a `move` of what the region outside reaches is `move-reachable`,
-and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a variable
-declared in a block that an arm of `match` or `else` ends with, read in that block's last expression,
-is read there as the region outside the function, since the block's end dropped its region, so that
-a `move` of the arm's value is `move-reachable` where section 6 lets it stand. The model
+and a word that does not fit a plain call's parameter `move-at-call`, in U16's order; a block that
+ends an arm of `match` or `else` gives the arm's value the region of its last expression, its own
+variables' regions read as they stood at the block's end, as rustc reads a block's tail. The model
 records each `move` argument, each variable a `move` names and each loop that takes its list for the
 emitter, `SemanticModel.IsMove`, `IsMoved` and `TakesItsList`), and the rules of `print` and of a value's text that
 these chapters reach: A1 to A9, A10 for a type parameter and an interface, A11 to A15, of a class's `Text()` the

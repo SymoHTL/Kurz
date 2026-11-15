@@ -7314,14 +7314,18 @@ public sealed class CheckerTests
     {
         // U12, section 6: a `move` ends every path into the value it sends, by regions as Swift's SE-0414 keeps them: a call merges the regions
         // of its arguments, written `mut` or not, and of what it is called on, a field's read is in its value's region and `move pair.A` ends
-        // `pair` whole, a binding of `match` joins its subject's, one of `else` the call's, and `with` joins both (comment 6897444564); a value
-        // that crosses with no word joins no region, so that `move` before it ends the variable it names alone (comment 6897778812, Q2 (a))
+        // `pair` whole, a binding of `match` joins its subject's, one of `else` the call's, and `with` joins both (comment 6897444564); a block
+        // that ends an arm gives the region of its last expression, its own variables' as they stood at its end, as rustc reads a block's
+        // tail; a value that crosses with no word joins no region, so that `move` before it ends the variable it names alone (comment
+        // 6897778812, Q2 (a))
         Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "cart = Cart(1)\nmut carts = [Cart(2)]\ncarts.Add(cart)\nshop.Add(move cart)\nprint(carts.Count)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "mut carts = [Cart(1)]\nkept = Cart(2)\nKeep(mut carts, kept)\nshop.Add(move kept)\nprint(carts.Count)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nfirst = pair.A\nshop.AddPair(move pair)\nprint(first.Items)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nshop.Add(move pair.A)\nprint(pair.K)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 75)], Errors(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nother = Cart(3)\ngot = Find(other) else {\n    Item i => {\n        shop.AddItem(move i)\n        Cart(0)\n    }\n}\nprint(got.Items)\nprint(other.Items)\n"));
         Clean(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nother = Cart(3)\ngot = Find(other) else {\n    Item i => {\n        shop.AddItem(move i)\n        Cart(0)\n    }\n}\nprint(got.Items)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 75)], Errors(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nkept = Cart(5)\ngot = Find(Cart(3)) else {\n    Item i => {\n        made = kept\n        made\n    }\n}\nshop.Add(move got)\nprint(kept.Items)\n"));
+        Clean(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nkept = Cart(5)\ngot = Find(Cart(3)) else {\n    Item i => {\n        made = kept\n        made\n    }\n}\nshop.Add(move got)\n");
         Assert.Equal([(ErrorIds.UsedAfterMove, 65)], Errors(MoveShop + "Item it = Big(1, 2)\nmatch it {\n    Big b => shop.AddItem(move b)\n    Item x => print(x.N)\n}\nprint(it.N)\n"));
         Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nother = pair with { K = 3 }\nshop.AddPair(move other)\nprint(pair.K)\n"));
         Clean(MoveShop + "cart = Cart(1)\nlabel = \"a\"\ncount = cart.Items\nshop.Name(move label)\nshop.Add(move cart)\nprint(count)\n");
