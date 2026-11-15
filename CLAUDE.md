@@ -390,7 +390,9 @@ Gate: review rule "rules for sessions".
   request 181 made possible (the line `sortby-change-fenced` holds it), and the place of an `asm`
   output into a path of fields of a block, found where its operand stood and held across the place of
   another output and across a later operand whose call gave the variable another block, with pull
-  request 520 (the line `asm-places-fenced` holds it)
+  request 520 (the line `asm-places-fenced` holds it), and a field passed to a `mut` parameter and read
+  before a call that assigns it through the instance, a direct call or a call of the chain that a call
+  that waits lets in, found on 2026-11-15 (the line `actor-waits-fenced` holds it)
   ([knowledge/a-borrow-outlives-its-source.md](knowledge/a-borrow-outlives-its-source.md)). Each
   such construct has a line in a fenced program of `ListTests`, and a refusal counts every form that
   changes a place. Gate: `compiler-tests`

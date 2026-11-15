@@ -4628,6 +4628,67 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
             """;
         Ran(BuildAndRun(sortByChange, fenced, "sortby-change-fenced"), 0, ["1", "0", "6", "3", "20", "0", "z", "2", "0", "[1, 2, 3]", "[0]", "2", "[9, 3, 1, 1]", "0"], "");
+        // U17, M7: a call that waits parks its message, and a call of its chain runs the actor's own methods while it waits (section 6,
+        // "Deadlocks", layer 1), so that one assigns a field the parked message read: a field passed to a `mut` parameter and read before
+        // the wait, or before a direct call of the method that assigns it, which the count of such a read holds to its statement's end; a
+        // field as an argument before the wait, a `for` over a field whose body waits and a key of `SortBy` that waits, which hold what
+        // they read as they hold it across any call
+        const string actorWaits = """
+            actor Store(Checker Check) {
+                mut List<int> items = [1, 2, 3]
+
+                pub int Waits() => Waited(mut items)
+
+                pub int Direct() => Cleared(mut items)
+
+                int Waited(mut List<int> xs) => Sum(xs, Check.Valid(this))
+
+                int Cleared(mut List<int> xs) => Sum(xs, Clear())
+
+                pub int Passed() => Sum(items, Check.Valid(this))
+
+                pub int Looped() {
+                    mut total = 0
+                    for x in items {
+                        total = total + x + Check.Valid(this)
+                    }
+
+                    return total
+                }
+
+                pub List<int> Sorted() {
+                    items.SortBy(x => Check.Valid(this) - x)
+                    return items
+                }
+
+                int Sum(List<int> xs, int k) => xs[0] + xs[1] + xs[2] + k
+
+                pub void Reset() {
+                    items = [7, 8, 9, 10]
+                }
+
+                int Clear() {
+                    items = [7, 8, 9, 10]
+                    return 0
+                }
+            }
+
+            actor Checker {
+                pub int Valid(Store store) {
+                    store.Reset()
+                    return 0
+                }
+            }
+
+            c = spawn Checker()
+            print(spawn Store(c).Waits())
+            print(spawn Store(c).Direct())
+            print(spawn Store(c).Passed())
+            print(spawn Store(c).Looped())
+            print(spawn Store(c).Sorted())
+
+            """;
+        Ran(BuildAndRun(actorWaits, fenced, "actor-waits-fenced"), 0, ["6", "6", "6", "6", "[7, 8, 9, 10]"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");

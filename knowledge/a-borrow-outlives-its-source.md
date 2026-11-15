@@ -1,6 +1,6 @@
 ---
 name: a-borrow-outlives-its-source
-description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; the key of a list's SortBy (2026-11-01) changed the list it sorted through an instance, past the promise of F11 that rested on a lambda changing nothing it captures, and the sort holds the list it read with a count of its own since; the lowering of inline assembly (pull request 520) found the place of an output into a path of fields of a block where its operand stood and held it across the place of another output and across a later operand whose call gave the variable another block (2026-11-13), and finds it after the call since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
+description: The counting of lists (pull request 63) read a list from a place without a count of its own and kept it while code that could change the place ran; three shapes reached main, one inside an expression (2026-10-24), which the checker refuses since the owner's answers (M7), the name an arm binds, which holds a count of its own since, and an assignment in an else arm's block inside an expression (2026-10-25), which the checker's walk of M7 missed and refuses since; the counting of strings (pull request 78) reached main with a string's hole the walk held nothing of, refused since, and an interpolation of one hole that was the string itself, a new value since; the key of a list's SortBy (2026-11-01) changed the list it sorted through an instance, past the promise of F11 that rested on a lambda changing nothing it captures, and the sort holds the list it read with a count of its own since; the lowering of inline assembly (pull request 520) found the place of an output into a path of fields of a block where its operand stood and held it across the place of another output and across a later operand whose call gave the variable another block (2026-11-13), and finds it after the call since; a field passed to a `mut` parameter and read before a call that assigns it through the instance, a call of the chain that a call that waits lets in or a direct call (2026-11-15), takes a count since; a borrow names what keeps its source unchanged while it is used, and a walk that checks it names every statement that changes a place
 metadata:
   type: feedback
 ---
@@ -68,6 +68,19 @@ change the place it came from. Seven shapes in which something could reached `ma
   through a pointer, `*p` or `p[i]`, is still found where its operand stands, since no copy is made
   to find it.
 
+One more was found on 2026-11-15, while calls that wait were made to stand anywhere: **through a
+`mut` parameter that names a field.** A method of an actor that passes its field, `Waited(mut items)`,
+gives the callee the field's place, and the callee's read of it, `Sum(xs, Check.Valid(this))`, was
+borrowed while the call after it ran. A call that waits lets in the calls of its chain (U17), so
+`Check.Valid` called back into the actor and assigned `items`, which freed the block `xs` read; a
+direct call of a method that assigns the field, `Sum(xs, Clear())`, does the same with no other actor.
+Both ended with the exit code 139 under the fenced allocator; the direct form reads the same path of
+the checker on `main` (inferred, not run there). Since then a read of a `mut` parameter that a call
+after it in the same expression could reach takes a count held to the statement's end (`Calls` in
+`Semantics/Checker.Reads.cs`, which marks the read a held copy), and the fenced program
+`actor-waits-fenced` of `ListTests` holds both forms, with a field passed before a call that waits, a
+`for` over a field whose body waits and a key of `SortBy` that waits.
+
 **Why:** a borrow is a claim about every path from the read to the last use, and the claim was
 checked only for the paths the author thought of. A program that frees nothing never shows the
 defect; one whose freed blocks are given out again shows it as wrong output, not as a crash.
@@ -85,7 +98,9 @@ the read of a field of a class instance takes, held to the statement's end (`Ins
 arguments give the field another (pull request 243), and the
 count the emitter takes of a read of a copied type that the checker marks as met by a change, a
 function value beside `Swap(mut f)` (`SemanticModel.IsHeldCopy`, the owner's "Copied", 2026-10-25), and the count
-`SortBy` takes of the list it read while its keys run. A construct
+`SortBy` takes of the list it read while its keys run, and the count a read of a `mut` parameter
+takes where a call after it in the expression can reach the field it names (`Calls` in
+`Semantics/Checker.Reads.cs`). A construct
 that has none takes a count of what it read. A promise of another rule that no code can reach the
 place, F11's for a lambda, is no such name: a later rule can open a way to it, as K2's methods did,
 so every member that runs a program's code while it holds a place is listed (`SortBy`, X8). Each one gets a line in a fenced program of `ListTests`

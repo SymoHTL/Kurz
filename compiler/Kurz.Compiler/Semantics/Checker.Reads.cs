@@ -114,8 +114,33 @@ public sealed partial class Checker
                     Conflict(ordered[i].Held, node, change);
                 }
             }
+
+            // a read of a `mut` parameter, the place of its caller's it names, held while a later part calls: any call can wait, and
+            // while its actor's message is parked the calls of its chain run its methods (U17), which change a field such a parameter
+            // names as a direct call of the actor's own method does, so the read takes a count of its own, as a copied read does
+            // (knowledge/a-borrow-outlives-its-source.md)
+            if (Calls(ordered[j].Part))
+            {
+                foreach (var read in ordered.Take(j).SelectMany(o => o.Held).Where(h => h.Variable is { Kind: VariableKind.Parameter, Mut: true }).Select(h => h.Read))
+                {
+                    if (read is not null)
+                    {
+                        model.RecordHeldCopy(read);
+                    }
+                }
+            }
         }
     }
+
+    /// <summary>
+    /// Whether the expression runs a call as it runs: a call, a <c>spawn</c>, a property's read, a <c>match</c> with a statement in an arm,
+    /// or a part that does (U17, M7).
+    /// </summary>
+    private bool Calls(Expression e) =>
+        e is CallExpression or SpawnExpression
+        || model.PropertyCallOf(e) is not null
+        || (e is MatchExpression m && m.Arms.Any(a => a.Body is Block))
+        || Parts(e).Any(Calls);
 
     private void Conflict(IReadOnlyList<Held> held, object node, Change change)
     {
