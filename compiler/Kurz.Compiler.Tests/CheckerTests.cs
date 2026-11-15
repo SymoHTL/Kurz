@@ -4314,6 +4314,14 @@ public sealed class CheckerTests
         // nothing; no class's field names a type parameter, since a class takes none in this build (T19)
         Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static I? None = null\n}\n\nprint(1)"));
         Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C {\n    pub static () => int One = () => 1\n}\n\nprint(1)"));
+        // K18, K7: the type K18 reads is always written, a field being written `Type name`; `static mut` with no type, the one field the
+        // front end reads without one (K7 with V2), is `static-state` by its `mut` where its value is of a type K18 admits, and one with
+        // neither is `syntax` (ParserTests)
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C {\n    pub static mut One = 1\n}\n\nprint(1)"));
+        // K18 (assumed in §4): a name no declaration gives in the written type is `unknown-name`, the type read whole before it is
+        // judged, and an initial value not of that type gives way to `static-state`, the value read after the type
+        Assert.Equal([(ErrorIds.UnknownName, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static Map<I, Nope>? m = null\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static I x = \"a\"\n}\n\nprint(1)"));
         // V9: a `static` field of the name of another field or of a method is `redeclared`
         Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int A = 1\n    pub static int A = 2\n}\n\nprint(C.A)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class C(int V) {\n    pub static int V = 1\n}\n\nprint(C.V)"));

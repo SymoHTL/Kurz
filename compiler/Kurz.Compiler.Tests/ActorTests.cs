@@ -1272,5 +1272,13 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
         static string Left(string error) => error.Split('\n').Single(l => l.StartsWith("  ... ", StringComparison.Ordinal));
         Assert.Equal(Left(message.Error), Left(callback.Error));
+
+        // and the count itself, which a walk that went on past the first frame of `Load`'s stack, or that counted a frame the trace leaves
+        // out, would change in both runs alike; past the hundredth frame the trace counts frames and names none, so no name can show it.
+        // Measured on x86-64 on 2026-11-16 (`Down`'s frame of 48 bytes, Deep); a frame of another size on 64-bit Arm gives another count
+        if (Builder.HostArch == Arch.X64)
+        {
+            Assert.Equal("  ... 43579 more frames", Left(callback.Error));
+        }
     }
 }

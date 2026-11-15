@@ -231,8 +231,8 @@ public sealed partial class Checker
     /// class, or an interface's type, a function type or a type parameter, read by its written type (<see cref="MayHoldClass"/>), is
     /// <c>static-state</c>, as K18 reads a class's field (<see cref="ResolveStaticField"/>; U1, assumed: K18's reading of <c>static</c>
     /// state); whether it has its error, reported here or, for a type that resolves to none, where the type is resolved. A
-    /// field whose type is not written takes its value's (V2), which the checker does not read in an actor it does not read, so that it
-    /// stays the build's limit, as an immutable one of another type does.
+    /// field whose type is not written is a <c>static mut</c> one, the one field the front end reads without a type (K7 with V2), and is
+    /// <c>static-state</c> by its <c>mut</c>, so that the type read here is always written, as K18 reads a class's.
     /// </summary>
     private bool StaticActorFieldError(TypeDeclaration d, FieldDeclaration f)
     {
