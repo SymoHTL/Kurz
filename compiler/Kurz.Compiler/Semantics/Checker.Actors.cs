@@ -321,41 +321,27 @@ public sealed partial class Checker
     /// <summary>
     /// U12, U16: whether the language may say <c>send-needs-word</c> of a message's argument of the type written with no word, so that
     /// the build's <c>not supported</c> stands first in the stage of the arguments, before <c>mut-in-message</c>: a type that reaches a
-    /// mutable class instance (<see cref="ReachesMutableClass"/>), or one that holds a function value, whose captures decide it (U12)
-    /// and which the build does not read.
+    /// mutable class instance, an instance of a class through which something reachable has a <c>mut</c> field, a class derived from it
+    /// among them (K6), a weak reference's target too; or one that reaches a function value, whose captures decide it (U12), or an
+    /// interface's type, whose classes no rule of U12 reads (as no rule reads them for a <c>static</c> field, K18), neither of which the
+    /// build reads. A type is read through the items of a list, the keys and values of a map, the cases of a union and the fields of a
+    /// data value and of a class.
     /// </summary>
-    private bool MayNeedWord(KurzType type) => ReachesMutableClass(type) || Holds(type, t => t is FunctionType, []);
+    private bool MayNeedWord(KurzType type) => MayNeedWord(type, [], []);
 
-    /// <summary>
-    /// U12: whether a value of the type reaches a mutable class instance, which a message's argument with no word makes
-    /// <c>send-needs-word</c>: an instance of a class through which something reachable has a <c>mut</c> field, each class read through
-    /// the classes a value of its fields' types holds (<see cref="ClassesHeld"/>).
-    /// </summary>
-    private bool ReachesMutableClass(KurzType type)
+    private bool MayNeedWord(KurzType type, HashSet<ClassSymbol> classes, HashSet<DataSymbol> data) => type switch
     {
-        var reached = new HashSet<ClassSymbol>();
-        ClassesHeld(type, reached, []);
-        var pending = new Queue<ClassSymbol>(reached);
-        while (pending.TryDequeue(out var c))
-        {
-            foreach (var field in c.Fields)
-            {
-                if (field.Mut)
-                {
-                    return true;
-                }
-
-                var held = new HashSet<ClassSymbol>();
-                ClassesHeld(field.Type, held, []);
-                foreach (var next in held.Where(reached.Add))
-                {
-                    pending.Enqueue(next);
-                }
-            }
-        }
-
-        return false;
-    }
+        FunctionType or InterfaceType => true,
+        WeakRefType w => MayNeedWord(w.Target, classes, data),
+        ClassType c => classDeclared.Where(x => x.HasBaseOrIs(c.Symbol)).Prepend(c.Symbol).Where(classes.Add)
+            .Any(k => k.Fields.Any(f => f.Mut || MayNeedWord(f.Type, classes, data))),
+        ListType l => MayNeedWord(l.Element, classes, data),
+        MapType m => MayNeedWord(m.Key, classes, data) || MayNeedWord(m.Value, classes, data),
+        UnionType u => u.Cases.Any(x => MayNeedWord(x, classes, data)),
+        DataType d when data.Add(d.Symbol) => d.Symbol.Fields.Any(f => MayNeedWord(SubstituteData(d, f.Type), classes, data)),
+        DataType d => HeldArguments(d).Any(a => MayNeedWord(a, classes, data)),
+        _ => false,
+    };
 
     /// <summary>
     /// U4, U6: a call through an actor's reference may wait in the top-level statements alone, and <c>send</c> and <c>spawn</c> stand there
@@ -499,8 +485,8 @@ public sealed partial class Checker
     /// waits for its result, in the top-level statements alone, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
     /// after <c>send</c> (U6). Its arguments cross (U12), then a <c>mut</c> parameter is <c>mut-in-message</c> (U9; Q6 of comment
     /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads a type
-    /// that reaches a mutable class instance, which the language reads as <c>send-needs-word</c> and this build says <c>not supported</c>
-    /// to, before a <c>mut</c> parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14,
+    /// on which the language may say <c>send-needs-word</c> (<see cref="MayNeedWord"/>: one that reaches a mutable class instance, a
+    /// function value or an interface's type), which this build says <c>not supported</c> to, before a <c>mut</c> parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14,
     /// #519, comment 6884160133, item 6), and a <c>mut</c> parameter before any other type that crosses no actor in this build, an
     /// immutable class instance among them, which the language lets cross with no word (U12), so that the build's limit hides no error
     /// of the language (E1); its stage of the result follows.
