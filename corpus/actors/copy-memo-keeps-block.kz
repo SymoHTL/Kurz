@@ -1,0 +1,18 @@
+// expect: output
+// | 1 2
+// | 3
+// rules: U12
+
+class Box(mut int N)
+class Holder(mut Box B)
+
+Box Swap(Holder held) {
+    held.B = Box(3)
+    return Box(2)
+}
+
+string Pair(Holder a, Box b) => "{a.B.N} {b.N}"
+
+h = Holder(Box(1))
+print(Pair(copy h, copy Swap(h)))
+print(h.B.N)

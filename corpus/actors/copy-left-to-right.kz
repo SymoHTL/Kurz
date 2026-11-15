@@ -1,0 +1,17 @@
+// expect: output
+// | 1 11
+// | 11
+// rules: U12
+
+class Cart(mut int Items)
+
+int Bump(Cart c) {
+    c.Items = c.Items + 10
+    return c.Items
+}
+
+string Show(Cart c, int now) => "{c.Items} {now}"
+
+cart = Cart(1)
+print(Show(copy cart, Bump(cart)))
+print(cart.Items)

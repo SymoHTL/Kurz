@@ -4693,7 +4693,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
         // that waits lets in a call of its chain that replaces the field, so that the copy reads no block the replacement freed; the copy
         // keeps the instance two items hold as one, and the weak link of another item points at it; and a field's instance given as a
         // result, copied before the method's count of it is let go of, which the field keeps for the next call, and a result's weak link to
-        // an instance the result does not hold, null on arrival as the copy holds no copy of its target (Q3)
+        // an instance the result does not hold, null on arrival as the copy holds no copy of its target (Q3); and two arguments of one
+        // message that reach one instance, between which a call that waits lets in a call of the chain whose result crosses in a session of
+        // its own, arrive as one copy, the call's memo unharmed by the crossing in between (section 6)
         const string actorCrossing = """
             class Item(string Name, mut int V, mut weak Item? Twin)
             class Label(string Text)
@@ -4714,6 +4716,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 pub Label Give() => Kept
 
                 pub Pin Mark() => Pin(Kept)
+
+                pub string Both(Item x, string k, Item y) {
+                    x.V = x.V + 100
+                    return "{y.V} {k}"
+                }
             }
 
             actor Store(Checker Check, Sink Target) {
@@ -4728,6 +4735,13 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                 pub void Reset() {
                     items = []
                 }
+
+                pub string Twice() {
+                    one = Item("one", 1, null)
+                    return Target.Both(copy one, Check.Fresh(this), copy one)
+                }
+
+                pub Label Made() => Label("made")
             }
 
             actor Checker {
@@ -4737,6 +4751,11 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     store.Reset()
                     return 0
                 }
+
+                pub string Fresh(Store store) {
+                    m = store.Made()
+                    return m.Text
+                }
             }
 
             word = "label"
@@ -4745,9 +4764,10 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
             print(sink.Give().Text)
             print(sink.Give().Text)
             print(sink.Mark().L == null)
+            print(spawn Store(spawn Checker(), sink).Twice())
 
             """;
-        Ran(BuildAndRun(actorCrossing, fenced, "actor-crossing-fenced"), 0, ["2 a x true 0", "kept label", "kept label", "true"], "");
+        Ran(BuildAndRun(actorCrossing, fenced, "actor-crossing-fenced"), 0, ["2 a x true 0", "kept label", "kept label", "true", "101 made"], "");
         Ran(BuildAndRun(Weak, fenced, "weak-fenced"), 0, WeakPrint, "");
         Ran(BuildAndRun(Equality, fenced, "class-equality-fenced"), 0, EqualityPrint, "");
         Ran(BuildAndRun(Inheritance, fenced, "class-inheritance-fenced"), 0, InheritancePrint, "");

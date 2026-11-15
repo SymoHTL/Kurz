@@ -20,6 +20,15 @@ public sealed partial class Emitter
 
         var info = Model.CallOf(c);
         var result = Sub(info.Result);
+        var copied = c.Arguments.Where(a => Model.IsCopied(a.Value) && ReachesInstance(Sub(Model.TypeOf(a.Value).Type))).ToList();
+        if (CallSession(copied.Count) is { } session)
+        {
+            foreach (var a in copied)
+            {
+                copySessions[a.Value] = session; // U12: the arguments after `copy` of one call share its session (Copied)
+            }
+        }
+
         var value = info.Kind switch
         {
             CallKind.Print => EmitPrint(c, 1),
@@ -322,6 +331,7 @@ public sealed partial class Emitter
     private List<string> Arguments(CallExpression c, CallInfo info, Func<int, KurzType> slotType, Func<int, bool> slotMut, Func<int, (Expression Value, Unit File)?> slotDefault, bool cConvention, bool owned, bool crossing = false)
     {
         var values = new string?[c.Arguments.Count];
+        var session = crossing ? CallSession(Enumerable.Range(0, c.Arguments.Count).Count(i => info.Binding[i] >= 0 && !slotMut(info.Binding[i]) && ReachesInstance(Sub(slotType(info.Binding[i]))))) : null;
         for (var i = 0; i < c.Arguments.Count; i++)
         {
             var slot = info.Binding[i];
@@ -331,7 +341,8 @@ public sealed partial class Emitter
                 var type = Sub(slotType(slot));
                 if (crossing && ReachesInstance(type))
                 {
-                    var copy = Crossed(Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false), type);
+                    // U12: each argument copied where it is evaluated, left to right, in the call's session
+                    var copy = Crossed(Convert(EmitExpression(a), TypeOf(a), type, a.Line, owned: false), type, session);
                     values[i] = owned ? copy : Temp(copy, type);
                     continue;
                 }

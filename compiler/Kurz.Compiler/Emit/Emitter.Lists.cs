@@ -112,6 +112,7 @@ public sealed partial class Emitter
         }
         finally
         {
+            regionSessions.Remove(regions[^1]);
             regions.RemoveAt(regions.Count - 1);
         }
     }
@@ -159,6 +160,7 @@ public sealed partial class Emitter
 
     private void LetGo(List<(string Value, KurzType Type)> temporaries)
     {
+        EndSessions(temporaries);
         for (var i = temporaries.Count - 1; i >= 0; i--)
         {
             if (temporaries[i].Type is MapType && walkedMaps.Contains((fn, temporaries[i].Value)))

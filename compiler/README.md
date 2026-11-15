@@ -486,14 +486,20 @@ the next one back to the system (section 6, the owner, 2026-11-14, #519, comment
 the top-level code runs on the thread's own stack, the main thread's, as section 6 has it (the
 owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's guard page is a
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
-process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) keeps
-three tables in the thread's own statics, since a copy runs on the thread that sends, each from the
-allocator, grown by doubling and kept for the thread's next copy: the memo, open addressing on a
-block's address and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each
-block held more than once and its copy; the work list, which `CopyPush` fills with a block, its copy
-and the function that fills the copy, and `CopyNext` empties, the last first; and the `weak`
-references of the copy, which `CopyWeak` keeps and `CopyEnd` points at their target's copy, or at
-null, before it empties the memo. `ActorTests` pins the stacks, the guard page,
+process with `allocation-failed` and the size asked for. `common/`'s copy of a crossing (U12) works
+in the session of a call, eight words in the caller's frame, since the copies one call makes share
+one memo and a result has one of its own (section 6): the memo, open addressing on a block's address
+and never more than half full, which `CopyFind` reads and `CopyKeep` fills with each block held more
+than once, or every block in a call of more than one copy, its copy and the function that lets go
+of the count the memo takes of the block; the `weak` references of the copies, which `CopyWeak`
+keeps with a weak count of their target; and the copies left, which `CopyLeft` counts down, the
+last pointing each `weak` reference at its target's copy, or at null, and letting go of the memo's
+counts. Each run of a copy names its session first (`CopyUse`), since an argument whose call waits
+lets other sessions run between two copies of one call, and `CopyAbort` ends a session whose call
+was left before its last copy. The work list, which `CopyPush` fills with a block, its copy and the
+function that fills the copy, and `CopyNext` empties, the last first, is the thread's own, from the
+allocator, grown by doubling and kept for the thread's next copy, since a run runs no program code
+and leaves it empty. `ActorTests` pins the stacks, the guard page,
 the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
 that clang assembles each switch for its machine.
@@ -978,16 +984,26 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   a copy, and one that reaches a class instance is copied deep by its type's copy function, every
   class instance it reaches copied and every other block shared by its count, an instance of a
   derived class through the copy slot of its class's table, slot 5, so that an instance held as its base arrives as its own class; a block whose count
-  says it is held more than once is looked up in the memo of the copy, so that two paths to one block
-  arrive as two paths to one copy (Q2), and once the copy is whole each `weak` reference in it points
-  at the copy of its target where the copy holds that target, and is null otherwise, with its weak
-  count taken there (Q3). `copy` before an argument of any other call copies the same way, the copy
-  a temporary the call reads and its statement lets go of (Q6). The copy walks a work list and never
-  recurses ("The runtime"). `ActorTests` pins a chain of a million links copied, 10,000 references to
-  one instance arriving as references to one copy, a weak parent link pointing at the copy and the
-  allocations equal to the frees, and the line `actor-crossing-fenced` of `ListTests` a field's list
-  copied before a later argument's wait replaces it, the memo, the weak fix-up and a result copied
-  from a field, and `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
+  says it is held more than once, or any block in a call of more than one copy, where a later
+  argument may reach it by a path that holds no count of it, is looked up in the memo of the call's
+  session, which the copies of all its arguments share and a result has of its own, so that two
+  paths to one block, in one argument or in two, arrive as two paths to one copy (Q2), and once the
+  call's last copy is made each `weak` reference in its copies points at the copy of its target
+  where they hold that target, and is null otherwise, with its weak count taken there (Q3). The
+  session is zero from the function's start, begun at the call where it makes more than one copy,
+  and ended by the region's end, or a jump out of it, where a case a later argument propagates left
+  the call before its last copy (section 6). `copy` before an argument of any other call copies the
+  same way, the copy a temporary the call reads and its statement lets go of (Q6). The copy walks a
+  work list and never recurses ("The runtime"). `ActorTests` pins a chain of a million links copied,
+  10,000 references to one instance arriving as references to one copy, a weak parent link pointing
+  at the copy and the allocations equal to the frees; the line `actor-crossing-fenced` of
+  `ListTests` a field's list copied before a later argument's wait replaces it, the memo, the weak
+  fix-up, a result copied from a field, and two arguments of one message that reach one instance
+  arriving as one copy across a later argument's wait whose chain crosses a result; the cases
+  `corpus/actors/copy-two-arguments.kz`, `copy-two-at-call.kz` and `copy-weak-across-arguments.kz`
+  the memo of a call, `copy-left-to-right.kz` the order, `copy-memo-keeps-block.kz` a block the memo
+  holds living to the call's last copy and `copy-left-early.kz` a call left before it; and
+  `corpus/actors/copy-derived.kz` an instance of a derived class held as its base.
   A call that waits (U4), wherever it stands, passes a reply in its own frame, the
   one-shot slot of section 6, and its file and line, and the runtime's `Wait` sets the activation
   that waits on it: in the top-level code it runs the first actor of the run queue ("The runtime"),
@@ -2158,12 +2174,14 @@ ask about it.
   and `corpus/actors/stack-floor.kz`.
 - U12 with section 6: a crossing copies by the type of the parameter the argument fills, the slot a
   message holds, so that `null` given to a `Box?` of a class with a `mut` field needs `copy` as a
-  `Box` would; the memo of Q2 holds the blocks of one argument or one result, so that two arguments
-  that reach one block arrive as two copies, as two messages do; a function value a crossing reaches
-  is shared by its count, its captures with it, as section 6's deep copy stops at one; an actor's
-  reference as a key of a map hashes by the actor's number, which a crossing keeps *(all assumed in
-  section 6)*. Pinned by `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz` and
-  `corpus/actors/references-in-list.kz`, and the line `actor-crossing-fenced` of `ListTests`.
+  `Box` would; the copies one call makes share one memo and a result has one of its own, each
+  argument copied where it is evaluated, left to right, a block the memo holds living until the
+  call's last copy; a function value a crossing reaches is shared by its count, its captures with
+  it, as the deep copy stops at one *(all assumed in section 6, "How a value crosses and what `copy`
+  does")*; and an actor's reference as a key of a map hashes by the actor's number, which a crossing
+  keeps, as section 6 has it ("An actor's reference compares by the actor it names"). Pinned by
+  `ActorTests`, the cases `corpus/actors/copy-shared-graph.kz`, `corpus/actors/references-in-list.kz`
+  and the six of the memo of a call (above), and the line `actor-crossing-fenced` of `ListTests`.
 
 ## What the compiler says about a program
 

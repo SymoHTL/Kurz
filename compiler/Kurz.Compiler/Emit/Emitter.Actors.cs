@@ -108,7 +108,7 @@ public sealed partial class Emitter
         if (ReachesInstance(f.ReturnType))
         {
             // U12: a result that reaches a class instance crosses back to the caller as a copy of its own, and the method's lets go
-            var crossed = Crossed(result, f.ReturnType);
+            var crossed = Crossed(result, f.ReturnType, null); // in a session of its own, not the call's
             Release(result, f.ReturnType);
             result = crossed;
         }

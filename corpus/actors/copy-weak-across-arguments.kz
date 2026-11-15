@@ -1,0 +1,25 @@
+// expect: output
+// | 11
+// | 1
+// rules: U12
+
+class Box(mut int N)
+class Tag(weak Box? Of)
+
+actor Shelf {
+    pub string Look(Tag t, Box b) {
+        b.N = b.N + 10
+        o = t.Of
+        if o != null {
+            return "{o.N}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+tag = Tag(box)
+s = spawn Shelf()
+print(s.Look(copy tag, copy box))
+print(box.N)

@@ -22,7 +22,7 @@ public sealed partial class Emitter
         var value = EmitExpressionAt(e);
         if (Model.IsCopied(e))
         {
-            value = Copied(value, Sub(Model.TypeOf(e).Type)); // U12: an argument after `copy`
+            value = Copied(e, value, Sub(Model.TypeOf(e).Type)); // U12: an argument after `copy`
         }
 
         f.Location = around;

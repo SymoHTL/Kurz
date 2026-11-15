@@ -238,6 +238,14 @@ internal sealed class IrFunction
         return name;
     }
 
+    /// <summary>A local's storage in the entry block, which holds <paramref name="value"/> from the function's start on.</summary>
+    public string Alloca(string type, string hint, string value)
+    {
+        var name = Alloca(type, hint);
+        allocas.Append("  store ").Append(type).Append(' ').Append(value).Append(", ptr ").AppendLine(name);
+        return name;
+    }
+
     public string Label(string hint) => $"{hint}.{++labels}";
 
     public void Emit(string instruction)

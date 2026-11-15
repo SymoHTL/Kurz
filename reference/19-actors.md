@@ -844,9 +844,9 @@ cost read for a word at the argument as for that function value, as rustc reads 
 struct's fields and a closure's through its captures)*. A reference that crosses names the same
 actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
 Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
-would with no word, `copy f` of one whose captures cross among them, and at an actor's reference,
-which the receiver gets naming the same actor, as a reference that crosses names it *(assumed: the
-stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
+would with no word, shared by its count with the values it captures, `copy f` of one whose
+captures cross among them, and at an actor's reference, which the receiver gets naming the same
+actor, as a reference that crosses names it *(assumed, §6: the stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
 `Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
 `Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
 `library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` or `move` before a value that
@@ -865,7 +865,20 @@ use, own id"); no case expects it, so that its id stands in this rule and not in
 errors, as `move-reachable`'s does (§6). Two paths to one block of a value that crosses, or of a
 value after `copy`, arrive as two paths to one copy, as Rust's clone of an `Rc` graph keeps its
 sharing, so that a copy is never larger than its source and a mutable graph keeps its shape (§6,
-the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). A `weak` reference (R3)
+the owner, 2026-11-15, #519, comment 6896192351, Q2, "Sharing kept"). The copies one call makes,
+of a message's arguments, of a `spawn`'s or of the arguments after `copy` at any call, share one
+memo, so that two arguments that reach one block arrive as two paths to one copy, and a `weak`
+reference in one argument points at the copy of its target where another argument's copy holds
+that target strongly; a result has a memo of its own. Each argument is copied where it is
+evaluated, left to right, so that a later argument that changes a block an earlier one copied
+changes the source alone, and one that reaches that block again reaches its copy as it was made;
+a later argument whose call waits lets other calls cross meanwhile, each in a memo of its own; a
+block the memo holds lives until the call's last copy, and a call left before its last copy, by a
+case a later argument propagates, ends its memo there. A crossing copies by the type of the
+parameter the argument fills, so that `null` given to a `Box?` of a class with a `mut` field needs
+`copy` as a `Box` would *(assumed, §6: the memo of the call, which Q2 reads at a call; the order,
+which keeps arguments evaluated left to right; and the parameter's type, the slot the message
+holds)*. A `weak` reference (R3)
 inside a value that crosses points at the copy of its target where the copy holds that target
 strongly, and is null on arrival otherwise, so that a tree with weak parent links crosses whole
 (§6, the owner, 2026-11-15, #519, comment 6896192351, Q3, "Points at the copy"). A function value
@@ -886,8 +899,8 @@ and `move` are words before an argument alone, as `mut` is there (L12), and name
 so that `copy(x)` is the word before `(x)` and a variable named `copy` is called as `(copy)(x)` (§6,
 the owner, 2026-11-13, #519, comment 6847932993, Q10, "Any order + contextual (Recommended)"); a
 `copy` or a `move` followed by `[`, `-`, `*`, `&` or `with`, which go on from a name, is the name,
-so that `copy[0]` reads an item of a list named `copy` *(assumed: as a name before what goes on
-from a name is read, which the answers did not give)*.
+so that `copy[0]` reads an item of a list named `copy` *(assumed, §6: as a name before what goes
+on from a name is read, which the answers did not give)*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -1121,6 +1134,122 @@ Cart cart = OwnedCart("Ann", 2)
 s = spawn Shop()
 s.Add(copy cart)
 print("at home: {cart.Show()}")
+```
+
+Case: [actors/copy-two-arguments.kz](../corpus/actors/copy-two-arguments.kz)
+```kurz
+class Counter(mut int N)
+
+actor Desk {
+    pub string Both(Counter a, Counter b) {
+        a.N = a.N + 10
+        return "{a.N} {b.N}"
+    }
+}
+
+c = Counter(1)
+d = spawn Desk()
+print(d.Both(copy c, copy c))
+print(c.N)
+```
+
+Case: [actors/copy-weak-across-arguments.kz](../corpus/actors/copy-weak-across-arguments.kz)
+```kurz
+class Box(mut int N)
+class Tag(weak Box? Of)
+
+actor Shelf {
+    pub string Look(Tag t, Box b) {
+        b.N = b.N + 10
+        o = t.Of
+        if o != null {
+            return "{o.N}"
+        }
+
+        return "gone"
+    }
+}
+
+box = Box(1)
+tag = Tag(box)
+s = spawn Shelf()
+print(s.Look(copy tag, copy box))
+print(box.N)
+```
+
+Case: [actors/copy-two-at-call.kz](../corpus/actors/copy-two-at-call.kz)
+```kurz
+class Cart(mut int Items)
+
+string Both(Cart a, Cart b) {
+    a.Items = a.Items + 10
+    return "{a.Items} {b.Items}"
+}
+
+cart = Cart(1)
+print(Both(copy cart, copy cart))
+print(cart.Items)
+```
+
+Case: [actors/copy-left-to-right.kz](../corpus/actors/copy-left-to-right.kz)
+```kurz
+class Cart(mut int Items)
+
+int Bump(Cart c) {
+    c.Items = c.Items + 10
+    return c.Items
+}
+
+string Show(Cart c, int now) => "{c.Items} {now}"
+
+cart = Cart(1)
+print(Show(copy cart, Bump(cart)))
+print(cart.Items)
+```
+
+Case: [actors/copy-memo-keeps-block.kz](../corpus/actors/copy-memo-keeps-block.kz)
+```kurz
+class Box(mut int N)
+class Holder(mut Box B)
+
+Box Swap(Holder held) {
+    held.B = Box(3)
+    return Box(2)
+}
+
+string Pair(Holder a, Box b) => "{a.B.N} {b.N}"
+
+h = Holder(Box(1))
+print(Pair(copy h, copy Swap(h)))
+print(h.B.N)
+```
+
+Case: [actors/copy-left-early.kz](../corpus/actors/copy-left-early.kz)
+```kurz
+data Missing
+
+class Box(mut int N)
+class Holder(mut Box B)
+class Tag(weak Box? Of)
+
+Box | Missing Lose(Holder held) {
+    held.B = Box(2)
+    return Missing
+}
+
+string Pair(Box a, Box b) => "{a.N} {b.N}"
+
+string | Missing Try(Holder held) {
+    return Pair(copy held.B, copy Lose(held))
+}
+
+h = Holder(Box(1))
+tag = Tag(h.B)
+match Try(h) {
+    string s => print(s)
+    Missing => print("missing")
+}
+print(tag.Of == null)
 ```
 
 ### U13 (decided, §6) The end of the program drops what is queued
