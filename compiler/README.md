@@ -456,11 +456,11 @@ on Windows, whose switch keeps the stack's limit; `StackTrim` gives back the mem
 the depth when a stack goes back to the pool, on Linux where the handler opened them, by a mapping
 with no access and `MAP_FIXED` over them, which gives their memory back as `madvise` with
 `MADV_DONTNEED` would and which the system joins to the guard page, so that the stack is two mappings
-again (section 6, the owner, 2026-11-13, #519, comment 6855469829, the call assumed there), and on Windows where the stack's limit
+again (section 6, the owner, 2026-11-13, #519, comment 6855469829, the call assumed there, where comment 6851105334 named `madvise`), and on Windows where the stack's limit
 lies past the depth, by a `VirtualFree` that decommits them from the base of the reservation, a
 `VirtualAlloc` that sets the page under the depth as the guard page again and the limit moved to the
 depth (section 6, the owner, 2026-11-13, #519, comment 6853074601, the guard page and the limit
-assumed there); `StackFree` gives a stack back, and `StackFirst` runs once on a thread before its first switch, on Windows calling
+assumed there); `StackFree` gives a stack back, and `StackFirst` runs once on each stack, at that stack's first run (`ActorStart`), on Windows calling
 `SetThreadStackGuarantee` for 0x5000 bytes, as `Start` does for the main thread's stack. A stack's
 header is its top 512 bytes: the save area of the switch, 320 bytes, which holds on Windows the four
 words at 288 to 312, then the actor whose message runs on it, the message, a word that marks its
@@ -1947,7 +1947,7 @@ with the system's own room, as Rust's released library does (section 2);
 `TraceTests.A_program_on_Windows_starts_with_the_guarantee_of_its_main_threads_stack_set_to_0x5000_bytes`
 reads the guarantee in force on Windows and on Linux compiles the program alone.
 
-Of section 6 the emitter builds the actors of one thread, each message run to its end (Q1 (a), the
+Of section 6 the emitter builds the actors of one thread, each message run to its end or to a wait that parks it (Q1 (a), the
 answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, each message on a stack of its own ("The runtime"), and messages run only while the top-level
@@ -1966,7 +1966,10 @@ past a message's stack ends the process with `stack-overflow` at its line on Lin
 it ends it as an overflow of the main thread's stack does, with the system's `0xC00000FD` and no line
 of Kurz, the handler of section 2 for an actor's stack not being built there; on 64-bit Arm the
 switch, `naked` on Arm and the stacks build, and no run of this repository's gates runs them but the
-job `compiler-arm`, which is not required; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
+job `compiler-arm`, which is not required and runs on Linux, as `compiler-windows` runs on x86-64, so
+that the switch of Windows on Arm is assembled
+(`EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`)
+and runs nowhere; a call waits with no bound, where section 6 bounds it by 5 seconds (`call-timeout`);
 and an inbox grows with no bound, where section 13 spills it at 64 MB, until the allocator ends the
 process with `allocation-failed`. An actor and its state live to the end of the process, which is
 section 6's end of an actor in a program the build takes: an actor ends with its supervisor, the
