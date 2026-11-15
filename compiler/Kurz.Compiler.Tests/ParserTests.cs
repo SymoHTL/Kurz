@@ -1130,6 +1130,31 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("void Take(move Cart c) {\n}", "(function void Take(move Cart c) {})")]
+    [InlineData("void Take(move List<Cart> cs, int n) {\n}", "(function void Take(move List<Cart> cs, int n) {})")]
+    [InlineData("void Take(move int n) {\n}", "(function void Take(move int n) {})")]
+    [InlineData("void Take(move (int) => int f) {\n}", "(function void Take(move (int) => int f) {})")]
+    [InlineData("void Run((move Cart, int) => void f) {\n}", "(function void Run((move Cart, int) => void f) {})")]
+    [InlineData("((move Cart) => void)? g = null", "(declare ((move Cart) => void)? g null)")]
+    [InlineData("void Take(int move) {\n}", "(function void Take(int move) {})")]
+    [InlineData("Run((move) => move)", "(call Run (lambda (move) move))")]
+    [InlineData("Run((move Cart c) => print(c))", "(call Run (lambda (move Cart c) (call print c)))")]
+    public void Move_before_a_parameter_and_in_a_function_type_is_its_word(string program, string tree)
+    {
+        // U12, section 6: `move` before a parameter's type, as `mut` stands there, and before a parameter of a function type (2026-11-05,
+        // Q4), the word where a type follows it, a name, a word of a type or `(`, and a name elsewhere, a parameter named `move` among them
+        Assert.Equal(tree, Tree(program));
+    }
+
+    [Fact]
+    public void Move_in_a_type_stands_before_a_parameter_of_a_function_type_alone()
+    {
+        // U12: a C function's parameter takes no `move` (R17), and `move` before a type that is no function type's parameter is no type
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("extern \"C\" (move int) => void f = Tick\n"));
+        Assert.Equal([(ErrorIds.Syntax, 1)], Errors("(move int) x = 1\n"));
+    }
+
+    [Theory]
     [InlineData("b = a with { Name = \"Bea\" }", "(assign-or-declare b (with a Name = (string \"Bea\")))")]
     [InlineData("value = Find(id) else {\n    NotFound => 0\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (int 0))]))")]
     [InlineData("value = Find(id) else {\n    NotFound => return Missing(id)\n}", "(assign-or-declare value (else (call Find id) [((type NotFound) => (return (call Missing id)))]))")]

@@ -1,0 +1,15 @@
+// expect: error used-after-move at 15
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Add(move cart)
+print(cart.Items)

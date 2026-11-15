@@ -410,6 +410,9 @@ public sealed class SemanticModel
     private readonly Dictionary<LambdaExpression, LambdaInfo> lambdas = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> heldCopies = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Expression> copied = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<Expression> moves = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<VariableSymbol> movedVariables = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<ForInStatement> takingLoops = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypePattern, KurzType> patterns = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FunctionDeclaration, FunctionSymbol> functions = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ExternFunction, FunctionSymbol> cFunctions = new(ReferenceEqualityComparer.Instance);
@@ -524,6 +527,24 @@ public sealed class SemanticModel
 
     /// <summary>U12: whether the expression is an argument of a call that is no message, written after <c>copy</c>, whose value is a deep copy (Q6 of comment 6896192351).</summary>
     public bool IsCopied(Expression expression) => copied.Contains(expression);
+
+    /// <summary>U12: whether the expression is an argument written after <c>move</c> that the check of what it ends passed (section 6), which the code generator passes copying nothing.</summary>
+    public bool IsMove(Expression expression) => moves.Contains(expression);
+
+    /// <summary>U12: whether a <c>move</c> names the variable, whose place the code generator empties at the move and lets go of through a test for the empty value, as rustc keeps a drop flag (comment 6897444564).</summary>
+    public bool IsMoved(VariableSymbol variable) => movedVariables.Contains(variable);
+
+    /// <summary>U12: whether the loop's body moves its variable, so that the loop takes its list (the owner, 2026-11-15, #519, comment 6897778812, Q1 (b)).</summary>
+    public bool TakesItsList(ForInStatement loop) => takingLoops.Contains(loop);
+
+    /// <summary>The arguments written after <c>move</c> that the check passed, for a reader of the model.</summary>
+    public IReadOnlyCollection<Expression> Moves => moves;
+
+    /// <summary>The loops that take their lists (<see cref="TakesItsList"/>).</summary>
+    public IReadOnlyCollection<ForInStatement> TakingLoops => takingLoops;
+
+    /// <summary>The variables a <c>move</c> names, for a reader of the model.</summary>
+    public IReadOnlyCollection<VariableSymbol> MovedVariables => movedVariables;
 
     /// <summary>The type an arm's pattern names (C4, O5).</summary>
     public KurzType PatternTypeOf(TypePattern pattern) => patterns.TryGetValue(pattern, out var t) ? t : throw Missing("pattern", pattern.Line);
@@ -648,6 +669,19 @@ public sealed class SemanticModel
     internal void RecordHeldCopy(Expression expression) => heldCopies.Add(expression);
 
     internal void RecordCopied(Expression expression) => copied.Add(expression);
+
+    internal void RecordMove(Expression value, VariableSymbol? variable)
+    {
+        moves.Add(value);
+        if (variable is not null)
+        {
+            movedVariables.Add(variable);
+            if (variable.Kind == VariableKind.Loop && DeclaringNode(variable) is ForInStatement loop)
+            {
+                takingLoops.Add(loop);
+            }
+        }
+    }
 
     internal void RecordPattern(TypePattern pattern, KurzType type) => patterns[pattern] = type;
 

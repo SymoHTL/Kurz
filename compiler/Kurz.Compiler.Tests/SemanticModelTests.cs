@@ -196,6 +196,22 @@ public sealed class SemanticModelTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_move_records_its_argument_its_variable_and_a_loop_that_takes_its_list()
+    {
+        // U12: each argument after `move` that the check passed, the variable it names, whose place the code generator empties, and a loop
+        // whose body moves its variable, which takes its list (the owner, 2026-11-15, #519, comment 6897778812, Q1 (b)); an argument
+        // without the word, its variable and a loop whose body moves nothing are none, and `move` of a new value names no variable
+        var (tree, model) = Clean("class Cart(mut int Items)\n\nvoid Take(move Cart c) {\n    print(c.Items)\n}\n\nvoid Show(Cart c) {\n    print(c.Items)\n}\n\ncart = Cart(1)\nother = Cart(4)\nShow(other)\nTake(move cart)\nTake(move Cart(5))\nfor k in [Cart(2)] {\n    Take(move k)\n}\n\nfor j in [Cart(3)] {\n    Show(j)\n}\n");
+        var calls = new List<CallExpression>();
+        Nodes.Collect(tree, calls);
+        var arguments = calls.Where(c => c.Callee is NameExpression { Name: "Take" or "Show" }).Select(c => c.Arguments[0].Value).ToList();
+        Assert.Equal([false, true, true, true, false], arguments.Select(model.IsMove));
+        Assert.Equal(["cart", "k"], model.MovedVariables.Select(v => v.Name).Order());
+        var loops = tree.Statements.OfType<ForInStatement>().ToList();
+        Assert.Equal([true, false], loops.Select(model.TakesItsList));
+    }
+
+    [Fact]
     public void The_copy_of_a_body_that_reads_its_type_keeps_the_word_before_an_argument()
     {
         // U12 with T33: the copy of a body that reads its type, made for its type arguments, carries each argument's word (SyntaxCopy), so

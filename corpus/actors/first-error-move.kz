@@ -1,0 +1,17 @@
+// expect: error move-reachable at 14
+// rules: U12, U16
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Take(move Cart c, mut int n) {
+        n = c.Items
+    }
+}
+
+void Give(Shop to, Cart cart) {
+    mut n = 0
+    send to.Take(move cart, mut n)
+}
+
+Give(spawn Shop(), Cart(1))

@@ -119,8 +119,7 @@ public sealed partial class Checker
     /// deep copy wherever it is written, a plain call among them, as Rust's <c>.clone()</c> stands anywhere (the owner, 2026-11-15, #519,
     /// comment 6896192351, Q6, "Rust: deep copy anywhere"), recorded for the code generator, unless the value reaches what the build
     /// does not copy (<see cref="CrossingOf"/>), a function value and an interface's value among them, which no word makes cross, which is
-    /// <c>not supported</c>; and <c>move</c> is <c>not supported</c>, since the build
-    /// makes no check of the paths it ends (section 6); whether it reported one.
+    /// <c>not supported</c>; then <c>move</c> and the regions the call merges (<see cref="PlainCallMoves"/>); whether it reported one.
     /// </summary>
     private bool PlainCallWords(CallExpression c)
     {
@@ -131,12 +130,6 @@ public sealed partial class Checker
 
         foreach (var a in c.Arguments)
         {
-            if (a.Word == ArgumentWord.Move)
-            {
-                NotSupported(a.Line, "`move` before an argument, whose check of the paths it ends (section 6) the build does not make (U12)");
-                return true;
-            }
-
             if (a.Word == ArgumentWord.Copy)
             {
                 var (kind, why, limit) = CrossingOf(model.TypeOf(a.Value).Type);
@@ -148,6 +141,17 @@ public sealed partial class Checker
 
                 model.RecordCopied(a.Value);
             }
+        }
+
+        if (model.TryCallOf(c) is { } info)
+        {
+            return PlainCallMoves(c, info, $"`{CalleeText(c.Callee)}`");
+        }
+
+        if (c.Arguments.FirstOrDefault(a => a.Word == ArgumentWord.Move) is { } moved)
+        {
+            Report(ErrorIds.MoveAtCall, moved.Line, $"`move` stands before an argument of `{CalleeText(c.Callee)}`, whose parameter is not written `move` (U12)");
+            return true;
         }
 
         return false;
@@ -174,6 +178,7 @@ public sealed partial class Checker
                     {
                         variable.Read = true;
                         model.RecordName(n, variable);
+                        UseOfMoved(n, variable, n.Line); // U12: a call of a function value is a use of it
                         var value = Narrowed(n, new Typed(variable.Type)); // N3: a nullable C function known not null (R17)
                         model.RecordType(n, value);
                         return CallValue(value.Type, c);

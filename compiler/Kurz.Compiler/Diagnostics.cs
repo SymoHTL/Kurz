@@ -181,6 +181,9 @@ public static class ErrorIds
     public const string ActorFieldPublic = "actor-field-public";
     public const string MutInMessage = "mut-in-message";
     public const string SendNeedsWord = "send-needs-word";
+    public const string UsedAfterMove = "used-after-move";
+    public const string MoveReachable = "move-reachable";
+    public const string MoveAtCall = "move-at-call";
 
     /// <summary>L1 names this id in its rule and keeps it out of the table, which lists the ids cases expect: no corpus file can be a file that is not UTF-8.</summary>
     public const string InvalidSource = "invalid-source";

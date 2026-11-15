@@ -18,6 +18,11 @@ internal sealed class LoopExits
 
     public List<ImmutableHashSet<NullPath>> Continues { get; } = [];
 
+    /// <summary>U12: the moves at each <c>break</c> and <c>continue</c> of <see cref="Breaks"/> and <see cref="Continues"/>, in their order.</summary>
+    public List<MoveState> BreakMoves { get; } = [];
+
+    public List<MoveState> ContinueMoves { get; } = [];
+
     /// <summary>T33: a loop over <c>T.Fields</c>, unrolled into a pass for each field, whose <c>break</c> and <c>continue</c> are <c>not supported</c>.</summary>
     public bool Unrolled { get; init; }
 }
@@ -301,15 +306,20 @@ public sealed partial class Checker
     /// own that can be reached, as the end point of C#'s <c>while (true)</c> is reached only through one (F3), and the same constant decides
     /// both; the body of one whose condition is the constant <c>false</c> is never reached, as in C#.
     /// </summary>
-    private bool CheckLoop(Expression? condition, Block body)
+    private bool CheckLoop(Expression? condition, Block body, Action? round = null)
     {
         var head = frame.Known;
+        var before = frame.Moves; // U12: a round starts with what the rounds before it may have moved, which a read meets as moved in an earlier round
+        var headMoves = before;
         while (true)
         {
             var variables = declared.Count;
             frame.Known = head;
+            frame.Moves = headMoves;
+            round?.Invoke();
             Push();
             var tested = head;
+            var testedMoves = frame.Moves;
             var (whenTrue, whenFalse) = (ImmutableHashSet<NullPath>.Empty, ImmutableHashSet<NullPath>.Empty);
             bool? constant = null;
             if (condition is not null)
@@ -318,6 +328,7 @@ public sealed partial class Checker
                 CheckCondition(condition);
                 constant = ConstantCondition(condition);
                 tested = frame.Known; // what the condition's `mut` arguments changed, while the head stays what a round comes back to
+                testedMoves = frame.Moves;
                 (whenTrue, whenFalse) = ConditionTests(condition, calls);
             }
 
@@ -332,24 +343,31 @@ public sealed partial class Checker
             frame.LoopDepth--;
             frame.Loops.RemoveAt(frame.Loops.Count - 1);
             var rounds = exits.Continues.ToList();
+            var movesRounds = exits.ContinueMoves.ToList();
             if (flow == Flow.Completes && constant != false)
             {
                 rounds.Add(frame.Known);
+                movesRounds.Add(frame.Moves);
             }
 
             var next = head.Intersect(Join(rounds, head));
-            if (next.Count == head.Count)
+            var fresh = declared.Skip(variables).ToList(); // a variable declared in the body is new each round
+            var nextMoves = headMoves.Union(MoveState.Join(movesRounds, headMoves).Without(fresh).Rounds(before, earlier: true));
+            if (next.Count == head.Count && nextMoves.Same(headMoves))
             {
                 Pop(commit: true);
                 var forever = constant == true;
                 var leaves = forever ? exits.Breaks : exits.Breaks.Prepend(tested.Union(whenFalse));
                 frame.Known = Join(leaves, tested);
+                var movesLeaving = forever ? exits.BreakMoves : exits.BreakMoves.Prepend(testedMoves);
+                frame.Moves = MoveState.Join(movesLeaving, testedMoves).Without(fresh).Rounds(before, earlier: false);
                 return !forever || exits.Breaks.Count > 0;
             }
 
             Pop(commit: false);
             declared.RemoveRange(variables, declared.Count - variables); // the variables of a reading that does not stand
             head = next;
+            headMoves = nextMoves;
         }
     }
 

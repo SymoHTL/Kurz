@@ -487,6 +487,7 @@ public sealed partial class Checker
         {
             variable.Read = true;
             model.RecordName(n, variable);
+            UseOfMoved(n, variable, n.Line); // U12
             if (ReferenceEquals(variable, model.Arguments))
             {
                 model.RecordArgumentsRead(n.Line); // S13
@@ -1818,6 +1819,16 @@ public sealed partial class Checker
             parameterTypes.AddRange(l.Parameters.Select(p => failed || p.Type is null ? Types.Error : Resolve(p.Type)));
         }
 
+        // U12: a parameter whose type is not written takes `move` from the function type the lambda is given for, one whose type is
+        // written takes the word it is written with, and one written `move` where that type has none is `type-mismatch` (section 6, the
+        // owner, 2026-11-05, issue 156, comment 6657251688, Q4)
+        var moves = l.Parameters.Select((p, i) => p.Move || (p.Type is null && (expected?.MovesAt(i) ?? false))).ToList();
+        foreach (var (p, i) in l.Parameters.Select((p, i) => (p, i)).Where(x => x.p.Move && expected is not null && !expected.MovesAt(x.i)))
+        {
+            Report(ErrorIds.TypeMismatch, p.Line, $"the parameter `{p.Name}` is written `move` where `{expected}` passes it without the word (U12, F11)");
+            failed = true;
+        }
+
         var outer = frame;
         frame = new Frame
         {
@@ -1829,11 +1840,12 @@ public sealed partial class Checker
             TypeParameters = outer.TypeParameters,
             Reserved = outer.Reserved,
             Known = Unchangeable(outer.Known), // N3 with F15: the lambda takes the values its variables have where it is made, and what was known of them; N9: not of a path a call can change before the lambda runs
+            Moves = MoveState.Empty.With(moved: outer.Moves.Moved), // U12: what was moved where it is made; what it captures is outside its body
         };
         var parameters = new List<VariableSymbol>();
-        foreach (var (p, type) in l.Parameters.Zip(parameterTypes))
+        foreach (var (p, type, move) in l.Parameters.Zip(parameterTypes, moves))
         {
-            parameters.Add(DeclareParameter(p.Name, type, p.Mut, p.Line, p));
+            parameters.Add(DeclareParameter(p.Name, type, p.Mut, p.Line, p, move));
         }
 
         KurzType result;
@@ -1895,7 +1907,7 @@ public sealed partial class Checker
             return Typed.Error;
         }
 
-        var lambdaType = new FunctionType(parameterTypes, result);
+        var lambdaType = new FunctionType(parameterTypes, result, moves.Contains(true) ? moves : null);
         model.RecordLambda(l, new LambdaInfo(parameters, lambda.Captures.ToList(), lambdaType)); // the symbols declared here: a reader of the model never runs while the checker does
         return new Typed(lambdaType);
     }

@@ -289,6 +289,11 @@ public sealed partial class Checker
         {
             var p = listed[i];
             var type = p.Type is null ? Types.Error : Resolve(p.Type);
+            if (p.Move)
+            {
+                NotSupported(p.Line, "`move` before a field of a primary constructor, which section 6 writes before a parameter (U12)");
+            }
+
             if (p.Type is null)
             {
                 Report(ErrorIds.Syntax, p.Line, $"the field `{p.Name}` of a class names its type (K1)");
@@ -1076,7 +1081,7 @@ public sealed partial class Checker
                 }
                 foreach (var (p, node) in method.Parameters.Zip(d.Parameters))
                 {
-                    DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node);
+                    DeclareParameter(p.Name, p.Type, p.Mut, p.Line, node, p.Move);
                 }
 
                 if (d.ExpressionBody is not null)
@@ -1413,6 +1418,8 @@ public sealed partial class Checker
         {
             Assigned(new NullPath(receiver, field.Name), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
+
+        Merge([Outside, RegionOf(a.Value)]); // U12: a value stored in a field of `this` joins the region outside the function
     }
 
     // ---- static members ------------------------------------------------------------------------------
@@ -1896,6 +1903,8 @@ public sealed partial class Checker
         {
             Assigned(PathOf(a.Target), field.Type, value); // N9: a path with no `weak` reference is narrowed by its assignment
         }
+
+        Merge([RegionOf(last.Target), RegionOf(a.Value)]); // U12: the value joins the region of the instance it is stored in
     }
 
     /// <summary>

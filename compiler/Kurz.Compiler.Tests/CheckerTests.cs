@@ -7269,10 +7269,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<string, Cell> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<string, Cell>())\nprint(x)\n")); // a map's values
         Assert.Equal([(ErrorIds.SendNeedsWord, 11)], Errors("class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, int | Cell c) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1))\nprint(x)\n")); // a union's cases
 
-        // U16 after `send-needs-word`: the build's `not supported` of `move`, where `move-reachable` stands in the language, and
-        // `mut-in-message`, the argument written first first (the owner, 2026-11-15, issue 519, comment 6891937666, item 4)
+        // U16 after `send-needs-word`: `move`, whose check passes for a variable of the code, and `mut-in-message`, the argument written
+        // first first (the owner, 2026-11-15, issue 519, comment 6891937666, item 4; `move-reachable` against it,
+        // Move_and_mut_in_message_are_read_by_argument_order_after_send_needs_word)
         const string Take = "class Box(mut int N)\n\nactor A {\n    pub void Take(Box bx, mut int n) {\n        n = n + bx.N\n    }\n\n    pub void Give(mut int n, Box bx) {\n        n = n + bx.N\n    }\n}\n\na = spawn A()\nmut x = 1\nb = Box(1)\n";
-        NotSupportedAt(16, "U12", Take + "send a.Take(move b, mut x)\nprint(x)\n");
+        Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Take(move b, mut x)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, move b)\nprint(x)\n"));
         Assert.Equal([(ErrorIds.SendNeedsWord, 17)], Errors(Take + "send a.Give(mut x,\n    b)\nprint(x)\n")); // `send-needs-word` before an earlier argument's `mut-in-message`
         Assert.Equal([(ErrorIds.MutInMessage, 16)], Errors(Take + "send a.Give(mut x, copy b)\nprint(x)\n"));
@@ -7285,6 +7286,99 @@ public sealed class CheckerTests
         // A declaration that breaks two rules: the error of the word read first, `pub` before `static` (the owner, 2026-11-14, #519, comment
         // 6884160133, item 7)
         Assert.Equal([(ErrorIds.ActorFieldPublic, 2)], Errors("actor A {\n    pub static mut int n = 0\n}\n"));
+    }
+
+    private const string MoveShop = "class Cart(mut int Items)\n\nclass Item(mut int N)\n\nclass Big(int Size) : Item\n\ndata Pair(Cart A, int K)\n\nactor Shop {\n    pub void Add(Cart c) {\n        print(c.Items)\n    }\n\n    pub void Two(Cart c, int n) {\n        print(c.Items + n)\n    }\n\n    pub void Name(string t) {\n        print(t)\n    }\n\n    pub void AddItem(Item i) {\n        print(i.N)\n    }\n\n    pub void AddPair(Pair p) {\n        print(p.K)\n    }\n\n    pub void Keep(move Cart c) {\n        print(c.Items)\n    }\n\n    pub void Count(move int k, mut int n) {\n        n = n + k\n    }\n\n    pub void TakeMut(Cart c, mut int n) {\n        n = n + c.Items\n    }\n\n    pub void GiveMut(mut int n, Cart c) {\n        n = n + c.Items\n    }\n}\n\nvoid Take(move Cart c) {\n    print(c.Items)\n}\n\nvoid Show(Cart c) {\n    print(c.Items)\n}\n\nvoid Keep(mut List<Cart> into, Cart k) {\n    into.Add(k)\n}\n\nshop = spawn Shop()\n";
+    [Fact]
+    public void A_use_of_what_a_move_ended_is_used_after_move_at_the_use()
+    {
+        // U12, section 6: a read of a variable a `move` ended, on any path, is `used-after-move` at the read (the owner, 2026-11-15, #519,
+        // comment 6896192351, Q1), a call of a lambda that captured it and a capture after it among them; an assignment makes the variable
+        // live again; a `move` in a loop that does not assign its variable again before the round ends is one at that `move`, read in an
+        // earlier round, and a `break` after it leaves the loop; an argument after a `move` in the same call reads after it (D11)
+        // (comment 6897444564, the points taken as following from the record)
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nprint(cart.Items)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "cart = Cart(1)\nif args.Count > 0 {\n    shop.Add(move cart)\n}\nprint(cart.Items)\n"));
+        Clean(MoveShop + "mut cart = Cart(1)\nif args.Count > 0 {\n    shop.Add(move cart)\n    cart = Cart(2)\n}\nprint(cart.Items)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nfor i in 0..<2 {\n    shop.Add(move cart)\n}\n"));
+        Clean(MoveShop + "mut cart = Cart(1)\nfor i in 0..<2 {\n    shop.Add(move cart)\n    cart = Cart(i)\n}\nprint(cart.Items)\n");
+        Clean(MoveShop + "cart = Cart(1)\nwhile true {\n    shop.Add(move cart)\n    break\n}\n");
+        Clean(MoveShop + "mut cart = Cart(1)\nshop.Add(move cart)\ncart = Cart(2)\nprint(cart.Items)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Two(move cart,\n    cart.Items)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "cart = Cart(1)\nf = () => cart.Items\nshop.Add(move cart)\nprint(f())\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "cart = Cart(1)\nshop.Add(move cart)\nf = () => cart.Items\nprint(f())\n"));
+    }
+
+    [Fact]
+    public void A_move_ends_every_variable_its_region_reaches()
+    {
+        // U12, section 6: a `move` ends every path into the value it sends, by regions as Swift's SE-0414 keeps them: a call merges the regions
+        // of its arguments, written `mut` or not, and of what it is called on, a field's read is in its value's region and `move pair.A` ends
+        // `pair` whole, a binding of `match` joins its subject's, one of `else` the call's, and `with` joins both (comment 6897444564); a value
+        // that crosses with no word joins no region, so that `move` before it ends the variable it names alone (comment 6897778812, Q2 (a))
+        Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "cart = Cart(1)\nmut carts = [Cart(2)]\ncarts.Add(cart)\nshop.Add(move cart)\nprint(carts.Count)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "mut carts = [Cart(1)]\nkept = Cart(2)\nKeep(mut carts, kept)\nshop.Add(move kept)\nprint(carts.Count)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nfirst = pair.A\nshop.AddPair(move pair)\nprint(first.Items)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nshop.Add(move pair.A)\nprint(pair.K)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 75)], Errors(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nother = Cart(3)\ngot = Find(other) else {\n    Item i => {\n        shop.AddItem(move i)\n        Cart(0)\n    }\n}\nprint(got.Items)\nprint(other.Items)\n"));
+        Clean(MoveShop + "Cart | Item Find(Cart c) {\n    if c.Items > 1 {\n        return Item(c.Items)\n    }\n    return c\n}\n\nother = Cart(3)\ngot = Find(other) else {\n    Item i => {\n        shop.AddItem(move i)\n        Cart(0)\n    }\n}\nprint(got.Items)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 65)], Errors(MoveShop + "Item it = Big(1, 2)\nmatch it {\n    Big b => shop.AddItem(move b)\n    Item x => print(x.N)\n}\nprint(it.N)\n"));
+        Assert.Equal([(ErrorIds.UsedAfterMove, 63)], Errors(MoveShop + "pair = Pair(Cart(1), 2)\nother = pair with { K = 3 }\nshop.AddPair(move other)\nprint(pair.K)\n"));
+        Clean(MoveShop + "cart = Cart(1)\nlabel = \"a\"\ncount = cart.Items\nshop.Name(move label)\nshop.Add(move cart)\nprint(count)\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 62)], Errors(MoveShop + "label = \"a\"\nshop.Name(move label)\nprint(label)\n"));
+    }
+
+    [Fact]
+    public void A_loop_whose_body_moves_its_variable_takes_its_list()
+    {
+        // U12: a loop whose body moves its variable takes its list, which is dead after the loop, and a list held outside the function is
+        // `move-reachable` (the owner, 2026-11-15, #519, comment 6897778812, Q1 (b), "Rust: loop takes list")
+        Clean(MoveShop + "carts = [Cart(1), Cart(2)]\nfor k in carts {\n    shop.Add(move k)\n}\n");
+        Assert.Equal([(ErrorIds.UsedAfterMove, 64)], Errors(MoveShop + "carts = [Cart(1), Cart(2)]\nfor k in carts {\n    shop.Add(move k)\n}\nprint(carts.Count)\n"));
+        Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "void Send(Shop to, List<Cart> carts) {\n    for k in carts {\n        to.Add(move k)\n    }\n}\n\nSend(shop, [Cart(1)])\n"));
+    }
+
+    [Fact]
+    public void A_move_of_what_the_region_outside_the_function_reaches_is_move_reachable()
+    {
+        // U12, section 6: a parameter not written `move`, `this` with its fields, a captured variable and a static form the region outside the
+        // function, whose `move` is `move-reachable`, a value that crosses with no word among them (comment 6897778812, Q2 (a)); a parameter
+        // written `move` starts a region of its own (comment 6897444564)
+        Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Give(Cart p) {\n    Take(move p)\n}\n\nGive(Cart(1))\nsend shop.Name(\"x\")\n"));
+        Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "void Say(Shop to, string t) {\n    to.Name(move t)\n}\n\nSay(shop, \"a\")\n"));
+        Assert.Equal([(ErrorIds.MoveReachable, 61)], Errors(MoveShop + "cart = Cart(1)\ngive = () => shop.Add(move cart)\ngive()\n"));
+        Clean(MoveShop + "void Pass(Shop to, move Cart c) {\n    to.Add(move c)\n}\n\nPass(shop, move Cart(1))\n");
+    }
+
+    [Fact]
+    public void A_parameter_written_move_takes_move_or_copy_at_the_call()
+    {
+        // U12, section 6: an argument of a parameter written `move` is written `move`, or `copy`, whose copy is new; no word at a plain call is
+        // `move-at-call` and at a message `send-needs-word` (the owner, 2026-11-15, #519, comment 6897778812, Q3 (a), "Swift/Rust: copy
+        // fits"); `move` before a parameter not written `move` at a plain call is `move-at-call`, before what its caller holds too, since the
+        // call's word is checked first (the reading of comment 6668638888); a lambda's parameter whose type is not written takes `move` from the
+        // function type it is given for, one whose type is written without it is its caller's, and one written `move` where that type has
+        // none is `type-mismatch` (2026-11-05, Q4)
+        Clean(MoveShop + "cart = Cart(1)\nTake(copy cart)\nshop.Keep(copy cart)\nTake(move cart)\n");
+        Assert.Equal([(ErrorIds.MoveAtCall, 61)], Errors(MoveShop + "cart = Cart(1)\nTake(cart)\nsend shop.Name(\"x\")\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 61)], Errors(MoveShop + "cart = Cart(1)\nshop.Keep(cart)\n"));
+        Assert.Equal([(ErrorIds.MoveAtCall, 61)], Errors(MoveShop + "cart = Cart(1)\nShow(move cart)\nsend shop.Name(\"x\")\n"));
+        Assert.Equal([(ErrorIds.MoveAtCall, 61)], Errors(MoveShop + "void Give(Cart p) {\n    Show(move p)\n}\n\nGive(Cart(1))\nsend shop.Name(\"x\")\n"));
+        Clean(MoveShop + "void Run((move Cart) => void f) {\n    f(move Cart(1))\n}\n\nRun(k => shop.Add(move k))\n");
+        Assert.Equal([(ErrorIds.MoveReachable, 64)], Errors(MoveShop + "void Run((move Cart) => void f) {\n    f(move Cart(1))\n}\n\nRun((Cart k) => shop.Add(move k))\n"));
+        Assert.Equal([(ErrorIds.TypeMismatch, 64)], Errors(MoveShop + "void Plain((Cart) => void f) {\n    f(Cart(1))\n}\n\nPlain((move Cart k) => print(k.Items))\nsend shop.Name(\"x\")\n"));
+    }
+
+    [Fact]
+    public void Move_and_mut_in_message_are_read_by_argument_order_after_send_needs_word()
+    {
+        // U16: a message's stage of the arguments after `send-needs-word`, by argument order: `move-reachable` and `move-at-call` against
+        // `mut-in-message` (comment 6897778812, U16's order kept), and `send-needs-word` of a later argument before an earlier one's
+        // `mut-in-message`
+        Assert.Equal([(ErrorIds.MoveReachable, 62)], Errors(MoveShop + "void Give(Shop to, Cart p) {\n    mut x = 1\n    send to.TakeMut(move p, mut x)\n    print(x)\n}\n\nGive(shop, Cart(1))\n"));
+        Assert.Equal([(ErrorIds.MutInMessage, 62)], Errors(MoveShop + "void Give(Shop to, Cart p) {\n    mut x = 1\n    send to.GiveMut(mut x, move p)\n    print(x)\n}\n\nGive(shop, Cart(1))\n"));
+        Assert.Equal([(ErrorIds.MoveAtCall, 61)], Errors(MoveShop + "mut x = 1\nsend shop.Count(1, mut x)\nprint(x)\n"));
+        Assert.Equal([(ErrorIds.SendNeedsWord, 62)], Errors(MoveShop + "mut x = 1\nsend shop.GiveMut(mut x,\n    Cart(1))\nprint(x)\n"));
     }
 
     [Theory]
@@ -7423,12 +7517,10 @@ public sealed class CheckerTests
     [Fact]
     public void What_this_build_does_not_make_cross_is_not_supported()
     {
-        // U12: `move` before an argument, whose region check (section 6) the build does not make, at a plain call; a map whose keys reach a
-        // class instance, whose hash a copy would keep; `copy` at a plain call of a function value and of an interface's value, which no
+        // U12: a map whose keys reach a class instance, whose hash a copy would keep; `copy` at a plain call of a function value and of an interface's value, which no
         // word makes cross; an instance of a class of `std/`, whose classes the walk of the file's classes does not hold
         // (knowledge/a-class-of-std-is-no-class-of-the-file.md)
         NotSupportedAt(10, "U12", "class Box(int N)\n\nactor A {\n    pub void Take(Map<Box, int> m) {\n        print(m.Count)\n    }\n}\n\na = spawn A()\nsend a.Take(Map<Box, int>())\n");
-        NotSupportedAt(8, "U12", "class Box(mut int N)\n\nvoid Show(Box x) {\n    print(x.N)\n}\n\nb = Box(1)\nShow(move b)\n");
         NotSupportedAt(5, "U12", "void Call(() => int f) {\n    print(f())\n}\n\nCall(copy () => 1)\n");
         NotSupportedAt(10, "U12", "interface I {\n}\n\nclass Box(int N) : I\n\nvoid Keep(I x) {\n}\n\nI y = Box(1)\nKeep(copy y)\n");
         var (diagnostics, _) = CheckSeeingStd("actor A {\n    pub void Take(HttpHeaders h) {\n        print(h.Get(\"a\") ?? \"\")\n    }\n}\n\na = spawn A()\nsend a.Take(HttpHeaders())\n");

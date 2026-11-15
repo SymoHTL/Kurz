@@ -1,0 +1,21 @@
+// expect: error move-reachable at 18
+// rules: U12
+
+class Cart(mut int Items)
+class Basket(mut List<Cart> Carts)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+void Fill(Basket basket, Shop to) {
+    mut carts = [Cart(1)]
+    c = Cart(2)
+    carts.Add(c)
+    basket.Carts = carts
+    to.Add(move c)
+}
+
+Fill(Basket([]), spawn Shop())

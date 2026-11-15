@@ -64,6 +64,11 @@ public sealed partial class Checker
             foreach (var p in k.Declaration.Parameters)
             {
                 var type = p.Type is null ? Types.Error : Resolve(p.Type);
+                if (p.Move)
+                {
+                    NotSupported(p.Line, "`move` before a parameter of a constructor (U12, K14)");
+                }
+
                 if (p.Type is null)
                 {
                     Report(ErrorIds.Syntax, p.Line, $"the parameter `{p.Name}` of a constructor needs a type (F1)");

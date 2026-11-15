@@ -1,0 +1,18 @@
+// expect: error used-after-move at 15
+// rules: U12
+
+class Line(mut int Count)
+class Cart(Line First)
+
+void Take(move Cart c) {
+    print(c.First.Count)
+}
+
+void Run() {
+    cart = Cart(Line(1))
+    first = cart.First
+    Take(move cart)
+    print(first.Count)
+}
+
+Run()

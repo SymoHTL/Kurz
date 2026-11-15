@@ -1,0 +1,18 @@
+// expect: error move-reachable at 14
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        print(c.Items)
+    }
+}
+
+void Send(Shop to, List<Cart> carts) {
+    for c in carts {
+        to.Add(move c)
+    }
+}
+
+Send(spawn Shop(), [Cart(1)])

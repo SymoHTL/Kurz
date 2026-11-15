@@ -1,0 +1,18 @@
+// expect: error used-after-move at 15
+// rules: U12
+
+class Cart(mut int Items)
+
+void Take(move Cart c) {
+    print(c.Items)
+}
+
+void Maybe(bool give) {
+    c = Cart(1)
+    if give {
+        Take(move c)
+    }
+    print(c.Items)
+}
+
+Maybe(true)

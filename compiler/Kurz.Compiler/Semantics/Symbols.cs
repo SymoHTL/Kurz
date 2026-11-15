@@ -37,6 +37,9 @@ public sealed class VariableSymbol(string name, KurzType type, bool mut, Variabl
     public bool Read { get; set; }
 
     public bool Changed { get; set; }
+
+    /// <summary>U12: a parameter written <c>move</c>, the function's to send, which starts a region of its own (section 6).</summary>
+    public bool Move { get; init; }
 }
 
 /// <summary>A type parameter (T19). A limit written on it is <c>not supported</c> and is not read; whether one is written is kept, since only a limit gives a type parameter members.</summary>
@@ -59,7 +62,7 @@ public sealed class TypeParameterSymbol(string name, int line)
 }
 
 /// <summary>A parameter of a function (F1), a lambda (F7) or a primary constructor (D1): the type, the <c>mut</c> marker (M7) and whether a default is written (D11).</summary>
-public sealed record ParameterSymbol(string Name, KurzType Type, bool Mut, bool HasDefault, int Line);
+public sealed record ParameterSymbol(string Name, KurzType Type, bool Mut, bool HasDefault, int Line, bool Move = false);
 
 /// <summary>A function declared in the file (F1 to F5), a declaration of a block of C functions (R16), or a built-in one.</summary>
 public sealed class FunctionSymbol(string name, FunctionDeclaration? declaration)
