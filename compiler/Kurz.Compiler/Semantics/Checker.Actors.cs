@@ -205,8 +205,9 @@ public sealed partial class Checker
     /// <summary>
     /// A <c>static</c> field of an actor the checker does not read: <c>pub</c> before it is <c>actor-field-public</c>, its word read before
     /// <c>static</c> (U8, U16; the owner, 2026-11-14, #519, comment 6884160133, item 7), and <c>static mut</c>, or a type that is or holds a
-    /// class, is <c>static-state</c>, as K18 reads a class's field (<see cref="ResolveStaticField"/>; U1, assumed: K18's reading of
-    /// <c>static</c> state); whether it has its error, reported here or, for a type that resolves to none, where the type is resolved. A
+    /// class, or an interface's type, a function type or a type parameter, read by its written type (<see cref="MayHoldClass"/>), is
+    /// <c>static-state</c>, as K18 reads a class's field (<see cref="ResolveStaticField"/>; U1, assumed: K18's reading of <c>static</c>
+    /// state); whether it has its error, reported here or, for a type that resolves to none, where the type is resolved. A
     /// field whose type is not written takes its value's (V2), which the checker does not read in an actor it does not read, so that it
     /// stays the build's limit, as an immutable one of another type does.
     /// </summary>
@@ -235,6 +236,12 @@ public sealed partial class Checker
         if (held.Count > 0)
         {
             Report(ErrorIds.StaticState, f.Line, $"the `static` field `{f.Name}` of the actor `{d.Name}` would hold an instance of `{held.First().Name}`, which lives in one actor's heap (U1, K18)");
+            return true;
+        }
+
+        if (MayHoldClass(type))
+        {
+            Report(ErrorIds.StaticState, f.Line, $"the `static` field `{f.Name}` of the actor `{d.Name}` is of type `{type}`, which may hold a class instance whatever the program puts there: a `static` field is read by its written type (U1, K18)");
             return true;
         }
 
@@ -323,9 +330,9 @@ public sealed partial class Checker
     /// the build's <c>not supported</c> stands first in the stage of the arguments, before <c>mut-in-message</c>: a type that reaches a
     /// mutable class instance, an instance of a class through which something reachable has a <c>mut</c> field, a class derived from it
     /// among them (K6), a weak reference's target too; or one that reaches a function value, whose captures decide it (U12), or an
-    /// interface's type, whose classes no rule of U12 reads (as no rule reads them for a <c>static</c> field, K18), neither of which the
-    /// build reads. A type is read through the items of a list, the keys and values of a map, the cases of a union and the fields of a
-    /// data value and of a class.
+    /// interface's type, which is read by its written type, at a <c>static</c> field by K18 and at a message's argument by U12 (the
+    /// owner, 2026-11-15, issue 519, comment 6891937666), neither of which the build reads. A type is read through the items of a list,
+    /// the keys and values of a map, the cases of a union and the fields of a data value and of a class.
     /// </summary>
     private bool MayNeedWord(KurzType type) => MayNeedWord(type, [], []);
 

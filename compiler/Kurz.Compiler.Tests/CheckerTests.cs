@@ -4309,6 +4309,11 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C(int V) {\n    static mut int Total = 0\n\n    pub void Add() {\n        Total = Total + 1\n    }\n}\n\nC(1).Add()"));
         Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C(int V) {\n    pub static C? None = null\n}\n\nprint(C.None == null)"));
         Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class C(int V)\n\nclass R {\n    pub static List<C> All = []\n}\n\nprint(1)"));
+        // K18 (the owner, 2026-11-15, issue 519, comment 6891937666, "Written type, Rust"): an interface's type and a function type, read
+        // by the field's written type whatever the program puts there, `I` with no class that implements it and a function that captures
+        // nothing; no class's field names a type parameter, since a class takes none in this build (T19)
+        Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nclass C {\n    pub static I? None = null\n}\n\nprint(1)"));
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("class C {\n    pub static () => int One = () => 1\n}\n\nprint(1)"));
         // V9: a `static` field of the name of another field or of a method is `redeclared`
         Assert.Equal([(ErrorIds.Redeclared, 3)], Errors("class C(int V) {\n    pub static int A = 1\n    pub static int A = 2\n}\n\nprint(C.A)"));
         Assert.Equal([(ErrorIds.Redeclared, 2)], Errors("class C(int V) {\n    pub static int V = 1\n}\n\nprint(C.V)"));
@@ -4320,6 +4325,17 @@ public sealed class CheckerTests
         Assert.Equal(["2: the `static` field `Step` takes no value: it has no `=`, and no constructor assigns a `static` field (K14, K18)"], unassigned.Sorted.Select(d => $"{d.Line}: {d.Message}").ToList());
         Assert.All(unassigned.Items, d => Assert.Equal(ErrorIds.FieldUnassigned, d.Id));
     }
+
+    /// <summary>
+    /// K18 (the owner, 2026-11-15, issue 519, comment 6891937666, "Written type, Rust"): a <c>static</c> field whose written type holds an
+    /// interface's type or a function type, through a list's items, a map's values or a data value's fields, is <c>static-state</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("interface I {\n}\n\nclass C {\n    pub static List<I>? Items = null\n}\n\nprint(1)", 5)] // a list's items
+    [InlineData("class C {\n    pub static Map<string, () => int>? Fs = null\n}\n\nprint(1)", 2)] // a map's values
+    [InlineData("interface I {\n}\n\ndata D(I X)\n\nclass C {\n    pub static D? Held = null\n}\n\nprint(1)", 7)] // a data value's fields
+    public void A_static_field_whose_written_type_holds_an_interface_or_a_function_type_is_static_state(string program, int line) =>
+        Assert.Equal([(ErrorIds.StaticState, line)], Errors(program));
 
     [Fact]
     public void The_initial_value_of_a_static_field_reads_any_static_field_and_a_cycle_among_them_is_static_cycle()
@@ -7136,7 +7152,6 @@ public sealed class CheckerTests
     [InlineData(1, "U1", "actor A stack 8mb {\n}\n")]
     [InlineData(1, "U1", "actor A on crash restart {\n}\n")]
     [InlineData(1, "U1, T19", "actor A<T> {\n}\n")]
-    [InlineData(1, "U1, T19", "actor A<T> {\n    static List<T> xs = []\n}\n")]
     [InlineData(1, "U1, T19", "actor Pair<T>(T First) {\n}\n\np = spawn Pair<int>(1)\nprint(p)\n")]
     [InlineData(4, "U1", "interface I {\n}\n\nactor A : I {\n}\n")]
     [InlineData(2, "U1", "actor A {\n    static int X = 1\n}\n")]
@@ -7149,7 +7164,7 @@ public sealed class CheckerTests
         // an interface, which Q26 of comment 6881678834 lets an actor declare and the build does not read; `static` members, which U1 reads
         // as K18 reads a class's and the build does not read; U9: a modifier of a method but `pub`, which Q26 lets a method take as a class's
         // does and the build does not read; `spawn` of an actor with type parameters, with its type arguments (U2, U14), its arguments read
-        // loosely (E1); a `static` field's type that names the actor's type parameter is read in its scope (T19), no `unknown-name`
+        // loosely (E1)
         NotSupportedAt(line, rule, program);
     }
 
@@ -7199,6 +7214,13 @@ public sealed class CheckerTests
         Assert.Equal([(ErrorIds.StaticState, 2)], Errors("actor A {\n    static mut int n = 0\n}\n"));
         Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class Box(int N)\n\nactor A {\n    static Box b = Box(1)\n}\n"));
         Assert.Equal([(ErrorIds.StaticState, 4)], Errors("class Box(int N)\n\nactor A {\n    static List<Box> boxes = []\n}\n"));
+
+        // K18 by its written type (the owner, 2026-11-15, issue 519, comment 6891937666, "Written type, Rust"): an interface's type that no
+        // class implements, a function type, and the actor's type parameter, read in its scope (T19), no `unknown-name`; the language's
+        // error stands in place of the build's `not supported` of a generic actor (E1)
+        Assert.Equal([(ErrorIds.StaticState, 5)], Errors("interface I {\n}\n\nactor A {\n    static I? x = null\n}\n"));
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("actor A {\n    static () => int f = () => 1\n}\n"));
+        Assert.Equal([(ErrorIds.StaticState, 2)], Errors("actor A<T> {\n    static List<T> xs = []\n}\n"));
     }
 
     [Fact]
@@ -7231,8 +7253,10 @@ public sealed class CheckerTests
         NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, List<Cell> cs) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, [Cell(1)])\nprint(x)\n"); // a list's items
         NotSupportedAt(13, "U12", "class Cell(mut int N)\n\ndata Pair(Cell C, int K)\n\nactor A {\n    pub void Take(mut int n, Pair p) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Pair(Cell(1), 2))\nprint(x)\n"); // a data value's fields
         NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<string, Cell> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<string, Cell>())\nprint(x)\n"); // a map's values
+        NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, Map<Cell, int> m) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Map<Cell, int>())\nprint(x)\n"); // a map's keys
         NotSupportedAt(11, "U12", "class Cell(mut int N)\n\nactor A {\n    pub void Take(mut int n, int | Cell c) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Cell(1))\nprint(x)\n"); // a union's cases
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Node(int N, weak Node? Next)\n\nactor A {\n    pub void Take(mut int n, Node d) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Node(1, null))\nprint(x)\n")); // a class that reaches itself, read once
+        Assert.Equal([(ErrorIds.MutInMessage, 13)], Errors("class Box(int N)\n\ndata Tree(Box B, List<Tree> Kids)\n\nactor A {\n    pub void Take(mut int n, Tree t) {\n        n = n + 1\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Tree(Box(1), []))\nprint(x)\n")); // a data value that reaches itself, read once
         Assert.Equal([(ErrorIds.MutInMessage, 11)], Errors("class Box(int N)\n\nactor A {\n    pub void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n\na = spawn A()\nmut x = 1\nsend a.Take(mut x, Box(1))\nprint(x)\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 6)], Errors("class Box(int N)\n\nactor A {\n    pub void Go() {\n        mut x = 1\n        send Take(mut x, Box(1))\n        print(x)\n    }\n\n    void Take(mut int n, Box b) {\n        n = n + b.N\n    }\n}\n"));
         Assert.Equal([(ErrorIds.MutInMessage, 12)], Errors("class Box(int N)\n\nactor A {\n    pub Box Bump(mut int n) {\n        n = n + 1\n        return Box(n)\n    }\n}\n\na = spawn A()\nmut x = 1\nb = a.Bump(mut x)\nprint(b.N)\nprint(x)\n")); // the result's crossing, of U16's stage of the result, after it

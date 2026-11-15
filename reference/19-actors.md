@@ -24,8 +24,10 @@ class's modifiers (K7); it has no base, so that a type after its name that is no
 `syntax`, and so is an actor after a class's `:` *(assumed: that id, which the answer did not give,
 as E4 gives one to a form no rule gives a meaning)*, and it holds no `static` state (§6, the owner,
 2026-11-14, #519, comment 6882624606, Q26, "All six leans (Recommended)"): a `static mut` field of
-an actor, or a `static` field whose type is or holds a class, is `static-state`, as K18 makes a
-class's, since a class instance, mutable or not, lives in one actor's heap (K18), and an immutable
+an actor, or a `static` field whose type is or holds a class, an interface's type, a function type
+or a type parameter, is `static-state`, as K18 makes a class's, by its written type (§4, the owner,
+2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust"), since a class
+instance, mutable or not, lives in one actor's heap (K18), and an immutable
 `static` field of another type is no `static` state in K18's sense and stands as a class's does
 *(assumed: K18's reading of `static` state, which the answer did not name; a class's immutable
 `static` field of such a type is reached from every actor, so that one of an actor shares nothing
@@ -564,10 +566,11 @@ actor Worker {
 
 ### U12 (decided, §6) What crosses
 
-What crosses between actors is a value (a string, a number), a collection or a `data` value where
-every value it reaches crosses, an immutable class instance and an actor's reference; a mutable
-class instance crosses with `copy` or `move`
-alone (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
+What crosses between actors is a value (a string, a number), a collection, a `data` value or an
+immutable class instance where every value it reaches crosses, a function value where every value
+it captures crosses, and an actor's reference; a mutable class instance crosses with `copy` or
+`move` alone, and so does a collection or a `data` value that reaches one, every value it reaches
+crossing or being a mutable class instance (§6, "What may cross between actors"). A message's arguments and its result cross so, and so
 do the arguments of an actor's constructor, which cross as a call's do (§6, the owner,
 2026-11-13, #519, comment 6847932993, Q13). A mutable class instance among a message's arguments
 or a constructor's with neither word is the compile error `send-needs-word`, at its argument
@@ -579,7 +582,20 @@ cross, at its argument, as rustc gives one error, E0277, for a closure as for an
 No word at the argument makes such a function value cross, `copy f` and `move f` among them, the
 fix being in what it captures (§6) *(assumed: Q24's cost, "the fix is in the capture", read for a
 word at the argument, as rustc reads a closure's `Send` from the types of what it captures,
-written `move` or not)*.
+written `move` or not)*. A value of an interface's type is read by its written type, which may hold
+a mutable class instance whatever the program puts there, so that one among a message's arguments
+or a constructor's written with no word is `send-needs-word`, as K18 reads a `static` field's type
+and as rustc finds no auto trait on a trait object but in its bounds (§4, §6, the owner,
+2026-11-15, issue 519, comment 6891937666, item 3, option (a), "Written type, Rust"). No word makes
+such a value cross: it is `send-needs-word` with `copy` or `move` too, as `Box<dyn Trait>` is not
+`Send` in Rust, moved or cloned, unless its type says `+ Send` (§6, the owner, 2026-11-15, issue
+519, comment 6892275110, item 2, option (a), "No, never crosses"), and so is a collection, a `data`
+value or a class instance that reaches one *(assumed: the answer read through what a value reaches,
+as a function value whose captures do not cross is read, as rustc reads `Send` through a struct's
+fields)*. A value of an interface's type given as a message's result is, by its written type, the
+compile error of a mutable class instance given as a call's result, whose id stands open (§6, §14,
+the owner, 2026-11-15, issue 519, comment 6892275110, item 3, option (a), "Same error, by written
+type").
 An immutable class is one through which nothing
 reachable has a `mut` field, and a value crosses where every value it reaches crosses, a
 collection's items and a `data` value's fields among them, as Rust's `Send` is structural
@@ -588,18 +604,30 @@ function value crosses where every value it captures crosses, and a
 mutable class instance given as a call's result, where no word can stand, is a compile error whose
 id stands open (§6, §14, the owner, 2026-11-14, #519, comment 6880404917, Q14, "All eight leans (Recommended)").
 A collection or a `data` value that reaches a mutable class instance is `send-needs-word` at its
-argument with neither word, and crosses with `copy`, a deep copy of all it reaches, or with
-`move`, every path into it ending, `move-reachable` where one cannot *(assumed: that reading of
-§6's `copy` and `move`, carried from a mutable class instance to a value that holds one, where
-rustc reads `Send` through a struct's fields whatever a call writes)*. A collection or a `data`
-value that reaches a function value whose captures do not cross is `send-needs-word` at its
-argument with a word or with none, as that function value is, the deep copy of `copy` and the
-paths `move` ends stopping at a function value it reaches *(assumed: Q24's cost read for a word at
-the argument as for that function value, as rustc reads `Send` through a struct's fields and a
-closure's through its captures)*. `copy` or `move` before a value that crosses with no word, an
-immutable class instance or a number among them, stands and does what it does before a mutable
-class instance, the receiver getting a deep copy or the sender's variable dead after it
-*(assumed: as Rust clones or moves a value that is `Send` already, with no error)*.
+argument with neither word, and crosses with `copy`, a deep copy of all it reaches up to a function
+value or an actor's reference, or with `move`, every path into it ending, `move-reachable` where
+one cannot *(assumed: that reading of §6's `copy` and `move`, carried from a mutable class instance
+to a value that holds one, where rustc reads `Send` through a struct's fields whatever a call
+writes)*. A collection, a `data` value or a class instance that reaches a function value whose
+captures do not cross is `send-needs-word` at its argument with a word or with none, as that
+function value is, the paths `move` ends stopping at a function value it reaches *(assumed: Q24's
+cost read for a word at the argument as for that function value, as rustc reads `Send` through a
+struct's fields and a closure's through its captures)*. A reference that crosses names the same
+actor, so that `==` holds across a crossing (§6, the owner, 2026-11-14, #519, comment 6880404917,
+Q10). The deep copy of `copy` stops at a function value it reaches, which the receiver gets as it
+would with no word, `copy f` of one whose captures cross among them, and at an actor's reference,
+which the receiver gets naming the same actor, as a reference that crosses names it *(assumed: the
+stop at a function value, Q24's cost read for a word at the argument, as rustc reads a closure's
+`Send` through its captures; the stop at an actor's reference, as Rust's clone of a channel's
+`Sender` is another sender to the same channel, `impl<T> Clone for Sender<T>`,
+`library/std/src/sync/mpsc.rs` of Rust 1.100.0, line 646)*. `copy` or `move` before a value that
+crosses with no word, an immutable class instance or a number among them, stands and does what it
+does before a mutable class instance, the receiver getting a deep copy, or the sender's variable
+dead after it and every path into the value ending, `move-reachable` where one cannot, as §6's
+`move` reads of any value it sends *(assumed: as Rust clones or moves a value that is `Send`
+already, the word being no error, and as rustc refuses a move of a borrowed value whatever its type
+(E0505, `MoveBorrow`, `compiler/rustc_borrowck/src/session_diagnostics.rs` of Rust 1.100.0, lines
+318 to 322))*.
 
 Case: [actors/relay.kz](../corpus/actors/relay.kz)
 
@@ -631,9 +659,12 @@ no statement and is `syntax`, as a value on its own is (F5), since nothing can s
 no reference reaches (§6, the same comment, Q21, "All five leans (Recommended)"). What follows
 `spawn` that is no name, its type arguments written or not (U2), and its argument list,
 `spawn Box`, `spawn x.Make()` or `spawn 3`, is `syntax` (E4), as U2's form gives, `spawn Box` of
-a class among them, its form read before its name (U16). After an actor's name, a count of type
-arguments that does not match its type parameters is T19's `syntax`, and type arguments neither
-written nor inferable are `cannot-infer` (T27), each of the stage of the name (U16).
+a class among them, its form read before its name (U16). After an actor's name, its type arguments
+(U2): a count that does not match its type parameters is T19's count, `syntax` (T35), of the
+stage of the name (U16), and type arguments neither written nor inferable are `cannot-infer`
+(T27), said only where every argument reads clean, an argument's own error standing alone, as rustc
+reports no "type annotations needed" once the body has another error (§6, the owner, 2026-11-15,
+issue 519, comment 6892275110, item 1, option (a), "Argument's error only").
 
 Case: [actors/spawn-not-actor.kz](../corpus/actors/spawn-not-actor.kz)
 ```kurz
@@ -698,7 +729,14 @@ the owner, 2026-11-14, #519, comment 6882624606, Q27, "All six leans (Recommende
 stage of its arguments an argument's own error comes first, a `type-mismatch` among them, then
 `send-needs-word` (U12), then `mut-in-message` (U9, U11), as rustc reports a type that is not
 `Send` (E0277) in its type check and its borrow check skips a body with a type error (§6, the
-owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order"). A declaration
+owner, 2026-11-14, #519, comment 6884160133, item 6, option (a), "Rust's order"). `move-reachable`
+of an argument written with `move` (§6, U12) comes after `send-needs-word` too, and between it and
+`mut-in-message` the error of the argument written first comes first, as rustc's borrow check,
+whose errors both are, sorts its errors by their place (§6, the owner, 2026-11-15, issue 519,
+comment 6891937666, item 4, option (a), "Rust: by argument order"). An argument's own error
+stands alone before U14's `cannot-infer` of `spawn`'s type arguments, which is said only where every
+argument reads clean (§6, the owner, 2026-11-15, issue 519, comment 6892275110, item 1, option (a),
+"Argument's error only"). A declaration
 in an actor that breaks two rules, one of them this chapter's, is the error of the word read
 first, so that `pub static mut int n = 0` is `actor-field-public` (U8) and not `static-state`
 (U1), and `static mut Nope x = 0` and `static mut int n = "a"` are `static-state` and not the
