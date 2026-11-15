@@ -122,13 +122,19 @@ public sealed partial class Checker
     /// <summary>
     /// U1, U16: once every type is resolved, the one diagnostic of each actor the checker does not read: the language's error of its
     /// declaration where it has one (<see cref="ActorDeclarationError"/>), else <c>not supported</c> at the first part the build does not
-    /// read (<see cref="UnreadActorPart"/>), so that the build's limit hides no error of the language (E1).
+    /// read (<see cref="UnreadActorPart"/>), so that the build's limit hides no error of the language (E1). Its types are read with its
+    /// type parameters in scope, as a data type's are (<see cref="ResolveData"/>), since T19 declares them for its whole declaration, so
+    /// that one named in a type after its name or in a <c>static</c> field's type is no <c>unknown-name</c>; one that holds a constant
+    /// names no type (T35).
     /// </summary>
     private void RefuseUnreadActors()
     {
         foreach (var d in unreadActors)
         {
-            if (!ActorDeclarationError(d) && UnreadActorPart(d) is { } part)
+            typeContext = [.. d.TypeParameters.Where(p => p.Constant is null).Select(p => new TypeParameterSymbol(p.Name, p.Line) { HasLimit = p.Limit is not null })];
+            var error = ActorDeclarationError(d);
+            typeContext = null;
+            if (!error && UnreadActorPart(d) is { } part)
             {
                 NotSupported(part.Line, part.Construct);
             }
@@ -313,6 +319,45 @@ public sealed partial class Checker
         !Holds(type, t => t is not (PrimitiveType or EnumType or FlagsType or NullType or VoidType or ErrorType or ListType or MapType or UnionType or DataType or ActorType), []);
 
     /// <summary>
+    /// U12, U16: whether the language may say <c>send-needs-word</c> of a message's argument of the type written with no word, so that
+    /// the build's <c>not supported</c> stands first in the stage of the arguments, before <c>mut-in-message</c>: a type that reaches a
+    /// mutable class instance (<see cref="ReachesMutableClass"/>), or one that holds a function value, whose captures decide it (U12)
+    /// and which the build does not read.
+    /// </summary>
+    private bool MayNeedWord(KurzType type) => ReachesMutableClass(type) || Holds(type, t => t is FunctionType, []);
+
+    /// <summary>
+    /// U12: whether a value of the type reaches a mutable class instance, which a message's argument with no word makes
+    /// <c>send-needs-word</c>: an instance of a class through which something reachable has a <c>mut</c> field, each class read through
+    /// the classes a value of its fields' types holds (<see cref="ClassesHeld"/>).
+    /// </summary>
+    private bool ReachesMutableClass(KurzType type)
+    {
+        var reached = new HashSet<ClassSymbol>();
+        ClassesHeld(type, reached, []);
+        var pending = new Queue<ClassSymbol>(reached);
+        while (pending.TryDequeue(out var c))
+        {
+            foreach (var field in c.Fields)
+            {
+                if (field.Mut)
+                {
+                    return true;
+                }
+
+                var held = new HashSet<ClassSymbol>();
+                ClassesHeld(field.Type, held, []);
+                foreach (var next in held.Where(reached.Add))
+                {
+                    pending.Enqueue(next);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// U4, U6: a call through an actor's reference may wait in the top-level statements alone, and <c>send</c> and <c>spawn</c> stand there
     /// and in an actor's methods, never in a lambda, a function, a class's method or a default.
     /// </summary>
@@ -410,13 +455,14 @@ public sealed partial class Checker
 
         if (call.Kind == CallKind.Method && call.Function?.Owner is { IsActor: true } own)
         {
-            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t)) is { } stays)
+            var mut = call.Function.Parameters.FirstOrDefault(p => p.Mut);
+            if (call.Function.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
             {
                 NotSupported(s.Line, $"{Types.A(stays)} in the message `{own.Name}.{call.Function.Name}`, which is no value or actor's reference (U12)");
                 return;
             }
 
-            if (call.Function.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
+            if (mut is not null)
             {
                 Report(ErrorIds.MutInMessage, s.Line, $"`{mut.Name}` of `{own.Name}.{call.Function.Name}` is a `mut` parameter, and a message, as this `send` makes, holds no place of the code that sent it (U9, U11)");
                 return;
@@ -452,10 +498,12 @@ public sealed partial class Checker
     /// U4, U9: a call of an actor's method through its reference: a <c>pub</c> one alone is seen (U9), else <c>not-visible</c>; it
     /// waits for its result, in the top-level statements alone, and is <see cref="CallKind.ActorCall"/>, or <see cref="CallKind.ActorSend"/>
     /// after <c>send</c> (U6). Its arguments cross (U12), then a <c>mut</c> parameter is <c>mut-in-message</c> (U9; Q6 of comment
-    /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads what
-    /// crosses, which the language reads as <c>send-needs-word</c> and this build says <c>not supported</c> to, before a <c>mut</c>
-    /// parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14, #519, comment 6884160133,
-    /// item 6), and its stage of the result follows.
+    /// 6880404917), and then its result crosses where it waits, a <c>send</c> dropping it (U6): U16's stage of the arguments reads a type
+    /// that reaches a mutable class instance, which the language reads as <c>send-needs-word</c> and this build says <c>not supported</c>
+    /// to, before a <c>mut</c> parameter, as rustc reads <c>Send</c> in its type check before its borrow check (the owner, 2026-11-14,
+    /// #519, comment 6884160133, item 6), and a <c>mut</c> parameter before any other type that crosses no actor in this build, an
+    /// immutable class instance among them, which the language lets cross with no word (U12), so that the build's limit hides no error
+    /// of the language (E1); its stage of the result follows.
     /// </summary>
     private Typed CallActor(ActorType type, MemberAccess m, CallExpression c, KurzType? expected)
     {
@@ -497,13 +545,14 @@ public sealed partial class Checker
             return typed;
         }
 
-        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t)) is { } stays)
+        var mut = picked.Parameters.FirstOrDefault(p => p.Mut);
+        if (picked.Parameters.Select(p => p.Type).FirstOrDefault(t => !CrossesActors(t) && (mut is null || MayNeedWord(t))) is { } stays)
         {
             NotSupported(m.Line, $"{Types.A(stays)} in the message `{symbol.Name}.{picked.Name}`, which is no value or actor's reference (U12)");
             return Typed.Error;
         }
 
-        if (picked.Parameters.FirstOrDefault(p => p.Mut) is { } mut)
+        if (mut is not null)
         {
             Report(ErrorIds.MutInMessage, m.Line, $"`{mut.Name}` of `{symbol.Name}.{picked.Name}` is a `mut` parameter, and a message through a reference holds no place of its caller's (U9)");
             return Typed.Error;

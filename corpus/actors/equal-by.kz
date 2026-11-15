@@ -1,0 +1,9 @@
+// expect: error syntax at 4
+// rules: U2
+
+actor Point(int X) equal by X {
+    pub int Get() => X
+}
+
+p = spawn Point(1)
+print(p.Get())

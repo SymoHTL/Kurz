@@ -35,11 +35,16 @@ a head reads the parent's diff again.
   `judgment step`
 - A follow-up already pushed takes main by a merge: "never merge main into the follow-up", which
   this entry read until 2026-11-14, holds no more for it, since a rebase would rewrite what was
-  published. After the merge, compare its tree with main plus the follow-up's diff against the
-  parent's last head: read main's tree into a spare index (`GIT_INDEX_FILE`), apply
-  `git diff <parent's last head> <follow-up's last commit before the merge>` to it with
+  published. After the merge, compare its tree with main plus the follow-up's own diff, from the
+  parent's commit it was built on: read main's tree into a spare index (`GIT_INDEX_FILE`), apply
+  `git diff <parent's last head>...<follow-up's last commit before the merge>` to it with
   `git apply --cached`, write it with `git write-tree` and `git diff` that tree against the merge;
-  take out what differs, and check the trees equal again. `judgment step`
+  take out what differs, and check the trees equal again. The three dots diff from the two
+  commits' merge base, the parent's commit the follow-up was built on: two dots, from the parent's
+  last head, would also hold the reverse of every commit the parent took after the follow-up's
+  base, which main holds through the parent's squash merge, and taking out what differs would
+  take those commits out of the merge. For a follow-up built on the parent's last head the two
+  diffs are the same. `judgment step`
 - Before the push, `git diff origin/main...<follow-up> --stat` lists the follow-up's own files
   alone. `judgment step`
 - Generate the evidence guide again on that tree (`tools/quality_evidence.py`), and judge and run
