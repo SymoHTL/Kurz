@@ -442,7 +442,8 @@ public sealed partial class Checker
 
     /// <summary>
     /// K7, K18: a <c>static</c> field, which exists once for the program and so holds an immutable value: <c>static mut</c>, and a type
-    /// that is or holds a class, are <c>static-state</c>; a field of the name of another field is <c>redeclared</c> (V9). A field
+    /// that is or holds a class or may hold one by its written type (<see cref="JudgeStaticFieldType"/>), are <c>static-state</c>; a
+    /// field of the name of another field is <c>redeclared</c> (V9). A field
     /// without a written type takes the type of its initial value (V2), judged when that value is read (<see cref="CheckStaticFields"/>).
     /// </summary>
     private void ResolveStaticField(ClassSymbol symbol, StaticFieldSymbol s)
@@ -469,8 +470,10 @@ public sealed partial class Checker
 
     /// <summary>
     /// K18: the type of a <c>static</c> field: one that is or holds a class is <c>static-state</c>, since an instance lives in one actor's
-    /// heap; the checker reads a field of a number, a <c>bool</c>, a <c>char</c>, a <c>string</c>, a time or a value of an enum, whose
-    /// constants F12 gives, and a type of another kind is <c>not supported</c>, as an initial value that is no constant is.
+    /// heap, and so is one that is or holds an interface's type, a function type or a type parameter, read by its written type
+    /// (<see cref="MayHoldClass"/>); the checker reads a field of a number, a <c>bool</c>, a <c>char</c>, a <c>string</c>, a time or a
+    /// value of an enum, whose constants F12 gives, and a type of another kind is <c>not supported</c>, as an initial value that is no
+    /// constant is.
     /// </summary>
     private void JudgeStaticFieldType(StaticFieldSymbol s)
     {
@@ -490,12 +493,25 @@ public sealed partial class Checker
             Report(ErrorIds.StaticState, s.Line, $"the `static` field `{s.Name}` would hold an instance of `{held.First().Name}`, which lives in one actor's heap: a `static` field holds an immutable value no actor owns (K18)");
             s.Refused = true;
         }
+        else if (MayHoldClass(s.Type))
+        {
+            Report(ErrorIds.StaticState, s.Line, $"the `static` field `{s.Name}` is of type `{s.Type}`, which may hold a class instance whatever the program puts there: a `static` field is read by its written type (K18)");
+            s.Refused = true;
+        }
         else if (s.Type is not (PrimitiveType or EnumType))
         {
             NotSupported(s.Line, $"a `static` field of type `{s.Type}`: the checker reads one of a number, a `bool`, a `char`, a `string`, a time or a value of an enum, which a constant gives (K18)");
             s.Refused = true;
         }
     }
+
+    /// <summary>
+    /// K18 (the owner, 2026-11-15, issue 519, comment 6891937666, "Written type, Rust"): whether a <c>static</c> field's type is or holds
+    /// an interface's type, a function type or a type parameter, each of which may hold a class instance whatever the program puts there,
+    /// as rustc asks <c>Sync</c> of a <c>static</c>'s written type; read through the items of a list, the keys and values of a map, the
+    /// cases of a union and the fields of a data value, a class being <c>static-state</c> itself.
+    /// </summary>
+    private static bool MayHoldClass(KurzType type) => Holds(type, t => t is InterfaceType or FunctionType or TypeParameterType, []);
 
     /// <summary>
     /// K18, K20, F12: the initial value of each <c>static</c> field, a constant as F12 counts one, in which a <c>static</c> field of any

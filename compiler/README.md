@@ -2288,7 +2288,7 @@ It raises these ids of the table: `type-mismatch`, `narrowing-conversion`, `sign
 
 A program that uses one of these gets `not supported` at the construct's line and no error that
 comes from the construct (E1), but where the construct holds an error of its own, a grant's or
-`raw-required` (the reading on R7, R12 and R16 below), or the language's error of an actor's declaration, a type after its name that is no interface (U1), `equal by` or a constructor in its body (U2), a `pub` field's or property's `actor-field-public` (U8) or a `static` field's `static-state` (U1), the first in the order of its words (U16), or a message's `mut-in-message` (U9, U11) beside a parameter that crosses no actor in this build and reaches no mutable class instance, no function value and no interface's type, through a class's fields and a weak reference's target among them, an immutable class instance among them, which the language lets cross with no word (U12, U16), where a function value's captures, which the build does not read, decide whether the language's error there is `send-needs-word`, and an interface's type is read by no rule of U12, which is then its one diagnostic. What stands inside the construct is still read, with its diagnostics
+`raw-required` (the reading on R7, R12 and R16 below), or the language's error of an actor's declaration, a type after its name that is no interface (U1), `equal by` or a constructor in its body (U2), a `pub` field's or property's `actor-field-public` (U8) or a `static` field's `static-state` (U1), the first in the order of its words (U16), or a message's `mut-in-message` (U9, U11) beside a parameter that crosses no actor in this build and reaches no mutable class instance, no function value and no interface's type, through a class's fields and a weak reference's target among them, an immutable class instance among them, which the language lets cross with no word (U12, U16), that error is then its one diagnostic. Beside a `mut` parameter, a parameter that reaches a mutable class instance, a function value or an interface's type keeps the build's `not supported`, since the language's one diagnostic there, the argument written with no word, is `send-needs-word`, which U16 reads before `mut-in-message`, for a mutable class instance and for an interface's type, read by its written type (U12; the owner, 2026-11-15, issue 519, comment 6891937666), and for a function value whose captures, which the build does not read, do not cross. What stands inside the construct is still read, with its diagnostics
 dropped, so that the variables it uses count as used, but for the operand of `*` and `&` and the
 body of a lambda where a type stands that the checker does not read: these are checked, and an
 error of their own, a name no declaration has among them, is reported beside the line. The list,
@@ -2325,7 +2325,8 @@ that section 12 decides and section 4
 reads as an index loop (C6), a `static` field
 with an initial value that is no constant, which section 4 computes at the field's first read and whose open
 items section 14 holds, or of a type other than a number, a `bool`, a `char`, a `string`, a time or an enum,
-but for one that is or holds a class, which is `static-state` (K18), a method as a value, a property of `void` or
+but for one that is or holds a class, an interface's type, a function type or a type parameter, which is
+`static-state` by its written type (K18), a method as a value, a property of `void` or
 of a type that lists cases beside its success, which section 14 leaves open (K7, O2, O10), a
 property read after `?.` (K7, N5) or after `&`, where the checker reads a field alone (K7, R10), an assignment into a
 `data` value a field of an instance holds, `p.Pos.X = 1`, and a `mut`
