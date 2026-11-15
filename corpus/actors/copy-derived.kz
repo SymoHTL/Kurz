@@ -1,0 +1,24 @@
+// expect: output
+// | Ann's cart: 3
+// | at home: Ann's cart: 2
+// rules: U12
+
+class Cart(mut int Items) {
+    pub virtual string Show() => "a cart: {Items}"
+}
+
+class OwnedCart(string Owner, int Start) : Cart(Start) {
+    pub override string Show() => "{Owner}'s cart: {Items}"
+}
+
+actor Shop {
+    pub void Add(Cart c) {
+        c.Items = c.Items + 1
+        print(c.Show())
+    }
+}
+
+Cart cart = OwnedCart("Ann", 2)
+s = spawn Shop()
+s.Add(copy cart)
+print("at home: {cart.Show()}")

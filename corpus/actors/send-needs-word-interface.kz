@@ -1,0 +1,19 @@
+// expect: error send-needs-word at 19
+// rules: U12
+
+interface Shape {
+    int Area()
+}
+
+class Square(int Side) : Shape {
+    pub int Area() => Side * Side
+}
+
+actor Painter {
+    pub void Paint(Shape s) {
+        print(s.Area())
+    }
+}
+
+p = spawn Painter()
+p.Paint(copy Square(2))

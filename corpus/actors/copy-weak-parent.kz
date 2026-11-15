@@ -1,0 +1,23 @@
+// expect: output
+// | home/docs true
+// rules: U12
+
+class Folder(string Name, List<Folder> Children, mut weak Folder? Parent)
+
+actor Archive {
+    pub string Path(Folder top) {
+        child = top.Children[0]
+        p = child.Parent
+        if p != null {
+            return "{p.Name}/{child.Name} {p == top}"
+        }
+
+        return "lost"
+    }
+}
+
+docs = Folder("docs", List<Folder>(), null)
+home = Folder("home", [docs], null)
+docs.Parent = home
+a = spawn Archive()
+print(a.Path(copy home))

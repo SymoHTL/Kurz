@@ -1,0 +1,23 @@
+// expect: output
+// | Ann 3
+// | true
+// rules: U12
+
+class Order(string Customer, int Items)
+
+actor Shop {
+    mut List<Order> orders = []
+
+    pub void Place(Order o) {
+        orders.Add(o)
+    }
+
+    pub Order First() => orders[0]
+}
+
+order = Order("Ann", 3)
+s = spawn Shop()
+s.Place(order)
+f = s.First()
+print("{f.Customer} {f.Items}")
+print(f == order)

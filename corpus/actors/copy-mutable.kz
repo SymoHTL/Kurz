@@ -1,0 +1,18 @@
+// expect: output
+// | in the shop: 2
+// | at home: 1
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub void Add(Cart c) {
+        c.Items = c.Items + 1
+        print("in the shop: {c.Items}")
+    }
+}
+
+cart = Cart(1)
+s = spawn Shop()
+s.Add(copy cart)
+print("at home: {cart.Items}")

@@ -1,0 +1,21 @@
+// expect: output
+// | 15 15
+// | 5
+// rules: U12
+
+class Account(mut int Balance)
+class Owner(string Name, Account Main, Account Savings)
+
+actor Bank {
+    pub string Deposit(Owner o) {
+        main = o.Main
+        main.Balance = main.Balance + 10
+        return "{o.Main.Balance} {o.Savings.Balance}"
+    }
+}
+
+joint = Account(5)
+ann = Owner("Ann", joint, joint)
+b = spawn Bank()
+print(b.Deposit(copy ann))
+print(joint.Balance)

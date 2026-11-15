@@ -1,0 +1,14 @@
+// expect: error send-needs-word at 14
+// rules: U12
+
+class Tally(mut int Count)
+
+actor Runner {
+    pub void Run(() => int f) {
+        print(f())
+    }
+}
+
+t = Tally(1)
+r = spawn Runner()
+r.Run(() => t.Count)

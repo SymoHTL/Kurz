@@ -1,0 +1,19 @@
+// expect: output
+// | filled: 11
+// | kept: 1
+// | filled: 11
+// | changed: 11
+// rules: U12
+
+class Cart(mut int Items)
+
+void Fill(Cart c) {
+    c.Items = c.Items + 10
+    print("filled: {c.Items}")
+}
+
+cart = Cart(1)
+Fill(copy cart)
+print("kept: {cart.Items}")
+Fill(cart)
+print("changed: {cart.Items}")

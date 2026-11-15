@@ -1,0 +1,12 @@
+// expect: error send-needs-word at 11
+// rules: U12
+
+class Cart(mut int Items)
+
+actor Shop {
+    pub Cart Open() => Cart(0)
+}
+
+s = spawn Shop()
+c = s.Open()
+print(c.Items)
