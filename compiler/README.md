@@ -453,8 +453,10 @@ with it, its base, its limit, the deallocation stack and no guaranteed bytes; `S
 bounds the handler of a fault reads on Linux, the stack's guard page and its closed pages, before
 each switch to a stack and clears them after the switch back, as section 2 has it, and does nothing
 on Windows, whose switch keeps the stack's limit; `StackTrim` gives back the memory of the pages past
-the depth when a stack goes back to the pool, on Linux where the handler opened them, by an `madvise`
-with `MADV_DONTNEED` and an `mprotect` that closes them again, and on Windows where the stack's limit
+the depth when a stack goes back to the pool, on Linux where the handler opened them, by a mapping
+with no access and `MAP_FIXED` over them, which gives their memory back as `madvise` with
+`MADV_DONTNEED` would and which the system joins to the guard page, so that the stack is two mappings
+again (section 6, the owner, 2026-11-13, #519, comment 6855469829, the call assumed there), and on Windows where the stack's limit
 lies past the depth, by a `VirtualFree` that decommits them from the base of the reservation, a
 `VirtualAlloc` that sets the page under the depth as the guard page again and the limit moved to the
 depth (section 6, the owner, 2026-11-13, #519, comment 6853074601, the guard page and the limit
@@ -1902,8 +1904,7 @@ the exit code 1, as a crash outside an actor ends it, on Linux with a trace that
 frame, the first of its stack, and names no `main`, and no actor restarts; a message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
-of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says, a stack
-trimmed once being three on Linux 6.8 (the readings below); a recursion
+of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
 past a message's stack ends the process with `stack-overflow` at its line on Linux, while on Windows
 it ends it as an overflow of the main thread's stack does, with the system's `0xC00000FD` and no line
 of Kurz, the handler of section 2 for an actor's stack not being built there; on 64-bit Arm the
@@ -2110,10 +2111,11 @@ ask about it.
   of a fault reads on Linux, are set in the thread's record before each switch to a stack and cleared
   after the switch back, as section 2 stores the stack's limit. A stack mapped on a thread whose
   handler of a fault the system refused is opened whole and never closed, since no handler would open
-  it. Measured on Linux 6.8: the trim's `madvise` and `mprotect`, the calls of comment 6855469829,
-  leave the closed pages an area of their own beside the guard page's, so that a stack trimmed once
-  is three mappings where section 6 counts two, and about 21,800 such stacks fit under Linux's default
-  limit; a mapping with `MAP_FIXED` and no access over those pages, one call, keeps it two. The chain
+  it. The trim on Linux is one mapping with no access and `MAP_FIXED` over the pages past the depth,
+  since, measured on Linux 6.8 on 2026-11-15, an `madvise` and an `mprotect` leave them an area of
+  their own beside the guard page's, a third mapping for each stack trimmed once, where the mapping
+  joins them to the guard page, and a stack is two mappings fresh, after the handler opened its pages
+  and after each trim *(assumed in section 6)*. The chain
   ID is drawn from a xoshiro256++ generator of the thread, the one `rand`'s `SmallRng` is on a 64-bit
   machine, seeded with 32 bytes of `Random`, the system's randomness that a map's keys take (M9), at
   the thread's first chain, so that a chain costs two steps of the generator and no call to the

@@ -674,10 +674,10 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void A_stack_a_message_took_past_the_depth_is_trimmed_in_the_pool_and_grows_again()
     {
         // section 6, "Bound pool + trim deep", comments 6853074601 and 6855469829: a message's calls past 64 KiB, about a megabyte, open the
-        // closed pages of its stack, which the stack's return to the pool gives back and closes again, so that on Linux the stack is a
-        // closed range of 2 MiB less 64 KiB, joined to its guard page or not, under 64 KiB open for reading and writing; the same calls
-        // then run again on that stack, which on Windows grows through the guard page the trim set again; the counts are Linux's halved
-        // on Windows, whose frames are twice as large (Deep)
+        // closed pages of its stack, which the stack's return to the pool gives back and closes again, so that on Linux the stack is two
+        // mappings again, a closed range of 2 MiB less 64 KiB joined to its guard page, one mapping with no access, under 64 KiB open for
+        // reading and writing; the same calls then run again on that stack, which on Windows grows through the guard page the trim set
+        // again; the counts are Linux's halved on Windows, whose frames are twice as large (Deep)
         var linux = OperatingSystem.IsLinux();
         var depth = OperatingSystem.IsWindows() ? 10000 : 20000;
         var run = BuildAndRun(Trimmed(depth, linux), toolchain.Runtime, "actor-trim");
@@ -696,7 +696,9 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
             return (Low: range[0], High: range[1], Access: parts[1]);
         }).ToList();
         var closed = 2097152 - 65536;
-        Assert.Contains(maps, m => m.Access == "---p" && m.High - m.Low >= closed && m.High - m.Low <= closed + 65536 && maps.Any(o => o.Low == m.High && o.Access == "rw-p"));
+        var page = Environment.SystemPageSize;
+        Assert.Contains(maps, m => m.Access == "---p" && m.High - m.Low >= closed + page && m.High - m.Low <= closed + 65536 && maps.Any(o => o.Low == m.High && o.Access == "rw-p"));
+        Assert.DoesNotContain(maps, m => m.Access == "---p" && m.High - m.Low == closed); // the closed range is no mapping of its own
     }
 
     [Theory]

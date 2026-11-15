@@ -21,7 +21,6 @@ extern "C" {
     byte* getenv(byte* name)
     ulong getauxval(ulong type)
     int mprotect(void* address, long length, int protection)
-    int madvise(void* address, long length, int advice)
     int sigaction(int number, void* action, void* old)
     int sigaltstack(void* stack, void* old)
     ulong pthread_self()
@@ -387,17 +386,18 @@ pub void StackGuard(byte* top, long size) {
 }
 
 // The trim of the stack whose base is `top`, of `size` bytes, as it goes back to the pool: where a
-// message opened its pages past the depth, they are given back to the system (`MADV_DONTNEED` is 4), which
-// gives them again filled with zeros at their next touch, and closed again (design record, section 6, the
-// owner, 2026-11-13, #519, comments 6853074601 and 6855469829), so that the stack keeps 64 KiB of memory;
-// Linux keeps the range closed again an area of its own beside the guard page's, so that a stack trimmed
-// once is three mappings (`compiler/README.md`). Where the system refuses to close them, they stay open
-// and marked, and the next trim tries again.
+// message opened its pages past the depth, a new mapping with no access takes their place (`MAP_FIXED |
+// MAP_PRIVATE | MAP_ANONYMOUS` is 50), which gives their memory back to the system, as `madvise` with
+// `MADV_DONTNEED` would, and closes them again joined to the guard page, so that the stack keeps 64 KiB of
+// memory and is two mappings again (design record, section 6, the owner, 2026-11-13, #519, comments
+// 6853074601 and 6855469829; the call assumed there): after an `madvise` and an `mprotect` Linux keeps
+// the range an area of its own beside the guard page's, a third mapping. Where the system refuses the call,
+// the stack stays marked, and the next trim tries again.
 pub void StackTrim(byte* top, long size) {
     raw {
         if *Ptr<long>(top - 512 + 408) != 0 {
-            madvise(Ptr<void>(top - size), size - 65536, 4)
-            if mprotect(Ptr<void>(top - size), size - 65536, 0) == 0 {
+            void* got = mmap(Ptr<void>(top - size), size - 65536, 0, 50, -1, 0)
+            if long(got) == long(top - size) {
                 *Ptr<long>(top - 512 + 408) = 0
             }
         }
