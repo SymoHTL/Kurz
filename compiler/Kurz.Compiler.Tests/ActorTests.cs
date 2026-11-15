@@ -30,7 +30,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     private static void Ran((int Code, IReadOnlyList<string> Output, string Error) run, int code, IReadOnlyList<string> lines, string error)
     {
-        Assert.Equal(lines, run.Output);
+        // the exit code and the error with the lines, so that a run that ended early says how it ended
+        Assert.True(lines.SequenceEqual(run.Output), $"printed [{string.Join(", ", run.Output)}] where [{string.Join(", ", lines)}] was expected; exit code {run.Code}, error: {run.Error}");
         Assert.Equal((code, error), (run.Code, run.Error));
     }
 
@@ -352,6 +353,8 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 
     // ---- the stacks of actors (design record, section 6, "Own stack"; the owner, 2026-11-15, #519) -------------------------------
 
+    // an actor whose `Down` recurses n deep; a frame of `Down` in a test build (-O0) is 48 bytes on Linux and 96 on Windows, whose calls
+    // keep 32 bytes of home space, and one of the top-level `Top` below 32 and 80 (measured on 2026-11-15 from clang's assembly of each)
     private static string Deep(string name, string clause = "") => $$"""
         actor {{name}}{{clause}} {
             pub long Down(long n) {
@@ -368,14 +371,17 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_message_runs_on_a_stack_of_2_mib_with_a_guard_page_and_the_top_level_code_on_the_threads_own()
     {
-        // section 6, "Own stack", "Keep guard page", "2 MiB + clause": a message's 20000 calls, about a megabyte, run on the actor's
-        // stack on every system; on Linux its 100000, about five, pass the 2 MiB and fault in the guard page below them, the
-        // error line at the call's line and the trace ending at the method, while the same 100000 calls of the top-level code run on the
-        // thread's own stack of 8 MiB (the root actor's code stays there, section 2)
+        // section 6, "Own stack", "Keep guard page", "2 MiB + clause": on Linux a message's 20000 calls, about a megabyte, run on the
+        // actor's stack, and its 100000, about five, pass the 2 MiB and fault in the guard page below them, the error line at the call's
+        // line and the trace ending at the method, while 100000 calls of the top-level code, about three, run on the thread's own stack of
+        // 8 MiB (the root actor's code stays there, section 2); on Windows, whose frames are twice as large (Deep) and whose main
+        // thread has 1 MiB, a message's 15000 calls, about 1.4 MB, run only on the actor's 2 MiB, and the top-level code's 10000 fit
+        // the main thread's
+        var (top, down) = OperatingSystem.IsWindows() ? (10000, 15000) : (100000, 20000);
         var text = "long Top(long n) {\n    if n == 0 {\n        return 0\n    }\n\n    return Top(n - 1) + 1\n}\n\n"
             + Deep("Deep")
-            + "print(Top(100000))\nd = spawn Deep()\nprint(d.Down(20000))\n";
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-runs"), 0, ["100000", "20000"], "");
+            + $"print(Top({top}))\nd = spawn Deep()\nprint(d.Down({down}))\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-runs"), 0, [$"{top}", $"{down}"], "");
         if (!OperatingSystem.IsLinux())
         {
             return; // an overflow on Windows ends the process as the system ends it (compiler/README.md, "What the emitter does not emit")
@@ -409,10 +415,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     [Fact]
     public void A_thread_holds_one_stack_and_takes_another_for_a_message_that_asks_another_size()
     {
-        // U1, the clause `stack`: a thread holds the stack of the size its last message asked for, so the 8 MiB actor's 100000 calls,
-        // after a message of the actor of 2 MiB, run on a stack of 8 MiB, and the next message of 2 MiB on one of that size again
-        var text = Deep("Big", " stack 8mb") + Deep("Plain") + "b = spawn Big()\np = spawn Plain()\nprint(p.Down(20000))\nprint(b.Down(100000))\nprint(p.Down(20000))\n";
-        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-sizes"), 0, ["20000", "100000", "20000"], "");
+        // U1, the clause `stack`: a thread holds the stack of the size its last message asked for, so the 8 MiB actor's calls, about 4.8 MB,
+        // after a message of the actor of 2 MiB, run on a stack of 8 MiB, and the next message of 2 MiB, about a megabyte, on one of that
+        // size again; the counts are Linux's halved on Windows, whose frames are twice as large (Deep)
+        var (big, plain) = OperatingSystem.IsWindows() ? (50000, 10000) : (100000, 20000);
+        var text = Deep("Big", " stack 8mb") + Deep("Plain") + $"b = spawn Big()\np = spawn Plain()\nprint(p.Down({plain}))\nprint(b.Down({big}))\nprint(p.Down({plain}))\n";
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-sizes"), 0, [$"{plain}", $"{big}", $"{plain}"], "");
     }
 
     [Fact]

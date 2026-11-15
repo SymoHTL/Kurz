@@ -358,8 +358,8 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
     public void On_an_arm_machine_a_naked_function_is_assembly_of_the_module_and_an_asm_is_not_supported_at_its_line()
     {
         // R12 on 64-bit Arm (the owner, 2026-11-15, #519, comment 6892812780, Q2, "Rust: AArch64 switch now"): a `naked` function is the
-        // module's assembly there as on x86-64, in the one syntax Arm's assembler reads and typed `%function`, since `@` begins a comment
-        // in it; on an Arm machine it runs. R11: an `asm` statement, whose operands the checker reads for x86-64 alone, gets one `not
+        // module's assembly there as on x86-64, in the one syntax Arm's assembler reads, on Linux typed `%function`, since `@` begins a
+        // comment in it, and on Windows, whose module is COFF, named by `.def` and typed `.type 32`, as on x86-64; on an Arm machine it runs. R11: an `asm` statement, whose operands the checker reads for x86-64 alone, gets one `not
         // supported` at its line in a build for Arm and no assembly of x86-64 in a module of Arm; the same program builds for x86-64
         // (the control)
         const string asm = "mut long n = 1\nraw {\n    asm(\"add {r}, 1\", r = inout(reg) n)\n}\nprint(n)\n";
@@ -373,7 +373,7 @@ public sealed class EmitterTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var built = Builder.Compile(SourceText.FromString("program.kz", naked), ["raw"], toolchain.For(Cpu.ArmBaseline), testBuild: true, cpu: () => Cpu.ArmBaseline);
         Assert.True(built.Program is not null, string.Join("; ", built.Diagnostics.Sorted));
         var module = string.Join("\n", built.Program.Ir.ReplaceLineEndings("\n").Split('\n').Where(l => l.StartsWith("module asm ", StringComparison.Ordinal)));
-        Assert.Matches(@"module asm ""\.type \\22[^\\""]*\bSeven\b[^\\""]*\\22,%function""", module);
+        Assert.Matches(OperatingSystem.IsWindows() ? @"module asm ""\.def \\22[^\\""]*\bSeven\b[^\\""]*\\22""\nmodule asm ""\.scl 3""\nmodule asm ""\.type 32""" : @"module asm ""\.type \\22[^\\""]*\bSeven\b[^\\""]*\\22,%function""", module); // the module of the host's system on Arm
         Assert.Contains("module asm \"mov x0, #7\"", module, StringComparison.Ordinal);
         Assert.DoesNotContain("_syntax", module, StringComparison.Ordinal);
         if (Builder.HostCpu.X86)
