@@ -389,7 +389,6 @@ public sealed partial class Checker
         FindGrowingCycles(); // T34: after the readers are known, of which it reads the calls in a loop over `T.Fields` alone
 
         frame = new Frame { IsTopLevel = true, ReturnType = Types.Void, Line = 1 };
-        topLevelFrame = frame; // U4
         // S13: `args`, the program's arguments without its name, which the top-level statements alone see, as a parameter of the
         // top-level code, never `unused-variable` (V13) and no name a function cannot declare (the owner, 2026-10-30, "Top-level code only")
         var arguments = new VariableSymbol("args", new ListType(Types.String), false, VariableKind.Parameter, 0);

@@ -1,0 +1,17 @@
+// expect: output
+// | 16
+// rules: U4
+
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+actor Cart(Price Prices) {
+    pub int Total(int n) {
+        return Prices.Of(n) + 1
+    }
+}
+
+p = spawn Price()
+c = spawn Cart(p)
+print(c.Total(3))

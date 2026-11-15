@@ -1,0 +1,20 @@
+// expect: output
+// | 101
+// | 102
+// rules: U10, U17
+
+actor Counter {
+    mut int count = 0
+
+    pub int Next() {
+        me = this
+        count = count + 1
+        return me.Get() + 100
+    }
+
+    pub int Get() => count
+}
+
+c = spawn Counter()
+print(c.Next())
+print(c.Next())

@@ -7280,20 +7280,28 @@ public sealed class CheckerTests
     }
 
     [Theory]
-    [InlineData(13, "U4", "int Read(Counter c) => c.Get()\n\nprint(Read(spawn Counter()))\n")]
-    [InlineData(14, "U4", "c = spawn Counter()\nf = () => c.Get()\nprint(f())\n")]
-    [InlineData(14, "U4", "actor B(Counter Other) {\n    pub int Read() => Other.Get()\n}\n")]
-    [InlineData(14, "U6", "void Go(Counter c) {\n    send c.Add(1)\n}\n\nGo(spawn Counter())\n")]
-    [InlineData(15, "U6", "class Box {\n    pub void Go(Counter c) {\n        send c.Add(1)\n    }\n}\n\nBox().Go(spawn Counter())\n")]
-    [InlineData(13, "U2", "Counter Make() => spawn Counter()\n\nprint(Make().Get())\n")]
+    [InlineData("int Read(Counter c) => c.Get()\n\nprint(Read(spawn Counter()))\n")]
+    [InlineData("c = spawn Counter()\nf = () => c.Get()\nprint(f())\n")]
+    [InlineData("actor B(Counter Other) {\n    pub int Read() => Other.Get()\n}\n")]
+    [InlineData("void Go(Counter c) {\n    send c.Add(1)\n}\n\nGo(spawn Counter())\n")]
+    [InlineData("class Box {\n    pub void Go(Counter c) {\n        send c.Add(1)\n    }\n}\n\nBox().Go(spawn Counter())\n")]
+    [InlineData("Counter Make() => spawn Counter()\n\nprint(Make().Get())\n")]
+    [InlineData("actor B {\n    Counter c = spawn Counter()\n}\n")]
+    [InlineData("actor B(Counter Other) {\n    pub void Go() {\n        f = () => {\n            send Other.Add(1)\n        }\n        f()\n    }\n}\n")]
+    public void A_message_or_a_spawn_stands_wherever_a_call_does(string program)
+    {
+        // U4: a call that waits, in a function, a lambda and an actor's method; U2, U6: `spawn` and `send` in a function, a class's method, a
+        // field's default and a lambda in an actor's method, where a call that waits parks its message (section 6, "Own stack"; the owner,
+        // 2026-11-15, #519, comment 6892835500)
+        Assert.Empty(Errors(ActorCounter + program));
+    }
+
+    [Theory]
     [InlineData(13, "U2", "c = spawn Counter() on crash restart\nprint(c.Get())\n")]
     [InlineData(14, "U4, F11", "c = spawn Counter()\nf = c.Get\nprint(f())\n")]
-    [InlineData(14, "U2", "actor B {\n    Counter c = spawn Counter()\n}\n")]
-    [InlineData(16, "U6", "actor B(Counter Other) {\n    pub void Go() {\n        f = () => {\n            send Other.Add(1)\n        }\n        f()\n    }\n}\n")]
     public void A_message_or_a_spawn_where_the_build_makes_none_is_not_supported(int line, string rule, string program)
     {
-        // U4: a call that waits, in the top-level statements alone; U2, U6: `spawn` and `send` there and in an actor's methods alone, never in a
-        // function, a lambda or a class's method; U2: `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
+        // U2: `on crash` after `spawn` (Q1); U4 with F11: a method of an actor named without a call
         NotSupportedAt(line, rule, ActorCounter + program);
     }
 

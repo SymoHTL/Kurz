@@ -4328,9 +4328,9 @@ public sealed class ListTests(Toolchain toolchain) : IClassFixture<Toolchain>
                     "}\n\n" +
                     "byte* Mapped(long bytes) {"),
                 // the block's pages, from the first, made inaccessible (`mprotect` with `PROT_NONE`) and then given back to the system
-                // (`madvise` with `MADV_DONTNEED`, 4): the pages stay mapped, as MEM_DECOMMIT keeps them reserved on Windows, in a
-                // mapping with the flags of its neighbours, which the system joins with them, so that the count of mappings stays low
-                (file, "    int mprotect(void* address, long length, int protection)", "    int mprotect(void* address, long length, int protection)\n    int madvise(void* address, long length, int advice)"),
+                // (`madvise` with `MADV_DONTNEED`, 4, which the runtime declares for the trim of an actor's stack): the pages stay mapped, as
+                // MEM_DECOMMIT keeps them reserved on Windows, in a mapping with the flags of its neighbours, which the system joins with
+                // them, so that the count of mappings stays low
                 (file, "munmap(Ptr<void>(p), bytes)",
                     "mprotect(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 0)\n" +
                     "        madvise(Ptr<void>(p + bytes - (bytes + 4095) / 4096 * 4096), (bytes + 4095) / 4096 * 4096, 4)"),

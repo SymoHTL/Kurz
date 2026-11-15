@@ -21,6 +21,7 @@ extern "C" {
     byte* getenv(byte* name)
     ulong getauxval(ulong type)
     int mprotect(void* address, long length, int protection)
+    int madvise(void* address, long length, int advice)
     int sigaction(int number, void* action, void* old)
     int sigaltstack(void* stack, void* old)
     ulong pthread_self()
@@ -323,10 +324,13 @@ pub long PageSize() {
 // An actor's stack of `size` bytes, a multiple of the page, with its guard page below it, as Rust's
 // stackful coroutines map one (corosensei's `DefaultStack::new` in `src/stack/unix.rs`): one mapping of
 // the size and the page with no access (`PROT_NONE`, `MAP_PRIVATE | MAP_ANONYMOUS` is 34), then read and
-// write (3) on all of it but its lowest page, so that the stack is two mappings (design record, section
-// 6, "Keep guard page") and the system gives memory to a page at its first touch. The guard page is the
-// one the handler reads as the actor's stack's (`OnFault`). The stack's base, its highest address, or
-// null where the system refuses either call.
+// write (3) on its top 64 KiB, the depth of the trim, and on all of it where it is no larger or where the
+// thread has no handler of a fault, so that the stack is two mappings (design record, section 6, "Keep
+// guard page", "Close all pages past depth") and the system gives memory to a page at its first touch.
+// The pages past the depth stay closed, joined to the guard page, until a message touches them and the
+// handler opens them (`OnFault`). Its header keeps, at 416, the lowest address of the mapping, where the
+// guard page starts, and at 408, zero from the system, whether the pages past the depth are open. The
+// stack's base, its highest address, or null where the system refuses either call.
 pub byte* StackNew(long size) {
     raw {
         long unit = long(getauxval(6))
@@ -335,14 +339,19 @@ pub byte* StackNew(long size) {
             return null
         }
 
-        if mprotect(Ptr<void>(Ptr<byte>(got) + unit), size, 3) != 0 {
+        byte* top = Ptr<byte>(got) + unit + size
+        mut long openBytes = size
+        if size > 65536 && handling {
+            openBytes = 65536
+        }
+
+        if mprotect(Ptr<void>(top - openBytes), openBytes, 3) != 0 {
             munmap(got, size + unit)
             return null
         }
 
-        stackGuardLow = long(got)
-        stackGuardHigh = long(got) + unit
-        return Ptr<byte>(got) + unit + size
+        *Ptr<long>(top - 512 + 416) = long(got)
+        return top
     }
 }
 
@@ -351,8 +360,47 @@ pub void StackFree(byte* top, long size) {
     raw {
         long unit = long(getauxval(6))
         munmap(Ptr<void>(top - size - unit), size + unit)
+    }
+}
+
+// The bounds the handler of a fault reads of the stack whose base is `top`, of `size` bytes, before the
+// thread switches to it, and none, `top` null, after it switched back, since a thread holds several
+// stacks, of which the one it runs on is the one whose guard page a fault can reach (design record,
+// section 2): its guard page, and its pages past the depth where they are closed.
+pub void StackGuard(byte* top, long size) {
+    raw {
         stackGuardLow = 0
         stackGuardHigh = 0
+        closedLow = 0
+        closedHigh = 0
+        if top != null {
+            stackGuardLow = *Ptr<long>(top - 512 + 416)
+            stackGuardHigh = long(top) - size
+            if size > 65536 && *Ptr<long>(top - 512 + 408) == 0 {
+                closedLow = long(top) - size
+                closedHigh = long(top) - 65536
+            }
+
+            openedMark = top - 512 + 408
+        }
+    }
+}
+
+// The trim of the stack whose base is `top`, of `size` bytes, as it goes back to the pool: where a
+// message opened its pages past the depth, they are given back to the system (`MADV_DONTNEED` is 4), which
+// gives them again filled with zeros at their next touch, and closed again (design record, section 6, the
+// owner, 2026-11-13, #519, comments 6853074601 and 6855469829), so that the stack keeps 64 KiB of memory;
+// Linux keeps the range closed again an area of its own beside the guard page's, so that a stack trimmed
+// once is three mappings (`compiler/README.md`). Where the system refuses to close them, they stay open
+// and marked, and the next trim tries again.
+pub void StackTrim(byte* top, long size) {
+    raw {
+        if *Ptr<long>(top - 512 + 408) != 0 {
+            madvise(Ptr<void>(top - size), size - 65536, 4)
+            if mprotect(Ptr<void>(top - size), size - 65536, 0) == 0 {
+                *Ptr<long>(top - 512 + 408) = 0
+            }
+        }
     }
 }
 
@@ -379,16 +427,22 @@ thread static mut bool ended = false
 thread static mut bool failed = false
 thread static mut bool tracing = false
 
-// The handler's state on its thread: the guard page of the thread's stack, from `guardLow` up to
-// `guardHigh`, and that of the actor's stack the thread holds, from `stackGuardLow` up to
-// `stackGuardHigh`, 0 and 0 where it holds none; whether the thread's crash path runs; where the walk of
+// The handler's state on its thread: whether it is installed; the guard page of the thread's stack, from
+// `guardLow` up to `guardHigh`, and that of the actor's stack the thread runs on, from `stackGuardLow` up
+// to `stackGuardHigh`, with that stack's closed pages past the depth, from `closedLow` up to `closedHigh`,
+// and the word of its header that marks them open, each 0 where the thread runs on its own stack or the
+// pages are open (`StackGuard`); whether the thread's crash path runs; where the walk of
 // a stack overflow stands, 1 while it passes the handler's frames and the signal's, 2 while it looks for
 // the frame that holds the line, and 0 from that frame on; and whether `KURZ_TRACE=0` switched the trace
 // off.
+thread static mut bool handling = false
 thread static mut long guardLow = 0
 thread static mut long guardHigh = 0
 thread static mut long stackGuardLow = 0
 thread static mut long stackGuardHigh = 0
+thread static mut long closedLow = 0
+thread static mut long closedHigh = 0
+thread static mut byte* openedMark = null
 thread static mut bool crashing = false
 thread static mut int seeking = 0
 thread static mut bool quiet = false
@@ -499,7 +553,8 @@ pub void Crashing() {
 // fault in its own walk reaches it again (design record, section 6); a fault outside the guard page
 // returns through that frame once the default action is set back. Where any of it cannot be had, no
 // handler is installed and the mapping is given back, and a stack overflow ends the process as the
-// system ends it.
+// system ends it; an actor's stack is then mapped open to its guard page, since nothing would open its
+// pages past the depth (`StackNew`).
 void Faults() {
     raw {
         // `AT_PAGESZ`
@@ -549,7 +604,7 @@ void Faults() {
         *Ptr<extern "C" (int, void*, void*) => void>(scratch + 128) = OnFault
         *Ptr<int>(scratch + 264) = 1207959556
         if sigaltstack(Ptr<void>(scratch + 64), null) == 0 {
-            sigaction(11, Ptr<void>(scratch + 128), null)
+            handling = sigaction(11, Ptr<void>(scratch + 128), null) == 0
             sigaction(7, Ptr<void>(scratch + 128), null)
         } else {
             munmap(got, size + 65536 + size)
@@ -557,8 +612,12 @@ void Faults() {
     }
 }
 
-// The handler of a fault (design record, section 6), on its own stack. A fault whose address is
-// outside the guard page of the thread's stack and outside that of the actor's stack it holds is not the
+// The handler of a fault (design record, section 6), on its own stack. A fault in the closed pages past
+// the depth of the actor's stack the thread runs on opens them, marks the stack for the trim and returns,
+// so that the instruction runs again; the handler tells them from the guard page by the fault's address
+// (section 6, the owner, 2026-11-13, #519, comments 6853074601 and 6855469829, the address assumed
+// there), and where the system refuses to open them the fault is the system's to end. A fault whose address is
+// outside the guard page of the thread's stack and outside that of the actor's stack it runs on is not the
 // handler's: it sets the signal's default action back and returns, so that the instruction faults again
 // and the system ends the process, as Rust's handler does (the owner, 2026-10-29, "Guard page first, as
 // Rust"). A fault in a guard page while the thread's crash path runs, a walk of a raise that overflowed
@@ -569,6 +628,18 @@ extern "C" void OnFault(int number, void* details, void* context) {
     raw {
         // `si_addr` of `siginfo_t`
         long address = *Ptr<long>(Ptr<byte>(details) + 16)
+        if address >= closedLow && address < closedHigh {
+            if mprotect(Ptr<void>(closedLow), closedHigh - closedLow, 3) != 0 {
+                signal(number, null)
+                return
+            }
+
+            *Ptr<long>(openedMark) = 1
+            closedLow = 0
+            closedHigh = 0
+            return
+        }
+
         if (address < guardLow || address >= guardHigh) && (address < stackGuardLow || address >= stackGuardHigh) {
             signal(number, null)
             return

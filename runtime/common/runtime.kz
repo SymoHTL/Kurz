@@ -3288,29 +3288,46 @@ pub string ExitErrorText(ExitError e) {
 
 // ---- actors (chapter 19) -----------------------------------------------------------------------------
 
-// The actors of a program run on the one thread the runtime runs, each message to its end, while the
-// top-level code waits for a call's result (U4), as tokio's `current_thread` runtime runs its tasks
-// inside `block_on` (compiler/README.md, "What the emitter emits"). An actor's reference is the address
-// of its state, which the emitted code constructs, with the actor's record in the 48 bytes in front of
-// it, as a string's block stands in front of its bytes, a multiple of 16 so that the state keeps the
-// alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds: the size of
-// the actor's stack its clause asked for (U1), the actor's number (U2), the first message of its inbox,
-// the last, the actor after it in the run queue, and whether it stands in that queue, as a tokio task's
-// state has a bit for "has been pushed into a run queue". A message is a block the emitted code makes:
-// the message after it in the inbox, the function that runs it, its reply, and its arguments; that
-// function frees it. Each message runs on a stack of the actor's own, which the thread switches to and
-// back from (design record, section 6, "Own stack"), below.
+// The actors of a program run on the one thread the runtime runs, while the top-level code waits for a
+// call's result (U4), as tokio's `current_thread` runtime runs its tasks inside `block_on`
+// (compiler/README.md, "What the emitter emits"). An actor's reference is the address of its state, which
+// the emitted code constructs, with the actor's record in the 48 bytes in front of it, as a string's block
+// stands in front of its bytes, a multiple of 16 so that the state keeps the alignment of the allocator's
+// block, as Rust's `ArcInner` pads its counts to what it holds: the size of the actor's stack its clause
+// asked for (U1), the actor's number (U2), the first message of its inbox, the last, the actor after it in
+// the run queue, and its top activation, null while it is idle. An actor stands in the run queue where an
+// actor stands after it or it is the last, as an intrusive list tells its members by their links. A
+// message is a block the emitted code makes: the message after it in its list, the function that runs it,
+// its reply, null after `send`, its chain ID, 16 bytes, and its arguments; that function frees it.
+//
+// A message runs in an activation, which lives in the header of a stack of the actor's own that the
+// thread switches to and back from (design record, section 6, "Own stack"), below. A call that waits
+// inside a message parks its activation on its stack, the thread switching back to the scheduler, until
+// the call's reply is set (section 6, "Every call looks synchronous"), as Rust's stackful coroutines
+// suspend (corosensei's `Yielder::suspend`). Every call carries a chain ID, and an actor whose activation
+// waits in a chain takes the waiting calls of that chain on a side list as they are queued, each run in
+// an activation of its own above the waiting one, on a pooled stack, while every other message, a `send`
+// of the chain among them, waits in its inbox (section 6, "Deadlocks", layer 1; U17; the owner,
+// 2026-11-15, #519, comment 6892835500, Q6, "Own pooled stack"). An activation below another resumes
+// once the ones above it end, as a nested call returns before its caller goes on.
 
-// The first and the last actor of the run queue, each with a message in its inbox.
+// The first and the last actor of the run queue.
 static mut byte* runFirst = null
 static mut byte* runLast = null
 
 // The count of the actors spawned, which is the number of the last one (U2).
 static mut long actorCount = 0
 
-// The record of a new actor, numbered after the last one spawned, its inbox empty and outside the run
-// queue, with room for a state of `size` bytes behind it, and the bytes of its stack, `stack`, the size
-// its clause wrote or 2 MiB (U1): the address of that room, which is the actor's reference (U2).
+// The header of the activation whose message runs on the thread, null while the top-level code runs,
+// the scheduler's loop in its wait among it.
+thread static mut byte* running = null
+
+// The record of a new actor, numbered after the last one spawned, its inbox empty, outside the run queue
+// and idle, with room for a state of `size` bytes behind it, and the bytes of its stack, `stack`, the size
+// its clause wrote or 2 MiB (U1): the address of that room, which is the actor's reference (U2). No
+// message reaches the actor while `spawn` constructs it, as section 6 has it (assumed there): its
+// reference is the spawner's once `spawn` returns, and a default of its body reads neither `this` nor
+// its methods (K7).
 pub byte* ActorNew(long size, long stack) {
     mut byte* state = Allocate(48 + size)
     raw {
@@ -3321,7 +3338,7 @@ pub byte* ActorNew(long size, long stack) {
         *Ptr<byte*>(state - 32) = null
         *Ptr<byte*>(state - 24) = null
         *Ptr<byte*>(state - 16) = null
-        *Ptr<long>(state - 8) = 0
+        *Ptr<byte*>(state - 8) = null
     }
 
     return state
@@ -3338,30 +3355,75 @@ pub string ActorText(string name, byte* state) {
     return "{name}#{number}"
 }
 
-// The message at the end of the inbox of the actor whose reference is `state`, as tokio's `mpsc` channel
-// pushes a value at the tail of its list, so that an inbox keeps the order in which its messages were sent
-// (U5, U15); and the actor at the end of the run queue where it does not stand there.
+// A message to the actor whose reference is `state`, stamped with its chain ID: the running message's,
+// or a new one where the top-level code makes it, so that each waiting call and each `send` of the
+// top-level code starts a chain of its own (section 6, "Deadlocks", layer 1, assumed there). A call that
+// waits, of the chain the actor's activation waits in, goes to the end of that activation's side list
+// (layer 1; section 6, "One-shot reply slot"), and every other message to the end of the inbox, as
+// tokio's `mpsc` channel pushes a value at the tail of its list, so that an inbox keeps the order in
+// which its messages were sent (U5, U15); the actor goes to the end of the run queue where it does not
+// stand there.
 pub void Enqueue(byte* state, byte* message) {
     raw {
         *Ptr<byte*>(message) = null
-        byte* last = *Ptr<byte*>(state - 24)
+        if running == null {
+            NewChain(message + 24)
+        } else {
+            *Ptr<long>(message + 24) = *Ptr<long>(running + 344)
+            *Ptr<long>(message + 32) = *Ptr<long>(running + 352)
+        }
+
+        byte* top = *Ptr<byte*>(state - 8)
+        if top != null && *Ptr<byte*>(message + 16) != null && *Ptr<long>(message + 24) == *Ptr<long>(top + 344) && *Ptr<long>(message + 32) == *Ptr<long>(top + 352) {
+            Append(top + 376, message)
+        } else {
+            Append(state - 32, message)
+        }
+
+        if !Queued(state) {
+            Queue(state)
+        }
+    }
+}
+
+// `message` at the end of the list whose first message stands at `list` and whose last at `list + 8`.
+void Append(byte* list, byte* message) {
+    raw {
+        byte* last = *Ptr<byte*>(list + 8)
         if last == null {
-            *Ptr<byte*>(state - 32) = message
+            *Ptr<byte*>(list) = message
         } else {
             *Ptr<byte*>(last) = message
         }
 
-        *Ptr<byte*>(state - 24) = message
-        if *Ptr<long>(state - 8) == 0 {
-            Queue(state)
+        *Ptr<byte*>(list + 8) = message
+    }
+}
+
+// The first message of the list at `list`, which holds one, taken off it.
+byte* Taken(byte* list) {
+    raw {
+        byte* message = *Ptr<byte*>(list)
+        byte* next = *Ptr<byte*>(message)
+        *Ptr<byte*>(list) = next
+        if next == null {
+            *Ptr<byte*>(list + 8) = null
         }
+
+        return message
+    }
+}
+
+// Whether the actor whose reference is `state` stands in the run queue.
+bool Queued(byte* state) {
+    raw {
+        return *Ptr<byte*>(state - 16) != null || runLast == state
     }
 }
 
 // The actor whose reference is `state` at the end of the run queue.
 void Queue(byte* state) {
     raw {
-        *Ptr<long>(state - 8) = 1
         *Ptr<byte*>(state - 16) = null
         if runLast == null {
             runFirst = state
@@ -3373,24 +3435,79 @@ void Queue(byte* state) {
     }
 }
 
-// A call that waits for its result (U4): the messages of the run queue run one at a time, in its order,
-// until the byte `done` of the call's reply is set, as tokio's `block_on` runs the tasks of its queue in
-// a loop until its future is ready. The loop keeps no frame of a message it ran, so a call behind any
-// count of messages takes the stack of one. While `done` is not set, the message the call waits on stands
-// in its actor's inbox, so the run queue is not empty.
-pub void Wait(byte* done) {
+// Whether the actor whose reference is `state` has a message that can go on: a call of its chain on the
+// side list of its top activation, that activation's reply set, or, where it is idle, a message in its
+// inbox.
+bool Ready(byte* state) {
     raw {
-        while *done == 0 {
-            RunOne()
+        byte* top = *Ptr<byte*>(state - 8)
+        if top == null {
+            return *Ptr<byte*>(state - 32) != null
+        }
+
+        byte* reply = *Ptr<byte*>(top + 360)
+        return *Ptr<byte*>(top + 376) != null || (reply != null && *reply != 0)
+    }
+}
+
+// The reply `reply` of a call set, once the message's function stored its result beside it, and the
+// actor of the activation that waits on it at the end of the run queue where that activation is its top,
+// as tokio's `oneshot::Sender::send` stores the value and wakes the receiver's task; it never switches. An
+// activation below another goes on once the ones above it end (`Run`); the top-level code reads the byte
+// in its loop (`Wait`). A reply is the byte set once the result stands, the activation that waits on it,
+// null for the top-level code, and the result.
+pub void Replied(byte* reply) {
+    raw {
+        *reply = 1
+        byte* waiter = *Ptr<byte*>(reply + 8)
+        if waiter != null {
+            byte* state = *Ptr<byte*>(waiter + 320)
+            if *Ptr<byte*>(state - 8) == waiter && !Queued(state) {
+                Queue(state)
+            }
         }
     }
 }
 
-// The first message of the first actor of the run queue, run to its end on the actor's stack: the
-// thread switches to a stack of the size the actor asked for, whose entry, `ActorStart`, runs the
-// message and switches back (design record, section 6, "Own stack"). The actor stands at the end of
-// the queue again where its inbox still holds a message, unless a message sent to it while that one ran
-// put it there already (U11).
+// A call that waits for its result (U4), its reply `reply`, at the line `line` of the file `file`. In the
+// top-level code the messages of the run queue run one at a time, in its order, until the reply is set,
+// as tokio's `block_on` runs the tasks of its queue in a loop until its future is ready, on the main
+// thread's stack, which never parks (section 6, "Deadlocks", assumed there); where the run queue is empty
+// and the reply is not set, nothing is left that could set it, and the process ends with
+// `error: deadlock at <file>:<n>` at that call's line and the exit code 1 (section 6, the owner,
+// 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"). Inside a message the
+// activation parks: the thread switches from its stack to the scheduler's, as corosensei's
+// `Yielder::suspend` switches back to the stack that resumed it, and comes back here once the scheduler
+// resumes it with the reply set.
+pub void Wait(byte* reply, string file, int line) {
+    raw {
+        *Ptr<byte*>(reply + 8) = running
+        if running == null {
+            while *reply == 0 {
+                if runFirst == null {
+                    Raise("deadlock", file, line)
+                }
+
+                RunOne()
+            }
+
+            return
+        }
+
+        byte* header = running
+        *Ptr<byte*>(header + 360) = reply
+        while *reply == 0 {
+            sys.Switch(header, threadSide)
+        }
+
+        *Ptr<byte*>(header + 360) = null
+    }
+}
+
+// The first actor of the run queue taken off it, and what it can go on with run: a call of its chain on
+// its top activation's side list, which starts an activation above that one; its top activation, whose
+// reply is set; or, where it is idle, the first message of its inbox; an actor with none of them is
+// passed over, a message sent to it while it waits staying in its inbox.
 void RunOne() {
     raw {
         byte* state = runFirst
@@ -3399,22 +3516,118 @@ void RunOne() {
             runLast = null
         }
 
-        *Ptr<long>(state - 8) = 0
-        byte* message = *Ptr<byte*>(state - 32)
-        byte* next = *Ptr<byte*>(message)
-        *Ptr<byte*>(state - 32) = next
-        if next == null {
-            *Ptr<byte*>(state - 24) = null
+        *Ptr<byte*>(state - 16) = null
+        byte* top = *Ptr<byte*>(state - 8)
+        if top == null {
+            if *Ptr<byte*>(state - 32) != null {
+                Start(state, Taken(state - 32), null)
+            }
+        } else {
+            byte* reply = *Ptr<byte*>(top + 360)
+            if *Ptr<byte*>(top + 376) != null {
+                Start(state, Taken(top + 376), top)
+            } else if reply != null && *reply != 0 {
+                Run(state, top)
+            }
         }
+    }
+}
 
-        byte* header = Held(*Ptr<long>(state - 48)) - 512
+// A new activation of the actor whose reference is `state` for `message`, on a stack of the size the
+// actor asked for, above the activation `below`, null where the actor is idle, whose chain it takes and
+// whose side list it takes over, and its run from its first frame, `ActorStart`.
+void Start(byte* state, byte* message, byte* below) {
+    raw {
+        byte* header = Held(*Ptr<long>(state - 48))
         *Ptr<byte*>(header + 320) = state
         *Ptr<byte*>(header + 328) = message
+        *Ptr<long>(header + 344) = *Ptr<long>(message + 24)
+        *Ptr<long>(header + 352) = *Ptr<long>(message + 32)
+        *Ptr<byte*>(header + 360) = null
+        *Ptr<byte*>(header + 368) = below
+        *Ptr<byte*>(header + 376) = null
+        *Ptr<byte*>(header + 384) = null
+        if below != null {
+            *Ptr<byte*>(header + 376) = *Ptr<byte*>(below + 376)
+            *Ptr<byte*>(header + 384) = *Ptr<byte*>(below + 384)
+            *Ptr<byte*>(below + 376) = null
+            *Ptr<byte*>(below + 384) = null
+        }
+
+        *Ptr<byte*>(state - 8) = header
         sys.Enter(header, header, ActorStart)
+        Run(state, header)
+    }
+}
+
+// The activation `header` of the actor whose reference is `state` run on its stack until it waits or
+// ends: the bounds of that stack's guard set for the target's handler of a fault (section 2), the switch
+// to it and back. An activation that ended gives the actor's top to the one below it, with its side list,
+// and its stack back to the pool; the actor then stands at the end of the run queue where it can go on
+// (`Ready`) and does not stand there.
+void Run(byte* state, byte* header) {
+    raw {
+        sys.StackGuard(header + 512, *Ptr<long>(header + 400))
+        running = header
         sys.Switch(threadSide, header)
-        if *Ptr<byte*>(state - 32) != null && *Ptr<long>(state - 8) == 0 {
+        running = null
+        sys.StackGuard(null, 0)
+        if *Ptr<byte*>(header + 360) == null {
+            byte* below = *Ptr<byte*>(header + 368)
+            *Ptr<byte*>(state - 8) = below
+            if below != null {
+                *Ptr<byte*>(below + 376) = *Ptr<byte*>(header + 376)
+                *Ptr<byte*>(below + 384) = *Ptr<byte*>(header + 384)
+            }
+
+            Give(header)
+        }
+
+        if !Queued(state) && Ready(state) {
             Queue(state)
         }
+    }
+}
+
+// The chain ID of a chain the top-level code starts, 16 bytes at `at`: the size of W3C's trace-id, which
+// the chain ID is for a trace the program starts (section 6, "Deadlocks"; section 12, assumed there),
+// drawn from a generator of the thread, xoshiro256++, seeded once from the system's randomness at the
+// thread's first chain, as Rust's `opentelemetry` draws a trace-id from a `SmallRng` of its thread seeded
+// from the system (`RandomIdGenerator`, not checked at source), so that a chain costs two steps of the
+// generator and no call of the system (section 6, assumed there). Where the system gives no randomness,
+// the process ends with `random-failed`, as at a thread's first map (M9).
+thread static mut byte* chains = null
+
+void NewChain(byte* at) {
+    raw {
+        if chains == null {
+            chains = Allocate(32)
+            if !sys.Random(chains, 32) {
+                RandomFailed()
+            }
+        }
+
+        *Ptr<ulong>(at) = NextChainWord(chains)
+        *Ptr<ulong>(at + 8) = NextChainWord(chains)
+    }
+}
+
+// The next 64 bits of the generator whose four words stand at `s`, xoshiro256++ as its authors give it
+// (Blackman and Vigna, `xoshiro256plusplus.c`), the generator of Rust's `SmallRng` on a 64-bit machine.
+ulong NextChainWord(byte* s) {
+    raw {
+        ulong s0 = *Ptr<ulong>(s)
+        ulong s1 = *Ptr<ulong>(s + 8)
+        ulong s2 = *Ptr<ulong>(s + 16) ^ s0
+        ulong s3 = *Ptr<ulong>(s + 24) ^ s1
+        ulong sum = s0 +% *Ptr<ulong>(s + 24)
+        ulong result = (sum << 23 | sum >> 41) +% s0
+        ulong t = s1 << 17
+        *Ptr<ulong>(s + 8) = s1 ^ s2
+        *Ptr<ulong>(s) = s0 ^ s3
+        *Ptr<ulong>(s + 16) = s2 ^ t
+        *Ptr<ulong>(s + 24) = s3 << 45 | s3 >> 19
+        return result
     }
 }
 
@@ -3424,25 +3637,31 @@ void RunOne() {
 // touched, with a guard page below it (section 6, "Own stack", "Keep guard page", "2 MiB + clause"): the
 // size the actor's clause asked for, or 2 MiB, rounded up to the system's page and raised to the floor
 // of 64 KiB with no message (U1; the owner, 2026-11-15, #519, comment 6892835500, Q7, "Rust/C#: round up
-// silently"). A thread holds one stack at a time, made at its first message and kept for the next
-// message that asks for the same size, and given back for one that asks another, since a message runs to
-// its end before the next starts (U4); a stack the system refuses ends the process with
+// silently"). A stack is held only while a message runs or waits in it, and then goes back to a pool of
+// its thread, which keeps at most 64 stacks, each kept for a message that asks its size, and gives back a
+// stack past that (section 6, "Only while running", "Bound pool + trim deep", and Q12 of comment
+// 6880404917; the owner, 2026-11-15, #519, comment 6892812780, Q3, "Build it now", for the sizes); a stack
+// that goes back to the pool has its pages past a depth of 64 KiB given back to the system where a
+// message went past it (`StackTrim` of the target). A stack the system refuses ends the process with
 // `error: allocation-failed (<n> bytes)`, the stack's size (section 6, 2026-10-09).
 //
-// At the stack's base, its highest addresses, 512 bytes hold its header: from 0 the save area of the
-// switch, where the switch keeps the registers of the stack's side it leaves, the stack pointer among
-// them (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack base"), each
-// architecture's layout of them its own (`Switch` of the architecture's directory), with the four words
-// of the thread environment block at 288 on Windows; at 320 the actor's state and at 328 the message the
-// stack runs; at 336 whether the stack has not run yet; the rest unused. The stack's frames start below
-// the header. The thread's own side of the switch, its save area, is in the thread's record,
-// `threadSide`, 320 bytes from the allocator, made at the thread's first message.
+// At the stack's base, its highest addresses, 512 bytes hold its header, and the stack's frames start
+// below it: from 0 the save area of the switch, where the switch keeps the registers of the stack's side
+// it leaves, the stack pointer among them (the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area
+// at stack base"), each architecture's layout of them its own (`Switch` of the architecture's directory),
+// with the four words of the thread environment block at 288 on Windows; then the activation that runs
+// or waits on the stack: at 320 the actor's state, at 328 the message, at 336 whether the stack has not
+// run yet, at 344 the chain ID, at 360 the reply the activation waits on, null while it runs, at 368 the
+// activation below it, at 376 the first and at 384 the last call of its side list; at 392 the next stack
+// of the pool, at 400 the stack's size, and from 408 the target's words of the trim. The thread's own
+// side of the switch, its save area, is in the thread's record, `threadSide`, 320 bytes from the
+// allocator, made at the thread's first message.
 thread static mut byte* threadSide = null
-thread static mut byte* stackTop = null
-thread static mut long stackSize = 0
+thread static mut byte* pooled = null
+thread static mut long pooledCount = 0
 
-// The stack of `asked` bytes the thread holds, rounded up to the page and raised to the floor (above):
-// its base, the address above its header; the one it held given back where it holds another size.
+// The header of a stack of `asked` bytes, rounded up to the page and raised to the floor (above): the
+// first of that size the thread's pool holds, taken off it, or a new one.
 byte* Held(long asked) {
     raw {
         if threadSide == null {
@@ -3450,22 +3669,49 @@ byte* Held(long asked) {
         }
 
         long size = StackSize(asked)
-        if stackTop != null && stackSize != size {
-            sys.StackFree(stackTop, stackSize)
-            stackTop = null
-        }
+        mut byte* before = null
+        mut byte* at = pooled
+        while at != null {
+            if *Ptr<long>(at + 400) == size {
+                if before == null {
+                    pooled = *Ptr<byte*>(at + 392)
+                } else {
+                    *Ptr<byte*>(before + 392) = *Ptr<byte*>(at + 392)
+                }
 
-        if stackTop == null {
-            stackTop = sys.StackNew(size)
-            if stackTop == null {
-                AllocationFailed(size)
+                pooledCount = pooledCount - 1
+                return at
             }
 
-            stackSize = size
-            *Ptr<long>(stackTop - 512 + 336) = 1
+            before = at
+            at = *Ptr<byte*>(at + 392)
         }
 
-        return stackTop
+        byte* top = sys.StackNew(size)
+        if top == null {
+            AllocationFailed(size)
+        }
+
+        *Ptr<long>(top - 512 + 336) = 1
+        *Ptr<long>(top - 512 + 400) = size
+        return top - 512
+    }
+}
+
+// The stack whose header is `header` back in the thread's pool, trimmed by the target, or given back to
+// the system where the pool holds 64 stacks already.
+void Give(byte* header) {
+    raw {
+        long size = *Ptr<long>(header + 400)
+        if pooledCount >= 64 {
+            sys.StackFree(header + 512, size)
+            return
+        }
+
+        sys.StackTrim(header + 512, size)
+        *Ptr<byte*>(header + 392) = pooled
+        pooled = header
+        pooledCount = pooledCount + 1
     }
 }
 
@@ -3490,14 +3736,14 @@ long StackSize(long asked) {
     return size
 }
 
-// The first frame of an actor's stack, which the switch enters with a return address of zero, so that a
+// The first frame of an activation, which the switch enters with a return address of zero, so that a
 // walk of the stack ends here (design record, section 2): at the stack's first run the target's first
 // act on a stack, the guarantee of its room for an overflow on Windows (round 17, "Fiber layout +
-// guarantee"); then the message, run to its end; then the switch back to the thread's side, which never
-// comes back here: the next message enters the stack afresh.
+// guarantee"); then the message, run to its end, its waits parking it (`Wait`); then the switch back to
+// the thread's side, which never comes back here: the stack's next activation enters it afresh.
 extern "C" void ActorStart() {
     raw {
-        byte* header = stackTop - 512
+        byte* header = running
         if *Ptr<long>(header + 336) != 0 {
             *Ptr<long>(header + 336) = 0
             sys.StackFirst()

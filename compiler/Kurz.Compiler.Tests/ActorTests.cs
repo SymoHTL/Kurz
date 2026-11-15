@@ -17,7 +17,10 @@ namespace Kurz.Compiler.Tests;
 /// of each actor in turn in the order the actors were queued, as tokio's <c>current_thread</c> runs its tasks, an actor that sends itself
 /// a message while it runs standing in that queue once (U11); what is still queued
 /// when the top-level code ends, which does not run (U13); and the number in an actor's text, one count over the actors of every type,
-/// the text of <c>this</c> and <c>!=</c> of two references (U2, U10); and a state aligned to the 16 a vector field needs (R18).
+/// the text of <c>this</c> and <c>!=</c> of two references (U2, U10); and a state aligned to the 16 a vector field needs (R18). Then the
+/// stacks of section 6, and the waits that park a message on its stack: a call of the chain that reaches the actor waiting in it (U17),
+/// the pool and its trim, the registers a parked message keeps, the top-level code's <c>deadlock</c>, a parked message at the end (U13),
+/// the chains the top-level code starts, and an overflow in a call of the chain.
 /// </summary>
 public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
 {
@@ -413,11 +416,12 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
     }
 
     [Fact]
-    public void A_thread_holds_one_stack_and_takes_another_for_a_message_that_asks_another_size()
+    public void A_message_takes_a_stack_of_the_size_its_actor_asks_for_from_the_pool()
     {
-        // U1, the clause `stack`: a thread holds the stack of the size its last message asked for, so the 8 MiB actor's calls, about 4.8 MB,
-        // after a message of the actor of 2 MiB, run on a stack of 8 MiB, and the next message of 2 MiB, about a megabyte, on one of that
-        // size again; the counts are Linux's halved on Windows, whose frames are twice as large (Deep)
+        // U1, the clause `stack`, and section 6's pool: a thread keeps the stacks its messages gave back, each with its size, and a message
+        // takes one of the size its actor asks for, so the 8 MiB actor's calls, about 4.8 MB, after a message of the actor of 2 MiB, run on a
+        // stack of 8 MiB, and the next message of 2 MiB, about a megabyte, on one of that size again; the counts are Linux's halved on
+        // Windows, whose frames are twice as large (Deep)
         var (big, plain) = OperatingSystem.IsWindows() ? (50000, 10000) : (100000, 20000);
         var text = Deep("Big", " stack 8mb") + Deep("Plain") + $"b = spawn Big()\np = spawn Plain()\nprint(p.Down({plain}))\nprint(b.Down({big}))\nprint(p.Down({plain}))\n";
         Ran(BuildAndRun(text, toolchain.Runtime, "actor-stack-sizes"), 0, [$"{plain}", $"{big}", $"{plain}"], "");
@@ -514,5 +518,401 @@ public sealed class ActorTests(Toolchain toolchain) : IClassFixture<Toolchain>
         var compilation = Builder.Compile(SourceText.FromString("program.kz", text), ["raw", "native"], toolchain.Runtime, true);
         Assert.True(compilation.Program is not null, string.Join("; ", compilation.Diagnostics.Sorted));
         Ran(Toolchain.Run(toolchain.Build(compilation.Program, "actor-guarantee"), null), 0, ["20480"], "");
+    }
+
+    // ---- waiting anywhere (design record, section 6, "Deadlocks", layer 1; the owner, 2026-11-15, #519) ------------------------------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_call_of_the_chain_reaches_the_actor_that_waits_in_it_as_a_nested_call(bool testBuild)
+    {
+        // U17 (section 6, "Deadlocks", layer 1): `Save` waits on `Check`, which waits on `Verify`, which calls `Load` on the store that
+        // waits in their chain; `Load` runs on a stack of its own above `Save` (Q6 of comment 6892835500, "Own pooled stack"), and each
+        // waiting message resumes once the calls above it ended, in a test build and a release build
+        const string chain = """
+            actor Store(Checker Check) {
+                mut int saved = 0
+
+                pub int Save(int n) {
+                    saved = n
+                    print("save waits")
+                    valid = Check.Valid(this)
+                    print("save resumes")
+                    return valid + 1
+                }
+
+                pub int Load() {
+                    print("load")
+                    return saved
+                }
+            }
+
+            actor Verifier {
+                pub int Verify(Store store) {
+                    print("verify waits")
+                    loaded = store.Load()
+                    print("verify resumes")
+                    return loaded * 10
+                }
+            }
+
+            actor Checker(Verifier V) {
+                pub int Valid(Store store) {
+                    print("check waits")
+                    verified = V.Verify(store)
+                    print("check resumes")
+                    return verified * 10
+                }
+            }
+
+            v = spawn Verifier()
+            c = spawn Checker(v)
+            s = spawn Store(c)
+            print(s.Save(4))
+            print(s.Load())
+
+            """;
+        string[] expected = ["save waits", "check waits", "verify waits", "load", "verify resumes", "check resumes", "save resumes", "401", "load", "4"];
+        Ran(BuildAndRun(chain, toolchain.Runtime, testBuild ? "actor-chain" : "actor-chain-release", testBuild), 0, expected, "");
+    }
+
+    /// <summary>
+    /// Two actors that call each other <paramref name="depth"/> deep in one chain, each call reaching an actor that waits in it, so that
+    /// every call runs on a stack of its own (Q6 of comment 6892835500); on Linux the deepest call gives the count of the process's mappings
+    /// and the top-level code prints that count and the count after the chain ended, each less the count before the first message.
+    /// </summary>
+    private static string PingPong(int depth, bool maps) => $$"""
+        long Mappings() {
+            {{(maps ? "bytes = File.ReadAll(\"/proc/self/maps\") else {\n        IoError => List<byte>()\n    }\n\n    text = string.FromUtf8(bytes) else {\n        InvalidUtf8 => \"\"\n    }\n\n    return long(text.Split('\\n').Count)" : "return 0")}}
+        }
+
+        actor Ping {
+            pub long Down(Pong other, int n) {
+                if n == 0 {
+                    return Mappings()
+                }
+
+                return other.Down(this, n - 1)
+            }
+        }
+
+        actor Pong {
+            pub long Down(Ping other, int n) {
+                if n == 0 {
+                    return Mappings()
+                }
+
+                return other.Down(this, n - 1)
+            }
+        }
+
+        before = Mappings()
+        a = spawn Ping()
+        b = spawn Pong()
+        deep = a.Down(b, {{depth}})
+        after = Mappings()
+        print("{deep - before} {after - before}")
+
+        """;
+
+    [Fact]
+    public void A_chain_of_calls_past_the_pool_takes_a_stack_for_each_and_the_pool_keeps_64_of_them()
+    {
+        // section 6, "Bound pool + trim deep" and Q12 of comment 6880404917: 200 calls of one chain hold 200 stacks at once, two mappings
+        // each on Linux, and once the chain ended the thread's pool keeps 64 of them and gives the rest back to the system
+        var linux = OperatingSystem.IsLinux();
+        var run = BuildAndRun(PingPong(200, linux), toolchain.Runtime, "actor-pool");
+        Assert.True((run.Code, run.Error) == (0, ""), $"exit code {run.Code}, error: {run.Error}");
+        if (!linux)
+        {
+            Assert.Equal(["0 0"], run.Output);
+            return; // the mappings are read from Linux's `/proc/self/maps`
+        }
+
+        var counts = run.Output.Single().Split(' ').Select(long.Parse).ToList();
+        Assert.True(counts[0] >= 400, $"{counts[0]} mappings more while 200 stacks are held"); // the stacks are mappings of their own
+        Assert.InRange(counts[1], 128, 140); // 64 stacks of two mappings, and room for the allocator's own
+    }
+
+    /// <summary>
+    /// An actor whose message recurses <paramref name="depth"/> deep, then takes 100 messages, then recurses again on the stack it held;
+    /// on Linux the top-level code prints the process's mappings between the two, once its call that waits ran the 100 messages.
+    /// </summary>
+    private static string Trimmed(int depth, bool maps) => $$"""
+        actor Deep {
+            mut long count = 0
+
+            pub long Down(long n) {
+                if n == 0 {
+                    return 0
+                }
+
+                return Down(n - 1) + 1
+            }
+
+            pub void Add() {
+                count = count + 1
+            }
+
+            pub long Count() => count
+        }
+
+        d = spawn Deep()
+        print(d.Down({{depth}}))
+        for i in 0..<100 {
+            send d.Add()
+        }
+
+        print(d.Count())
+        {{(maps ? "bytes = File.ReadAll(\"/proc/self/maps\") else {\n    IoError => List<byte>()\n}\n\nprint(string.FromUtf8(bytes) else {\n    InvalidUtf8 => \"\"\n})" : "print(\"\")")}}
+        print(d.Down({{depth}}))
+
+        """;
+
+    [Fact]
+    public void A_stack_a_message_took_past_the_depth_is_trimmed_in_the_pool_and_grows_again()
+    {
+        // section 6, "Bound pool + trim deep", comments 6853074601 and 6855469829: a message's calls past 64 KiB, about a megabyte, open the
+        // closed pages of its stack, which the stack's return to the pool gives back and closes again, so that on Linux the stack is a
+        // closed range of 2 MiB less 64 KiB, joined to its guard page or not, under 64 KiB open for reading and writing; the same calls
+        // then run again on that stack, which on Windows grows through the guard page the trim set again; the counts are Linux's halved
+        // on Windows, whose frames are twice as large (Deep)
+        var linux = OperatingSystem.IsLinux();
+        var depth = OperatingSystem.IsWindows() ? 10000 : 20000;
+        var run = BuildAndRun(Trimmed(depth, linux), toolchain.Runtime, "actor-trim");
+        Assert.True((run.Code, run.Error) == (0, ""), $"exit code {run.Code}, error: {run.Error}");
+        Assert.Equal([$"{depth}", "100"], run.Output.Take(2));
+        Assert.Equal($"{depth}", run.Output[^1]);
+        if (!linux)
+        {
+            return; // the mappings are read from Linux's `/proc/self/maps`
+        }
+
+        var maps = run.Output.Skip(2).SkipLast(1).Where(l => l.Length > 0).Select(l =>
+        {
+            var parts = l.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var range = parts[0].Split('-').Select(x => Convert.ToInt64(x, 16)).ToArray();
+            return (Low: range[0], High: range[1], Access: parts[1]);
+        }).ToList();
+        var closed = 2097152 - 65536;
+        Assert.Contains(maps, m => m.Access == "---p" && m.High - m.Low >= closed && m.High - m.Low <= closed + 65536 && maps.Any(o => o.Low == m.High && o.Access == "rw-p"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_registers_a_parked_message_keeps_are_its_own_again_when_it_resumes(bool testBuild)
+    {
+        // the switch keeps the registers the convention keeps across a call in the save area at the base of each stack (the owner,
+        // 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack base"): 8 longs and 12 doubles, each the result of a call that
+        // parked the message, live across every later call that parks it, in a release build in the registers it keeps, xmm6 to xmm15
+        // among them on Windows, while the source's messages run on a stack of their own
+        const string text = """
+            actor Source {
+                mut long n = 0
+
+                pub long Get(long k) {
+                    n = n + 1
+                    return k * 1000 + n
+                }
+            }
+
+            actor Mixer(Source S) {
+                pub string Mix() {
+                    long a = S.Get(1)
+                    long b = S.Get(2)
+                    long c = S.Get(3)
+                    long d = S.Get(4)
+                    long e = S.Get(5)
+                    long f = S.Get(6)
+                    long g = S.Get(7)
+                    long h = S.Get(8)
+                    double p = double(S.Get(9)) / 2.0
+                    double q = double(S.Get(10)) / 4.0
+                    double r = double(S.Get(11)) / 8.0
+                    double s = double(S.Get(12)) / 16.0
+                    double t = double(S.Get(13)) / 32.0
+                    double u = double(S.Get(14)) / 64.0
+                    double v = double(S.Get(15)) / 2.0
+                    double w = double(S.Get(16)) / 4.0
+                    double x = double(S.Get(17)) / 8.0
+                    double y = double(S.Get(18)) / 16.0
+                    double z = double(S.Get(19)) / 32.0
+                    double o = double(S.Get(20)) / 64.0
+                    return "{a} {b} {c} {d} {e} {f} {g} {h} {p} {q} {r} {s} {t} {u} {v} {w} {x} {y} {z} {o}"
+                }
+            }
+
+            source = spawn Source()
+            m = spawn Mixer(source)
+            print(m.Mix())
+
+            """;
+        string[] expected = ["1001 2002 3003 4004 5005 6006 7007 8008 4504.5 2502.5 1376.375 750.75 406.65625 218.96875 7507.5 4004 2127.125 1126.125 594.34375 312.8125"];
+        Ran(BuildAndRun(text, toolchain.Runtime, testBuild ? "actor-park-registers" : "actor-park-registers-release", testBuild), 0, expected, "");
+    }
+
+    [Fact]
+    public void A_wait_of_the_top_level_code_that_nothing_left_to_run_can_end_is_a_deadlock_at_its_line()
+    {
+        // section 6, "Deadlocks" (the owner, 2026-11-15, #519, comment 6892812780, Q4, "deadlock at top-level wait"): each `Ask` waits in
+        // a chain of its own on the other actor, which waits in the other chain, so neither takes the other's call (layer 1), and the
+        // top-level code's wait, in a function it called, finds nothing left to run: the process ends at that call's line, not at a
+        // line of the loop, with the exit code 1
+        const string text = """
+            actor Left {
+                pub void Ask(Right other) {
+                    print("left asks")
+                    print("left got {other.Value()}")
+                }
+
+                pub int Value() => 1
+            }
+
+            actor Right {
+                pub void Ask(Left other) {
+                    print("right asks")
+                    print("right got {other.Value()}")
+                }
+
+                pub int Value() => 2
+            }
+
+            int Start(Left l, Right r) {
+                send l.Ask(r)
+                send r.Ask(l)
+                return l.Value()
+            }
+
+            left = spawn Left()
+            right = spawn Right()
+            print(Start(left, right))
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-deadlock"), 1, ["left asks", "right asks"], "error: deadlock at program.kz:22\n");
+    }
+
+    [Fact]
+    public void A_message_parked_when_the_top_level_code_ends_is_dropped_with_the_process()
+    {
+        // U13 (the owner, 2026-11-15, #519, comment 6892835500, Q5, "Rust: dropped"): `Run` waits on `Open`, queued behind `Count`, whose
+        // reply ends the top-level code's last wait; the program then ends, and `Run`'s line after its wait never runs
+        const string text = """
+            actor Gate {
+                mut int opened = 0
+
+                pub void Open() {
+                    opened = opened + 1
+                }
+
+                pub int Count() => opened
+            }
+
+            actor Slow(Gate G) {
+                pub void Run() {
+                    print("before")
+                    G.Open()
+                    print("after")
+                }
+            }
+
+            g = spawn Gate()
+            s = spawn Slow(g)
+            send s.Run()
+            print(g.Count())
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-parked-end"), 0, ["before", "0"], "");
+    }
+
+    [Fact]
+    public void Each_call_that_waits_and_each_send_of_the_top_level_code_starts_a_chain_of_its_own()
+    {
+        // section 6, "Deadlocks", layer 1 (assumed there, as comment 6892786121 took it): `Slow`, sent by the top-level code, waits on
+        // the gate, and the top-level code's later call of `Peek` is of another chain, so it waits in the inbox until `Slow` ended,
+        // where one chain of the top-level code would let it in above `Slow`
+        const string text = """
+            actor Gate {
+                pub int Pass() => 1
+            }
+
+            actor Other {
+                pub int Ping() => 0
+            }
+
+            actor Worker(Gate G) {
+                pub void Slow() {
+                    print("slow starts")
+                    t = G.Pass()
+                    print("slow ends {t}")
+                }
+
+                pub int Peek() {
+                    print("peek")
+                    return 2
+                }
+            }
+
+            g = spawn Gate()
+            o = spawn Other()
+            w = spawn Worker(g)
+            send w.Slow()
+            print(o.Ping())
+            print(w.Peek())
+
+            """;
+        Ran(BuildAndRun(text, toolchain.Runtime, "actor-chains"), 0, ["slow starts", "0", "slow ends 1", "peek", "2"], "");
+    }
+
+    /// <summary>A store whose <c>Load</c> recurses <c>n</c> deep, called through a checker in the chain of <c>Save</c>, or as a message of its own.</summary>
+    private static string Overflowing(string last) => $$"""
+        actor Store(Checker Check) {
+            pub long Save(long n) => Check.Valid(this, n)
+
+            pub long Load(long n) => Down(n)
+
+            long Down(long n) {
+                if n == 0 {
+                    return 0
+                }
+
+                return Down(n - 1) + 1
+            }
+        }
+
+        actor Checker {
+            pub long Valid(Store store, long n) => store.Load(n)
+        }
+
+        c = spawn Checker()
+        s = spawn Store(c)
+        print(s.Save(1000))
+        {{last}}
+
+        """;
+
+    [Fact]
+    public void An_overflow_in_a_call_of_the_chain_is_a_stack_overflow_whose_trace_ends_at_that_calls_method()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // an overflow on Windows ends the process as the system ends it (compiler/README.md, "What the emitter does not emit")
+        }
+
+        // the bounds of the guard page the handler reads are set at each switch, since a thread holds several stacks (design record,
+        // section 2): `Load`'s calls, reached as a call of `Save`'s chain on a stack of their own, past its 2 MiB, fault in that stack's
+        // guard page, after the stacks of the first `Save` went back to the pool; the walk of the trace ends at `Load`'s frame, the first of
+        // its stack, so the frames it counts are those of `Load` reached as a message of its own
+        var callback = BuildAndRun(Overflowing("print(s.Save(100000))"), toolchain.Runtime, "actor-callback-overflow", trace: null);
+        var message = BuildAndRun(Overflowing("print(s.Load(100000))"), toolchain.Runtime, "actor-message-overflow", trace: null);
+        foreach (var run in new[] { callback, message })
+        {
+            Assert.Equal((1, "1000"), (run.Code, string.Join('\n', run.Output)));
+            Assert.Equal("error: stack-overflow at program.kz:11", run.Error.Split('\n')[0]);
+        }
+
+        static string Left(string error) => error.Split('\n').Single(l => l.StartsWith("  ... ", StringComparison.Ordinal));
+        Assert.Equal(Left(message.Error), Left(callback.Error));
     }
 }

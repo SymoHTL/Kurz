@@ -1,0 +1,26 @@
+// expect: output
+// | 30
+// | 20
+// rules: U4
+
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+actor Cart(Price Prices) {
+    pub int Total(List<int> counts) {
+        priced = (int n) => Prices.Of(n)
+        mut total = 0
+        for n in counts {
+            total = total + priced(n)
+        }
+
+        return total
+    }
+}
+
+p = spawn Price()
+c = spawn Cart(p)
+print(c.Total([1, 2, 3]))
+of = (int n) => p.Of(n)
+print(of(4))

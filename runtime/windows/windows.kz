@@ -178,6 +178,30 @@ pub void StackFree(byte* top, long size) {
     }
 }
 
+// The bounds of a stack's guard for a handler of a fault, set at each switch on Linux: none on Windows,
+// where the system grows a stack through its `PAGE_GUARD` page and this runtime installs no handler.
+pub void StackGuard(byte* top, long size) {
+}
+
+// The trim of the stack whose base is `top`, of `size` bytes, as it goes back to the pool, where the
+// stack limit the switch saved with it, at 296 of its header, lies past the depth of 64 KiB, so that a
+// message went past it (design record, section 6, the owner, 2026-11-13, #519, comment 6853074601): the
+// pages below the depth decommitted (`MEM_DECOMMIT` is 16384) from the base of the reservation, at 304,
+// which leaves them reserved, the page under the depth committed again as the guard page through which
+// the system grows the stack (`PAGE_READWRITE | PAGE_GUARD` is 260), and the saved limit set to the depth,
+// as Microsoft's C runtime puts a stack's guard page back with `_resetstkoflw` (section 6, assumed there).
+pub void StackTrim(byte* top, long size) {
+    raw {
+        byte* edge = top - 65536
+        if long(*Ptr<byte*>(top - 512 + 296)) < long(edge) {
+            byte* low = *Ptr<byte*>(top - 512 + 304)
+            VirtualFree(Ptr<void>(low), ulong(long(edge) - 4096 - long(low)), 16384)
+            VirtualAlloc(Ptr<void>(edge - 4096), 4096, 4096, 260)
+            *Ptr<byte*>(top - 512 + 296) = edge
+        }
+    }
+}
+
 // The target's first act on an actor's stack, on the stack itself once the switch set the thread
 // environment block's words for it: the guarantee of 0x5000 bytes, the room the system keeps on it for
 // the handling of its overflow, as `Start` sets it for the main thread's stack and Rust's standard

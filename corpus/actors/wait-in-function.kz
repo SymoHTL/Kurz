@@ -1,0 +1,19 @@
+// expect: output
+// | 31
+// | 10
+// rules: U4
+
+actor Price {
+    pub int Of(int n) => n * 5
+}
+
+int Twice(Price p, int n) => p.Of(n) * 2
+
+actor Cart(Price Prices) {
+    pub int Total(int n) => Twice(Prices, n) + 1
+}
+
+prices = spawn Price()
+cart = spawn Cart(prices)
+print(cart.Total(3))
+print(Twice(prices, 1))

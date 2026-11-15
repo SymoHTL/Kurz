@@ -1,0 +1,40 @@
+// expect: output
+// | load
+// | saved
+// | 40
+// | note
+// | load
+// | 4
+// rules: U17, U15
+
+actor Store(Checker Check) {
+    mut int saved = 0
+
+    pub int Save(int n) {
+        saved = n
+        valid = Check.Valid(this)
+        print("saved")
+        return valid
+    }
+
+    pub int Load() {
+        print("load")
+        return saved
+    }
+
+    pub void Note() {
+        print("note")
+    }
+}
+
+actor Checker {
+    pub int Valid(Store store) {
+        send store.Note()
+        return store.Load() * 10
+    }
+}
+
+c = spawn Checker()
+s = spawn Store(c)
+print(s.Save(4))
+print(s.Load())

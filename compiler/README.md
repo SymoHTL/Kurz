@@ -438,21 +438,34 @@ giving null, as a region `VirtualAlloc` reserved cannot grow, and `Random` calli
 `bcryptprimitives.dll`, and false where the library or the call is missing (below). The
 Linux file is the code of 64-bit Linux, where C's `size_t` is 64 bits as `long` is.
 
-A target's directory also gives `PageSize`, `StackNew`, `StackFree` and `StackFirst`, and an
-architecture's directory `Switch` and `Enter`: the stacks of section 6, on which every message runs
-(the owner, 2026-11-13, #519, comment 6847932993, Q1, "Own stack (Recommended)"). `StackNew` maps a
-stack whole with a guard page under it and gives the address of its top, on Linux by an `mmap` of
-the size and a page with no access, then an `mprotect` that opens every page but the lowest, and on
+A target's directory also gives `PageSize`, `StackNew`, `StackFree`, `StackGuard`, `StackTrim` and
+`StackFirst`, and an architecture's directory `Switch` and `Enter`: the stacks of section 6, on which
+every message runs (the owner, 2026-11-13, #519, comment 6847932993, Q1, "Own stack (Recommended)").
+`StackNew` maps a stack whole with a guard page under it and gives the address of its top, on Linux
+by an `mmap` of the size and a page with no access, then an `mprotect` that opens its top 64 KiB, the
+depth of the trim, the pages past it staying closed with the guard page until a fault in them, which
+the handler tells from one in the guard page by its address, opens them and marks the stack (section 6,
+the owner, 2026-11-13, #519, comment 6855469829, "Close all pages past depth"), and on
 Windows by a `VirtualAlloc` that reserves the size, then commits its top page, and the page under it
 with `PAGE_GUARD`, through which the system grows the stack, as round 17's fiber layout has it, and
 writes into the stack's header the four words of the thread environment block that the switch keeps
-with it, its base, its limit, the deallocation stack and no guaranteed bytes; `StackFree` gives it
-back, and `StackFirst` runs once on a thread before its first switch, on Windows calling
+with it, its base, its limit, the deallocation stack and no guaranteed bytes; `StackGuard` sets the
+bounds the handler of a fault reads on Linux, the stack's guard page and its closed pages, before
+each switch to a stack and clears them after the switch back, as section 2 has it, and does nothing
+on Windows, whose switch keeps the stack's limit; `StackTrim` gives back the memory of the pages past
+the depth when a stack goes back to the pool, on Linux where the handler opened them, by an `madvise`
+with `MADV_DONTNEED` and an `mprotect` that closes them again, and on Windows where the stack's limit
+lies past the depth, by a `VirtualFree` that decommits them from the base of the reservation, a
+`VirtualAlloc` that sets the page under the depth as the guard page again and the limit moved to the
+depth (section 6, the owner, 2026-11-13, #519, comment 6853074601, the guard page and the limit
+assumed there); `StackFree` gives a stack back, and `StackFirst` runs once on a thread before its first switch, on Windows calling
 `SetThreadStackGuarantee` for 0x5000 bytes, as `Start` does for the main thread's stack. A stack's
 header is its top 512 bytes: the save area of the switch, 320 bytes, which holds on Windows the four
-words at 288 to 312, then the actor whose message runs on it, the message and a word that marks its
-first run, and room for what a message that waits keeps with its stack (the owner, 2026-11-15, #519,
-comment 6892812780, Q1, "Save area at stack base"); the thread's own side is a save area in a
+words at 288 to 312, then the actor whose message runs on it, the message, a word that marks its
+first run, the message's chain ID, the reply it waits on, the activation below it on its actor, the
+first and the last message of its side list, the next stack of its thread's pool, its size, and from
+408 its target's words, on Linux the mark of its opened pages and the lowest address of its mapping
+(the owner, 2026-11-15, #519, comment 6892812780, Q1, "Save area at stack base"); the thread's own side is a save area in a
 thread-local static of `common/`. `Switch` is a `naked` function (R12) of each architecture's file
 that stores the registers its calling convention keeps across a call and the stack pointer into the
 save area at its first argument, loads them from the one at its second and goes on where that side
@@ -462,13 +475,17 @@ rsi, r12 to r15, xmm6 to xmm15 and the four words of the thread environment bloc
 four words through x18, at the offsets of x86-64's block (the owner, 2026-11-15, #519, comment
 6892812780, Q2, "Rust: AArch64 switch now"). `Enter` sets a save area so that the switch to it enters
 a function on a fresh stack with a return address of zero, where an unwinder's walk ends. `common/`'s
-`RunOne` runs a message on the stack its thread holds: it writes the actor and the message into the
-header and switches to the stack, where `ActorStart`, its entry, runs the message and switches back;
+`RunOne` takes the first actor of the run queue: the first message of an idle actor's inbox starts on
+a stack of its thread's pool, the first call of the side list of an actor that waits starts on another
+above the activation it waits in, and an activation whose reply is set goes on, each by a switch from
+the thread's side, where `ActorStart`, a stack's entry, runs the message and switches back. A stack
+whose message ended goes back to the pool, trimmed, which keeps at most 64 for each thread and gives
+the next one back to the system (section 6, the owner, 2026-11-14, #519, comment 6880404917, Q12);
 the top-level code runs on the thread's own stack, the main thread's, as section 6 has it (the
 owner, 2026-11-14, #519, comment 6880404917, Q11). On Linux a fault on a stack's guard page is a
 `stack-overflow` as one on the main thread's is (below), and a stack the system refuses ends the
 process with `allocation-failed` and the size asked for. `ActorTests` pins the stacks, the guard page,
-the overflow, the refusal, the sizes and the registers a switch keeps, `RuntimeTests` the directories
+the overflow, the refusal, the sizes, the pool, the trim and the registers a switch keeps, `RuntimeTests` the directories
 of the architectures, and `EmitterTests.The_switch_of_every_target_and_architecture_is_assembled_by_clang_for_its_machine`
 that clang assembles each switch for its machine.
 
@@ -921,7 +938,10 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the alignment of the allocator's block, as Rust's `ArcInner` pads its counts to what it holds, a
   `Vector128` field's 16 among it: the size of the stack its messages run on, 2 MiB or what its
   `stack` clause sets (U1), the actor's number, the first and the last
-  message of its inbox, the actor after it in the run queue, and whether it stands there. The number
+  message of its inbox, the actor after it in the run queue, and the activation at the top of its
+  stacks, the one that runs or waits, none while it is idle, which nothing marks while its
+  constructor runs, since no message can reach an actor before `spawn` gives its reference and a
+  default reads neither `this` nor its methods (K7). The number
   counts the actors of every type from 1, in the order `ActorNew` makes them (U2). The reference is
   the address of the state, which nothing counts, an actor living to the end of the process: `==` of
   two references compares the two addresses, `this` as a value inside an actor is the address of its
@@ -930,19 +950,25 @@ library a block of C functions names (R16), the Linux runtime's own block among 
   the body run inside `spawn`, so that what they print comes before what the spawner prints after it
   (U3). A call through a reference, a `send` and a `send` of the actor's own method (U11) make a
   message, one block of the allocator, as actix packs a message and the sender of its reply into one
-  envelope: the message after it in the inbox, the function that runs it, the reply, none after
-  `send`, and the arguments, each with a count of its own; the runtime's `Enqueue` puts it at the end
-  of the inbox, and the actor at the end of the run queue where it does not stand there, so that an
-  inbox keeps the order its messages were sent in (U5, U15). The function of a method's messages,
-  made at its first use and named outside the program's functions, so that a trace leaves its frame
-  out with the runtime's, calls the method on the state, lets go of the arguments, moves the result
-  beside the reply and sets the reply's byte, as tokio's `oneshot` stores its value and marks it
-  sent, and frees the message. A call that waits (U4) passes a reply in its own frame, and the
-  runtime's `Wait` runs the first message of the first actor of the run queue, on the stack its
-  thread holds for that actor's size ("The runtime"), an actor that still
-  holds a message going to the end of the queue again, in a loop until the byte is set, as tokio's
-  `block_on` runs its queue until its future is ready, so that a call behind any count of messages
-  takes the stack of one (`ActorTests`);
+  envelope: the message after it in its list, the function that runs it, the reply, none after
+  `send`, the chain ID, 16 bytes, and the arguments, each with a count of its own; the runtime's
+  `Enqueue` stamps the chain, a new one in the top-level code, drawn from the thread's generator, and
+  the running message's inside a message (section 6), and puts a call that waits, of the chain that
+  the actor's top activation waits in, at the end of that activation's side list, and every other
+  message at the end of the inbox, a `send` of the chain among them, and the actor at the end of the
+  run queue where it does not stand there, so that an inbox keeps the order its messages were sent in
+  (U5, U15, U17). The function of a method's messages, made at its first use and named outside the
+  program's functions, so that a trace leaves its frame out with the runtime's, calls the method on
+  the state, lets go of the arguments, moves the result beside the reply and calls the runtime's
+  `Replied`, which sets the reply's byte and puts the actor back in the run queue where the activation
+  that waits on it is its top, as tokio's `oneshot` stores its value and wakes its receiver, and
+  frees the message. A call that waits (U4), wherever it stands, passes a reply in its own frame, the
+  one-shot slot of section 6, and its file and line, and the runtime's `Wait` sets the activation
+  that waits on it: in the top-level code it runs the first actor of the run queue ("The runtime"),
+  in a loop until the byte is set, as tokio's `block_on` runs its queue until its future is ready, so
+  that a call behind any count of messages takes the stack of one, and ends the process with
+  `deadlock` at the call's line where the queue is empty and the byte is not set (U18); inside a
+  message it parks the activation, switching to the thread's side until the byte is set (`ActorTests`);
 - unions (D9), whose tag is the number of the case's type in the program, as wide as the largest
   number among the cases needs (section 5, round 19), a data type's number that of its name, as the IR names it, so
   that a built-in type the runtime's files see as one symbol and a program's as another, `IoError` or `ExitError`,
@@ -1867,12 +1893,17 @@ answers of 2026-11-14, issue 519, comment 6880404917), and no case shows
 where a program it builds differs from the section: every actor runs on the one thread the runtime
 runs, each message on a stack of its own ("The runtime"), and messages run only while the top-level
 code waits for a call's result, one message of each actor in turn, so that a `send` made after the
-last call that waits does not run (U13); a crash in a method ends the process with its error line and
+last call that waits does not run, and a message parked in a wait when the top-level code ends does
+not go on (U13); of section 6's deadlocks the build makes layer 1 (U17) and the `deadlock` of a wait
+of the top-level code that nothing can end (U18), and neither layer 2, the compile error `call-loop`,
+nor layer 3, so that a loop of waits that the top-level code does not wait on stays to the end of the
+program; a crash in a method ends the process with its error line and
 the exit code 1, as a crash outside an actor ends it, on Linux with a trace that ends at the method's
 frame, the first of its stack, and names no `main`, and no actor restarts; a message has 2 MiB of
 stack where its clause sets no other size, where a message on Linux had the main thread's 8 MiB
 while messages ran on it, and a server whose actors hold many stacks at once, two mappings each, needs Linux's limit
-of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says; a recursion
+of mappings, `vm.max_map_count`, raised past its default of 65,530, as section 6 says, a stack
+trimmed once being three on Linux 6.8 (the readings below); a recursion
 past a message's stack ends the process with `stack-overflow` at its line on Linux, while on Windows
 it ends it as an overflow of the main thread's stack does, with the system's `0xC00000FD` and no line
 of Kurz, the handler of section 2 for an actor's stack not being built there; on 64-bit Arm the
@@ -2073,20 +2104,28 @@ ask about it.
   as Python's `re.split` does (the walk and the order: the owner, 2026-11-12, issue 176, comment 6819137493, Q1 and Q2 of
   comment 6810129884). Pinned
   by `RegexTests` and `corpus/regex/replace.kz` and `split.kz`.
-- U1 and section 6's stacks: a thread holds one stack at a time, the one its last message ran on,
-  kept for the next message of an actor of the same size and given back and mapped anew for one of
-  another size, where section 6 keeps a pool of stacks for each thread; the bounds of a stack's guard
-  page, which the handler of a fault reads on Linux, are set in the thread's record when the thread
-  maps the stack and cleared when it gives the stack back, where section 2 stores the stack's limit
-  before each switch to an actor and clears it after the switch back, which reads the same while a
-  thread holds one stack, since no fault reaches that stack's guard page while the thread runs on
-  another. The floor of a stack's size is 64 KiB on every target and architecture *(assumed in
+- U1 and section 6's stacks: a thread's pool is a list of the stacks given back, the last one first,
+  in which a message takes the first of the size its actor asks for, and a size the pool does not
+  hold maps a new stack; the bounds of a stack's guard page and of its closed pages, which the handler
+  of a fault reads on Linux, are set in the thread's record before each switch to a stack and cleared
+  after the switch back, as section 2 stores the stack's limit. A stack mapped on a thread whose
+  handler of a fault the system refused is opened whole and never closed, since no handler would open
+  it. Measured on Linux 6.8: the trim's `madvise` and `mprotect`, the calls of comment 6855469829,
+  leave the closed pages an area of their own beside the guard page's, so that a stack trimmed once
+  is three mappings where section 6 counts two, and about 21,800 such stacks fit under Linux's default
+  limit; a mapping with `MAP_FIXED` and no access over those pages, one call, keeps it two. The chain
+  ID is drawn from a xoshiro256++ generator of the thread, the one `rand`'s `SmallRng` is on a 64-bit
+  machine, seeded with 32 bytes of `Random`, the system's randomness that a map's keys take (M9), at
+  the thread's first chain, so that a chain costs two steps of the generator and no call to the
+  system *(assumed in section 6)*. The floor of a stack's size is 64 KiB on every target and architecture *(assumed in
   section 6)*, and a size past 2^62 bytes, which no system maps, is refused at once with
   `allocation-failed`, as a stack the system refuses is. The mapping on Linux takes neither
   `MAP_STACK` nor `MAP_NORESERVE`. The switch saves neither the control
   and status register of SSE nor x87's control word nor Arm's floating-point control register, and
   carries no unwind directives (section 2, both assumed there). Pinned by
-  `ActorTests.A_thread_holds_one_stack_and_takes_another_for_a_message_that_asks_another_size`,
+  `ActorTests.A_message_takes_a_stack_of_the_size_its_actor_asks_for_from_the_pool`,
+  `ActorTests.A_chain_of_calls_past_the_pool_takes_a_stack_for_each_and_the_pool_keeps_64_of_them`,
+  `ActorTests.A_stack_a_message_took_past_the_depth_is_trimmed_in_the_pool_and_grows_again`,
   `ActorTests.A_message_runs_on_a_stack_of_2_mib_with_a_guard_page_and_the_top_level_code_on_the_threads_own`
   and `corpus/actors/stack-floor.kz`.
 
@@ -2484,9 +2523,7 @@ may take as a class's does (U1, U9), each of which leaves the
 actor and every use of its name unread, besides what a class's body does not read, as the checker's `syntax` for a base after
 an actor's name, `equal by` and a constructor in its body (U1, U2), and its `static-state` for a `static mut` field and one
 whose type is or holds a class (U1), leave it too, while an actor after a class's `:` is `syntax` and the class is read without
-that base (U1); a call through an actor's reference outside the top-level statements, which waits (U4), and a `spawn`
-or a `send` outside the top-level statements and the methods of an actor, in a lambda, a function, a
-method of a class and a default among them (U2, U6); an `on crash` after a `spawn` (U2); a message, or
+that base (U1); an `on crash` after a `spawn` (U2); a message, or
 an actor's constructor, that takes or gives what crosses no actor in this build, a class instance, an immutable one
 too, whose class the checker does not read through every class it reaches (U12), an interface's value or a function
 value among them (U12); an actor's reference inside a list, a map, a union, a `?`, a function type or a type argument,

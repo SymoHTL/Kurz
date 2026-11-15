@@ -1,0 +1,33 @@
+// expect: output
+// | 2
+// | 6
+// rules: U2, U6
+
+actor Counter {
+    mut int count = 0
+
+    pub void Add(int n) {
+        count = count + n
+    }
+
+    pub int Get() => count
+}
+
+Counter Make(int start) {
+    made = spawn Counter()
+    send made.Add(start)
+    return made
+}
+
+actor Factory {
+    pub int Build() {
+        built = Make(5)
+        send built.Add(1)
+        return built.Get()
+    }
+}
+
+c = Make(2)
+print(c.Get())
+f = spawn Factory()
+print(f.Build())
